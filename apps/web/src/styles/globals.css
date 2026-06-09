@@ -1,0 +1,93 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-xhs-red: #ff2442;
+  --color-xhs-red-soft: #ff6b81;
+  --color-bg-warm: #fdf8f5;
+  --color-card: #ffffff;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  min-height: 100%;
+  overflow-x: hidden;
+}
+
+body {
+  margin: 0;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'SF Pro Display',
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+  background: radial-gradient(circle at top left, #ffe4e9 0, #fdf8f5 40%, #fdf8f5 100%);
+  color: #111827;
+}
+
+button,
+[role='button'],
+.cursor-action,
+.clickable {
+  cursor: pointer;
+}
+
+button:disabled,
+.disabled,
+[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+
+.range-tab {
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    color 150ms ease,
+    box-shadow 150ms ease,
+    transform 150ms ease;
+}
+
+.range-tab:hover:not(:disabled) {
+  background-color: #fff1f2;
+  color: #be123c;
+  box-shadow: 0 2px 8px rgba(255, 36, 66, 0.12);
+}
+
+.range-tab-active {
+  cursor: pointer;
+  background: linear-gradient(135deg, #ff2442, #ff6b81);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(255, 36, 66, 0.28);
+}
+
+.card-clickable {
+  cursor: pointer;
+  transition:
+    transform 150ms ease,
+    box-shadow 150ms ease,
+    border-color 150ms ease;
+}
+
+.card-clickable:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+/* 移动端表格横向滚动容器 */
+.table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}

@@ -1,0 +1,85 @@
+{
+  "id": "official-2026-05-28-snapshot",
+  "date": "2026-05-28",
+  "description": "旧官方后台快照：2026-05-28 子杰当日 9 单，不含晚间飞云 8 单；退款仅 P795487315710005941 当日成功 29.90",
+  "source": "official_backend_screenshot_2026-05-28",
+  "expectations": {
+    "paidAmountCent": 1007990,
+    "paidOrderCount": 9,
+    "refundAmountCent": 2990
+  },
+  "orders": [
+    {
+      "orderNo": "P795487315710005941",
+      "payTime": "2026-05-28 10:28:47",
+      "paidAmountCent": 2990,
+      "anchorName": "子杰",
+      "orderStatus": "已取消"
+    },
+    {
+      "orderNo": "P795490183646098221",
+      "payTime": "2026-05-28 11:16:30",
+      "paidAmountCent": 299800,
+      "anchorName": "子杰",
+      "orderStatus": "已签收"
+    },
+    {
+      "orderNo": "P795491110326121261",
+      "payTime": "2026-05-28 11:33:04",
+      "paidAmountCent": 21700,
+      "anchorName": "子杰",
+      "orderStatus": "已发货未签收"
+    },
+    {
+      "orderNo": "P795494391081499051",
+      "payTime": "2026-05-28 12:26:44",
+      "paidAmountCent": 111700,
+      "anchorName": "子杰",
+      "orderStatus": "已签收"
+    },
+    {
+      "orderNo": "P795494448698499251",
+      "payTime": "2026-05-28 12:27:37",
+      "paidAmountCent": 241800,
+      "anchorName": "子杰",
+      "orderStatus": "已签收"
+    },
+    {
+      "orderNo": "P795495788583458651",
+      "payTime": "2026-05-28 12:49:56",
+      "paidAmountCent": 149800,
+      "anchorName": "子杰",
+      "orderStatus": "已签收"
+    },
+    {
+      "orderNo": "P795498675546275371",
+      "payTime": "2026-05-28 13:38:06",
+      "paidAmountCent": 89700,
+      "anchorName": "子杰",
+      "orderStatus": "已签收"
+    },
+    {
+      "orderNo": "P795499758124285701",
+      "payTime": "2026-05-28 13:56:08",
+      "paidAmountCent": 58800,
+      "anchorName": "子杰",
+      "orderStatus": "已签收"
+    },
+    {
+      "orderNo": "P795499892853285161",
+      "payTime": "2026-05-28 13:58:24",
+      "paidAmountCent": 31700,
+      "anchorName": "子杰",
+      "orderStatus": "已签收"
+    }
+  ],
+  "afterSales": [
+    {
+      "orderNo": "P795487315710005941",
+      "refundFeeCent": 2990,
+      "refundOkTime": "2026-05-28 10:31:00",
+      "refundStatusName": "退款成功",
+      "refunded": true
+    }
+  ]
+}

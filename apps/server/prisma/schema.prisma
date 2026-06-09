@@ -1,0 +1,576 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String    @id @default(cuid())
+  username           String    @unique
+  passwordHash       String
+  role               String
+  enabled            Boolean   @default(true)
+  mustChangePassword Boolean   @default(false)
+  passwordChangedAt  DateTime?
+  lastLoginAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  sessions           Session[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PlatformCredential {
+  id                    String    @id @default(cuid())
+  platformName          String    @unique
+  displayName           String    @default("")
+  cookieEncrypted       String    @default("")
+  remark                String?
+  enabled               Boolean   @default(true)
+  updatedBy             String?
+  cookieStatus          String    @default("unknown")
+  cookieLastCheckedAt   DateTime?
+  cookieLastSuccessAt   DateTime?
+  cookieLastFailedAt    DateTime?
+  cookieLastErrorCode   String?
+  cookieLastErrorMessage String?
+  cookieLastFailedApi   String?
+  affectedBusinessSync  Boolean   @default(false)
+  lastSyncSuccessAt     DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+}
+
+model DownloadConfig {
+  id        String   @id @default(cuid())
+  type      String   @unique
+  name      String
+  url       String
+  method    String   @default("GET")
+  mode      String   @default("direct_url")
+  sellerId  String?
+  enabled   Boolean  @default(true)
+  remark    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model DownloadBatch {
+  id           String    @id @default(cuid())
+  status       String
+  startDate    String
+  endDate      String
+  createdBy    String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  durationMs   Int?
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  tasks        DownloadTask[]
+
+  @@index([createdBy])
+  @@index([createdAt])
+}
+
+model DownloadTask {
+  id           String         @id @default(cuid())
+  type         String
+  mode         String?
+  batchId      String?
+  step         String?
+  pipelineMetaJson String?
+  apiDebugJson     String?
+  xhsTaskId    String?
+  status       String
+  fileName     String?
+  filePath     String?
+  fileSize     Int?
+  errorMessage String?
+  requestId    String?
+  durationMs   Int?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdBy    String?
+  createdAt    DateTime       @default(now())
+  batch        DownloadBatch? @relation(fields: [batchId], references: [id], onDelete: SetNull)
+
+  @@index([type, status])
+  @@index([createdBy])
+  @@index([batchId])
+}
+
+model OperationLog {
+  id          String   @id @default(cuid())
+  userId      String?
+  username    String?
+  role        String?
+  action      String
+  module      String
+  description String
+  ip          String?
+  userAgent   String?
+  path        String?
+  method      String?
+  requestId   String?
+  durationMs  Int?
+  metaJson    String?
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+  @@index([module])
+  @@index([createdAt])
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model RefreshJob {
+  id               String    @id @default(cuid())
+  type             String
+  status           String
+  preset           String
+  startDate        String
+  endDate          String
+  progress         Int       @default(0)
+  currentStep      String    @default("idle")
+  currentStepLabel String    @default("等待开始")
+  downloadBatchId  String?
+  trustStatus      String?
+  errorMessage     String?
+  startedBy        String?
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  durationMs       Int?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model ValidationPackage {
+  id           String    @id @default(cuid())
+  snapshotId   String
+  fileName     String
+  filePath     String
+  fileSize     Int       @default(0)
+  status       String
+  errorMessage String?
+  createdBy    String?
+  createdAt    DateTime  @default(now())
+  finishedAt   DateTime?
+
+  @@index([snapshotId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model ReportExport {
+  id           String    @id @default(cuid())
+  snapshotId   String
+  fileName     String
+  filePath     String
+  fileSize     Int       @default(0)
+  status       String
+  errorMessage String?
+  createdBy    String?
+  createdAt    DateTime  @default(now())
+  finishedAt   DateTime?
+
+  @@index([snapshotId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model PageViewLog {
+  id              String    @id @default(cuid())
+  userId          String
+  username        String
+  role            String
+  page            String
+  path            String?
+  startedAt       DateTime  @default(now())
+  lastSeenAt      DateTime  @default(now())
+  endedAt         DateTime?
+  durationSeconds Int?
+  ip              String?
+  userAgent       String?
+  createdAt       DateTime  @default(now())
+
+  @@index([userId])
+  @@index([page])
+  @@index([startedAt])
+}
+
+model XhsSyncJob {
+  id                   String    @id @default(cuid())
+  type                 String
+  status               String
+  preset               String
+  startDate            String
+  endDate              String
+  progress             Int       @default(0)
+  currentStep          String    @default("idle")
+  currentStepLabel     String    @default("等待开始")
+  totalRequestCount    Int       @default(0)
+  successRequestCount  Int       @default(0)
+  failedRequestCount   Int       @default(0)
+  orderCount           Int       @default(0)
+  liveSessionCount     Int       @default(0)
+  pendingCount         Int       @default(0)
+  settledCount         Int       @default(0)
+  currentPage          Int       @default(0)
+  totalPage            Int?
+  currentApiKey        String?
+  currentApiLabel      String?
+  rangeLabel           String?
+  errorMessage         String?
+  startedBy            String?
+  startedAt            DateTime?
+  finishedAt           DateTime?
+  durationMs           Int?
+  refreshJobId         String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  rawOrderDetails        XhsRawOrderDetail[]
+  rawLiveSessionDetails  XhsRawLiveSessionDetail[]
+
+  @@index([status])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model XhsRawOrder {
+  id              String    @id @default(cuid())
+  orderId         String?
+  packageId       String?
+  liveAccountId   String    @default("legacy")
+  liveAccountName String?
+  orderTime       DateTime?
+  buyerId         String?
+  rawJson         Json
+  syncJobId       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([liveAccountId, packageId])
+  @@index([orderId])
+  @@index([liveAccountId, orderId])
+  @@index([orderTime])
+  @@index([buyerId])
+}
+
+model XhsRawOrderDetail {
+  id        String     @id @default(cuid())
+  orderId   String
+  rawJson   String
+  syncJobId String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  syncJob   XhsSyncJob @relation(fields: [syncJobId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId])
+  @@index([syncJobId])
+}
+
+model XhsRawLiveSession {
+  id              String    @id
+  liveId          String?
+  liveName        String?
+  liveAccountId   String    @default("legacy")
+  liveAccountName String?
+  startTime       DateTime?
+  endTime         DateTime?
+  anchorName      String?
+  rawJson         Json
+  syncJobId       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([liveId])
+  @@index([liveAccountId])
+  @@index([startTime])
+  @@index([anchorName])
+}
+
+model XhsRawLiveSessionDetail {
+  id        String     @id @default(cuid())
+  sessionId String
+  rawJson   String
+  syncJobId String
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  syncJob   XhsSyncJob @relation(fields: [syncJobId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId])
+  @@index([syncJobId])
+}
+
+model XhsRawPendingSettlement {
+  id         String    @id
+  settleNo   String?
+  packageId  String?
+  orderTime  DateTime?
+  rawJson    Json
+  syncJobId  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([settleNo])
+  @@index([packageId])
+  @@index([orderTime])
+}
+
+model Anchor {
+  id                  String           @id @default(cuid())
+  name                String           @unique
+  externalId          String?
+  defaultLiveRoomName String?
+  color               String?
+  enabled             Boolean          @default(true)
+  sortOrder           Int              @default(0)
+  deletedAt           DateTime?
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  timeRules           AnchorTimeRule[]
+}
+
+model AnchorTimeRule {
+  id            String    @id @default(cuid())
+  anchorId      String
+  startTime     String
+  endTime       String
+  enabled       Boolean   @default(true)
+  sortOrder     Int       @default(0)
+  /** NULL = 历史规则，对全部订单生效；非 NULL = 仅对 effectiveFrom 之后的支付/下单时间生效 */
+  effectiveFrom DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  anchor        Anchor    @relation(fields: [anchorId], references: [id], onDelete: Cascade)
+
+  @@index([anchorId])
+}
+
+model XhsRawSettledSettlement {
+  id         String    @id
+  settleNo   String?
+  packageId  String?
+  orderTime  DateTime?
+  settleTime DateTime?
+  rawJson    Json
+  syncJobId  String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([settleNo])
+  @@index([packageId])
+  @@index([orderTime])
+  @@index([settleTime])
+}
+
+/// 售后工作台按订单号缓存（退款金额口径）
+model XhsAfterSalesWorkbenchCache {
+  id                       String    @id @default(cuid())
+  liveAccountId            String    @default("legacy")
+  orderNo                  String
+  packageId                String?
+  officialRefundAmountCent Int       @default(0)
+  expectedRefundAmountCent Int?
+  appliedAmountCent        Int?
+  appliedShipFeeAmountCent   Int       @default(0)
+  payAmountCent            Int?
+  settlementAmountCent     Int?
+  refundIncludesFreight    Boolean   @default(false)
+  afterSaleReason          String?
+  afterSaleStatus          String?
+  successReturnCount       Int       @default(0)
+  returnsIds               String?
+  rawDetail                Json?
+  fetchStatus              String    @default("pending")
+  fetchError               String?
+  fetchedAt                DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@unique([liveAccountId, orderNo])
+  @@index([fetchStatus])
+  @@index([liveAccountId])
+}
+
+/// 售后工作台补数队列
+model XhsAfterSalesWorkbenchQueue {
+  id            String   @id @default(cuid())
+  liveAccountId String   @default("legacy")
+  orderNo       String
+  status    String   @default("pending")
+  attempts  Int      @default(0)
+  lastError String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([liveAccountId, orderNo])
+  @@index([status])
+  @@index([liveAccountId])
+}
+
+/// 未完结订单追踪池
+model OrderTrackingPool {
+  id             String    @id @default(cuid())
+  packageId      String
+  skuId          String    @default("")
+  reasons        String
+  status         String    @default("active")
+  orderMonth     String?
+  lastStatusText String?
+  enteredAt      DateTime  @default(now())
+  lastCheckedAt  DateTime  @default(now())
+  removedAt      DateTime?
+  syncJobId      String?
+
+  @@unique([packageId, skuId])
+  @@index([status])
+  @@index([lastCheckedAt])
+  @@index([orderMonth])
+}
+
+/// 历史月份调整项（退款/结算/扣费等后续变化）
+model HistoricalAdjustment {
+  id             String    @id @default(cuid())
+  monthKey       String
+  packageId      String?
+  adjustmentType String
+  amountCent     Int
+  occurredAt     DateTime?
+  description    String?
+  orderMonth     String?
+  refundMonth    String?
+  syncJobId      String?
+  createdAt      DateTime  @default(now())
+
+  @@index([monthKey])
+  @@index([packageId])
+  @@index([createdAt])
+}
+
+/// 官方品质负反馈 / 品退明细（小红书商品品质负反馈接口）
+model QualityBadCase {
+  id                        String   @id @default(cuid())
+  liveAccountId             String   @default("legacy")
+  caseKey                   String
+  packageId                 String
+  sourceBizId               String?
+  itemId                    String?
+  itemName                  String?
+  itemImage                 String?
+  problemType               String   @default("品质问题")
+  negativeReasonsJson       String   @default("[]")
+  feedbackContent           String?
+  feedbackTime              String?
+  packagePayTime            String?
+  rawJson                   String?
+  matchedOrderNo            String?
+  matchedOrderId            String?
+  matchedAfterSaleId        String?
+  matchedBuyerId            String?
+  matchedBuyerNickname      String?
+  matchedAnchorId           String?
+  matchedAnchorName         String?
+  afterSaleStatus           String?
+  afterSaleReason           String?
+  afterSaleRefundAmountCent Int      @default(0)
+  afterSaleRefunded         Boolean  @default(false)
+  source                    String   @default("official_quality_badcase")
+  matchStatus               String   @default("unmatched")
+  confidence                String   @default("high")
+  syncedAt                  DateTime @default(now())
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+
+  @@unique([liveAccountId, caseKey])
+  @@index([liveAccountId])
+  @@index([packageId])
+  @@index([sourceBizId])
+  @@index([itemId])
+  @@index([packagePayTime])
+  @@index([feedbackTime])
+  @@index([matchedAnchorId])
+  @@index([matchedBuyerId])
+}
+
+model QualityBadCaseSyncMeta {
+  id                    String    @id @default("default")
+  source                String    @default("official_quality_badcase")
+  windowDays            Int       @default(30)
+  startTime             String?
+  endTime               String?
+  lastSyncedAt          DateTime?
+  itemCount             Int       @default(0)
+  caseCount             Int       @default(0)
+  matchedOrderCount     Int       @default(0)
+  matchedAfterSaleCount Int       @default(0)
+  unmatchedCount        Int       @default(0)
+  updatedAt             DateTime  @updatedAt
+}
+
+/// 售后按时间范围查询缓存（交叉印证，非品退主来源）
+model XhsAfterSalesTimeSearchCache {
+  id            String   @id @default(cuid())
+  liveAccountId String   @default("legacy")
+  returnId      String
+  orderNo       String
+  platformName  String   @default("merged")
+  rangeKey      String
+  rawJson      Json
+  syncedAt     DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([liveAccountId, returnId, rangeKey])
+  @@index([orderNo])
+  @@index([rangeKey])
+  @@index([liveAccountId])
+}
+
+/// 买家排行全量客户画像缓存（与经营看板日期范围无关）
+model BuyerRankingCache {
+  id                      String   @id @default("default")
+  itemsJson               String
+  summaryJson             String
+  blacklistedBuyerIdsJson String   @default("[]")
+  orderCount              Int      @default(0)
+  buyerCount              Int      @default(0)
+  builtAt                 DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+  lastTrigger             String?
+}
+
+/// 月度数据状态
+model MonthlyDataStatus {
+  monthKey                String    @id
+  status                  String
+  lastSyncedAt            DateTime?
+  hasHistoricalAdjustment Boolean   @default(false)
+  adjustmentAmountCent    Int       @default(0)
+  grossProfitStability    String?
+  updatedAt               DateTime  @updatedAt
+  createdAt               DateTime  @default(now())
+}

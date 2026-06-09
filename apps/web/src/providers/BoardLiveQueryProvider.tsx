@@ -1,0 +1,370 @@
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+import type { BoardRangePreset } from '../lib/board-range'
+import type { BoardResolvedRange } from '../lib/board-live-query'
+import { buildBoardRangeKey, resolveBoardRangeDates } from '../lib/board-range'
+import {
+  fetchBoardLocalData,
+  fetchBoardSyncMeta,
+  type BoardActiveSyncJob,
+  type BoardLiveQueryData,
+  type BoardSyncMeta,
+  type BoardDataDisplayStatus,
+} from '../lib/board-live-query'
+import { apiRequest } from '../lib/api'
+import { deriveBoardSyncUiMode, isBusinessSyncActive } from '../lib/business-sync-ui'
+import type { CookieHealthPayload } from '../lib/live-account'
+import type { QualityFeedbackStatus } from '../components/board/OfficialQualitySyncNote'
+
+export type BoardLiveQueryStatus = 'idle' | 'loading' | 'ready' | 'failed'
+
+interface BoardLiveQueryContextValue {
+  preset: BoardRangePreset
+  customStart: string
+  customEnd: string
+  customQueried: boolean
+  rangeKey: string
+  setPreset: (p: BoardRangePreset) => void
+  setCustomStart: (s: string) => void
+  setCustomEnd: (s: string) => void
+  setCustomQueried: (q: boolean) => void
+  status: BoardLiveQueryStatus
+  error: string | null
+  data: BoardLiveQueryData | null
+  /** 与 data 相同，对应当前 rangeKey 下可展示的本地查询结果 */
+  displayData: BoardLiveQueryData | null
+  displaySummary: Record<string, unknown> | null
+  resolvedRange: BoardResolvedRange
+  dataDisplayStatus: BoardDataDisplayStatus | null
+  isLoading: boolean
+  isDisplayStale: boolean
+  boardSyncUiMode: ReturnType<typeof deriveBoardSyncUiMode>
+  lastSyncedAt: string | null
+  syncMeta: BoardSyncMeta | null
+  activeSyncJob: BoardActiveSyncJob | null
+  totalRawOrders: number
+  totalRawLiveSessions: number
+  cookieHealth: CookieHealthPayload | null
+  staleMessage: string | null
+  startDate: string
+  endDate: string
+  qualityFeedback: QualityFeedbackStatus | null
+  reload: () => Promise<void>
+  triggerBusinessSync: () => Promise<void>
+  triggerSyncBusy: boolean
+}
+
+const BoardLiveQueryContext = createContext<BoardLiveQueryContextValue | null>(null)
+
+export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [preset, setPreset] = useState<BoardRangePreset>('thisMonth')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+  const [customQueried, setCustomQueried] = useState(false)
+  const [status, setStatus] = useState<BoardLiveQueryStatus>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const [data, setData] = useState<BoardLiveQueryData | null>(null)
+  const [displaySummary, setDisplaySummary] = useState<Record<string, unknown> | null>(null)
+  const [dataDisplayStatus, setDataDisplayStatus] = useState<BoardDataDisplayStatus | null>(null)
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
+  const [syncMeta, setSyncMeta] = useState<BoardSyncMeta | null>(null)
+  const [staleMessage, setStaleMessage] = useState<string | null>(null)
+  const [triggerSyncBusy, setTriggerSyncBusy] = useState(false)
+  const abortRef = useRef<AbortController | null>(null)
+  const requestSeqRef = useRef(0)
+  const hasLoadedOnceRef = useRef(false)
+  const wasSyncingRef = useRef(false)
+
+  const { startDate, endDate } = useMemo(
+    () => resolveBoardRangeDates(preset, customStart, customEnd),
+    [preset, customStart, customEnd],
+  )
+
+  const rangeKey = useMemo(
+    () => buildBoardRangeKey(preset, startDate, endDate),
+    [preset, startDate, endDate],
+  )
+
+  const loadedRangeKey = data?.rangeKey ?? null
+  const isDisplayStale = Boolean(
+    displaySummary && loadedRangeKey && loadedRangeKey !== rangeKey,
+  )
+
+  const activeSyncJob = syncMeta?.activeSyncJob ?? null
+  const totalRawOrders = syncMeta?.totalRawOrders ?? 0
+  const totalRawLiveSessions = syncMeta?.totalRawLiveSessions ?? 0
+
+  /** 日期切换时保留上一份 summary / data，直到新范围请求成功写回（与买家排行 Tab 切换一致） */
+  const showSummaryForUi = displaySummary
+  const showDataForUi = data
+
+  const boardSyncUiMode = deriveBoardSyncUiMode({
+    hasDisplayData: Boolean(showSummaryForUi),
+    businessSync: syncMeta?.businessSync,
+    activeSyncJob,
+    totalRawOrders,
+    isLoadingRange: isDisplayStale && status === 'loading',
+  })
+
+  const qualityFeedback =
+    loadedRangeKey === rangeKey ? data?.qualityFeedback ?? null : null
+
+  const refreshSyncMeta = useCallback(async () => {
+    try {
+      const meta = await fetchBoardSyncMeta()
+      setSyncMeta(meta)
+      return meta
+    } catch {
+      return null
+    }
+  }, [])
+
+  const loadLocal = useCallback(async () => {
+    if (preset === 'custom' && (!customQueried || !customStart || !customEnd)) {
+      setStatus('idle')
+      setData(null)
+      setDisplaySummary(null)
+      setDataDisplayStatus(null)
+      setStaleMessage(null)
+      return
+    }
+
+    const fetchRangeKey = buildBoardRangeKey(preset, startDate, endDate)
+    const seq = ++requestSeqRef.current
+
+    abortRef.current?.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    setStatus('loading')
+    setError(null)
+
+    try {
+      const [result, meta] = await Promise.all([
+        fetchBoardLocalData({
+          preset,
+          startDate,
+          endDate,
+          signal: controller.signal,
+        }),
+        fetchBoardSyncMeta(controller.signal),
+      ])
+      if (controller.signal.aborted || seq !== requestSeqRef.current) return
+
+      const resultRangeKey =
+        result.rangeKey ??
+        buildBoardRangeKey(result.preset, result.startDate, result.endDate)
+      if (resultRangeKey !== fetchRangeKey) return
+
+      hasLoadedOnceRef.current = true
+      setSyncMeta(meta ?? result.syncMeta ?? null)
+
+      const summary =
+        Object.keys(result.summary).length > 0 ? result.summary : null
+
+      setData({ ...result, rangeKey: resultRangeKey })
+      setDisplaySummary(summary)
+      setDataDisplayStatus(result.dataDisplayStatus ?? null)
+      setLastSyncedAt(
+        meta?.businessSync.lastSuccessAt ??
+          result.syncMeta?.businessSync.lastSuccessAt ??
+          result.fetchedAt,
+      )
+
+      const uiMode = deriveBoardSyncUiMode({
+        hasDisplayData: Boolean(summary),
+        businessSync: meta?.businessSync ?? result.syncMeta?.businessSync,
+        activeSyncJob: meta?.activeSyncJob,
+        totalRawOrders: meta?.totalRawOrders ?? 0,
+      })
+
+      if (uiMode === 'first_sync' || uiMode === 'empty_idle') {
+        setStaleMessage(null)
+      } else if (uiMode === 'syncing_with_data') {
+        setStaleMessage(null)
+      } else if (result.dataDisplayStatus === 'failed_with_cache') {
+        setStaleMessage(
+          result.progress.message || '本次更新失败，当前展示上一次成功同步数据。',
+        )
+      } else if (result.dataDisplayStatus === 'empty') {
+        setStaleMessage(result.progress.message || '当前日期范围内暂无订单数据。')
+      } else {
+        setStaleMessage(null)
+      }
+      setStatus('ready')
+    } catch (e) {
+      if (controller.signal.aborted || seq !== requestSeqRef.current) return
+      const msg = e instanceof Error ? e.message : '加载失败'
+      setError(msg)
+      setStatus('failed')
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null
+    }
+  }, [preset, customQueried, customStart, customEnd, startDate, endDate])
+
+  const triggerBusinessSync = useCallback(async () => {
+    setTriggerSyncBusy(true)
+    try {
+      await apiRequest<{ message?: string }>(
+        '/api/settings/data-maintenance/trigger-business-sync',
+        { method: 'POST' },
+      )
+      await refreshSyncMeta()
+    } finally {
+      setTriggerSyncBusy(false)
+    }
+  }, [refreshSyncMeta])
+
+  useEffect(() => {
+    void loadLocal()
+  }, [loadLocal, rangeKey])
+
+  useEffect(() => {
+    void refreshSyncMeta()
+  }, [refreshSyncMeta])
+
+  useEffect(() => {
+    const onCleared = () => {
+      setData(null)
+      setDisplaySummary(null)
+      setDataDisplayStatus(null)
+      setStaleMessage(null)
+      hasLoadedOnceRef.current = false
+      void refreshSyncMeta()
+      void loadLocal()
+    }
+    window.addEventListener('business-data-cleared', onCleared)
+    return () => window.removeEventListener('business-data-cleared', onCleared)
+  }, [loadLocal, refreshSyncMeta])
+
+  useEffect(() => {
+    const biz = syncMeta?.businessSync
+    const syncing = isBusinessSyncActive(biz?.status)
+    const hasData = Boolean(displaySummary)
+    const intervalMs = syncing && !hasData ? 2000 : syncing && hasData ? 5000 : 60_000
+
+    const timer = window.setInterval(() => {
+      void (async () => {
+        try {
+          const meta = await refreshSyncMeta()
+          if (!meta) return
+          const stillSyncing = isBusinessSyncActive(meta.businessSync.status)
+          const syncJustFinished = wasSyncingRef.current && !stillSyncing
+          wasSyncingRef.current = stillSyncing
+          if (syncJustFinished) {
+            void loadLocal()
+          }
+        } catch {
+          /* ignore */
+        }
+      })()
+    }, intervalMs)
+
+    wasSyncingRef.current = syncing
+
+    return () => window.clearInterval(timer)
+  }, [
+    syncMeta?.businessSync.status,
+    syncMeta?.businessSync.currentTask,
+    syncMeta?.activeSyncJob,
+    Boolean(displaySummary),
+    loadLocal,
+    refreshSyncMeta,
+  ])
+
+  const resolvedRange = useMemo<BoardResolvedRange>(() => {
+    if (loadedRangeKey === rangeKey && data?.resolvedRange) {
+      return data.resolvedRange
+    }
+    return { preset, startDate, endDate }
+  }, [loadedRangeKey, rangeKey, data?.resolvedRange, preset, startDate, endDate])
+
+  const value = useMemo(
+    () => ({
+      preset,
+      customStart,
+      customEnd,
+      customQueried,
+      rangeKey,
+      setPreset,
+      setCustomStart,
+      setCustomEnd,
+      setCustomQueried,
+      status,
+      error,
+      data: showDataForUi,
+      displayData: showDataForUi,
+      displaySummary: showSummaryForUi,
+      resolvedRange,
+      dataDisplayStatus:
+        loadedRangeKey === rangeKey ? dataDisplayStatus : null,
+      isLoading: status === 'loading',
+      isDisplayStale,
+      boardSyncUiMode,
+      lastSyncedAt,
+      syncMeta,
+      activeSyncJob,
+      totalRawOrders,
+      totalRawLiveSessions,
+      cookieHealth: syncMeta?.cookieHealth ?? null,
+      staleMessage,
+      startDate,
+      endDate,
+      qualityFeedback,
+      reload: loadLocal,
+      triggerBusinessSync,
+      triggerSyncBusy,
+    }),
+    [
+      preset,
+      customStart,
+      customEnd,
+      customQueried,
+      rangeKey,
+      status,
+      error,
+      showDataForUi,
+      loadedRangeKey,
+      showSummaryForUi,
+      resolvedRange,
+      dataDisplayStatus,
+      isDisplayStale,
+      boardSyncUiMode,
+      lastSyncedAt,
+      syncMeta,
+      activeSyncJob,
+      totalRawOrders,
+      totalRawLiveSessions,
+      staleMessage,
+      startDate,
+      endDate,
+      qualityFeedback,
+      loadLocal,
+      triggerBusinessSync,
+      triggerSyncBusy,
+    ],
+  )
+
+  return (
+    <BoardLiveQueryContext.Provider value={value}>{children}</BoardLiveQueryContext.Provider>
+  )
+}
+
+export function useBoardLiveQuery(): BoardLiveQueryContextValue {
+  const ctx = useContext(BoardLiveQueryContext)
+  if (!ctx) {
+    throw new Error('useBoardLiveQuery must be used within BoardLiveQueryProvider')
+  }
+  return ctx
+}
+
+export const BoardLiveQueryAutoRefresh: React.FC<{ pageScope?: string }> = () => null

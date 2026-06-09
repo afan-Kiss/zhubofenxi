@@ -1,0 +1,325 @@
+import React, { useMemo, useState } from 'react'
+import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
+import {
+  displayCell,
+  boardRowDisplayOrderNo,
+  normalizeBoardOrderRow,
+  displayAfterSaleReason,
+  type BoardDrillOrderRow,
+} from '../../lib/board-order-row'
+import {
+  afterSaleToneClass,
+  deriveAfterSaleDisplay,
+  earnedAmountForRow,
+  orderStatusLabelForRow,
+  warnBuyerOrderAnomalies,
+  type BuyerOrderRowExt,
+} from '../../lib/derive-after-sale-display'
+import { MetricInfoTooltip } from './MetricInfoTooltip'
+import { getMetricExplain } from '../../lib/metricExplain'
+import { BuyerDisplay } from './BuyerDisplay'
+import { MobileBuyerOrderCards } from './MobileBuyerOrderCards'
+import { MobileBoardOrderCards } from './MobileBoardOrderCards'
+import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
+
+export type { BoardDrillOrderRow }
+
+const BOARD_COLUMN_COUNT = 17
+const BUYER_COLUMN_COUNT = 7
+
+interface Props {
+  rows: BoardDrillOrderRow[] | Array<Record<string, unknown>>
+  blacklistedBuyerIds?: string[]
+  loading?: boolean
+  emptyText?: string
+  listKey?: string
+  /** 买家 Drawer 明细表：拆分金额列 */
+  variant?: 'board' | 'buyer'
+  headerRefundOrderCount?: number
+}
+
+function refundSourceLabel(
+  source: string | undefined,
+  pending: boolean,
+): string {
+  if (pending) return '待同步'
+  if (source === 'after_sales_workbench') return '售后工作台'
+  if (source === 'after_sales_workbench_no_record') return '售后工作台(无记录)'
+  if (source === 'after_sales_workbench_zero_refund') return '售后工作台(零退款)'
+  if (source === 'no_after_sale') return '无售后'
+  return displayCell(source)
+}
+
+function QualityReturnBadge({ isQuality }: { isQuality: boolean }) {
+  return isQuality ? (
+    <span className="inline-flex rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700">
+      品退
+    </span>
+  ) : (
+    <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+      非品退
+    </span>
+  )
+}
+
+export const BoardDrillOrderTable: React.FC<Props> = ({
+  rows: rawRows,
+  blacklistedBuyerIds = [],
+  loading = false,
+  emptyText = '暂无明细',
+  listKey,
+  variant = 'board',
+  headerRefundOrderCount,
+}) => {
+  const { formatMoney } = useAmountDisplay()
+  const blacklistSet = useMemo(() => new Set(blacklistedBuyerIds), [blacklistedBuyerIds])
+  const isBuyer = variant === 'buyer'
+  const columnCount = isBuyer ? BUYER_COLUMN_COUNT : BOARD_COLUMN_COUNT
+  const [viewMode, setViewMode] = useState<ListViewMode>('cards')
+
+  const showCardsOnDesktop = viewMode === 'cards'
+  const cardClass = showCardsOnDesktop ? 'block' : 'block md:hidden'
+  const tableWrapClass = showCardsOnDesktop ? 'hidden' : 'hidden md:block'
+
+  const rows = useMemo(
+    () =>
+      rawRows.map((r) =>
+        'orderNo' in r && typeof (r as BoardDrillOrderRow).orderTime === 'string'
+          ? (r as BoardDrillOrderRow)
+          : normalizeBoardOrderRow(r as Record<string, unknown>),
+      ),
+    [rawRows],
+  )
+
+  const tableKey =
+    listKey ?? (rows.length > 0 ? `rows-${boardRowDisplayOrderNo(rows[0]!)}` : 'empty')
+
+  if (loading) {
+    return (
+      <div
+        data-testid="drawer-order-skeleton"
+        className="animate-in fade-in space-y-2 py-4 duration-300"
+      >
+        {[1, 2, 3, 4, 5].map((i) => (
+          <div
+            key={i}
+            className="h-10 animate-pulse rounded-xl bg-rose-50/80"
+            style={{ animationDelay: `${i * 60}ms` }}
+          />
+        ))}
+      </div>
+    )
+  }
+
+  if (isBuyer) {
+    return (
+      <div key={tableKey} className="animate-in fade-in duration-300">
+        <div className="mb-3 flex justify-end">
+          <ListViewToggle mode={viewMode} onChange={setViewMode} />
+        </div>
+        <MobileBuyerOrderCards
+          rows={rows}
+          emptyText={emptyText}
+          className={cardClass}
+          headerRefundOrderCount={headerRefundOrderCount}
+        />
+        <div className={tableWrapClass}>{renderBuyerTable()}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div key={tableKey} data-testid="drawer-order-table" className="animate-in fade-in duration-300">
+      <div className="mb-3 flex justify-end">
+        <ListViewToggle mode={viewMode} onChange={setViewMode} />
+      </div>
+      <MobileBoardOrderCards
+        rows={rows}
+        emptyText={emptyText}
+        blacklistedBuyerIds={blacklistedBuyerIds}
+        className={cardClass}
+      />
+      <div className={tableWrapClass}>{renderBoardTable()}</div>
+    </div>
+  )
+
+  function renderBuyerTable() {
+    return (
+      <div className="overflow-x-auto rounded-2xl border border-rose-100/60 bg-white">
+        <table className="w-full min-w-[720px] text-left text-[11px]">
+          <thead className="bg-rose-50/50 text-slate-500">
+            <tr>
+              <th className="sticky left-0 z-10 min-w-[180px] whitespace-nowrap bg-rose-50/95 px-2 py-2">
+                订单号
+              </th>
+              <th className="whitespace-nowrap px-2 py-2 text-right">
+                <span className="inline-flex items-center gap-0.5">
+                  赚到金额
+                  <MetricInfoTooltip text={getMetricExplain('earnedAmount')} />
+                </span>
+              </th>
+              <th className="whitespace-nowrap px-2 py-2">订单状态</th>
+              <th className="whitespace-nowrap px-2 py-2">售后状态</th>
+              <th className="whitespace-nowrap px-2 py-2">售后类型</th>
+              <th className="min-w-[120px] px-2 py-2">售后原因</th>
+              <th className="whitespace-nowrap px-2 py-2">退款来源</th>
+            </tr>
+          </thead>
+          <tbody>{renderBuyerRows()}</tbody>
+        </table>
+      </div>
+    )
+  }
+
+  function renderBoardTable() {
+    return (
+      <div className="overflow-x-auto rounded-2xl border border-rose-100/60 bg-white">
+        <table className="w-full min-w-[1280px] text-left text-[11px]">
+          <thead className="bg-rose-50/50 text-slate-500">
+            <tr>
+              <th className="whitespace-nowrap px-2 py-2">订单号</th>
+              <th className="whitespace-nowrap px-2 py-2">下单时间</th>
+              <th className="whitespace-nowrap px-2 py-2">来源直播号</th>
+              <th className="whitespace-nowrap px-2 py-2">主播</th>
+              <th className="whitespace-nowrap px-2 py-2">买家昵称</th>
+              <th className="whitespace-nowrap px-2 py-2">商品名称</th>
+              <th className="whitespace-nowrap px-2 py-2">商家应收/支付金额</th>
+              <th className="whitespace-nowrap px-2 py-2">退款金额</th>
+              <th className="whitespace-nowrap px-2 py-2">订单状态</th>
+              <th className="whitespace-nowrap px-2 py-2">售后状态</th>
+              <th className="whitespace-nowrap px-2 py-2">售后原因</th>
+              <th className="whitespace-nowrap px-2 py-2">品退来源</th>
+              <th className="whitespace-nowrap px-2 py-2">售后印证</th>
+              <th className="whitespace-nowrap px-2 py-2">销售状态</th>
+              <th className="whitespace-nowrap px-2 py-2">状态说明</th>
+              <th className="whitespace-nowrap px-2 py-2">品退标记</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={columnCount}
+                  data-testid="drawer-empty-state"
+                  className="py-10 text-center text-slate-400"
+                >
+                  {emptyText}
+                </td>
+              </tr>
+            ) : (
+              rows.map((r, idx) => {
+                const buyerKey = displayCell(r.buyerKey)
+                const nick = displayCell(r.buyerNickname)
+                const rowBlocked =
+                  Boolean(r.isBlacklistedBuyer) ||
+                  (buyerKey !== '—' && blacklistSet.has(buyerKey))
+                return (
+                  <tr
+                    key={`${boardRowDisplayOrderNo(r)}-${idx}`}
+                    className={`border-t ${rowBlocked ? 'bg-red-50/40' : 'border-slate-50 hover:bg-rose-50/30'}`}
+                  >
+                    <td className="px-2 py-1.5 font-mono">{displayCell(boardRowDisplayOrderNo(r))}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.orderTime)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.liveAccountName)}</td>
+                    <td className="px-2 py-1.5">{displayCell(r.anchorName)}</td>
+                    <td className="px-2 py-1.5">
+                      <BuyerDisplay nickname={nick === '—' ? '未知' : nick} />
+                    </td>
+                    <td className="max-w-[160px] truncate px-2 py-1.5" title={displayCell(r.productName)}>
+                      {displayCell(r.productName)}
+                    </td>
+                    <td className="px-2 py-1.5 font-medium">
+                      {formatMoney(Number(r.merchantReceivableAmount ?? 0))}
+                    </td>
+                    <td className="px-2 py-1.5 text-rose-600">
+                      {formatMoney(Number(r.refundAmount ?? r.productRefundAmount ?? 0))}
+                    </td>
+                    <td className="px-2 py-1.5">{displayCell(r.orderStatus)}</td>
+                    <td className="px-2 py-1.5">{displayCell(r.afterSaleStatus)}</td>
+                    <td className="max-w-[120px] truncate px-2 py-1.5" title={displayAfterSaleReason(r)}>
+                      {displayAfterSaleReason(r)}
+                    </td>
+                    <td className="max-w-[140px] truncate px-2 py-1.5 text-slate-600" title={displayCell(r.qualitySourceLabel)}>
+                      {r.isQualityReturn
+                        ? displayCell(r.officialReasonText ?? r.qualityReasonText)
+                        : r.qualityVerifyStatus === 'after_sale_only'
+                          ? '官方未命中'
+                          : '—'}
+                    </td>
+                    <td className="max-w-[160px] truncate px-2 py-1.5 text-slate-600" title={displayCell(r.qualityVerifyDisplayLabel ?? r.qualitySourceLabel)}>
+                      {displayCell(r.qualityVerifyDisplayLabel ?? r.qualitySourceLabel ?? '—')}
+                    </td>
+                    <td className="px-2 py-1.5">{r.includedInGmv ? '本期支付有效' : '状态未成交'}</td>
+                    <td className="max-w-[120px] truncate px-2 py-1.5 text-slate-500" title={displayCell(r.gmvExcludeReason)}>
+                      {displayCell(r.gmvExcludeReason)}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <QualityReturnBadge isQuality={Boolean(r.isQualityReturn)} />
+                    </td>
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  function renderBuyerRows() {
+    if (rows.length === 0) {
+      return (
+        <tr>
+          <td colSpan={BUYER_COLUMN_COUNT} className="py-10 text-center text-slate-400">
+            {emptyText}
+          </td>
+        </tr>
+      )
+    }
+
+    return rows.map((rawRow, idx) => {
+      const r = rawRow as BuyerOrderRowExt
+      const refundPending = Boolean(r.refundAmountPending)
+      const refundSource = refundSourceLabel(r.refundAmountSource, refundPending)
+      const reason = displayAfterSaleReason(r)
+      const afterSale = deriveAfterSaleDisplay(r)
+      const orderStatus = orderStatusLabelForRow(r)
+      const earned = earnedAmountForRow(r)
+      const afterSaleTypeLabel =
+        r.afterSaleDisplayType && r.afterSaleDisplayType !== '—'
+          ? r.afterSaleDisplayType
+          : r.isQualityReturn
+            ? '品退'
+            : '—'
+
+      warnBuyerOrderAnomalies(r, { headerRefundOrderCount })
+
+      return (
+        <tr
+          key={`${boardRowDisplayOrderNo(r)}-${idx}`}
+          className="border-t border-slate-50 hover:bg-rose-50/30"
+        >
+          <td className="sticky left-0 z-10 min-w-[180px] bg-white px-2 py-1.5 font-mono text-[10px] group-hover:bg-rose-50/30">
+            {displayCell(boardRowDisplayOrderNo(r))}
+          </td>
+          <td className="px-2 py-1.5 text-right text-[12px] font-bold text-rose-900 tabular-nums">
+            {formatMoney(earned)}
+          </td>
+          <td className="px-2 py-1.5">{orderStatus}</td>
+          <td className="px-2 py-1.5">
+            <span
+              className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${afterSaleToneClass(afterSale.tone)}`}
+            >
+              {afterSale.label}
+            </span>
+          </td>
+          <td className="px-2 py-1.5">{afterSaleTypeLabel}</td>
+          <td className="max-w-[140px] truncate px-2 py-1.5" title={reason}>
+            {reason}
+          </td>
+          <td className="px-2 py-1.5 text-slate-500">{refundSource}</td>
+        </tr>
+      )
+    })
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "description": "已知遗留禁用词命中；新增命中将令 check:copy 失败。修文案后请从 baseline 删除对应项。",
+  "entries": [
+    "apps/web/src/pages/board/OverviewTab.tsx:毛利润",
+    "apps/web/src/components/config/DataCaliberDocPanel.tsx:毛利润",
+    "apps/web/src/components/dashboard/DashboardStatusBar.tsx:毛利润",
+    "apps/web/src/components/bi/SettlementDrillTable.tsx:毛利润",
+    "apps/web/src/components/bi/MetricExplainCard.tsx:毛利润",
+    "apps/web/src/components/bi/DailyTrendChart.tsx:毛利润",
+    "apps/web/src/components/dashboard/GrossProfitBreakdownModal.tsx:毛利润",
+    "apps/server/src/services/board-check-export.service.ts:黑名单",
+    "apps/server/src/services/validation-package-builder.service.ts:毛利润",
+    "apps/server/src/services/gross-profit.service.ts:毛利润",
+    "apps/server/src/services/business-analysis.service.ts:毛利润",
+    "apps/server/src/services/report-excel.service.ts:毛利润",
+    "apps/server/src/services/report-excel.service.ts:账单对账",
+    "apps/server/src/services/report-summary.service.ts:毛利润",
+    "apps/server/src/routes/diagnostics.routes.ts:毛利润",
+    "apps/server/src/services/xhs-api-sync/sync-validation-summary.service.ts:毛利润",
+    "apps/server/src/services/board-reconciliation-export.service.ts:贡献",
+    "apps/server/src/services/board-reconciliation-export.service.ts:黑名单",
+    "apps/server/src/services/xhs-api-sync/amount-anomaly.service.ts:毛利润",
+    "apps/server/src/services/xhs-api-sync/xhs-analysis-from-raw.service.ts:毛利润",
+    "apps/server/src/services/downloaded-file-resolver.service.ts:毛利润",
+    "apps/server/src/services/bi-drill.service.ts:毛利润",
+    "apps/server/src/services/buyer-ranking-tab-filters.ts:黑名单",
+    "apps/server/src/services/system-acceptance.service.ts:毛利润",
+    "apps/server/src/services/data-validation.service.ts:毛利润",
+    "apps/server/src/utils/xhs-auth.util.ts:TOP"
+  ]
+}

@@ -1,0 +1,196 @@
+import { apiRequest } from './api'
+import type { BoardRangePreset } from './board-range'
+import { resolveBoardRangeDates } from './board-range'
+import type { QualityFeedbackStatus } from '../components/board/OfficialQualitySyncNote'
+import type { CookieHealthPayload } from './live-account'
+import type { SyncJobView } from './sync-status'
+import {
+  BUYER_PROFILE_EXPECTED_CACHE_VERSION,
+} from './buyer-profile-cache'
+
+export interface BoardActiveSyncJob extends SyncJobView {
+  afterSaleCount?: number
+  qualityCaseCount?: number
+}
+
+export interface LiveQueryProgress {
+  totalPages: number
+  fetchedPages: number
+  totalOrders: number
+  message: string
+}
+
+export interface BoardSyncMeta {
+  businessSync: {
+    lastRunAt: string | null
+    lastSuccessAt: string | null
+    failedAt: string | null
+    nextRunAt: string | null
+    status: 'success' | 'failed' | 'running' | 'idle' | 'queued'
+    intervalMinutes: number
+    message: string
+    lastError: string | null
+    currentTask?: { reason: string; startedAt: string } | null
+  }
+  buyerRankingSync: {
+    lastRunAt: string | null
+    nextRunAt: string | null
+    status: 'success' | 'failed' | 'running' | 'idle'
+    message: string
+    lastError: string | null
+    cacheVersion: string | null
+  }
+  cookieHealth?: CookieHealthPayload
+  syncRunning?: boolean
+  activeSyncJob?: BoardActiveSyncJob | null
+  totalRawOrders?: number
+  totalRawLiveSessions?: number
+  buyerProfileStatus?: BuyerProfileStatus
+}
+
+export interface BuyerProfileStatus {
+  status:
+    | 'ready'
+    | 'stale_with_cache'
+    | 'rebuilding'
+    | 'empty'
+    | 'failed'
+    | 'stale'
+    | 'building'
+    | 'error'
+  rebuilding?: boolean
+  startedAt?: string | null
+  updatedAt?: string | null
+  lastSuccessAt?: string | null
+  lastError?: string | null
+  durationMs?: number | null
+  runningSeconds?: number | null
+  isStaleRunning?: boolean
+  hasStaleCache?: boolean
+  cacheVersion?: string | null
+  expectedCacheVersion?: string
+  cacheCompatible?: boolean
+  rebuildScheduled?: boolean
+  lastBuiltAt: string | null
+  sampleOrderCount: number
+  sampleCustomerCount: number
+  progress: number | null
+  message: string
+}
+
+export async function fetchSyncStatusFull(signal?: AbortSignal) {
+  return apiRequest<{
+    running: boolean
+    job: BoardActiveSyncJob | null
+    businessSync: BoardSyncMeta['businessSync']
+    buyerRankingSync: BoardSyncMeta['buyerRankingSync']
+  }>('/api/sync/status', { signal })
+}
+
+export type BoardDataDisplayStatus =
+  | 'ready'
+  | 'syncing_with_cache'
+  | 'syncing_no_cache'
+  | 'failed_with_cache'
+  | 'empty'
+
+export interface BoardResolvedRange {
+  preset: string
+  startDate: string
+  endDate: string
+}
+
+export interface BoardLiveQueryData {
+  requestId: string
+  preset: string
+  startDate: string
+  endDate: string
+  rangeKey?: string
+  resolvedRange?: BoardResolvedRange
+  source: 'live_api'
+  isFromCache: boolean
+  fetchedAt: string
+  dataDisplayStatus?: BoardDataDisplayStatus
+  progress: LiveQueryProgress
+  summary: Record<string, unknown>
+  anchorPerformanceSummary?: Record<string, unknown>
+  anchorLeaderboard: Array<Record<string, unknown>>
+  orders: Array<Record<string, unknown>>
+  allOrders: Array<Record<string, unknown>>
+  ordersTotal: number
+  page: number
+  pageSize: number
+  blacklistedBuyerIds: string[]
+  debug: {
+    orderNos: string[]
+    includedOrderNos: string[]
+    excludedOrderNos: string[]
+    gmvField: string
+    formulaVersion: string
+  }
+  qualityFeedback?: QualityFeedbackStatus
+  syncMeta?: BoardSyncMeta
+}
+
+export async function fetchBoardLocalData(params: {
+  preset: BoardRangePreset
+  startDate?: string
+  endDate?: string
+  signal?: AbortSignal
+}): Promise<BoardLiveQueryData> {
+  if (params.signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError')
+  }
+  const dates = resolveBoardRangeDates(
+    params.preset,
+    params.startDate ?? '',
+    params.endDate ?? '',
+  )
+  const qs = new URLSearchParams({ preset: params.preset })
+  if (dates.startDate) qs.set('startDate', dates.startDate)
+  if (dates.endDate) qs.set('endDate', dates.endDate)
+  return apiRequest<BoardLiveQueryData>(`/api/board/local-data?${qs}`, {
+    signal: params.signal,
+  })
+}
+
+/** @deprecated 使用 fetchBoardLocalData */
+export async function runBoardLiveQuery(params: {
+  preset: BoardRangePreset
+  startDate?: string
+  endDate?: string
+  pageSize?: number
+  signal?: AbortSignal
+  onProgress?: (p: LiveQueryProgress) => void
+}): Promise<BoardLiveQueryData> {
+  if (params.onProgress) {
+    params.onProgress({
+      totalPages: 1,
+      fetchedPages: 0,
+      totalOrders: 0,
+      message: '正在读取本地同步数据…',
+    })
+  }
+  const result = await fetchBoardLocalData(params)
+  if (params.onProgress) {
+    params.onProgress(result.progress)
+  }
+  return result
+}
+
+export async function fetchBoardSyncMeta(signal?: AbortSignal): Promise<BoardSyncMeta> {
+  return apiRequest<BoardSyncMeta>('/api/board/sync-meta', { signal })
+}
+
+export { BUYER_PROFILE_EXPECTED_CACHE_VERSION } from './buyer-profile-cache'
+
+export function isBuyerProfileStatusCacheCompatible(
+  status?: BuyerProfileStatus | null,
+): boolean {
+  if (!status) return true
+  if (status.cacheCompatible === false) return false
+  const expected = status.expectedCacheVersion ?? BUYER_PROFILE_EXPECTED_CACHE_VERSION
+  const version = String(status.cacheVersion ?? '').trim()
+  if (!version) return true
+  return version === expected
+}

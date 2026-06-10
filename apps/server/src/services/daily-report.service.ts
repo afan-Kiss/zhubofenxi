@@ -13,7 +13,6 @@ import {
   type AnchorLiveSessionBrief,
 } from './anchor-live-sessions.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
-import { buildDailyReportAiSuggestions } from './daily-report-ai.service'
 import {
   countDailyReportOrders,
   roundMinutes,
@@ -50,7 +49,6 @@ export interface DailyReportPayload {
     overallHourlyAmountYuan: number | null
   }
   anchors: DailyReportAnchorRow[]
-  aiSuggestions: string[]
 }
 
 function formatDailyReportDateLabel(dateKey: string): string {
@@ -59,13 +57,14 @@ function formatDailyReportDateLabel(dateKey: string): string {
   return `${Number(m[2])}.${Number(m[3])}`
 }
 
-function resolveSessionLabel(config: AnchorConfig, anchorId: string, anchorName: string): string {
+function resolveSessionLabel(config: AnchorConfig, anchorId: string): string {
   const rule = config.timeRules.find((r) => r.enabled && r.anchorId === anchorId)
   if (!rule) return '场次'
   const startHour = Number(rule.startTime.split(':')[0] ?? 0)
+  if (startHour >= 22) return '夜场'
   if (startHour >= 18) return '晚场'
-  if (startHour < 12) return '早场'
-  return '日场'
+  if (startHour >= 12) return '午场'
+  return '早场'
 }
 
 function buildLivePeriodText(sessions: AnchorLiveSessionBrief[]): string {
@@ -93,7 +92,7 @@ function buildAnchorRow(params: {
   const liveHours = safeDivide(liveDurationMinutes, 60)
   return {
     anchorName: params.anchorName,
-    sessionLabel: resolveSessionLabel(params.config, params.anchorId, params.anchorName),
+    sessionLabel: resolveSessionLabel(params.config, params.anchorId),
     livePeriodText: buildLivePeriodText(params.sessions),
     liveDurationText: formatLiveDurationMinutes(liveDurationMinutes),
     liveDurationMinutes,
@@ -203,6 +202,5 @@ export async function buildDailyReport(params: {
       ),
     },
     anchors: anchorRows,
-    aiSuggestions: buildDailyReportAiSuggestions(anchorRows),
   }
 }

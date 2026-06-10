@@ -3,7 +3,7 @@ import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-
 
 const CLOSED_KEYWORDS = ['已关闭', '交易关闭']
 
-/** 异常单：已关闭 或 售后完成（仅提醒，不计入真实卖出） */
+/** 关闭/退货单：已关闭 或 售后完成（仅提醒，不计入真实卖出） */
 export function isDailyReportInvalidOrder(v: AnalyzedOrderView): boolean {
   const orderStatus = (v.orderStatusText ?? '').trim()
   const afterSale = (v.afterSaleStatusText ?? '').trim()
@@ -12,7 +12,7 @@ export function isDailyReportInvalidOrder(v: AnalyzedOrderView): boolean {
   return false
 }
 
-/** 真实卖出：非异常单，且有效发货销售额 > 0（performance views 已排除低价刷单） */
+/** 真实卖出：非关闭/退货单，且有效发货销售额 > 0（performance views 已排除低价刷单） */
 export function isDailyReportSoldOrder(v: AnalyzedOrderView): boolean {
   if (isDailyReportInvalidOrder(v)) return false
   return v.includedInGmv === true && v.effectiveGmvCent > 0

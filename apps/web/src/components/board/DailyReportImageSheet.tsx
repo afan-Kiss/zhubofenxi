@@ -78,7 +78,7 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         <MetricLine label="时均产出" value={formatHourly(row.hourlyAmountYuan)} />
         <MetricLine label="成交密度" value={formatDensity(row.dealDensityMinutes)} />
         <MetricLine
-          label="异常单"
+          label="关闭/退货单"
           value={formatOrderCount(row.invalidOrderCount)}
           strong={row.invalidOrderCount > 0}
         />
@@ -119,7 +119,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
             value={formatHourly(data.summary.overallHourlyAmountYuan)}
           />
           <MetricLine
-            label="异常单"
+            label="关闭/退货单"
             value={formatOrderCount(data.summary.totalInvalidOrderCount)}
             strong={data.summary.totalInvalidOrderCount > 0}
           />
@@ -144,7 +144,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
           </ol>
         ) : (
           <p className="mt-3 text-[13px] leading-6 text-slate-500">
-            AI建议待填写，点击「复制数据给 ChatGPT」生成建议后填入。
+            AI建议待填写，点击「复制原始数据给 ChatGPT」生成建议后填入。
           </p>
         )}
       </div>

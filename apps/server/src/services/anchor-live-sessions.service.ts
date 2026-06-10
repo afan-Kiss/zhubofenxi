@@ -7,6 +7,7 @@ import { findAnchorByName, matchTimeRule } from './anchor-rules.service'
 import { getAnchorConfigSync } from './anchor.service'
 import { mapLiveNickToKnownAnchor } from '../utils/anchor-label'
 import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
+import { formatClockShanghai, formatDateTimeShanghai } from '../utils/business-timezone'
 
 export interface AnchorLiveSessionBrief {
   liveId: string
@@ -27,21 +28,9 @@ export function formatLiveDurationMinutes(minutes: number): string {
   return `${min}分钟`
 }
 
-function formatLiveDateTimeUtc(date: Date): string {
-  const y = date.getUTCFullYear()
-  const m = String(date.getUTCMonth() + 1).padStart(2, '0')
-  const d = String(date.getUTCDate()).padStart(2, '0')
-  const hh = String(date.getUTCHours()).padStart(2, '0')
-  const mm = String(date.getUTCMinutes()).padStart(2, '0')
-  const ss = String(date.getUTCSeconds()).padStart(2, '0')
-  return `${y}-${m}-${d} ${hh}:${mm}:${ss}`
-}
-
 function formatLiveClock(time: Date | null, fallbackText?: string): string {
   if (time && !Number.isNaN(time.getTime())) {
-    const hh = String(time.getUTCHours()).padStart(2, '0')
-    const mm = String(time.getUTCMinutes()).padStart(2, '0')
-    return `${hh}:${mm}`
+    return formatClockShanghai(time)
   }
   const text = (fallbackText ?? '').trim()
   const hit = /\d{2}:\d{2}/.exec(text)
@@ -172,10 +161,10 @@ function dedupeLiveSessions(sessions: NormalizedLiveSession[]): NormalizedLiveSe
 }
 
 function toBrief(session: NormalizedLiveSession): AnchorLiveSessionBrief {
-  const startTime = session.startTime ? formatLiveDateTimeUtc(session.startTime) : '—'
-  let endTime = session.endTime ? formatLiveDateTimeUtc(session.endTime) : '—'
+  const startTime = session.startTime ? formatDateTimeShanghai(session.startTime) : '—'
+  let endTime = session.endTime ? formatDateTimeShanghai(session.endTime) : '—'
   if (session.startTime && session.endTime && session.endTime.getTime() < session.startTime.getTime()) {
-    endTime = formatLiveDateTimeUtc(new Date(session.endTime.getTime() + 86400000))
+    endTime = formatDateTimeShanghai(new Date(session.endTime.getTime() + 86400000))
   }
   return {
     liveId: session.liveId || session.id,

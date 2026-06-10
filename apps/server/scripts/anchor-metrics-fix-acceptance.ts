@@ -116,37 +116,35 @@ function testAnchorRuleEffectiveFrom(issues: string[]) {
   assert(LEGACY_ANCHOR_CUTOFF_MS > 0, 'legacy cutoff 常量应存在', issues)
 }
 
-function testExcludedShops(issues: string[]) {
-  const name = '和田雅玉'
+function testCoreMetricsLowPriceOnly(issues: string[]) {
   assert(
-    isExcludedFromCoreMetrics(makeView({ liveAccountName: name })),
-    `${name} 直播号应排除`,
-    issues,
-  )
-  assert(
-    !isExcludedFromCoreMetrics(makeView({ anchorName: name, liveAccountName: '主店' })),
-    '仅主播名与排除店同名时不应排除（按直播号/店铺/门店）',
-    issues,
-  )
-  assert(
-    isExcludedFromCoreMetrics(
-      makeView({ liveAccountName: '主店', raw: { shopName: name } }),
+    !isExcludedFromCoreMetrics(
+      makeView({ liveAccountName: '和田雅玉', paymentBaseCent: 5000 }),
     ),
-    `${name} 店铺名应排除`,
+    '和田雅玉正常价单不应因店铺名排除',
     issues,
   )
   assert(
-    isExcludedFromCoreMetrics(
-      makeView({ liveAccountName: '主店', raw: { storeName: name } }),
+    !isExcludedFromCoreMetrics(
+      makeView({
+        anchorName: '和田雅玉',
+        liveAccountName: '主店',
+        paymentBaseCent: 3000,
+      }),
     ),
-    `${name} 门店名应排除`,
+    '29 元以上主店订单应计入',
+    issues,
+  )
+  assert(
+    isExcludedFromCoreMetrics(makeView({ paymentBaseCent: 2100 })),
+    '21 元低价单应排除',
     issues,
   )
   const kept = filterViewsForCoreMetrics([
-    makeView({ liveAccountName: '主店' }),
-    makeView({ liveAccountName: '和田雅玉' }),
+    makeView({ liveAccountName: '主店', paymentBaseCent: 5000 }),
+    makeView({ liveAccountName: '和田雅玉', paymentBaseCent: 1000 }),
   ])
-  assert(kept.length === 1, '排除店铺后只剩 1 单', issues)
+  assert(kept.length === 1, '仅排除低价单，正常价单保留', issues)
 }
 
 function testLowPriceBrush(issues: string[]) {
@@ -312,7 +310,6 @@ async function verifyMayLiveDb(issues: string[]) {
     // 子杰与合计允许 ±93 元容差：本地 3.01 元刷单批次（约 31 单）按 <29 元规则排除，与部分手工表存在差异
     const nearLive = (a: number, b: number, tol = 93) => Math.abs(a - b) <= tol
     if (!near(xiaohong, 0)) issues.push(`live: 小红签收额=${xiaohong} 期望 0`)
-    if (!near(hetian, 0)) issues.push(`live: 和田雅玉签收额=${hetian} 期望 0`)
     if (!nearLive(zijie, 31158.7)) issues.push(`live: 子杰签收额=${zijie} 期望 31158.70`)
     if (!near(feiyun, 41782.7)) issues.push(`live: 飞云签收额=${feiyun} 期望 41782.70`)
     if (!nearLive(total, 72941.4)) issues.push(`live: 主播合计=${total} 期望 72941.40`)
@@ -332,7 +329,7 @@ async function verifyMayLiveDb(issues: string[]) {
 async function main() {
   const issues: string[] = []
   testAnchorRuleEffectiveFrom(issues)
-  testExcludedShops(issues)
+  testCoreMetricsLowPriceOnly(issues)
   testLowPriceBrush(issues)
   testFreightRefundSignAmount(issues)
   testPaymentTimeExport(issues)

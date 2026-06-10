@@ -1,17 +1,14 @@
 /**
- * 核心指标店铺排除验收
+ * 核心指标低价刷单排除验收
  * 用法: npx tsx apps/server/scripts/metrics-exclusion-acceptance.ts
  */
 import { calculateBusinessMetrics } from '../src/services/business-metrics.service'
 import {
-  DEFAULT_EXCLUDED_LIVE_ACCOUNT_NAMES,
-  DEFAULT_EXCLUDED_SHOP_NAMES,
-  DEFAULT_EXCLUDED_STORE_NAMES,
   filterViewsForCoreMetrics,
-  getMetricsExclusionConfig,
   isExcludedFromCoreMetrics,
-  resetMetricsExclusionConfigCache,
+  describeMetricsExclusionConfig,
 } from '../src/services/metrics-exclusion.service'
+import { LOW_PRICE_BRUSH_THRESHOLD_CENT } from '../src/services/low-price-brush-order.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
@@ -65,77 +62,61 @@ function makeView(partial: Partial<AnalyzedOrderView>): AnalyzedOrderView {
   }
 }
 
-function testDefaults(issues: string[]) {
-  const cfg = getMetricsExclusionConfig()
-  assert(cfg.excludedShopNames.includes('和田雅玉'), '默认排除店铺应含和田雅玉', issues)
-  assert(cfg.excludedLiveAccountNames.includes('和田雅玉'), '默认排除直播号应含和田雅玉', issues)
-  assert(cfg.excludedStoreNames.includes('和田雅玉'), '默认排除门店应含和田雅玉', issues)
-  assert(
-    DEFAULT_EXCLUDED_SHOP_NAMES.length === 1 && DEFAULT_EXCLUDED_SHOP_NAMES[0] === '和田雅玉',
-    '未硬编码其他未知店铺名',
-    issues,
-  )
+function testThresholdConfig(issues: string[]) {
+  assert(LOW_PRICE_BRUSH_THRESHOLD_CENT === 2900, '低价刷单阈值应为 2900 分', issues)
+  const meta = describeMetricsExclusionConfig()
+  assert(meta.lowPriceBrushThresholdYuan === 29, '导出摘要阈值应为 29 元', issues)
 }
 
-function testLiveAccountExclusion(issues: string[]) {
+function testLowPriceExcluded(issues: string[]) {
+  const v = makeView({
+    paymentBaseCent: 2100,
+    effectiveGmvCent: 2100,
+    isEffectiveSigned: true,
+    actualSignAmountCent: 2100,
+    statusSigned: true,
+  })
+  assert(isExcludedFromCoreMetrics(v), '21 元应视为低价刷单并排除', issues)
+  const metrics = calculateBusinessMetrics(filterViewsForCoreMetrics([v]))
+  assert(metrics.actualSignedAmount === 0, '排除后签收额应为 0', issues)
+  assert(metrics.orderCount === 0, '排除后支付单数应为 0', issues)
+}
+
+function testNormalPriceIncluded(issues: string[]) {
   const v = makeView({
     liveAccountName: '和田雅玉',
+    anchorName: '和田雅玉',
     paymentBaseCent: 5000,
     effectiveGmvCent: 5000,
     isEffectiveSigned: true,
     actualSignAmountCent: 5000,
     statusSigned: true,
   })
-  assert(isExcludedFromCoreMetrics(v), '和田雅玉直播号应排除', issues)
+  assert(!isExcludedFromCoreMetrics(v), '50 元正常单不应排除（不因店铺名排除）', issues)
   const metrics = calculateBusinessMetrics(filterViewsForCoreMetrics([v]))
-  assert(metrics.actualSignedAmount === 0, '排除后签收额应为 0', issues)
-  assert(metrics.orderCount === 0, '排除后支付单数应为 0', issues)
+  assert(metrics.actualSignedAmount === 50, '正常单仍计入签收额', issues)
 }
 
-function testShopRawExclusion(issues: string[]) {
-  const v = makeView({
-    liveAccountName: '其他店',
-    paymentBaseCent: 9900,
-    effectiveGmvCent: 9900,
-    isEffectiveSigned: true,
-    actualSignAmountCent: 9900,
-    statusSigned: true,
-    raw: { shopName: '和田雅玉' },
-  })
-  assert(isExcludedFromCoreMetrics(v), 'raw.shopName=和田雅玉 应排除', issues)
+function testBoundary(issues: string[]) {
+  assert(isExcludedFromCoreMetrics(makeView({ paymentBaseCent: 2899 })), '28.99 元应排除', issues)
+  assert(!isExcludedFromCoreMetrics(makeView({ paymentBaseCent: 2900 })), '29 元应计入', issues)
 }
 
-function testAnchorNameNotExcluded(issues: string[]) {
-  const v = makeView({
-    anchorName: '和田雅玉',
-    liveAccountName: '主店',
-    paymentBaseCent: 3000,
-    effectiveGmvCent: 3000,
-    isEffectiveSigned: true,
-    actualSignAmountCent: 3000,
-    statusSigned: true,
-  })
-  assert(!isExcludedFromCoreMetrics(v), '误归属主播名不应触发店铺排除', issues)
-  const metrics = calculateBusinessMetrics(filterViewsForCoreMetrics([v]))
-  assert(metrics.actualSignedAmount === 30, '主店订单仍计入签收额', issues)
-}
-
-function testEnvOverride(issues: string[]) {
-  process.env.METRICS_EXCLUDED_LIVE_ACCOUNT_NAMES = '测试排除店'
-  resetMetricsExclusionConfigCache()
-  const v = makeView({ liveAccountName: '测试排除店' })
-  assert(isExcludedFromCoreMetrics(v), '环境变量应可追加排除直播号', issues)
-  delete process.env.METRICS_EXCLUDED_LIVE_ACCOUNT_NAMES
-  resetMetricsExclusionConfigCache()
+function testMixedFilter(issues: string[]) {
+  const kept = filterViewsForCoreMetrics([
+    makeView({ paymentBaseCent: 5000 }),
+    makeView({ paymentBaseCent: 1000 }),
+  ])
+  assert(kept.length === 1, '过滤后只剩 1 单正常价订单', issues)
 }
 
 function main() {
   const issues: string[] = []
-  testDefaults(issues)
-  testLiveAccountExclusion(issues)
-  testShopRawExclusion(issues)
-  testAnchorNameNotExcluded(issues)
-  testEnvOverride(issues)
+  testThresholdConfig(issues)
+  testLowPriceExcluded(issues)
+  testNormalPriceIncluded(issues)
+  testBoundary(issues)
+  testMixedFilter(issues)
 
   if (issues.length > 0) {
     console.error('[metrics-exclusion-acceptance] FAILED')

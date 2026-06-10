@@ -64,3 +64,44 @@ export function thisWeekStartKeyShanghai(now: Date = new Date()): string {
   const diff = day === 0 ? 6 : day - 1
   return addDaysShanghai(todayKey, -diff)
 }
+
+function shanghaiTimeParts(date: Date): {
+  year: string
+  month: string
+  day: string
+  hour: string
+  minute: string
+  second: string
+} {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: BUSINESS_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
+  return {
+    year: pick('year'),
+    month: pick('month'),
+    day: pick('day'),
+    hour: pick('hour'),
+    minute: pick('minute'),
+    second: pick('second'),
+  }
+}
+
+/** 格式化为 Asia/Shanghai 本地时间文本（与主播时间段配置一致） */
+export function formatDateTimeShanghai(date: Date): string {
+  const p = shanghaiTimeParts(date)
+  return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}:${p.second}`
+}
+
+/** 格式化为 HH:mm（Asia/Shanghai） */
+export function formatClockShanghai(date: Date): string {
+  const p = shanghaiTimeParts(date)
+  return `${p.hour}:${p.minute}`
+}

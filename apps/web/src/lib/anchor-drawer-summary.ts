@@ -19,6 +19,10 @@ function countZh(n: number): string {
   return String(n)
 }
 
+export function formatReportDateLabel(startDate: string, endDate: string): string {
+  return formatDrawerDateLabel(startDate, endDate)
+}
+
 export function buildAnchorDrawerSummaryText(params: {
   startDate: string
   endDate: string

@@ -187,6 +187,28 @@ boardRouter.get('/anchor-drill', async (req, res) => {
   }
 })
 
+boardRouter.get('/daily-report', async (req, res) => {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    if (!startDate || !endDate) {
+      sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    const { buildDailyReport } = await import('../services/daily-report.service')
+    const data = await buildDailyReport({
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      startDate,
+      endDate,
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '生成日报数据失败', 500)
+  }
+})
+
 boardRouter.get('/buyer-profile', async (req, res) => {
   try {
     const { buildQualityFeedbackPublicStatus } =

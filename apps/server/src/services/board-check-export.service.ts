@@ -172,9 +172,7 @@ export async function buildBoardCheckExportBuffer(params: {
     ['品退判断', 'strictQualityRefund：最终有效成功售后原因为商品问题'],
     ['签收单数', '有效签收订单数（已签收且签收净额>0）'],
     ['品退率分母', '支付订单数'],
-    ['排除直播号', exclusionMeta.excludedLiveAccountNames.join('、') || '—'],
-    ['排除店铺', exclusionMeta.excludedShopNames.join('、') || '—'],
-    ['排除门店', exclusionMeta.excludedStoreNames.join('、') || '—'],
+    ['低价刷单阈值', `支付基数低于 ${exclusionMeta.lowPriceBrushThresholdYuan} 元不计入核心指标`],
   ])
 
   addTableSheet(
@@ -289,7 +287,7 @@ export async function buildBoardCheckExportBuffer(params: {
     'qualityRefundReason',
     'hasHistoricalQualityReason',
     '黑名单买家',
-    '排除核心指标',
+      '低价刷单排除',
   ], orderRows)
 
   addTableSheet(

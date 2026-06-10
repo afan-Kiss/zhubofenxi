@@ -18,7 +18,7 @@ import {
 } from '../../providers/BoardLiveQueryProvider'
 import { showLongPeriodRates } from '../../lib/board-rate-display'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
-import { DailyReportExportPanel } from '../../components/board/DailyReportExportPanel'
+import { DailyReportPreviewButton } from '../../components/board/DailyReportPreviewButton'
 
 export const AnchorPerformanceTab: React.FC = () => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
@@ -172,14 +172,14 @@ export const AnchorPerformanceTab: React.FC = () => {
         <BoardStatRangeNote startDate={resolvedRange.startDate} endDate={resolvedRange.endDate} />
       )}
 
-      {startDate && endDate ? (
-        <DailyReportExportPanel
+      <div className="flex flex-wrap items-center gap-3">
+        <DailyReportPreviewButton
           preset={preset}
           startDate={startDate}
           endDate={endDate}
           disabled={!boardDataVisible || isLoading}
         />
-      ) : null}
+      </div>
 
       {showProgressCard ? (
         <BusinessSyncProgressCard

@@ -195,6 +195,10 @@ boardRouter.get('/daily-report', async (req, res) => {
       sendFail(res, '请提供 startDate 与 endDate', 400)
       return
     }
+    if (startDate !== endDate) {
+      sendFail(res, '日报仅支持单日范围', 400)
+      return
+    }
     const { buildDailyReport } = await import('../services/daily-report.service')
     const data = await buildDailyReport({
       preset: req.query.preset ? String(req.query.preset) : 'custom',
@@ -205,7 +209,7 @@ boardRouter.get('/daily-report', async (req, res) => {
     })
     sendOk(res, data)
   } catch (err) {
-    sendFail(res, err instanceof Error ? err.message : '生成日报数据失败', 500)
+    sendFail(res, err instanceof Error ? err.message : '加载日报失败', 500)
   }
 })
 

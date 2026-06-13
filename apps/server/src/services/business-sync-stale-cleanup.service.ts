@@ -106,8 +106,6 @@ export async function clearStaleBusinessSyncJobs(force = false): Promise<number>
   }
   lastCleanupAt = now
 
-  logInfo('经营同步', '检查是否有超时未完成的同步任务')
-
   const candidates = await prisma.xhsSyncJob.findMany({
     where: {
       status: 'running',
@@ -119,6 +117,8 @@ export async function clearStaleBusinessSyncJobs(force = false): Promise<number>
   if (candidates.length === 0) {
     return 0
   }
+
+  logInfo('经营同步', '检查是否有超时未完成的同步任务')
 
   let released = 0
 

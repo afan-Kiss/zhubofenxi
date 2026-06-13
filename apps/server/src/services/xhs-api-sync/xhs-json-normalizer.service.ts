@@ -17,6 +17,12 @@ import {
   attachBuyerIdentityToRaw,
   resolveBuyerIdentityForPackage,
 } from '../buyer-identity.service'
+import type { DateRangeResolved } from '../../utils/date-range'
+import { orderPayTimeInRange } from '../../utils/order-stat-time.util'
+
+/** DB 预筛缓冲：orderTime 存 orderedAt，统计口径用 paymentTime，需留余量 */
+const RAW_ORDER_RANGE_DB_BUFFER_MS = 7 * 24 * 60 * 60 * 1000
+const RAW_LIVE_RANGE_DB_BUFFER_MS = 1 * 24 * 60 * 60 * 1000
 
 const SIGNED_KEYWORDS = ['已签收', '已完成', '交易完成', '已收货', '交易成功', '完成']
 const RETURN_KEYWORDS = ['退款', '退货', '售后完成', '已退款', '退款成功']
@@ -490,9 +496,28 @@ export async function summarizeNormalizedOrders(): Promise<NormalizedOrdersSumma
   }
 }
 
-export async function loadNormalizedOrdersFromRaw(): Promise<NormalizedOrder[]> {
-  const rows = await prisma.xhsRawOrder.findMany({ orderBy: { updatedAt: 'desc' } })
-  return rows.map((row, index) =>
+function buildOrderTimeDbWhere(range: DateRangeResolved) {
+  return {
+    OR: [
+      {
+        orderTime: {
+          gte: new Date(range.startTimeMs - RAW_ORDER_RANGE_DB_BUFFER_MS),
+          lte: new Date(range.endTimeMs + RAW_ORDER_RANGE_DB_BUFFER_MS),
+        },
+      },
+      { orderTime: null },
+    ],
+  }
+}
+
+export async function loadNormalizedOrdersFromRaw(options?: {
+  range?: DateRangeResolved
+}): Promise<NormalizedOrder[]> {
+  const rows = await prisma.xhsRawOrder.findMany({
+    where: options?.range ? buildOrderTimeDbWhere(options.range) : undefined,
+    orderBy: { updatedAt: 'desc' },
+  })
+  const normalized = rows.map((row, index) =>
     normalizeXhsOrderPackage(asRecord(row.rawJson), index + 1, {
       dbPackageId: row.packageId,
       dbOrderId: row.orderId,
@@ -500,6 +525,8 @@ export async function loadNormalizedOrdersFromRaw(): Promise<NormalizedOrder[]> 
       liveAccountName: row.liveAccountName,
     }),
   )
+  if (!options?.range) return normalized
+  return normalized.filter((o) => orderPayTimeInRange(o, options.range!))
 }
 
 /** @deprecated 旧流水线兼容：阶段八后由独立看板接口提供数据 */
@@ -650,8 +677,25 @@ export interface NormalizedLiveSessionsSummary {
   sample: NormalizedLiveSession[]
 }
 
-export async function normalizeLiveSessionsFromRaw(): Promise<NormalizedLiveSession[]> {
-  const rows = await prisma.xhsRawLiveSession.findMany({ orderBy: { updatedAt: 'desc' } })
+export async function normalizeLiveSessionsFromRaw(options?: {
+  range?: DateRangeResolved
+}): Promise<NormalizedLiveSession[]> {
+  const rows = await prisma.xhsRawLiveSession.findMany({
+    where: options?.range
+      ? {
+          OR: [
+            {
+              startTime: {
+                gte: new Date(options.range.startTimeMs - RAW_LIVE_RANGE_DB_BUFFER_MS),
+                lte: new Date(options.range.endTimeMs + RAW_LIVE_RANGE_DB_BUFFER_MS),
+              },
+            },
+            { startTime: null },
+          ],
+        }
+      : undefined,
+    orderBy: { updatedAt: 'desc' },
+  })
   return rows.map((row) => normalizeXhsLiveSession(asRecord(row.rawJson), row.id))
 }
 

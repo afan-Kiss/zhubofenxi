@@ -24,6 +24,7 @@ import {
 export interface DailyReportAnchorRow {
   anchorName: string
   sessionLabel: string
+  shopName: string
   livePeriodText: string
   liveDurationText: string
   liveDurationMinutes: number
@@ -78,10 +79,51 @@ function buildLivePeriodText(sessions: AnchorLiveSessionBrief[]): string {
   return `${first.startTime.slice(11, 16)}~${last.endTime.slice(11, 16)}`
 }
 
+function pickShopNameFromRaw(raw: Record<string, unknown> | undefined): string {
+  if (!raw) return ''
+  const keys = ['shopName', 'shop_name', 'sellerShopName', 'seller_shop_name', 'storeName', 'store_name']
+  for (const k of keys) {
+    const v = raw[k]
+    if (v != null && String(v).trim()) return String(v).trim()
+  }
+  return ''
+}
+
+function resolveAnchorShopName(
+  views: ReturnType<typeof attachRawByMatchToViews>,
+  sessions: AnchorLiveSessionBrief[],
+): string {
+  const counts = new Map<string, number>()
+  for (const view of views) {
+    const liveAccountName = (view.liveAccountName ?? '').trim()
+    if (liveAccountName && liveAccountName !== '—') {
+      counts.set(liveAccountName, (counts.get(liveAccountName) ?? 0) + 1)
+    }
+    const shopName = pickShopNameFromRaw(view.raw)
+    if (shopName && shopName !== '—') {
+      counts.set(shopName, (counts.get(shopName) ?? 0) + 1)
+    }
+  }
+  if (counts.size > 0) {
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])[0]![0]
+  }
+  for (const session of sessions) {
+    const liveName = (session.liveName ?? '').trim()
+    if (liveName && liveName !== '—') return liveName
+  }
+  return ''
+}
+
+function formatSessionLabelWithShop(sessionLabel: string, shopName: string): string {
+  if (!shopName) return sessionLabel
+  return `${sessionLabel}·${shopName}`
+}
+
 function buildAnchorRow(params: {
   config: AnchorConfig
   anchorId: string
   anchorName: string
+  shopName: string
   shippedAmountYuan: number
   soldOrderCount: number
   invalidOrderCount: number
@@ -92,7 +134,11 @@ function buildAnchorRow(params: {
   const liveHours = safeDivide(liveDurationMinutes, 60)
   return {
     anchorName: params.anchorName,
-    sessionLabel: resolveSessionLabel(params.config, params.anchorId),
+    sessionLabel: formatSessionLabelWithShop(
+      resolveSessionLabel(params.config, params.anchorId),
+      params.shopName,
+    ),
+    shopName: params.shopName,
     livePeriodText: buildLivePeriodText(params.sessions),
     liveDurationText: formatLiveDurationMinutes(liveDurationMinutes),
     liveDurationMinutes,
@@ -163,6 +209,7 @@ export async function buildDailyReport(params: {
         config,
         anchorId: anchor.id,
         anchorName: anchor.name,
+        shopName: resolveAnchorShopName(anchorWithRaw, sessions),
         shippedAmountYuan,
         soldOrderCount,
         invalidOrderCount: invalidFromAll,

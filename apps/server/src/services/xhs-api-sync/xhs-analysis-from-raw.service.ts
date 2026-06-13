@@ -94,10 +94,9 @@ export async function buildRawAnalyzeBundle(
   const orderCount = await prisma.xhsRawOrder.count()
   if (orderCount === 0) return null
 
-  const allOrders = await loadNormalizedOrdersFromRaw()
-  const orders = allOrders.filter((o) => orderInRange(o, range))
+  const orders = await loadNormalizedOrdersFromRaw({ range })
 
-  const liveSessions = (await normalizeLiveSessionsFromRaw())
+  const liveSessions = (await normalizeLiveSessionsFromRaw({ range }))
     .filter((s) => liveInRange(s, range))
     .map((s, i) => toLiveSession(s, i))
     .filter((s): s is LiveSession => s != null)

@@ -383,7 +383,10 @@ export async function refreshWorkbenchMemoryCache(): Promise<number> {
   })
   const next = new Map<string, AfterSalesWorkbenchRefund>()
   for (const row of rows) {
-    next.set(liveAccountOrderKey(row.liveAccountId, row.orderNo), rowToRefund(row))
+    const refund = rowToRefund(row)
+    // 内存缓存仅用于退款聚合字段，不保留 rawDetail，避免全量加载时 OOM
+    refund.rawDetail = undefined
+    next.set(liveAccountOrderKey(row.liveAccountId, row.orderNo), refund)
   }
   memoryCache = next
   memoryCacheAt = Date.now()

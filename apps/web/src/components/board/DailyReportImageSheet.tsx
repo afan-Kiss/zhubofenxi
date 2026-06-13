@@ -12,6 +12,7 @@ import {
 export interface DailyReportAnchorRow {
   anchorName: string
   sessionLabel: string
+  shopName: string
   livePeriodText: string
   liveDurationText: string
   liveDurationMinutes: number

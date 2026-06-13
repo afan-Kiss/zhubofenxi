@@ -10,10 +10,14 @@ set "ROOT=%ROOT:~0,-1%"
 set "PORT=3001"
 set "LOCAL_URL=http://127.0.0.1:%PORT%"
 set "HEALTH_URL=%LOCAL_URL%/api/health"
+set "WEB_DIST=%ROOT%\apps\web\dist\index.html"
+set "SRV_DIST=%ROOT%\apps\server\dist\index.js"
+set "BAT_VER=2026-06-13"
 
 echo.
 echo ==================================================
 echo   主播分析软件 - 一键启动
+echo   脚本版本：%BAT_VER%
 echo ==================================================
 echo  项目目录：%ROOT%
 echo  本机访问：%LOCAL_URL%
@@ -32,7 +36,7 @@ if not exist "%ROOT%\package.json" (
   exit /b 1
 )
 
-rem 常见 Node 安装路径兜底
+rem 常见 Node 安装路径兜底（本窗口 + 后续新开的服务窗口均会继承）
 where node >nul 2>nul
 if errorlevel 1 (
   if exist "E:\node.js\node.exe" (
@@ -140,37 +144,52 @@ popd
 echo  数据库已就绪。
 echo.
 
-echo [5/8] 正在编译项目 npm run build ...
-echo.
-call npm run build
-if errorlevel 1 (
+if exist "%WEB_DIST%" if exist "%SRV_DIST%" (
+  echo [5/8] 已检测到编译产物，跳过 npm run build。
+  echo        若刚改过代码，请先在本目录执行：npm run build
   echo.
-  echo [错误] 编译失败，请查看上方报错。
-  pause
-  exit /b 1
+) else (
+  echo [5/8] 正在编译项目 npm run build ...
+  echo.
+  call npm run build
+  if errorlevel 1 (
+    echo.
+    echo [错误] 编译失败，请查看上方报错。
+    pause
+    exit /b 1
+  )
+  echo.
 )
-echo.
 
 echo [6/8] 正在启动服务（新窗口）...
 echo.
-start "主播分析软件 - 请勿关闭" cmd /k "cd /d ""%ROOT%"" && npm run start:server"
-
-echo  正在等待服务就绪...
+echo  重要：将单独打开标题为「主播分析软件 - 请勿关闭」的窗口。
+echo        服务在该窗口中运行，关闭该窗口即停止服务。
+echo        本窗口（一键启动）可以按任意键关闭，不影响服务。
 echo.
 
+rem 将当前 PATH 传入服务窗口，避免子窗口找不到 node
+start "主播分析软件 - 请勿关闭" cmd /k "cd /d ""%ROOT%"" && set "PATH=%PATH%" && npm run start:server"
+
+echo  正在等待服务就绪（冷启动约需 3～5 秒）...
+echo.
+
+rem 首轮稍等，避免服务尚未监听时连续空轮询
+timeout /t 2 /nobreak >nul
+
 set "OK=0"
-for /l %%i in (1,1,60) do (
-  curl.exe -s "%HEALTH_URL%" 2>nul | findstr /i "live-business-api" >nul 2>nul
+for /l %%i in (1,1,90) do (
+  curl.exe -s -m 3 "%HEALTH_URL%" 2>nul | findstr /i "live-business-api" >nul 2>nul
   if not errorlevel 1 (
     set "OK=1"
     goto HEALTH_OK
   )
-  powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 '%HEALTH_URL%'; if ($r.Content -match 'live-business-api') { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>nul
+  powershell -NoProfile -Command "try { $r=Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 '%HEALTH_URL%'; if ($r.Content -match 'live-business-api') { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>nul
   if not errorlevel 1 (
     set "OK=1"
     goto HEALTH_OK
   )
-  echo  等待中... %%i/60
+  echo  等待中... %%i/90
   timeout /t 1 /nobreak >nul
 )
 
@@ -178,8 +197,9 @@ for /l %%i in (1,1,60) do (
 echo.
 
 if not "!OK!"=="1" (
-  echo [警告] 60 秒内未检测到服务启动成功。
+  echo [警告] 90 秒内未检测到服务启动成功。
   echo         请查看「主播分析软件 - 请勿关闭」窗口里的报错。
+  echo         常见原因：网络授权二次校验失败、.env 配置缺失、端口被占用。
   echo.
   pause
   exit /b 1
@@ -194,8 +214,13 @@ echo   启动完成
 echo.
 echo   本机访问：%LOCAL_URL%
 echo.
-echo   请勿关闭标题为「主播分析软件 - 请勿关闭」的窗口，
-echo   关闭该窗口即停止服务。
+echo   【务必保留】标题为「主播分析软件 - 请勿关闭」的窗口
+echo   关闭该窗口 = 停止服务，网页将无法访问。
+echo.
+echo   本窗口（一键启动）可按任意键关闭，不影响服务运行。
+echo.
+echo   仅重启服务、不重新编译：在本目录执行 npm run start:server
+echo   改了代码需先编译：npm run build
 echo.
 echo   需要 FRP 外网隧道时，请自行配置 frpc 映射 3001 端口。
 echo ==================================================

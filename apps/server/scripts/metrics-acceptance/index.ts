@@ -259,6 +259,7 @@ async function checkAnchorDrillConsistency(monthData: LocalDataResponse): Promis
       anchorId,
       page: 1,
       pageSize: 20,
+      statusType: 'all',
     })
 
     const drawerTotal = num(data.pagination?.total)
@@ -318,6 +319,7 @@ async function checkAnchorDrillConsistency(monthData: LocalDataResponse): Promis
       anchorName: '飞云',
       page: 1,
       pageSize: 20,
+      statusType: 'all',
     })
     const wrongRows = (data.rows ?? []).filter(
       (r) => String(r.anchorName ?? '').trim() === '子杰',

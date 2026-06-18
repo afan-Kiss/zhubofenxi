@@ -29,6 +29,8 @@ export interface BoardDrillOrderRow {
   refundAmount: number
   productRefundAmount?: number
   refundAmountSource?: string
+  /** 买家 Drawer：后端已翻译的退款来源文案，优先展示 */
+  refundSourceText?: string
   refundAmountPending?: boolean
   refundAmountDisplay?: string
   orderStatus: string
@@ -141,6 +143,8 @@ export function normalizeBoardOrderRow(raw: Record<string, unknown>): BoardDrill
     refundAmount: refund,
     productRefundAmount: Number(raw.productRefundAmount ?? refund),
     refundAmountSource: raw.refundAmountSource != null ? String(raw.refundAmountSource) : undefined,
+    refundSourceText:
+      raw.refundSourceText != null ? String(raw.refundSourceText).trim() : undefined,
     refundAmountPending: Boolean(raw.refundAmountPending),
     refundAmountDisplay:
       raw.refundAmountDisplay != null ? String(raw.refundAmountDisplay) : undefined,

@@ -20,6 +20,8 @@ import { getMetricExplain } from '../../lib/metricExplain'
 import { BuyerDisplay } from './BuyerDisplay'
 import { MobileBuyerOrderCards } from './MobileBuyerOrderCards'
 import { MobileBoardOrderCards } from './MobileBoardOrderCards'
+import { normalizeBuyerDrawerOrderRow } from '../../lib/buyer-drawer-order-row'
+import { formatRefundSourceLabel } from '../../lib/refund-source-label'
 import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
 
 export type { BoardDrillOrderRow }
@@ -41,13 +43,9 @@ interface Props {
 function refundSourceLabel(
   source: string | undefined,
   pending: boolean,
+  sourceText?: string | null,
 ): string {
-  if (pending) return '待同步'
-  if (source === 'after_sales_workbench') return '售后工作台'
-  if (source === 'after_sales_workbench_no_record') return '售后工作台(无记录)'
-  if (source === 'after_sales_workbench_zero_refund') return '售后工作台(零退款)'
-  if (source === 'no_after_sale') return '无售后'
-  return displayCell(source)
+  return formatRefundSourceLabel(source, pending, sourceText)
 }
 
 function QualityReturnBadge({ isQuality }: { isQuality: boolean }) {
@@ -78,17 +76,19 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
 
   const showCardsOnDesktop = viewMode === 'cards'
-  const cardClass = showCardsOnDesktop ? 'block' : 'block md:hidden'
-  const tableWrapClass = showCardsOnDesktop ? 'hidden' : 'hidden md:block'
+  const cardClass = showCardsOnDesktop ? 'block' : 'hidden'
+  const tableWrapClass = showCardsOnDesktop ? 'hidden' : 'block'
 
   const rows = useMemo(
     () =>
       rawRows.map((r) =>
-        'orderNo' in r && typeof (r as BoardDrillOrderRow).orderTime === 'string'
-          ? (r as BoardDrillOrderRow)
-          : normalizeBoardOrderRow(r as Record<string, unknown>),
+        isBuyer
+          ? normalizeBuyerDrawerOrderRow(r as Record<string, unknown>)
+          : 'orderNo' in r && typeof (r as BoardDrillOrderRow).orderTime === 'string'
+            ? (r as BoardDrillOrderRow)
+            : normalizeBoardOrderRow(r as Record<string, unknown>),
       ),
-    [rawRows],
+    [rawRows, isBuyer],
   )
 
   const tableKey =
@@ -145,9 +145,9 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
 
   function renderBuyerTable() {
     return (
-      <div className="overflow-x-auto rounded-2xl border border-rose-100/60 bg-white">
+      <div className="max-h-[min(70dvh,680px)] overflow-auto rounded-2xl border border-rose-100/60 bg-white">
         <table className="w-full min-w-[720px] text-left text-[11px]">
-          <thead className="bg-rose-50/50 text-slate-500">
+          <thead className="sticky top-0 z-10 bg-rose-50/95 text-slate-500 shadow-[0_1px_0_rgba(244,63,94,0.08)]">
             <tr>
               <th className="sticky left-0 z-10 min-w-[180px] whitespace-nowrap bg-rose-50/95 px-2 py-2">
                 订单号
@@ -173,9 +173,9 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
 
   function renderBoardTable() {
     return (
-      <div className="overflow-x-auto rounded-2xl border border-rose-100/60 bg-white">
+      <div className="max-h-[min(70dvh,680px)] overflow-auto rounded-2xl border border-rose-100/60 bg-white">
         <table className="w-full min-w-[1280px] text-left text-[11px]">
-          <thead className="bg-rose-50/50 text-slate-500">
+          <thead className="sticky top-0 z-10 bg-rose-50/95 text-slate-500 shadow-[0_1px_0_rgba(244,63,94,0.08)]">
             <tr>
               <th className="whitespace-nowrap px-2 py-2">订单号</th>
               <th className="whitespace-nowrap px-2 py-2">下单时间</th>
@@ -280,7 +280,11 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
     return rows.map((rawRow, idx) => {
       const r = rawRow as BuyerOrderRowExt
       const refundPending = Boolean(r.refundAmountPending)
-      const refundSource = refundSourceLabel(r.refundAmountSource, refundPending)
+      const refundSource = refundSourceLabel(
+        r.refundAmountSource,
+        refundPending,
+        r.refundSourceText,
+      )
       const reason = displayAfterSaleReason(r)
       const afterSale = deriveAfterSaleDisplay(r)
       const orderStatus = orderStatusLabelForRow(r)

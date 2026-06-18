@@ -12,7 +12,7 @@ interface Props {
 export const ListViewToggle: React.FC<Props> = ({ mode, onChange, className = '' }) => {
   return (
     <div
-      className={`hidden items-center gap-1 rounded-full border border-rose-100 bg-white p-0.5 md:inline-flex ${className}`}
+      className={`inline-flex items-center gap-1 rounded-full border border-rose-100 bg-white p-0.5 ${className}`}
       role="group"
       aria-label="列表展示方式"
     >

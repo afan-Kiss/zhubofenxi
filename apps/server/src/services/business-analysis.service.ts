@@ -172,6 +172,8 @@ function buildViews(
       afterSaleRecords,
       isFreightRefundOnly: classification.isFreightRefundOnly,
       freightRefundAmountCent: classification.freightRefundAmountCent,
+      afterSaleClosedNoRefund: classification.afterSaleClosedNoRefund,
+      resolvedRefundSource: boardRefundResolved.refundAmountSource,
     })
     const statRangeRefundAmountCent =
       statRange != null

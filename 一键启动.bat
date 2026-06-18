@@ -7,12 +7,13 @@ title 主播分析软件 - 一键启动
 set "ROOT=%~dp0"
 set "ROOT=%ROOT:~0,-1%"
 
-set "PORT=3001"
+set "PORT=4723"
 set "LOCAL_URL=http://127.0.0.1:%PORT%"
 set "HEALTH_URL=%LOCAL_URL%/api/health"
 set "WEB_DIST=%ROOT%\apps\web\dist\index.html"
 set "SRV_DIST=%ROOT%\apps\server\dist\index.js"
-set "BAT_VER=2026-06-13"
+set "BAT_VER=2026-06-18"
+set "NODE_HEAP=8192"
 
 echo.
 echo ==================================================
@@ -147,6 +148,7 @@ echo.
 if exist "%WEB_DIST%" if exist "%SRV_DIST%" (
   echo [5/8] 已检测到编译产物，跳过 npm run build。
   echo        若刚改过代码，请先在本目录执行：npm run build
+  echo        或双击运行：一键启动-含编译.bat
   echo.
 ) else (
   echo [5/8] 正在编译项目 npm run build ...
@@ -168,8 +170,8 @@ echo        服务在该窗口中运行，关闭该窗口即停止服务。
 echo        本窗口（一键启动）可以按任意键关闭，不影响服务。
 echo.
 
-rem 将当前 PATH 传入服务窗口，避免子窗口找不到 node
-start "主播分析软件 - 请勿关闭" cmd /k "cd /d ""%ROOT%"" && set "PATH=%PATH%" && npm run start:server"
+rem 将当前 PATH 与 Node 堆内存传入服务窗口，避免子窗口找不到 node / OOM
+start "主播分析软件 - 请勿关闭" cmd /k "cd /d ""%ROOT%"" && set "PATH=%PATH%" && set "NODE_OPTIONS=--max-old-space-size=%NODE_HEAP%" && npm run start:server"
 
 echo  正在等待服务就绪（冷启动约需 3～5 秒）...
 echo.
@@ -219,10 +221,11 @@ echo   关闭该窗口 = 停止服务，网页将无法访问。
 echo.
 echo   本窗口（一键启动）可按任意键关闭，不影响服务运行。
 echo.
-echo   仅重启服务、不重新编译：在本目录执行 npm run start:server
-echo   改了代码需先编译：npm run build
+echo   仅重启服务、不重新编译：双击 一键启动.bat（会自动关旧进程）
+echo   改了代码需先编译：双击 一键启动-含编译.bat 或 npm run build
+echo   Node 堆内存：%NODE_HEAP% MB（可在本 BAT 顶部 NODE_HEAP 调整）
 echo.
-echo   需要 FRP 外网隧道时，请自行配置 frpc 映射 3001 端口。
+echo   需要 FRP 外网隧道时，请自行配置 frpc 映射 %PORT% 端口。
 echo ==================================================
 echo.
 

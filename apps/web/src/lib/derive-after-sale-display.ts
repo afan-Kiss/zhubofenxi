@@ -19,6 +19,7 @@ export type BuyerOrderRowExt = BoardDrillOrderRow & {
   afterSaleCompleteTime?: string | null
   netDealAmount?: number
   afterSaleNo?: string | null
+  refundSourceText?: string | null
 }
 
 function isEmpty(v: unknown): boolean {

@@ -396,9 +396,11 @@ export function normalizeXhsOrderPackage(
 
   const orderStatusText =
     pickString(pkg, ['statusDesc', 'status_desc']) || pickString(pkg, ['status'])
-  const afterSaleStatusText =
+  const afterSaleStatusTextRaw =
     pickString(pkg, ['afterSaleStatusDesc', 'after_sale_status_desc']) ||
     pickString(pkg, ['afterSaleStatus', 'after_sale_status'])
+  const afterSaleStatusText =
+    afterSaleStatusTextRaw === '3' ? '售后完成' : afterSaleStatusTextRaw
 
   const combined = [orderStatusText, afterSaleStatusText].filter(Boolean).join(' ')
   const isSigned = containsAny(orderStatusText, SIGNED_KEYWORDS) || containsAny(combined, SIGNED_KEYWORDS)
@@ -542,6 +544,8 @@ export interface NormalizedLiveSession {
   id: string
   liveId: string
   liveName: string
+  /** 同步时写入的直播号名称（祥钰珠宝 / 和田雅玉 / 拾玉居等） */
+  liveAccountName: string
   anchorName: string
   startTime: Date | null
   endTime: Date | null
@@ -654,6 +658,7 @@ export function normalizeXhsLiveSession(
     id,
     liveId,
     liveName,
+    liveAccountName: '',
     anchorName,
     startTime,
     endTime,
@@ -696,7 +701,12 @@ export async function normalizeLiveSessionsFromRaw(options?: {
       : undefined,
     orderBy: { updatedAt: 'desc' },
   })
-  return rows.map((row) => normalizeXhsLiveSession(asRecord(row.rawJson), row.id))
+  return rows.map((row) => {
+    const session = normalizeXhsLiveSession(asRecord(row.rawJson), row.id)
+    const liveAccountName = row.liveAccountName?.trim()
+    if (!liveAccountName) return session
+    return { ...session, liveAccountName }
+  })
 }
 
 export async function summarizeNormalizedLiveSessions(): Promise<NormalizedLiveSessionsSummary> {

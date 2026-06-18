@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 
+import { formatRefundSourceLabel } from '../../lib/refund-source-label'
 import {
   boardRowDisplayOrderNo,
   displayAfterSaleReason,
@@ -26,13 +27,12 @@ interface Props {
   headerRefundOrderCount?: number
 }
 
-function refundSourceLabel(source: string | undefined, pending: boolean): string {
-  if (pending) return '待同步'
-  if (source === 'after_sales_workbench') return '售后工作台'
-  if (source === 'after_sales_workbench_no_record') return '售后工作台(无记录)'
-  if (source === 'after_sales_workbench_zero_refund') return '售后工作台(零退款)'
-  if (source === 'no_after_sale') return '无售后'
-  return displayCell(source)
+function refundSourceLabel(
+  source: string | undefined,
+  pending: boolean,
+  sourceText?: string | null,
+): string {
+  return formatRefundSourceLabel(source, pending, sourceText)
 }
 
 function ExpandableReason({ text }: { text: string }) {
@@ -158,7 +158,7 @@ export const MobileBuyerOrderCards: React.FC<Props> = ({
               <div className="flex items-start justify-between gap-3 py-1">
                 <span className="shrink-0 text-slate-500">退款来源</span>
                 <span className="text-slate-800">
-                  {refundSourceLabel(r.refundAmountSource, refundPending)}
+                  {refundSourceLabel(r.refundAmountSource, refundPending, r.refundSourceText)}
                 </span>
               </div>
             </div>

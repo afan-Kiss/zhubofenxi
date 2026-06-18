@@ -5,13 +5,17 @@ import {
   shouldFetchAfterSalesWorkbench,
   shouldFetchInputFromNormalizedOrder,
 } from './after-sales-fetch-decision.service'
-import type { AfterSalesWorkbenchRefund } from './xhs-after-sales-workbench.service'
 import { pickPaymentBaseCent } from './order-amount-metrics.service'
 import {
   FREIGHT_REFUND_CENT,
   isFreightOnlyRefund,
 } from './business-refund-caliber.service'
 import { parseMoneyToCent } from '../utils/money'
+import {
+  isCompletedAfterSaleStatusText,
+  isStaleEmptyWorkbenchForOrder,
+} from './completed-after-sale-status.service'
+import type { AfterSalesWorkbenchRefund } from './xhs-after-sales-workbench.service'
 
 export type OrderRefundAmountSource =
   | 'none'
@@ -111,7 +115,11 @@ function capProductRefundToPayment(
 
 function pickFromWorkbench(
   workbench: AfterSalesWorkbenchRefund,
+  order?: Pick<NormalizedOrder, 'afterSaleStatusText' | 'isReturned' | 'orderStatusText'>,
 ): { cent: number; source: OrderRefundAmountSource } | null {
+  if (order && isStaleEmptyWorkbenchForOrder(order, workbench)) {
+    return null
+  }
   if (workbench.fetchStatus === 'success' && workbench.officialRefundAmountCent > 0) {
     return { cent: workbench.officialRefundAmountCent, source: 'after_sales_workbench' }
   }
@@ -130,14 +138,45 @@ function pickFromWorkbench(
   return null
 }
 
-/** 平台订单主表：已取消/已关闭 + 售后完成（全额退款常见形态） */
 export function isClosedOrderWithCompletedAfterSale(order: NormalizedOrder): boolean {
   const orderText = (order.orderStatusText ?? '').trim()
   const afterText = (order.afterSaleStatusText ?? '').trim()
   if (!orderText || !afterText) return false
   if (!/已取消|已关闭|交易关闭/.test(orderText)) return false
-  return /售后完成|退款成功|退货退款成功|已退款|退款完成|平台已退款/.test(afterText)
+  return isCompletedAfterSaleStatusText(afterText)
 }
+
+/** 主表显示售后完成，但尚无 API 已核实的退款结果 */
+export function isUnverifiedCompletedAfterSaleOrder(
+  order: Pick<NormalizedOrder, 'afterSaleStatusText'> & { isReturned?: boolean },
+  resolvedRefundSource?: string | null,
+): boolean {
+  if (!isCompletedAfterSaleStatusText(order.afterSaleStatusText)) {
+    if (!order.isReturned) return false
+  }
+  const src = (resolvedRefundSource ?? '').trim()
+  if (
+    src === 'after_sales_workbench' ||
+    src === 'after_sales_workbench_expected' ||
+    src === 'after_sales_workbench_applied' ||
+    src === 'after_sales_workbench_zero_refund' ||
+    src === 'order_closed_after_sale_complete' ||
+    src === 'settlement' ||
+    src === 'raw_product_refund' ||
+    src === 'raw_refund_amount' ||
+    src === 'raw_after_sale_refund' ||
+    src === 'capped_to_payment'
+  ) {
+    return false
+  }
+  return true
+}
+
+export {
+  isCompletedAfterSaleStatusText,
+  isStaleEmptyWorkbenchForOrder,
+  orderSignalsCompletedAfterSale,
+} from './completed-after-sale-status.service'
 
 function hasAfterSaleRefundSignal(
   order: NormalizedOrder,
@@ -217,27 +256,41 @@ export function resolveOrderProductRefund(
   let source: OrderRefundAmountSource = 'none'
   let workbenchCent = 0
 
+  const mustFetchWorkbench = shouldFetchAfterSalesWorkbench(fetchInput)
+  const completedAfterSaleUnverified = isUnverifiedCompletedAfterSaleOrder(
+    order,
+    undefined,
+  )
+  const staleEmptyWorkbench = workbench ? isStaleEmptyWorkbenchForOrder(order, workbench) : false
+
   if (workbench) {
-    const wbPick = pickFromWorkbench(workbench)
+    const wbPick = pickFromWorkbench(workbench, order)
     if (wbPick) {
       productCent = wbPick.cent
       source = wbPick.source
       workbenchCent = wbPick.cent
       refundIncludesFreight = workbench.refundIncludesFreight
-    } else if (workbench.fetchStatus === 'pending' || workbench.fetchStatus === 'failed') {
+    } else if (
+      workbench.fetchStatus === 'pending' ||
+      workbench.fetchStatus === 'failed' ||
+      staleEmptyWorkbench
+    ) {
       warning = '售后金额待同步'
       source = 'after_sales_workbench_pending'
     }
   } else if (
-    opts?.buyerStrict &&
-    !canSkipAfterSalesWorkbenchFetch(fetchInput) &&
-    hasAfterSaleRefundSignal(order, classification)
+    mustFetchWorkbench &&
+    (hasAfterSaleRefundSignal(order, classification) || completedAfterSaleUnverified)
   ) {
     warning = '售后金额待同步'
     source = 'after_sales_workbench_pending'
   }
 
-  if (productCent <= 0 && !opts?.buyerStrict) {
+  const allowRawFallback =
+    !opts?.buyerStrict &&
+    !mustFetchWorkbench &&
+    !completedAfterSaleUnverified
+  if (productCent <= 0 && allowRawFallback) {
     const rawPick = pickRawOrderProductRefundCent(order)
     if (rawPick) {
       productCent = rawPick.cent
@@ -249,13 +302,15 @@ export function resolveOrderProductRefund(
   }
 
   if (
-    opts?.buyerStrict &&
     productCent <= 0 &&
     source !== 'after_sales_workbench_no_record' &&
     source !== 'after_sales_workbench_zero_refund' &&
     source !== 'no_after_sale' &&
-    hasAfterSaleRefundSignal(order, classification) &&
-    (!workbench || workbench.fetchStatus === 'failed' || workbench.fetchStatus === 'pending')
+    (hasAfterSaleRefundSignal(order, classification) || completedAfterSaleUnverified) &&
+    (!workbench ||
+      workbench.fetchStatus === 'failed' ||
+      workbench.fetchStatus === 'pending' ||
+      staleEmptyWorkbench)
   ) {
     warning = warning ?? '售后金额待同步'
     source = 'after_sales_workbench_pending'

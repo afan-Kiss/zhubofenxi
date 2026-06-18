@@ -17,6 +17,7 @@ interface AnchorDrillData {
   anchorId: string
   anchorName: string
   stats: Record<string, unknown> | null
+  tabs?: Array<{ key: string; label: string; count: number }>
   liveSessions?: Array<{
     liveId: string
     liveName: string
@@ -64,6 +65,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
   const [reloadNonce, setReloadNonce] = useState(0)
   const [copyDone, setCopyDone] = useState(false)
   const [liveSessionsOpen, setLiveSessionsOpen] = useState(false)
+  const [orderTab, setOrderTab] = useState<'signed' | 'all'>('signed')
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pageSize = 20
 
@@ -79,6 +81,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
     setError(null)
     setCopyDone(false)
     setLiveSessionsOpen(false)
+    setOrderTab('signed')
   }, [open, anchorName, anchorId, startDate, endDate, preset])
 
   useEffect(() => {
@@ -101,6 +104,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
           endDate,
           page: String(page),
           pageSize: String(pageSize),
+          statusType: orderTab,
         })
         if (preset) qs.set('preset', preset)
         const name = anchorName?.trim()
@@ -136,7 +140,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
     })()
 
     return () => controller.abort()
-  }, [open, anchorId, anchorName, preset, startDate, endDate, page, reloadNonce])
+  }, [open, anchorId, anchorName, preset, startDate, endDate, page, reloadNonce, orderTab])
 
   useEffect(() => {
     if (!import.meta.env.DEV || !data || !rowSnapshot) return
@@ -330,12 +334,34 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
         <div
           className={`transition-opacity duration-300 ${loading && data ? 'opacity-60' : 'opacity-100'}`}
         >
+          <div className="mb-3 flex flex-wrap gap-1 rounded-2xl bg-white/80 p-1">
+            {(data?.tabs ?? [
+              { key: 'signed', label: '实际签收', count: 0 },
+              { key: 'all', label: '全部订单', count: 0 },
+            ]).map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => {
+                  setOrderTab(t.key === 'all' ? 'all' : 'signed')
+                  setPage(1)
+                }}
+                className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
+                  orderTab === t.key ? 'bg-rose-500 text-white' : 'text-slate-600 hover:bg-rose-50'
+                }`}
+              >
+                {t.label} ({t.count})
+              </button>
+            ))}
+          </div>
           <BoardDrillOrderTable
             rows={data?.rows ?? []}
-            listKey={`anchor-${anchorId ?? anchorName}-${page}-${data?.rows.length ?? 0}`}
+            listKey={`anchor-${anchorId ?? anchorName}-${orderTab}-${page}-${data?.rows.length ?? 0}`}
             blacklistedBuyerIds={data?.blacklistedBuyerIds}
             loading={loading && !!data}
-            emptyText="当前范围暂无该主播订单"
+            emptyText={
+              orderTab === 'signed' ? '当前范围暂无实际签收订单' : '当前范围暂无该主播订单'
+            }
           />
           {summaryText ? (
             <div

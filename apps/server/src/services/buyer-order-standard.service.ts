@@ -9,6 +9,8 @@ import { resolveQualityRefundInfo } from './quality-refund-resolution.service'
 import { buyerOrderRowCountsTowardSpend } from './buyer-spend-eligibility.service'
 import { resolveBuyerOrderBusinessMetrics } from './resolve-buyer-order-business-metrics.service'
 import { resolveDisplayEarnedAmountCent } from './buyer-earned-amount.service'
+import { isUnverifiedCompletedAfterSaleOrder } from './order-product-refund.service'
+import { isCompletedAfterSaleStatusText } from './completed-after-sale-status.service'
 
 export type BuyerAfterSaleType =
   | 'none'
@@ -319,6 +321,15 @@ export function deriveAfterSaleDisplay(input: {
   }
 
   if (input.refundAmountPending) {
+    return { hasEffectiveAfterSale: true, label: '售后中', tone: 'pending' }
+  }
+
+  if (
+    isUnverifiedCompletedAfterSaleOrder(
+      { afterSaleStatusText: input.afterSaleStatusText },
+      input.refundSource,
+    )
+  ) {
     return { hasEffectiveAfterSale: true, label: '售后中', tone: 'pending' }
   }
 

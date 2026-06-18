@@ -5,6 +5,7 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { isStatusSignedView } from './order-sign-status.service'
 import { aggregateClassifiedAfterSalesForOrder } from './classify-after-sale-record.service'
 import { resolveOfficialPaidAmountCent } from './resolve-official-paid-amount.service'
+import { isUnverifiedCompletedAfterSaleOrder } from './order-product-refund.service'
 
 export interface BuyerOrderBusinessMetrics {
   isPaidOrder: boolean
@@ -125,6 +126,13 @@ export function resolveBuyerOrderBusinessMetrics(
     excludeFromRealDealReason = '订单已关闭'
   } else if (hasUnshippedRefundOnly) {
     excludeFromRealDealReason = '未发货仅退款'
+  } else if (hasPendingAfterSale) {
+    excludeFromRealDealReason = '售后金额待同步'
+  } else if (
+    isUnverifiedCompletedAfterSaleOrder(order, order.buyerProductRefundSource) &&
+    productRefundAmountCent <= 0
+  ) {
+    excludeFromRealDealReason = '售后完成待核实'
   } else if (!isRealDealOrderStatus(status, order)) {
     excludeFromRealDealReason = '订单未完成/未签收'
   } else if (hasSuccessfulProductRefund && productRefundAmountCent >= paidAmountCent) {

@@ -16,6 +16,7 @@ import {
 } from './low-price-brush-order.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { prisma } from '../lib/prisma'
+import { getLatestWorkbenchCacheUpdatedAt } from './xhs-after-sales-workbench.service'
 import { logInfo, logWarn, presetLabel } from '../utils/server-log'
 import { printStartupSummary } from './startup-summary.service'
 
@@ -44,6 +45,8 @@ export interface BusinessBoardCacheEntry {
   blacklistedBuyerIds: string[]
   orderCount: number
   lastBuiltAt: string
+  /** 构建时售后工作台 DB 最新 updatedAt，用于检测 resync 后失效 */
+  workbenchCacheMaxUpdatedAt: string | null
   sourceSyncJobId: string | null
   sourceDataMaxTime: string | null
   buildDurationMs: number
@@ -175,6 +178,7 @@ export async function buildAndSetBusinessBoardCache(params: {
   const anchorLeaderboard = aggregateAnchorLeaderboard(performanceViews)
   const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(coreViews)]
   const sourceDataMaxTime = await resolveSourceDataMaxTime()
+  const workbenchCacheMaxUpdatedAt = (await getLatestWorkbenchCacheUpdatedAt())?.toISOString() ?? null
 
   const entry: BusinessBoardCacheEntry = {
     cacheKey: key,
@@ -190,6 +194,7 @@ export async function buildAndSetBusinessBoardCache(params: {
     blacklistedBuyerIds,
     orderCount: views.length,
     lastBuiltAt: new Date().toISOString(),
+    workbenchCacheMaxUpdatedAt,
     sourceSyncJobId: await resolveLatestBusinessSyncJobId(),
     sourceDataMaxTime,
     buildDurationMs: Date.now() - started,
@@ -236,7 +241,21 @@ export async function getOrBuildBusinessBoardCache(params: {
   }
 
   const hit = cache.get(key)
-  if (hit) return hit
+  if (hit && !params.forceRebuild) {
+    const latestWorkbenchAt = await getLatestWorkbenchCacheUpdatedAt()
+    const cachedWorkbenchAt = hit.workbenchCacheMaxUpdatedAt
+      ? Date.parse(hit.workbenchCacheMaxUpdatedAt)
+      : 0
+    const latestMs = latestWorkbenchAt?.getTime() ?? 0
+    if (latestMs <= cachedWorkbenchAt) {
+      return hit
+    }
+    logInfo(
+      '经营缓存',
+      `${presetLabel(params.preset)} 售后工作台已更新，重建经营缓存`,
+    )
+    evictBusinessBoardCacheEntry(key, params.preset, range.startDate, range.endDate)
+  }
   const pending = pendingBuilds.get(key)
   if (pending) return pending
 

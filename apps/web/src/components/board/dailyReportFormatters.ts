@@ -40,6 +40,9 @@ export function formatOrderCount(count: number | null | undefined): string {
 
 export interface DailyReportRawOrderRow {
   orderId: string
+  packageId: string
+  bizOrderId: string
+  matchOrderId: string
   orderTime: string
   payTime: string
   shipTime: string
@@ -52,30 +55,76 @@ export interface DailyReportRawOrderRow {
   payAmount: number | null
   shippedAmount: number | null
   refundAmount: number | null
+  freightRefundAmount: number | null
   shippingFee: number | null
+  platformDiscount: number | null
+  sellerReceiveAmount: number | null
+  signedAmount: number | null
+  actualSignedAmount: number | null
   orderStatus: string
   afterSaleStatus: string
   refundStatus: string
+  afterSaleCategory: string
+  afterSaleReason: string
+  finalAfterSaleReason: string
   anchorName: string
+  anchorId: string
+  attributionType: string
+  matchedRuleName: string
   matchedLiveSession: string
+  matchedLiveStartTime: string
+  matchedLiveEndTime: string
+  liveAccountId: string
   liveAccountName: string
   shopName: string
+  buyerId: string
+  buyerNickname: string
+  buyerDisplayName: string
+  receiverName: string
+  receiverPhone: string
+  receiverAddress: string
   isLowPriceOrder: boolean
   isClosed: boolean
   isAfterSaleCompleted: boolean
   isRefunded: boolean
+  isReturnRefund: boolean
+  isRefundOnly: boolean
   isFreightRefundOnly: boolean
+  isSigned: boolean
+  isActualSigned: boolean
+  isQualityReturn: boolean
+  strictQualityRefund: boolean
+  officialQualityBadCase: boolean
   includedInGmv: boolean
   gmvExcludeReason: string
+  paymentBaseSource: string
   rawSource: string
+  platformRawJson: string
 }
 
 export interface DailyReportRawLiveSessionRow {
   anchorName: string
+  sessionLabel: string
+  shopName: string
+  liveAccountName: string
   startTime: string
   endTime: string
+  startDateTime: string
+  endDateTime: string
   durationMinutes: number
+  durationText: string
   liveName: string
+  liveId: string
+}
+
+export interface DailyReportAnchorLiveBlock {
+  anchorName: string
+  sessionLabel: string
+  shopName: string
+  livePeriodText: string
+  totalDurationMinutes: number
+  totalDurationText: string
+  sessions: DailyReportRawLiveSessionRow[]
 }
 
 export interface DailyReportRawChatGptPayload {
@@ -84,6 +133,7 @@ export interface DailyReportRawChatGptPayload {
     end: string
     label: string
   }
+  anchorLiveBlocks: DailyReportAnchorLiveBlock[]
   rawOrders: DailyReportRawOrderRow[]
   liveSessions: DailyReportRawLiveSessionRow[]
 }
@@ -105,10 +155,42 @@ export function sanitizeRawOrderForChatGpt(order: DailyReportRawOrderRow): Daily
   return { ...order }
 }
 
-function formatRawOrderBlock(order: DailyReportRawOrderRow, index: number): string {
+function formatAnchorLiveBlock(block: DailyReportAnchorLiveBlock): string {
+  const sessionLines =
+    block.sessions.length > 0
+      ? block.sessions
+          .map(
+            (session, idx) =>
+              [
+                `  场次${idx + 1}：${displayRawValue(session.liveName)}`,
+                `  直播号：${displayRawValue(session.liveAccountName)}`,
+                `  开播：${displayRawValue(session.startDateTime)}`,
+                `  下播：${displayRawValue(session.endDateTime)}`,
+                `  时段：${displayRawValue(session.startTime)}~${displayRawValue(session.endTime)}`,
+                `  时长：${displayRawValue(session.durationText)}（${displayRawValue(session.durationMinutes)}分钟）`,
+                `  liveId：${displayRawValue(session.liveId)}`,
+              ].join('\n'),
+          )
+          .join('\n')
+      : '  （本场次暂无直播记录）'
+
   return [
+    `【${displayRawValue(block.anchorName)}｜${displayRawValue(block.sessionLabel)}】`,
+    `- 对应店铺/直播号：${displayRawValue(block.shopName)}`,
+    `- 直播时段：${displayRawValue(block.livePeriodText)}`,
+    `- 直播总时长：${displayRawValue(block.totalDurationText)}（${displayRawValue(block.totalDurationMinutes)}分钟）`,
+    `- 场次明细：`,
+    sessionLines,
+  ].join('\n')
+}
+
+function formatRawOrderBlock(order: DailyReportRawOrderRow, index: number): string {
+  const lines = [
     `【订单 ${index + 1}】`,
     `- 订单号：${displayRawValue(order.orderId)}`,
+    `- 包裹号：${displayRawValue(order.packageId)}`,
+    `- 业务单号：${displayRawValue(order.bizOrderId)}`,
+    `- 匹配键：${displayRawValue(order.matchOrderId)}`,
     `- 下单时间：${displayRawValue(order.orderTime)}`,
     `- 支付时间：${displayRawValue(order.payTime)}`,
     `- 发货时间：${displayRawValue(order.shipTime)}`,
@@ -120,43 +202,77 @@ function formatRawOrderBlock(order: DailyReportRawOrderRow, index: number): stri
     `- 订单金额：${formatRawMoney(order.orderAmount)}`,
     `- 实付金额：${formatRawMoney(order.payAmount)}`,
     `- 发货金额/计入金额：${formatRawMoney(order.shippedAmount)}`,
+    `- 商家实收：${formatRawMoney(order.sellerReceiveAmount)}`,
     `- 退款金额：${formatRawMoney(order.refundAmount)}`,
+    `- 运费退款：${formatRawMoney(order.freightRefundAmount)}`,
     `- 运费：${formatRawMoney(order.shippingFee)}`,
+    `- 平台优惠：${formatRawMoney(order.platformDiscount)}`,
+    `- 签收金额：${formatRawMoney(order.signedAmount)}`,
+    `- 有效签收金额：${formatRawMoney(order.actualSignedAmount)}`,
     `- 订单状态：${displayRawValue(order.orderStatus)}`,
     `- 售后状态：${displayRawValue(order.afterSaleStatus)}`,
     `- 退款状态：${displayRawValue(order.refundStatus)}`,
+    `- 售后类型：${displayRawValue(order.afterSaleCategory)}`,
+    `- 售后原因：${displayRawValue(order.afterSaleReason)}`,
+    `- 最终售后原因：${displayRawValue(order.finalAfterSaleReason)}`,
     `- 是否已关闭：${displayRawValue(order.isClosed)}`,
     `- 是否售后完成：${displayRawValue(order.isAfterSaleCompleted)}`,
+    `- 是否退货退款：${displayRawValue(order.isReturnRefund)}`,
+    `- 是否仅退款：${displayRawValue(order.isRefundOnly)}`,
     `- 是否低价刷单：${displayRawValue(order.isLowPriceOrder)}`,
     `- 是否纯运费退款：${displayRawValue(order.isFreightRefundOnly)}`,
-    `- 匹配主播：${displayRawValue(order.anchorName)}`,
+    `- 是否签收：${displayRawValue(order.isSigned)}`,
+    `- 是否有效签收：${displayRawValue(order.isActualSigned)}`,
+    `- 是否品退：${displayRawValue(order.isQualityReturn)}`,
+    `- 官方品退命中：${displayRawValue(order.officialQualityBadCase)}`,
+    `- 匹配主播：${displayRawValue(order.anchorName)}（${displayRawValue(order.anchorId)}）`,
+    `- 归属方式：${displayRawValue(order.attributionType)}`,
+    `- 命中时间段规则：${displayRawValue(order.matchedRuleName)}`,
     `- 匹配直播时间段：${displayRawValue(order.matchedLiveSession)}`,
+    `- 匹配直播开始：${displayRawValue(order.matchedLiveStartTime)}`,
+    `- 匹配直播结束：${displayRawValue(order.matchedLiveEndTime)}`,
+    `- 来源直播号：${displayRawValue(order.liveAccountName)}（${displayRawValue(order.liveAccountId)}）`,
     `- 店铺名称：${displayRawValue(order.shopName)}`,
+    `- 买家ID：${displayRawValue(order.buyerId)}`,
+    `- 买家昵称：${displayRawValue(order.buyerNickname)}`,
+    `- 买家展示名：${displayRawValue(order.buyerDisplayName)}`,
+    `- 收件人：${displayRawValue(order.receiverName)}`,
+    `- 收件电话：${displayRawValue(order.receiverPhone)}`,
+    `- 收件地址：${displayRawValue(order.receiverAddress)}`,
+    `- 计入GMV：${displayRawValue(order.includedInGmv)}`,
+    `- 不计入原因：${displayRawValue(order.gmvExcludeReason)}`,
+    `- 支付口径来源：${displayRawValue(order.paymentBaseSource)}`,
     `- 原始平台：${displayRawValue(order.rawSource)}`,
-  ].join('\n')
+  ]
+  if (order.platformRawJson) {
+    lines.push(`- 平台原始JSON：${order.platformRawJson}`)
+  }
+  return lines.join('\n')
 }
 
 export function buildChatGptRawOrderPrompt(data: DailyReportRawChatGptPayload): string {
-  const liveSessionLines =
-    data.liveSessions.length > 0
-      ? data.liveSessions
-          .map(
-            (session) =>
-              `- ${session.anchorName}：${session.startTime}~${session.endTime}（${session.durationMinutes}分钟）`,
-          )
-          .join('\n')
-      : '—'
+  const anchorBlocks =
+    (data.anchorLiveBlocks?.length ?? 0) > 0
+      ? data.anchorLiveBlocks.map((block) => formatAnchorLiveBlock(block)).join('\n\n')
+      : data.liveSessions.length > 0
+        ? data.liveSessions
+            .map(
+              (session) =>
+                `- ${session.anchorName}｜${session.sessionLabel || session.anchorName}：${session.startDateTime || session.startTime}~${session.endDateTime || session.endTime}（${session.durationText || `${session.durationMinutes}分钟`}）直播号=${session.liveAccountName || session.shopName}`,
+            )
+            .join('\n')
+        : '—'
 
   const orderBlocks = data.rawOrders.map((order, index) => formatRawOrderBlock(order, index)).join('\n\n')
 
   return [
-    '请根据下面这批“小红书原始订单业务数据”和直播时间段，帮我分析主播昨日/当前时间段业绩，并生成可以放进日报图片里的“AI建议”。',
+    '请根据下面这批“小红书原始订单业务数据”和各主播直播场次，帮我分析主播昨日/当前时间段业绩，并生成可以放进日报图片里的“AI建议”。',
     '',
     '要求：',
     '1. 只输出 2~3 条建议。',
     '2. 每条一句话。',
     '3. 用老板能看懂的大白话。',
-    '4. 可以分析已关闭、售后完成、退款、低价刷单对业绩的影响。',
+    '4. 可以分析已关闭、售后完成、退款、低价刷单、品退对业绩的影响。',
     '5. 不要编造订单。',
     '6. 不要编造主播名字。',
     '7. 不要编造金额。',
@@ -173,17 +289,17 @@ export function buildChatGptRawOrderPrompt(data: DailyReportRawChatGptPayload): 
     `开始：${displayRawValue(data.range.start)}`,
     `结束：${displayRawValue(data.range.end)}`,
     '',
-    '直播时间段：',
-    liveSessionLines,
+    '各主播直播场次（含开播/下播时间与时长）：',
+    anchorBlocks,
     '',
-    '订单原始数据：',
+    '订单原始数据（含买家、收件、售后、平台原始JSON，未脱敏）：',
     orderBlocks || '—',
     '',
     '数据说明：',
-    '1. 下面是当前时间段内的小红书原始订单业务数据。',
-    '2. 数据包含已关闭、售后完成、退款、低价刷单订单。',
-    '3. 请基于订单状态和售后状态分析，不要只看总金额。',
-    '4. 买家隐私字段已剔除。',
+    '1. 下面是当前时间段内的小红书原始订单业务数据，字段尽量完整。',
+    '2. 数据包含已关闭、售后完成、退款、低价刷单、品退订单。',
+    '3. 每条订单末尾附有平台原始 JSON，可用于交叉核对。',
+    '4. 各主播直播场次已按归属列出，时长为各场次直播时长相加。',
   ].join('\n')
 }
 

@@ -2,7 +2,10 @@
  * 售后工作台补查：老板视角任务日志（补什么 / 为什么 / 影响）
  */
 import { prisma } from '../lib/prisma'
-import { syncWorkbenchForOrderNo } from './xhs-after-sales-workbench.service'
+import {
+  pickBuyerUserIdFromRawJson,
+  syncWorkbenchForOrderNo,
+} from './xhs-after-sales-workbench.service'
 import {
   TaskProgressReporter,
   taskFail,
@@ -67,7 +70,20 @@ export async function runAfterSalesBackfillBatch(limit = 60): Promise<{
     }
     stat.processed++
     try {
-      const result = await syncWorkbenchForOrderNo(item.orderNo, item.liveAccountId)
+      const rawOrder = await prisma.xhsRawOrder.findFirst({
+        where: {
+          liveAccountId: item.liveAccountId,
+          OR: [{ packageId: item.orderNo }, { orderId: item.orderNo }],
+        },
+        select: { rawJson: true, buyerId: true },
+      })
+      const fallbackBuyerUserId = pickBuyerUserIdFromRawJson(
+        rawOrder?.rawJson as Record<string, unknown> | undefined,
+        rawOrder?.buyerId,
+      )
+      const result = await syncWorkbenchForOrderNo(item.orderNo, item.liveAccountId, {
+        fallbackBuyerUserId,
+      })
       if (result.fetchStatus === 'failed') {
         failed++
         stat.failed++

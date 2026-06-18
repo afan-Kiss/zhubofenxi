@@ -146,7 +146,7 @@ export const AnchorPerformanceTab: React.FC = () => {
       <div>
         <h2 className="text-xl font-semibold text-slate-900">主播业绩</h2>
         <p className="mt-0.5 text-sm text-slate-500">
-          基于后台自动同步的本地订单 · 主播归属按支付时间命中时间段配置
+          基于后台自动同步的本地订单 · 6.13 起按直播号与早晚场归属主播
         </p>
         <BoardSyncStatusHeader
           syncMeta={syncMeta}

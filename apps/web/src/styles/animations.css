@@ -204,8 +204,8 @@
 }
 
 .board-drawer-panel {
-  width: min(860px, 92vw);
-  max-width: 92vw;
+  width: min(1180px, 96vw);
+  max-width: 96vw;
 }
 
 @media (max-width: 640px) {

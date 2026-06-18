@@ -7,6 +7,7 @@ import {
   attachRawByMatchToViews,
   filterViewsForAnchorPerformance,
 } from './low-price-brush-order.service'
+import { remapViewsForAnchorPerformance } from './anchor-performance-attribution.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { filterViewsForStaffScope } from './staff-anchor-scope.service'
 
@@ -85,10 +86,12 @@ export function getAnchorPerformanceViews(
   anchorName?: string,
 ): AnalyzedOrderView[] {
   const normalized = normalizeAnchorDrillQuery({ anchorId, anchorName })
+  const withRaw = attachRawByMatchToViews(scopedViews, rawByMatch)
+  const remapped = remapViewsForAnchorPerformance(withRaw)
   const base =
     normalized.anchorId || normalized.anchorName
-      ? filterViewsByAnchorSpec(scopedViews, normalized.anchorId, normalized.anchorName)
-      : scopedViews
+      ? filterViewsByAnchorSpec(remapped, normalized.anchorId, normalized.anchorName)
+      : remapped
   const coreBase = filterViewsForCoreMetrics(base)
-  return filterViewsForAnchorPerformance(attachRawByMatchToViews(coreBase, rawByMatch))
+  return filterViewsForAnchorPerformance(coreBase)
 }

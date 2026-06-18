@@ -42,6 +42,15 @@ import {
   isStaffUnbound,
   STAFF_UNBOUND_MESSAGE,
 } from './staff-anchor-scope.service'
+import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
+
+function filterDrillViewsByStatus(
+  views: AnalyzedOrderView[],
+  statusType?: string,
+): AnalyzedOrderView[] {
+  if (statusType === 'all') return views
+  return views.filter((v) => isEffectiveSignedView(v))
+}
 
 function filterBuyerViews(views: AnalyzedOrderView[], buyerId: string): AnalyzedOrderView[] {
   const key = buyerId.trim()
@@ -84,6 +93,7 @@ export async function buildAnchorDrill(params: {
   page?: number
   pageSize?: number
   sort?: string
+  statusType?: string
   role?: UserRole
   username?: string
 }) {
@@ -121,6 +131,8 @@ export async function buildAnchorDrill(params: {
   )
 
   const anchorViews = performanceScoped
+  const drillViews = filterDrillViewsByStatus(anchorViews, params.statusType ?? 'signed')
+  const signedCount = anchorViews.filter((v) => isEffectiveSignedView(v)).length
   const leaderboard = aggregateAnchorLeaderboard(performanceScoped)
   const stats =
     leaderboard.find((a) =>
@@ -133,7 +145,7 @@ export async function buildAnchorDrill(params: {
 
   const blacklist = buildBlacklistedBuyerIds(anchorViews)
   const allRows = sortDrillRows(
-    anchorViews.map((v) => {
+    drillViews.map((v) => {
       const raw = scoped.rawByMatch.get(v.matchOrderId || v.orderId)
       const bid = v.buyerId?.trim() ?? ''
       const row = mapViewToBoardDrillRow(
@@ -168,6 +180,10 @@ export async function buildAnchorDrill(params: {
     liveSessions,
     liveSummaryText: formatAnchorLiveSessionsSummary(liveSessions),
     blacklistedBuyerIds: [...blacklist],
+    tabs: [
+      { key: 'signed', label: '实际签收', count: signedCount },
+      { key: 'all', label: '全部订单', count: anchorViews.length },
+    ],
     pagination: {
       page,
       pageSize,
@@ -311,6 +327,8 @@ export async function buildBuyerProfileDrill(params: {
         refundAmount: std.refundAmountCent / 100,
         productRefundAmount: std.refundAmountCent / 100,
         refundAmountPending: std.refundAmountPending,
+        refundAmountSource: v?.buyerProductRefundSource?.trim() || undefined,
+        refundSourceText: std.refundSourceText,
         cardStatusLabel: std.orderStatusLabel,
         orderStatusLabel: std.orderStatusLabel,
         afterSaleStatusLabel: std.afterSaleStatusLabel,
@@ -323,7 +341,6 @@ export async function buildBuyerProfileDrill(params: {
         netDealAmount: std.netDealAmountCent / 100,
         earnedAmount: std.earnedAmountCent / 100,
         afterSaleNo: std.afterSaleNo,
-        afterSaleType: std.afterSaleType,
         isQualityRefund: std.isQualityRefund,
       }
     }),

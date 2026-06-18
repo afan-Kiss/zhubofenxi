@@ -162,7 +162,64 @@ function run(): void {
   })
 
   checkCase({
-    name: 'shouldFetch=true + cache no_record',
+    name: '已签收 + 售后完成 + no cache',
+    order: mockOrder({
+      displayOrderNo: 'P796633571104420891',
+      orderStatusText: '已签收',
+      afterSaleStatusText: '售后完成',
+      isSigned: true,
+      actualPaidCent: 391800,
+      gmvCent: 391800,
+      productAmountCent: 391800,
+    }),
+    workbench: null,
+    expectShouldFetch: true,
+    expectSource: 'after_sales_workbench_pending',
+    expectPending: true,
+  })
+
+  checkCase({
+    name: '已签收 + 售后完成 + cache success refund',
+    order: mockOrder({
+      displayOrderNo: 'P796633571104420891',
+      orderStatusText: '已签收',
+      afterSaleStatusText: '售后完成',
+      isSigned: true,
+      actualPaidCent: 391800,
+      gmvCent: 391800,
+      productAmountCent: 391800,
+    }),
+    workbench: mockWorkbench({
+      orderNo: 'P796633571104420891',
+      fetchStatus: 'success',
+      officialRefundAmountCent: 391800,
+      successReturnCount: 1,
+    }),
+    expectShouldFetch: true,
+    expectSource: 'after_sales_workbench',
+    expectPending: false,
+  })
+
+  checkCase({
+    name: '已签收 + afterSaleStatus=3 + cache empty',
+    order: mockOrder({
+      displayOrderNo: 'P796633571104420891',
+      orderStatusText: '已签收',
+      afterSaleStatusText: '3',
+      isSigned: true,
+      actualPaidCent: 391800,
+    }),
+    workbench: mockWorkbench({
+      orderNo: 'P796633571104420891',
+      fetchStatus: 'empty',
+    }),
+    expectShouldFetch: true,
+    expectSource: 'after_sales_workbench_pending',
+    expectPending: true,
+  })
+
+  checkCase({
+    name: 'shouldFetch=true + cache empty + 其他售后',
     order: mockOrder({
       displayOrderNo: 'P794000000000000001',
       orderStatusText: '售后关闭',
@@ -174,8 +231,8 @@ function run(): void {
       fetchStatus: 'empty',
     }),
     expectShouldFetch: true,
-    expectSource: 'after_sales_workbench_no_record',
-    expectPending: false,
+    expectSource: 'after_sales_workbench_pending',
+    expectPending: true,
   })
 
   console.log('\n全部 after-sales-pending-state 验收通过')

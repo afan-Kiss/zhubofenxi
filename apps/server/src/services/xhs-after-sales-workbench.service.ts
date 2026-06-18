@@ -420,6 +420,45 @@ export function getWorkbenchRefundMapForOrders(
   return m
 }
 
+/** 合并 DB / 内存售后缓存：success + 有退款优先于 empty / 0 元 */
+export function pickPreferredWorkbenchRefund(
+  a: AfterSalesWorkbenchRefund,
+  b: AfterSalesWorkbenchRefund,
+): AfterSalesWorkbenchRefund {
+  const score = (x: AfterSalesWorkbenchRefund): number => {
+    let s = 0
+    if (x.fetchStatus === 'success') s += 1_000_000
+    else if (x.fetchStatus === 'empty') s += 1_000
+    if (x.successReturnCount > 0) s += 500_000
+    s += x.officialRefundAmountCent
+    s += (x.fetchedAt?.getTime() ?? 0) / 1_000_000
+    return s
+  }
+  return score(a) >= score(b) ? a : b
+}
+
+export function mergeWorkbenchRefundMaps(
+  ...maps: Array<Map<string, AfterSalesWorkbenchRefund>>
+): Map<string, AfterSalesWorkbenchRefund> {
+  const merged = new Map<string, AfterSalesWorkbenchRefund>()
+  for (const map of maps) {
+    for (const [k, v] of map) {
+      const cur = merged.get(k)
+      merged.set(k, cur ? pickPreferredWorkbenchRefund(v, cur) : v)
+    }
+  }
+  return merged
+}
+
+/** 售后工作台缓存是否有晚于某时刻的更新（用于经营看板缓存失效） */
+export async function getLatestWorkbenchCacheUpdatedAt(): Promise<Date | null> {
+  const row = await prisma.xhsAfterSalesWorkbenchCache.findFirst({
+    orderBy: { updatedAt: 'desc' },
+    select: { updatedAt: true },
+  })
+  return row?.updatedAt ?? null
+}
+
 export async function saveWorkbenchCache(
   result: AfterSalesWorkbenchRefund & { rawDetail?: unknown },
   liveAccountId?: string,
@@ -473,10 +512,15 @@ export async function saveWorkbenchCache(
     },
   })
   if (result.fetchStatus === 'success' || result.fetchStatus === 'empty') {
-    memoryCache.set(liveAccountOrderKey(accountId, result.orderNo), {
-      ...result,
-      liveAccountId: accountId,
-    })
+    const key = liveAccountOrderKey(accountId, result.orderNo)
+    const prev = memoryCache.get(key)
+    memoryCache.set(
+      key,
+      prev ? pickPreferredWorkbenchRefund({ ...result, liveAccountId: accountId }, prev) : {
+        ...result,
+        liveAccountId: accountId,
+      },
+    )
   }
 }
 
@@ -513,6 +557,29 @@ export function orderNeedsWorkbenchSync(order: {
   return /退款|退货|售后|已关闭|其他售后/.test(text)
 }
 
+export function pickBuyerUserIdFromRawJson(
+  raw: Record<string, unknown> | undefined,
+  buyerId?: string | null,
+): string | undefined {
+  if (!raw) return buyerId?.trim() || undefined
+  const fromMeta = raw._buyerOfficialId != null ? String(raw._buyerOfficialId).trim() : ''
+  if (fromMeta) return fromMeta
+  for (const k of ['user_id', 'userId', 'buyer_id', 'buyerId']) {
+    const v = raw[k]
+    if (v != null && String(v).trim()) return String(v).trim()
+  }
+  const userInfo = raw.userInfo
+  if (userInfo && typeof userInfo === 'object') {
+    for (const k of ['userId', 'user_id', 'buyerId', 'buyer_id']) {
+      const v = (userInfo as Record<string, unknown>)[k]
+      if (v != null && String(v).trim()) return String(v).trim()
+    }
+  }
+  const id = buyerId?.trim()
+  if (id && !id.startsWith('nick:')) return id
+  return undefined
+}
+
 export async function syncWorkbenchForOrderNo(
   orderNo: string,
   liveAccountId?: string,
@@ -546,7 +613,20 @@ export async function processWorkbenchQueueBatch(limit = 10): Promise<{
   const errors: string[] = []
   for (const item of pending) {
     try {
-      await syncWorkbenchForOrderNo(item.orderNo, item.liveAccountId)
+      const rawOrder = await prisma.xhsRawOrder.findFirst({
+        where: {
+          liveAccountId: item.liveAccountId,
+          OR: [{ packageId: item.orderNo }, { orderId: item.orderNo }],
+        },
+        select: { rawJson: true, buyerId: true },
+      })
+      const fallbackBuyerUserId = pickBuyerUserIdFromRawJson(
+        rawOrder?.rawJson as Record<string, unknown> | undefined,
+        rawOrder?.buyerId,
+      )
+      await syncWorkbenchForOrderNo(item.orderNo, item.liveAccountId, {
+        fallbackBuyerUserId,
+      })
     } catch (e) {
       errors.push(`${item.liveAccountId}:${item.orderNo}: ${e instanceof Error ? e.message : String(e)}`)
     }

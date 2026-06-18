@@ -1,5 +1,10 @@
 import type { AnalyzedOrderView, NormalizedOrder } from '../types/analysis'
 import type { AfterSalesWorkbenchRefund } from './xhs-after-sales-workbench.service'
+import {
+  isCompletedAfterSaleStatusText,
+  isStaleEmptyWorkbenchForOrder,
+  orderSignalsCompletedAfterSale,
+} from './completed-after-sale-status.service'
 
 export interface ShouldFetchWorkbenchInput {
   orderStatusText?: string
@@ -128,6 +133,8 @@ function rawHasAfterSaleField(raw: Record<string, unknown> | undefined): boolean
 
 /** 已签收/已完成且明确无售后、raw 无售后字段 → 可跳过工作台查询 */
 export function canSkipAfterSalesWorkbenchFetch(input: ShouldFetchWorkbenchInput): boolean {
+  if (isCompletedAfterSaleStatusText(input.afterSaleStatusText)) return false
+
   const text = combinedStatusText(input)
   const orderPart = [input.orderStatusText, input.orderStatusLabel].filter(Boolean).join(' ')
   const afterPart = [input.afterSaleStatusText, input.afterSaleStatusLabel].filter(Boolean).join(' ')
@@ -161,6 +168,8 @@ export function canSkipAfterSalesWorkbenchFetch(input: ShouldFetchWorkbenchInput
 export function shouldFetchAfterSalesWorkbench(input: ShouldFetchWorkbenchInput): boolean {
   const orderNo = norm(input.displayOrderNo || input.officialOrderNo)
   if (!orderNo || !/^P/i.test(orderNo)) return false
+
+  if (isCompletedAfterSaleStatusText(input.afterSaleStatusText)) return true
 
   const src = norm(input.buyerProductRefundSource)
   if (src === 'after_sales_workbench_pending' || src === 'pending') {
@@ -274,6 +283,20 @@ export function isResolvedRefundSource(source: string | undefined | null): boole
   return RESOLVED_REFUND_SOURCES.has(s)
 }
 
+/** 主表已有售后完成信号时，empty/no_record 不可当作最终结论 */
+export function isTrustworthyResolvedRefundSource(
+  source: string | undefined | null,
+  afterSaleStatusText?: string | null,
+  isReturned?: boolean,
+): boolean {
+  const s = norm(source)
+  if (!isResolvedRefundSource(s)) return false
+  const completed =
+    isCompletedAfterSaleStatusText(afterSaleStatusText) || isReturned === true
+  if (completed && s === 'after_sales_workbench_no_record') return false
+  return true
+}
+
 /** 工作台缓存查询结果（用于 pending 判定） */
 export function resolveWorkbenchFetchStatus(
   workbench?: AfterSalesWorkbenchRefund | null,
@@ -310,11 +333,41 @@ export function isAfterSalesResultPending(
 ): boolean {
   if (!shouldFetchAfterSalesWorkbench(input)) return false
 
-  if (isResolvedRefundSource(resolvedRefundSource)) return false
+  const afterText = [input.afterSaleStatusText, input.afterSaleStatusLabel].filter(Boolean).join(' ')
+  if (
+    workbench &&
+    isStaleEmptyWorkbenchForOrder(
+      {
+        afterSaleStatusText: afterText,
+        isReturned: input.isReturned === true,
+        orderStatusText: input.orderStatusText ?? '',
+      },
+      workbench,
+    )
+  ) {
+    return true
+  }
+
+  if (
+    isTrustworthyResolvedRefundSource(
+      resolvedRefundSource,
+      afterText,
+      input.isReturned,
+    )
+  ) {
+    return false
+  }
 
   const wbStatus = resolveWorkbenchFetchStatus(workbench)
-  if (wbStatus === 'success' || wbStatus === 'no_record' || wbStatus === 'zero_refund') {
+  if (wbStatus === 'success' || wbStatus === 'zero_refund') {
     return false
+  }
+  if (wbStatus === 'no_record') {
+    return orderSignalsCompletedAfterSale({
+      afterSaleStatusText: afterText,
+      isReturned: input.isReturned === true,
+      orderStatusText: input.orderStatusText ?? '',
+    })
   }
   if (wbStatus === 'failed' || wbStatus === 'auth_failed' || wbStatus === 'pending') {
     return true

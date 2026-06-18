@@ -9,6 +9,16 @@ import {
   matchTimeRule,
 } from '../src/services/anchor-rules.service'
 import {
+  isReportDateOnOrAfterShopSessionCutoff,
+  normalizeShopSessionKey,
+  remapViewsForAnchorPerformance,
+  resolveAnchorForPerformanceAttribution,
+  resolveLiveSessionPeriod,
+  resolveShopSessionAnchorName,
+  ensureAnchorPerformanceLeaderboardSlots,
+  SHOP_SESSION_ANCHOR_CUTOFF_MS,
+} from '../src/services/anchor-performance-attribution.service'
+import {
   filterViewsForCoreMetrics,
   isExcludedFromCoreMetrics,
 } from '../src/services/metrics-exclusion.service'
@@ -20,6 +30,8 @@ import {
 import {
   getActualSignAmountCent,
   isEffectiveSignedOrder,
+  orderQualifiesForActualSignedAfterSale,
+  ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT,
 } from '../src/services/strict-after-sale-metrics.service'
 import {
   isFreightOnlyBoardRefundCent,
@@ -114,6 +126,119 @@ function testAnchorRuleEffectiveFrom(issues: string[]) {
     issues,
   )
   assert(LEGACY_ANCHOR_CUTOFF_MS > 0, 'legacy cutoff 常量应存在', issues)
+}
+
+function testShopSessionAnchorRules(issues: string[]) {
+  const config: AnchorConfig = {
+    anchors: [
+      { id: 'anchor-zijie', name: '子杰', color: '#000', enabled: true },
+      { id: 'anchor-feiyun', name: '飞云', color: '#000', enabled: true },
+      { id: 'anchor-xh', name: '小红', color: '#000', enabled: true },
+      { id: 'anchor-xy', name: '小艺', color: '#000', enabled: true },
+    ],
+    timeRules: [],
+  }
+
+  assert(
+    isReportDateOnOrAfterShopSessionCutoff('2026-06-13'),
+    '6.13 应启用店铺场次规则',
+    issues,
+  )
+  assert(
+    !isReportDateOnOrAfterShopSessionCutoff('2026-06-12'),
+    '6.12 仍走历史时间段规则',
+    issues,
+  )
+  assert(SHOP_SESSION_ANCHOR_CUTOFF_MS > 0, '店铺场次切换日应存在', issues)
+
+  const june13Morning = new Date('2026-06-13T10:00:00+08:00')
+  const june13Evening = new Date('2026-06-13T20:00:00+08:00')
+  assert(normalizeShopSessionKey('xy祥钰珠宝') === 'xiangyu', '祥钰店铺识别', issues)
+  assert(normalizeShopSessionKey('和田雅玉') === 'hetian', '和田雅玉识别', issues)
+  assert(normalizeShopSessionKey('拾玉居') === 'shiyu', '拾玉居识别', issues)
+  assert(resolveLiveSessionPeriod(june13Morning) === 'morning', '10 点属早场', issues)
+  assert(resolveLiveSessionPeriod(june13Evening) === 'evening', '20 点属晚场', issues)
+
+  assert(
+    resolveShopSessionAnchorName('xiangyu', 'morning') === '子杰',
+    '早场祥钰→子杰',
+    issues,
+  )
+  assert(
+    resolveShopSessionAnchorName('hetian', 'morning') === '小红',
+    '早场和田雅玉→小红',
+    issues,
+  )
+  assert(
+    resolveShopSessionAnchorName('shiyu', 'evening') === '飞云',
+    '晚场拾玉居→飞云',
+    issues,
+  )
+  assert(
+    resolveShopSessionAnchorName('hetian', 'evening') === '小艺',
+    '晚场和田雅玉→小艺',
+    issues,
+  )
+
+  const beforeCutoff = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: '和田雅玉',
+      orderTimeText: '2026-06-12 10:00:00',
+    }),
+    config,
+  )
+  assert(beforeCutoff.anchorName === '子杰', '6.12 前保留原归属', issues)
+
+  const afterMorning = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: '和田雅玉',
+      orderTimeText: '2026-06-13 10:00:00',
+    }),
+    config,
+  )
+  assert(afterMorning.anchorName === '小红', '6.13 早场和田雅玉→小红', issues)
+
+  const afterEvening = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '飞云',
+      liveAccountName: '拾玉居',
+      orderTimeText: '2026-06-13 20:00:00',
+    }),
+    config,
+  )
+  assert(afterEvening.anchorName === '飞云', '6.13 晚场拾玉居→飞云', issues)
+
+  const remapped = remapViewsForAnchorPerformance([
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: 'xy祥钰珠宝',
+      orderTimeText: '2026-06-13 09:00:00',
+    }),
+  ])
+  assert(remapped[0]?.anchorName === '子杰', '早场祥钰仍归子杰', issues)
+
+  const emptySlots = ensureAnchorPerformanceLeaderboardSlots([], '2026-06-13')
+  assert(emptySlots.some((r) => r.anchorName === '小红'), '6.13 起应展示小红空行', issues)
+  assert(emptySlots.some((r) => r.anchorName === '小艺'), '6.13 起应展示小艺空行', issues)
+  assert(emptySlots.length === 4, '6.13 起应固定展示四人', issues)
+}
+
+async function testLiveDurationDedup(issues: string[]) {
+  const { sumUniqueLiveDurationMinutesForRange } = await import(
+    '../src/services/anchor-live-sessions.service'
+  )
+  const total = await sumUniqueLiveDurationMinutesForRange({
+    startDate: '2026-06-13',
+    endDate: '2026-06-13',
+  })
+  if (total <= 0) {
+    console.log('[skip] 本地无 6.13 直播场次，跳过时长去重核验')
+    return
+  }
+  assert(total <= 1200, `6.13 直播总时长=${total}min 不应接近 24 小时`, issues)
+  assert(total >= 900, `6.13 直播总时长=${total}min 应约为 4 场之和`, issues)
 }
 
 function testCoreMetricsLowPriceOnly(issues: string[]) {
@@ -272,8 +397,74 @@ function testSignStatusUnchanged(issues: string[]) {
     includedInGmv: true,
     statusSigned: true,
     actualSignAmountCent: 100,
+    qualifiesAfterSale: true,
   })
   assert(signed, '签收净额>0 且已签收应有效', issues)
+}
+
+function testActualSignedAfterSaleQualify(issues: string[]) {
+  assert(
+    orderQualifiesForActualSignedAfterSale({
+      afterSaleRecords: [],
+      successfulProductRefundCent: 0,
+    }),
+    '无售后应计入实际签收',
+    issues,
+  )
+  assert(
+    orderQualifiesForActualSignedAfterSale({
+      afterSaleRecords: [],
+      successfulProductRefundCent: ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT,
+      afterSaleClosedNoRefund: false,
+    }),
+    '商品退款 20 元应计入',
+    issues,
+  )
+  assert(
+    !orderQualifiesForActualSignedAfterSale({
+      afterSaleRecords: [],
+      successfulProductRefundCent: 5000,
+    }),
+    '商品退款 50 元不应计入实际签收',
+    issues,
+  )
+  assert(
+    orderQualifiesForActualSignedAfterSale({
+      afterSaleRecords: [],
+      successfulProductRefundCent: 0,
+      afterSaleClosedNoRefund: true,
+    }),
+    '售后关闭无退款应计入',
+    issues,
+  )
+  assert(
+    !orderQualifiesForActualSignedAfterSale({
+      afterSaleRecords: [],
+      successfulProductRefundCent: 0,
+      afterSaleStatusText: '售后中',
+    }),
+    '售后处理中不应计入',
+    issues,
+  )
+  assert(
+    !orderQualifiesForActualSignedAfterSale({
+      afterSaleRecords: [],
+      successfulProductRefundCent: 0,
+      afterSaleStatusText: '售后完成',
+    }),
+    '售后完成且未核实退款不应计入实际签收',
+    issues,
+  )
+  assert(
+    orderQualifiesForActualSignedAfterSale({
+      afterSaleRecords: [],
+      successfulProductRefundCent: 0,
+      afterSaleStatusText: '售后完成',
+      resolvedRefundSource: 'after_sales_workbench_zero_refund',
+    }),
+    '售后完成且 API 确认零退款可计入',
+    issues,
+  )
 }
 
 async function verifyMayLiveDb(issues: string[]) {
@@ -307,12 +498,12 @@ async function verifyMayLiveDb(issues: string[]) {
     const total = rows.reduce((s, r) => s + (r.actualSignedAmount ?? 0), 0)
 
     const near = (a: number, b: number, tol = 0.05) => Math.abs(a - b) <= tol
-    // 子杰与合计允许 ±93 元容差：本地 3.01 元刷单批次（约 31 单）按 <29 元规则排除，与部分手工表存在差异
-    const nearLive = (a: number, b: number, tol = 93) => Math.abs(a - b) <= tol
+    // 子杰与合计允许 ±120 元容差：低价刷单排除 + 实际签收仅含无售后/取消/退款≤20元订单
+    const nearLive = (a: number, b: number, tol = 120) => Math.abs(a - b) <= tol
     if (!near(xiaohong, 0)) issues.push(`live: 小红签收额=${xiaohong} 期望 0`)
-    if (!nearLive(zijie, 31158.7)) issues.push(`live: 子杰签收额=${zijie} 期望 31158.70`)
+    if (!nearLive(zijie, 30550.9)) issues.push(`live: 子杰签收额=${zijie} 期望 30550.90`)
     if (!near(feiyun, 41782.7)) issues.push(`live: 飞云签收额=${feiyun} 期望 41782.70`)
-    if (!nearLive(total, 72941.4)) issues.push(`live: 主播合计=${total} 期望 72941.40`)
+    if (!nearLive(total, 72333.6)) issues.push(`live: 主播合计=${total} 期望 72333.60`)
 
     console.log('[live-db]', {
       子杰: zijie,
@@ -329,11 +520,14 @@ async function verifyMayLiveDb(issues: string[]) {
 async function main() {
   const issues: string[] = []
   testAnchorRuleEffectiveFrom(issues)
+  testShopSessionAnchorRules(issues)
+  await testLiveDurationDedup(issues)
   testCoreMetricsLowPriceOnly(issues)
   testLowPriceBrush(issues)
   testFreightRefundSignAmount(issues)
   testPaymentTimeExport(issues)
   testSignStatusUnchanged(issues)
+  testActualSignedAfterSaleQualify(issues)
   await verifyMayLiveDb(issues)
 
   if (issues.length > 0) {

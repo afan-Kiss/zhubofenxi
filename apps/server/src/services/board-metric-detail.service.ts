@@ -62,14 +62,17 @@ const METRIC_DEFS: Record<
   },
   actualSignedAmount: {
     title: '实际签收金额',
-    formula: '实际签收金额 = 已签收/已完成订单 max(支付金额−有效成功退款, 0) 合计',
-    description: '仅统计有效签收订单（签收净额>0）。',
+    formula:
+      '实际签收金额 = 已签收/已完成订单中，无售后、售后已取消，或成功商品退款 ≤ ¥20.00 的订单净额合计',
+    description:
+      '仅统计有效实际签收订单：已签收且无售后、售后取消/关闭，或商品退款不超过 ¥20.00（纯运费补偿不计入退款）。',
     valueKey: 'actualSignedAmount',
   },
   signedCount: {
     title: '签收单数',
-    formula: '签收单数 = 有效签收订单数（已签收且签收净额>0）',
-    description: '已签收/已完成且扣除全额退款后仍有净额的订单。',
+    formula: '签收单数 = 有效实际签收订单数（已签收，且无售后/取消/小额退款）',
+    description:
+      '已签收/已完成，且无售后、售后已取消，或商品退款不超过 ¥20.00 的订单，按 P 单号去重。',
     valueKey: 'signedCount',
   },
   signRate: {

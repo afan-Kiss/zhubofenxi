@@ -57,7 +57,7 @@ export function getDataDir(): string {
 }
 
 export function getPort(): number {
-  return Number(process.env.PORT ?? 3001)
+  return Number(process.env.PORT ?? 4723)
 }
 
 const PLACEHOLDER_KEY = '请替换'

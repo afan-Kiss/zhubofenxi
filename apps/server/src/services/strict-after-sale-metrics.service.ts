@@ -14,6 +14,8 @@ import {
 } from './returns-v3-record.service'
 import { isStatusSignedOrder, isStatusSignedView } from './order-sign-status.service'
 import { resolveSuccessfulProductRefundCentForSign } from './sign-amount-refund.service'
+import { isCompletedAfterSaleStatusText } from './completed-after-sale-status.service'
+import { isTrustworthyResolvedRefundSource } from './after-sales-fetch-decision.service'
 
 function yuanApiAmountToCent(value: unknown): number {
   if (value == null || value === '') return 0
@@ -327,20 +329,134 @@ export function getActualSignAmountCent(params: {
   return Math.max(0, params.paymentBaseCent - params.successfulRefundAmountCent)
 }
 
+/** 实际签收允许的最大商品退款（分），超过则不计入实际签收 */
+export const ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT = 2000
+
+const PENDING_AFTER_SALE_STATUS_KEYWORDS = [
+  '售后中',
+  '待审核',
+  '处理中',
+  '待退货',
+  '待退款',
+  '待商家',
+  '待买家',
+  '待平台',
+  '待寄回',
+  '待收货',
+  '待用户',
+] as const
+
+const CANCELLED_AFTER_SALE_STATUS_KEYWORDS = [
+  '已取消',
+  '已关闭',
+  '已撤销',
+  '售后关闭',
+  '取消售后',
+  '售后取消',
+  '关闭售后',
+  '拒绝退款',
+  '审核拒绝',
+] as const
+
+function afterSaleStatusIndicatesPending(text: string): boolean {
+  if (!text || text === '—') return false
+  if (CANCELLED_AFTER_SALE_STATUS_KEYWORDS.some((k) => text.includes(k))) return false
+  return PENDING_AFTER_SALE_STATUS_KEYWORDS.some((k) => text.includes(k))
+}
+
+function afterSaleStatusIndicatesCancelled(text: string): boolean {
+  if (!text || text === '—') return false
+  return CANCELLED_AFTER_SALE_STATUS_KEYWORDS.some((k) => text.includes(k))
+}
+
+/**
+ * 实际签收订单售后准入：无售后 / 售后已取消关闭 / 成功商品退款 ≤ 20 元
+ * 纯运费补偿、售后处理中、商品退款 > 20 元均不计入。
+ */
+export function orderQualifiesForActualSignedAfterSale(params: {
+  afterSaleRecords: Record<string, unknown>[]
+  successfulProductRefundCent: number
+  afterSaleClosedNoRefund?: boolean
+  isFreightRefundOnly?: boolean
+  afterSaleStatusText?: string
+  resolvedRefundSource?: string | null
+}): boolean {
+  const refundCent = Math.max(0, params.successfulProductRefundCent)
+  const statusText = (params.afterSaleStatusText ?? '').trim()
+
+  if (params.isFreightRefundOnly) return true
+
+  if (params.afterSaleClosedNoRefund && refundCent === 0) return true
+
+  const records = normalizeAfterSaleRecords(params.afterSaleRecords)
+
+  for (const rec of records) {
+    if (!isCanceledOrInvalidAfterSale(rec) && !isSuccessfulAfterSale(rec)) {
+      return false
+    }
+  }
+
+  const hasSuccessful = records.some((rec) => isSuccessfulAfterSale(rec))
+
+  if (records.length === 0 && refundCent === 0) {
+    if (afterSaleStatusIndicatesPending(statusText)) return false
+    if (afterSaleStatusIndicatesCancelled(statusText)) return true
+    if (isCompletedAfterSaleStatusText(statusText)) {
+      return isTrustworthyResolvedRefundSource(
+        params.resolvedRefundSource,
+        statusText,
+        undefined,
+      )
+    }
+    return true
+  }
+
+  if (!hasSuccessful && refundCent === 0) {
+    return true
+  }
+
+  if (refundCent > ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT) {
+    return false
+  }
+
+  if (refundCent > 0 && refundCent <= ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT) {
+    return true
+  }
+
+  return false
+}
+
 export function isEffectiveSignedOrder(params: {
   includedInGmv: boolean
   statusSigned: boolean
   actualSignAmountCent: number
+  qualifiesAfterSale?: boolean
 }): boolean {
-  return params.includedInGmv && params.statusSigned && params.actualSignAmountCent > 0
+  const afterSaleOk = params.qualifiesAfterSale !== false
+  return (
+    params.includedInGmv &&
+    params.statusSigned &&
+    params.actualSignAmountCent > 0 &&
+    afterSaleOk
+  )
 }
 
 export function isEffectiveSignedView(v: AnalyzedOrderView): boolean {
   if (v.isEffectiveSigned != null) return v.isEffectiveSigned
+  const refundCent = v.successfulRefundAmountCent ?? v.productRefundAmountCent ?? 0
+  const qualifiesAfterSale = orderQualifiesForActualSignedAfterSale({
+    afterSaleRecords: [],
+    successfulProductRefundCent: refundCent,
+    afterSaleClosedNoRefund: v.afterSaleClosedNoRefund,
+    isFreightRefundOnly: v.isFreightRefundOnly,
+    afterSaleStatusText: v.afterSaleStatusText ?? v.afterSaleStatusLabel,
+    resolvedRefundSource: v.buyerProductRefundSource,
+  })
   return isEffectiveSignedOrder({
     includedInGmv: v.includedInGmv,
     statusSigned: v.statusSigned === true || isStatusSignedView(v),
     actualSignAmountCent: v.actualSignAmountCent ?? v.actualSignedAmountCent ?? 0,
+    qualifiesAfterSale,
   })
 }
 
@@ -366,6 +482,8 @@ export function computeStrictOrderViewFields(params: {
   afterSaleRecords: Record<string, unknown>[]
   isFreightRefundOnly?: boolean
   freightRefundAmountCent?: number
+  afterSaleClosedNoRefund?: boolean
+  resolvedRefundSource?: string | null
 }): StrictOrderViewFields {
   const strictAgg = aggregateStrictAfterSaleForOrder(params.afterSaleRecords)
   const statusSigned = isStatusSignedOrder(params.order)
@@ -384,10 +502,19 @@ export function computeStrictOrderViewFields(params: {
     statusSigned,
     includedInGmv: params.includedInGmv,
   })
+  const qualifiesAfterSale = orderQualifiesForActualSignedAfterSale({
+    afterSaleRecords: params.afterSaleRecords,
+    successfulProductRefundCent: refundCent,
+    afterSaleClosedNoRefund: params.afterSaleClosedNoRefund,
+    isFreightRefundOnly: params.isFreightRefundOnly,
+    afterSaleStatusText: params.order.afterSaleStatusText,
+    resolvedRefundSource: params.resolvedRefundSource,
+  })
   const isEffectiveSigned = isEffectiveSignedOrder({
     includedInGmv: params.includedInGmv,
     statusSigned,
     actualSignAmountCent,
+    qualifiesAfterSale,
   })
 
   return {

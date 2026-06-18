@@ -89,7 +89,7 @@ export function maybeAutoClearConsole(): void {
     /* ignore */
   }
 
-  const port = Number(process.env.PORT ?? 3001)
+  const port = Number(process.env.PORT ?? 4723)
   const banner = [
     '==================================================',
     `${prefix('日志')} CMD 日志已超过 ${getAutoClearLogChars()} 字符，系统已自动清屏，避免窗口卡顿。`,

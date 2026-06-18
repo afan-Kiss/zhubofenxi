@@ -10,8 +10,15 @@ import {
 import {
   formatLiveDurationMinutes,
   resolveAnchorLiveSessionsForRange,
+  sumUniqueLiveDurationMinutesForRange,
   type AnchorLiveSessionBrief,
 } from './anchor-live-sessions.service'
+import {
+  ANCHOR_SESSION_DISPLAY_FROM_0613,
+  isReportDateOnOrAfterShopSessionCutoff,
+  remapViewsForAnchorPerformance,
+  resolveDailyReportAnchors,
+} from './anchor-performance-attribution.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import {
   countDailyReportOrders,
@@ -124,6 +131,7 @@ function buildAnchorRow(params: {
   anchorId: string
   anchorName: string
   shopName: string
+  sessionLabel?: string
   shippedAmountYuan: number
   soldOrderCount: number
   invalidOrderCount: number
@@ -132,12 +140,15 @@ function buildAnchorRow(params: {
 }): DailyReportAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
-  return {
-    anchorName: params.anchorName,
-    sessionLabel: formatSessionLabelWithShop(
+  const sessionLabel =
+    params.sessionLabel ??
+    formatSessionLabelWithShop(
       resolveSessionLabel(params.config, params.anchorId),
       params.shopName,
-    ),
+    )
+  return {
+    anchorName: params.anchorName,
+    sessionLabel,
     shopName: params.shopName,
     livePeriodText: buildLivePeriodText(params.sessions),
     liveDurationText: formatLiveDurationMinutes(liveDurationMinutes),
@@ -168,30 +179,37 @@ export async function buildDailyReport(params: {
   const scoped = await getBoardScopedViewsForRange(params)
   const config = getAnchorConfigSync()
   const anchorRows: DailyReportAnchorRow[] = []
+  const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)
+  const remappedAll = remapViewsForAnchorPerformance(
+    attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
+  )
 
-  for (const anchor of config.anchors.filter((a) => a.enabled)) {
-    const anchorScoped = filterViewsByAnchorSpec(scoped.views, anchor.id, anchor.name)
+  const reportAnchors = resolveDailyReportAnchors(config, useShopSessionRules)
+  for (const anchor of reportAnchors) {
     const performanceViews = getAnchorPerformanceViews(
       scoped.views,
       scoped.rawByMatch,
-      anchor.id,
-      anchor.name,
+      anchor.anchorId,
+      anchor.anchorName,
     )
     const leaderboard = aggregateAnchorLeaderboard(performanceViews)
     const stats = leaderboard.find(
-      (row) => row.anchorId === anchor.id || row.anchorName === anchor.name,
+      (row) => row.anchorId === anchor.anchorId || row.anchorName === anchor.anchorName,
     )
     const shippedAmountYuan = Number(stats?.validSalesAmount ?? 0)
 
-    const anchorWithRaw = attachRawByMatchToViews(anchorScoped, scoped.rawByMatch)
+    const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
     const { soldOrderCount, invalidOrderCount } = countDailyReportOrders(performanceViews)
-    const invalidFromAll = countDailyReportOrders(anchorWithRaw).invalidOrderCount
+    const invalidFromAll = countDailyReportOrders(anchorAllViews).invalidOrderCount
+    const fixedDisplay = useShopSessionRules
+      ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]
+      : undefined
     const sessions = await resolveAnchorLiveSessionsForRange({
       preset: params.preset,
       startDate: params.startDate,
       endDate: params.endDate,
-      anchorId: anchor.id,
-      anchorName: anchor.name,
+      anchorId: anchor.anchorId,
+      anchorName: anchor.anchorName,
       anchorOrders: performanceViews,
     })
 
@@ -207,9 +225,12 @@ export async function buildDailyReport(params: {
     anchorRows.push(
       buildAnchorRow({
         config,
-        anchorId: anchor.id,
-        anchorName: anchor.name,
-        shopName: resolveAnchorShopName(anchorWithRaw, sessions),
+        anchorId: anchor.anchorId,
+        anchorName: anchor.anchorName,
+        shopName:
+          fixedDisplay?.shopName ??
+          resolveAnchorShopName(anchorAllViews, sessions),
+        sessionLabel: fixedDisplay?.sessionLabel,
         shippedAmountYuan,
         soldOrderCount,
         invalidOrderCount: invalidFromAll,
@@ -226,10 +247,11 @@ export async function buildDailyReport(params: {
 
   const totalSoldOrderCount = anchorRows.reduce((sum, row) => sum + row.soldOrderCount, 0)
   const totalInvalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)
-  const totalLiveDurationMinutes = anchorRows.reduce(
-    (sum, row) => sum + row.liveDurationMinutes,
-    0,
-  )
+  const totalLiveDurationMinutes = await sumUniqueLiveDurationMinutesForRange({
+    preset: params.preset,
+    startDate: params.startDate,
+    endDate: params.endDate,
+  })
   const totalLiveHours = safeDivide(totalLiveDurationMinutes, 60)
 
   const dateLabel = formatDailyReportDateLabel(params.startDate)

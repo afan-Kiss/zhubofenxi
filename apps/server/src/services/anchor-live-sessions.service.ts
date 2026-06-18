@@ -3,6 +3,10 @@ import type { NormalizedLiveSession } from './xhs-api-sync/xhs-json-normalizer.s
 import { normalizeLiveSessionsFromRaw } from './xhs-api-sync/xhs-json-normalizer.service'
 import { normalizeAnchorDrillQuery } from './board-scoped-views.service'
 import { viewBelongsToAnchor } from './anchor-attribution.util'
+import {
+  resolveShopSessionAnchorFromLiveAccount,
+  SHOP_SESSION_ANCHOR_CUTOFF_MS,
+} from './anchor-performance-attribution.service'
 import { findAnchorByName, matchTimeRule } from './anchor-rules.service'
 import { getAnchorConfigSync } from './anchor.service'
 import { mapLiveNickToKnownAnchor } from '../utils/anchor-label'
@@ -84,7 +88,11 @@ function orderPayTimeMs(v: AnalyzedOrderView): number | null {
   return Number.isFinite(t) ? t : null
 }
 
-/** 场次开播时刻命中主播时间段规则（与订单 time_rule 归属一致） */
+function pickSessionLiveAccountName(session: NormalizedLiveSession): string {
+  return (session.liveAccountName || session.liveName || session.anchorName || '').trim()
+}
+
+/** 场次开播时刻命中主播时间段规则（6.13 前与订单 time_rule 归属一致） */
 function sessionMatchesTargetTimeRule(
   session: NormalizedLiveSession,
   target: { anchorId: string; anchorName: string },
@@ -96,16 +104,35 @@ function sessionMatchesTargetTimeRule(
   return hit.anchor.name === target.anchorName
 }
 
+/** 6.13 起：按直播号 + 早晚场固定归属 */
+function sessionMatchesShopSessionRule(
+  session: NormalizedLiveSession,
+  target: { anchorId: string; anchorName: string },
+): boolean {
+  if (!session.startTime) return false
+  const resolved = resolveShopSessionAnchorFromLiveAccount(
+    pickSessionLiveAccountName(session),
+    session.startTime,
+  )
+  if (!resolved) return false
+  if (target.anchorName === resolved.anchorName) return true
+  return Boolean(target.anchorId && target.anchorId === resolved.anchorId)
+}
+
 function liveSessionMatchesAnchor(
   session: NormalizedLiveSession,
   target: { anchorId: string; anchorName: string },
   anchorOrders: AnalyzedOrderView[],
 ): boolean {
   if (session.errors.length > 0 || !session.startTime) return false
+  const startMs = session.startTime.getTime()
+  if (startMs >= SHOP_SESSION_ANCHOR_CUTOFF_MS) {
+    return sessionMatchesShopSessionRule(session, target)
+  }
+
   if (liveSessionBelongsToAnchor(session, target)) return true
   if (sessionMatchesTargetTimeRule(session, target)) return true
 
-  const startMs = session.startTime.getTime()
   const endMs = sessionEndTime(session)?.getTime()
   if (endMs != null) {
     for (const v of anchorOrders) {
@@ -204,6 +231,34 @@ export async function resolveAnchorLiveSessionsForRange(params: {
     .sort((a, b) => (a.startTime?.getTime() ?? 0) - (b.startTime?.getTime() ?? 0))
     .map(toBrief)
   return dedupeLiveSessionBriefs(matched)
+}
+
+/** 日期范围内各直播场次时长去重求和（按 liveId，不重复累计） */
+export async function sumUniqueLiveDurationMinutesForRange(params: {
+  preset?: string
+  startDate: string
+  endDate: string
+}): Promise<number> {
+  const range = resolveDateRange(
+    (params.preset ?? 'custom') as DateRangePreset,
+    params.startDate,
+    params.endDate,
+  )
+  const all = dedupeLiveSessions(
+    await normalizeLiveSessionsFromRaw({ range }),
+  )
+  const seen = new Set<string>()
+  let total = 0
+  for (const session of all) {
+    if (session.errors.length > 0 || !session.startTime) continue
+    const ms = session.startTime.getTime()
+    if (ms < range.startTimeMs || ms > range.endTimeMs) continue
+    const key = session.liveId?.trim() || session.id
+    if (seen.has(key)) continue
+    seen.add(key)
+    total += Math.max(0, session.durationMinutes)
+  }
+  return total
 }
 
 function dedupeLiveSessionBriefs(sessions: AnchorLiveSessionBrief[]): AnchorLiveSessionBrief[] {

@@ -6,6 +6,7 @@ import {
   buildLiveAccountOrderQueries,
   getWorkbenchRefundMapForOrders,
   loadWorkbenchRefundMapFromDb,
+  mergeWorkbenchRefundMaps,
 } from './xhs-after-sales-workbench.service'
 import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
 import { anchorGroupKey } from './anchor-attribution.util'
@@ -154,8 +155,7 @@ export async function loadBoardArtifactsForRange(
     await bootstrapWorkbenchCache()
     const fromDb = await loadWorkbenchRefundMapFromDb(orderQueries)
     const fromMem = getWorkbenchRefundMapForOrders(orderQueries)
-    const workbenchByOrderNo = new Map(fromDb)
-    for (const [k, v] of fromMem) workbenchByOrderNo.set(k, v)
+    const workbenchByOrderNo = mergeWorkbenchRefundMaps(fromDb, fromMem)
     artifacts = prepareAnalysisArtifactsFromRaw(bundle, { statRange: range, workbenchByOrderNo })
   }
   const views = artifacts?.views ?? []

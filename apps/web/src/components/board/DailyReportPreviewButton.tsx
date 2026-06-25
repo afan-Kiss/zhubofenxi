@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { toPng } from 'html-to-image'
 import { apiRequest } from '../../lib/api'
 import {
@@ -26,6 +27,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   endDate,
   disabled = false,
 }) => {
+  const navigate = useNavigate()
   const sheetRef = useRef<HTMLDivElement>(null)
   const [loading, setLoading] = useState(false)
   const [capturing, setCapturing] = useState(false)
@@ -89,29 +91,9 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     }
   }, [pendingCapture, report, aiSuggestionLines, captureImage])
 
-  const handleViewReport = async () => {
+  const handleViewReport = () => {
     if (loading || disabled) return
-    setLoading(true)
-    setError(null)
-    setImageDataUrl(null)
-    setAiSuggestionLines([])
-    setAiDraft('')
-    try {
-      const qs = new URLSearchParams({ startDate, endDate })
-      if (preset) qs.set('preset', preset)
-      const payload = await apiRequest<DailyReportPayload>(`/api/board/daily-report?${qs}`)
-      if (payload.anchors.length === 0) {
-        setError('当前时间段暂无主播业绩数据')
-        setReport(null)
-        setLoading(false)
-        return
-      }
-      setReport(payload)
-      setPendingCapture(true)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载日报失败')
-      setLoading(false)
-    }
+    navigate(`/operations-report?tab=daily&date=${encodeURIComponent(startDate)}`)
   }
 
   const openAiInputModal = (prefill = '') => {

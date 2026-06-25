@@ -311,6 +311,7 @@ export async function sumNewFollowersByLiveAccountForRange(params: {
 
     const accountName = pickSessionLiveAccountName(session) || session.liveName?.trim() || '未知直播号'
     const followers = extractLiveSessionTrafficFromSession(session).newFollowerCount
+    if (followers == null) continue
     byAccount.set(accountName, (byAccount.get(accountName) ?? 0) + followers)
   }
 

@@ -222,6 +222,7 @@ boardRouter.get('/daily-report/raw-chatgpt-data', async (req, res) => {
       sendFail(res, '请提供 startDate 与 endDate', 400)
       return
     }
+    const confirmRaw = req.query.confirmRaw === '1' || req.query.confirmRaw === 'true'
     const { buildDailyReportRawChatGptData } = await import(
       '../services/daily-report-raw-chatgpt.service'
     )
@@ -231,10 +232,175 @@ boardRouter.get('/daily-report/raw-chatgpt-data', async (req, res) => {
       endDate,
       role: req.user!.role as import('../types/roles').UserRole,
       username: req.user!.username,
+      confirmRaw,
     })
     sendOk(res, data)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '加载小红书原始订单数据失败', 500)
+  }
+})
+
+boardRouter.get('/operations-report/daily', async (req, res) => {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    if (!startDate || !endDate) {
+      sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    if (startDate !== endDate) {
+      sendFail(res, '运营日报仅支持单日范围', 400)
+      return
+    }
+    const { buildDailyOperationsReport } = await import(
+      '../services/daily-operations-report.service'
+    )
+    const data = await buildDailyOperationsReport({
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      startDate,
+      endDate,
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '加载运营日报失败', 500)
+  }
+})
+
+boardRouter.get('/operations-report/weekly', async (req, res) => {
+  try {
+    const weekStart = req.query.weekStart ? String(req.query.weekStart) : ''
+    const weekEnd = req.query.weekEnd ? String(req.query.weekEnd) : ''
+    if (!weekStart || !weekEnd) {
+      sendFail(res, '请提供 weekStart 与 weekEnd', 400)
+      return
+    }
+    const { buildWeeklyOperationsReport } = await import(
+      '../services/weekly-operations-report.service'
+    )
+    const data = await buildWeeklyOperationsReport({
+      weekStart,
+      weekEnd,
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '加载运营周报失败', 500)
+  }
+})
+
+boardRouter.get('/operations-report/product-detail', async (req, res) => {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    const productKey = req.query.productKey ? String(req.query.productKey) : ''
+    if (!startDate || !endDate || !productKey) {
+      sendFail(res, '请提供 startDate、endDate 与 productKey', 400)
+      return
+    }
+    const { buildOperationsProductDetailReport } = await import(
+      '../services/daily-operations-report.service'
+    )
+    const data = await buildOperationsProductDetailReport({
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      startDate,
+      endDate,
+      productKey,
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '加载商品详情失败', 500)
+  }
+})
+
+boardRouter.get('/operations-report/after-sales-detail', async (req, res) => {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    if (!startDate || !endDate) {
+      sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    const { buildOperationsAfterSalesDetail } = await import(
+      '../services/daily-operations-report.service'
+    )
+    const data = await buildOperationsAfterSalesDetail({
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      startDate,
+      endDate,
+      category: req.query.category ? String(req.query.category) : undefined,
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '加载售后详情失败', 500)
+  }
+})
+
+boardRouter.get('/operations-report/review-note', async (req, res) => {
+  try {
+    const reportDate = req.query.reportDate ? String(req.query.reportDate) : ''
+    const reportType = req.query.reportType ? String(req.query.reportType) : 'daily'
+    if (!reportDate) {
+      sendFail(res, '请提供 reportDate', 400)
+      return
+    }
+    if (reportType !== 'daily' && reportType !== 'weekly') {
+      sendFail(res, 'reportType 须为 daily 或 weekly', 400)
+      return
+    }
+    const { getOpsReviewNote } = await import('../services/ops-review-note.service')
+    const data = await getOpsReviewNote({
+      reportDate,
+      reportType,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '加载复盘笔记失败', 500)
+  }
+})
+
+boardRouter.put('/operations-report/review-note', async (req, res) => {
+  try {
+    const body = req.body as Record<string, unknown> | undefined
+    const reportDate = body?.reportDate ? String(body.reportDate) : ''
+    const reportType = body?.reportType ? String(body.reportType) : 'daily'
+    if (!reportDate) {
+      sendFail(res, '请提供 reportDate', 400)
+      return
+    }
+    if (reportType !== 'daily' && reportType !== 'weekly') {
+      sendFail(res, 'reportType 须为 daily 或 weekly', 400)
+      return
+    }
+    const { upsertOpsReviewNote } = await import('../services/ops-review-note.service')
+    const data = await upsertOpsReviewNote({
+      reportDate,
+      reportType: reportType as 'daily' | 'weekly',
+      problemText: body?.problemText != null ? String(body.problemText) : undefined,
+      reasonText: body?.reasonText != null ? String(body.reasonText) : undefined,
+      trafficProducts: Array.isArray(body?.trafficProducts)
+        ? body!.trafficProducts.map((v) => String(v))
+        : undefined,
+      mainProducts: Array.isArray(body?.mainProducts)
+        ? body!.mainProducts.map((v) => String(v))
+        : undefined,
+      profitProducts: Array.isArray(body?.profitProducts)
+        ? body!.profitProducts.map((v) => String(v))
+        : undefined,
+      scriptText: body?.scriptText != null ? String(body.scriptText) : undefined,
+      ownerName: body?.ownerName != null ? String(body.ownerName) : undefined,
+      createdBy: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '保存复盘笔记失败', 500)
   }
 })
 

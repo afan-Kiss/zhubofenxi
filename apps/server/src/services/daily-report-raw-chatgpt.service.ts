@@ -20,6 +20,10 @@ import {
   type AnchorLiveSessionBrief,
 } from './anchor-live-sessions.service'
 import { isFreightOnlyBoardRefundCent } from './sign-amount-refund.service'
+import {
+  sanitizeDailyReportRawOrderRow,
+  shouldIncludeRawPlatformJson,
+} from './operations-report-privacy.util'
 
 export interface DailyReportRawOrderRow {
   orderId: string
@@ -454,6 +458,7 @@ export async function buildDailyReportRawChatGptData(params: {
   endDate: string
   role?: UserRole
   username?: string
+  confirmRaw?: boolean
 }): Promise<DailyReportRawChatGptPayload> {
   const preset = (params.preset ?? 'custom') as DateRangePreset
   const range = resolveDateRange(preset, params.startDate, params.endDate)
@@ -468,7 +473,14 @@ export async function buildDailyReportRawChatGptData(params: {
   const viewsWithRaw = remapViewsForAnchorPerformance(
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
-  const rawOrders = dedupeViewsByMetricOrderNo(viewsWithRaw).map(mapViewToRawOrder)
+  const rawOrdersBase = dedupeViewsByMetricOrderNo(viewsWithRaw).map(mapViewToRawOrder)
+  const includeRaw = shouldIncludeRawPlatformJson({
+    role: params.role,
+    confirmRaw: params.confirmRaw,
+  })
+  const rawOrders = includeRaw
+    ? rawOrdersBase
+    : rawOrdersBase.map(sanitizeDailyReportRawOrderRow)
 
   const config = getAnchorConfigSync()
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)

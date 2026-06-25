@@ -5,6 +5,7 @@ import { OverviewTab } from './pages/board/OverviewTab'
 import { AnchorPerformanceTab } from './pages/board/AnchorPerformanceTab'
 import { BuyerRankingTab } from './pages/board/BuyerRankingTab'
 import { SettingsTab } from './pages/board/SettingsTab'
+import { OperationsReportPage } from './pages/operations/OperationsReportPage'
 import { AmountDisplayProvider } from './providers/AmountDisplayProvider'
 import { loadAndApplyAppFavicon } from './lib/app-favicon'
 
@@ -23,6 +24,7 @@ const App: React.FC = () => {
             <Route path="anchors" element={<AnchorPerformanceTab />} />
             <Route path="anchors/:anchorId" element={<Navigate to="/anchors" replace />} />
             <Route path="buyers" element={<BuyerRankingTab />} />
+            <Route path="operations-report" element={<OperationsReportPage />} />
             <Route path="orders" element={<Navigate to="/" replace />} />
             <Route path="billing" element={<Navigate to="/" replace />} />
             <Route path="settings" element={<SettingsTab />} />

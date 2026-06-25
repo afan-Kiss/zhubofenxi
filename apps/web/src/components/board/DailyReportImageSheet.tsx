@@ -26,12 +26,12 @@ export interface DailyReportAnchorRow {
   hourlyAmountYuan: number | null
   dealDensityMinutes: number | null
   amountRatio: number | null
-  viewSessionCount: number
-  joinUserCount: number
+  viewSessionCount: number | null
+  joinUserCount: number | null
   avgOnlineUserCount: number | null
   avgViewDurationSeconds: number | null
-  newFollowerCount: number
-  dealUserCount: number
+  newFollowerCount: number | null
+  dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
 }

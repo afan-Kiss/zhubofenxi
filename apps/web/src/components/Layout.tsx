@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Menu, Settings, Users, UserCircle, X } from 'lucide-react'
+import { LayoutDashboard, Menu, Settings, Users, UserCircle, X, FileText } from 'lucide-react'
 import { PageRequestStatusBar } from './board/PageRequestStatusBar'
 import { CookieHealthWatcher } from './board/CookieHealthWatcher'
 import { BoardLiveQueryProvider } from '../providers/BoardLiveQueryProvider'
@@ -13,6 +13,7 @@ const MAIN_NAV = [
   { to: '/', end: true, label: (<><LayoutDashboard size={14} /> 经营总览</>), dataTestId: 'tab-overview' },
   { to: '/anchors', label: (<><UserCircle size={14} /> 主播业绩</>), dataTestId: 'tab-anchors' },
   { to: '/buyers', label: (<><Users size={14} /> 买家排行</>), dataTestId: 'tab-buyers' },
+  { to: '/operations-report', label: (<><FileText size={14} /> 运营报表</>), dataTestId: 'tab-operations-report' },
   { to: '/settings', label: (<><Settings size={14} /> 系统设置</>), dataTestId: 'tab-settings', requiresUnlock: true },
 ]
 

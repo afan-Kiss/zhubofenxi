@@ -574,3 +574,40 @@ model MonthlyDataStatus {
   updatedAt               DateTime  @updatedAt
   createdAt               DateTime  @default(now())
 }
+
+/// 运营报表：商品维度人工补充（不替代官方订单金额）
+model ProductDimension {
+  id          String   @id @default(cuid())
+  productKey  String   @unique
+  productCode String?
+  productName String?
+  skuName     String?
+  ringSize    String?
+  barType     String?
+  productRole String?
+  updatedBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([productCode])
+}
+
+/// 运营报表：每日/每周复盘笔记
+model OpsReviewNote {
+  id                  String   @id @default(cuid())
+  reportDate          String
+  reportType          String
+  problemText         String   @default("")
+  reasonText          String   @default("")
+  trafficProductsJson String   @default("[]")
+  mainProductsJson    String   @default("[]")
+  profitProductsJson  String   @default("[]")
+  scriptText          String   @default("")
+  ownerName           String   @default("")
+  createdBy           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([reportDate, reportType])
+  @@index([reportType])
+}

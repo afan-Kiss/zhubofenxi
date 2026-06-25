@@ -3,7 +3,7 @@
  * 用法: npx tsx apps/server/scripts/operations-report-acceptance.ts
  */
 import type { AnalyzedOrderView } from '../src/types/analysis'
-import { resolvePriceBandLabel } from '../src/config/operations-price-band.config'
+import { resolvePriceBandLabel, resolvePriceBandLabelFromCent } from '../src/config/operations-price-band.config'
 import { resolveProductRole } from '../src/config/operations-product-role.config'
 import {
   normalizeAfterSalesReason,
@@ -31,8 +31,29 @@ function assert(cond: boolean, msg: string, issues: string[]) {
 function testPriceBands(issues: string[]) {
   assert(resolvePriceBandLabel(399) === '≤399', '399 应落在 ≤399', issues)
   assert(resolvePriceBandLabel(400) === '400~599', '400 应落在 400~599', issues)
+  assert(resolvePriceBandLabel(599) === '400~599', '599 应落在 400~599', issues)
+  assert(resolvePriceBandLabel(600) === '600~799', '600 应落在 600~799', issues)
+  assert(resolvePriceBandLabel(799) === '600~799', '799 应落在 600~799', issues)
+  assert(resolvePriceBandLabel(800) === '800~999', '800 应落在 800~999', issues)
+  assert(resolvePriceBandLabel(999) === '800~999', '999 应落在 800~999', issues)
+  assert(resolvePriceBandLabel(1000) === '1000~1299', '1000 应落在 1000~1299', issues)
+  assert(resolvePriceBandLabel(1299) === '1000~1299', '1299 应落在 1000~1299', issues)
+  assert(resolvePriceBandLabel(1300) === '1300~1599', '1300 应落在 1300~1599', issues)
+  assert(resolvePriceBandLabel(1599) === '1300~1599', '1599 应落在 1300~1599', issues)
+  assert(resolvePriceBandLabel(1600) === '1600~1998', '1600 应落在 1600~1998', issues)
   assert(resolvePriceBandLabel(1998) === '1600~1998', '1998 应落在 1600~1998', issues)
+  assert(resolvePriceBandLabel(1998.99) === '1600~1998', '1998.99 应落在 1600~1998', issues)
+  assert(
+    resolvePriceBandLabelFromCent(199899) === '1600~1998',
+    '199899 分应落在 1600~1998',
+    issues,
+  )
   assert(resolvePriceBandLabel(1999) === '1999+', '1999 应落在 1999+', issues)
+  assert(
+    resolvePriceBandLabelFromCent(199900) === '1999+',
+    '199900 分应落在 1999+',
+    issues,
+  )
   assert(resolvePriceBandLabel(2000) === '1999+', '2000 应落在 1999+', issues)
 }
 

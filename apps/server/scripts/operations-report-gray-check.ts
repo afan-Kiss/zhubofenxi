@@ -484,38 +484,39 @@ async function checkPrivacyExport(ctx: CheckContext, targetDate: string) {
 
 function checkPriceBandBoundaries(ctx: CheckContext) {
   const results: string[] = []
-  const intCases: Array<[number, string]> = [
-    [1998, '1600~1998'],
-    [1999, '1999+'],
-    [2000, '1999+'],
+  const cases: Array<[number | string, string, 'yuan' | 'cent']> = [
+    [399, '≤399', 'yuan'],
+    [400, '400~599', 'yuan'],
+    [599, '400~599', 'yuan'],
+    [600, '600~799', 'yuan'],
+    [799, '600~799', 'yuan'],
+    [800, '800~999', 'yuan'],
+    [999, '800~999', 'yuan'],
+    [1000, '1000~1299', 'yuan'],
+    [1299, '1000~1299', 'yuan'],
+    [1300, '1300~1599', 'yuan'],
+    [1599, '1300~1599', 'yuan'],
+    [1600, '1600~1998', 'yuan'],
+    [1998, '1600~1998', 'yuan'],
+    [1998.99, '1600~1998', 'yuan'],
+    [199899, '1600~1998', 'cent'],
+    [1999, '1999+', 'yuan'],
+    [199900, '1999+', 'cent'],
+    [2000, '1999+', 'yuan'],
   ]
-  for (const [yuan, expected] of intCases) {
-    const got = resolvePriceBandLabel(yuan)
+  for (const [value, expected, unit] of cases) {
+    const got =
+      unit === 'cent'
+        ? resolvePriceBandLabelFromCent(Number(value))
+        : resolvePriceBandLabel(Number(value))
+    const label = unit === 'cent' ? `${value} 分` : `${value} 元`
     if (got !== expected) {
-      addFinding(ctx, 'P1', `价格带边界 ${yuan} 元应落在 ${expected}，实际 ${got}`)
-      results.push(`- ${yuan} → **${got}** ❌（期望 ${expected}）`)
+      addFinding(ctx, 'P1', `价格带边界 ${label} 应落在 ${expected}，实际 ${got}`)
+      results.push(`- ${label} → **${got}** ❌（期望 ${expected}）`)
     } else {
-      results.push(`- ${yuan} → ${got} ✅`)
+      results.push(`- ${label} → ${got} ✅`)
     }
   }
-
-  const cent199899 = resolvePriceBandLabelFromCent(199899)
-  if (cent199899 === '1600~1998') {
-    results.push('- 1998.99 元（199899 分）→ 1600~1998 ✅')
-  } else {
-    addFinding(
-      ctx,
-      'P3',
-      `1998.99 元（199899 分）当前归入 ${cent199899}；元级函数对 1998.99 会进 1999+，订单分位边界请人工关注`,
-    )
-    results.push(`- 1998.99 元（199899 分）→ ${cent199899} ⚠️（期望 1600~1998，已知元级边界行为）`)
-  }
-
-  const yuan199899 = resolvePriceBandLabel(1998.99)
-  results.push(
-    `- 1998.99 元（yuan 入参）→ ${yuan199899}${yuan199899 === '1999+' ? '（元级 >1998 归 1999+）' : ' ✅'}`,
-  )
-
   return results
 }
 
@@ -605,7 +606,8 @@ function resolveVerdict(ctx: CheckContext): 'PASS' | 'WARN' | 'FAIL' {
   const hasP1 = ctx.findings.some((f) => f.severity === 'P1')
   if (hasP0 || hasP1) return 'FAIL'
   const hasP2 = ctx.findings.some((f) => f.severity === 'P2')
-  if (hasP2 || ctx.notes.length > 0) return 'WARN'
+  const hasP3 = ctx.findings.some((f) => f.severity === 'P3')
+  if (hasP2 || hasP3) return 'WARN'
   return 'PASS'
 }
 

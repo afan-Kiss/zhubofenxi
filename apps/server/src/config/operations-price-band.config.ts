@@ -12,19 +12,35 @@ export const OPERATIONS_PRICE_BANDS = [
 
 export type OperationsPriceBandLabel = (typeof OPERATIONS_PRICE_BANDS)[number]['label']
 
-/** 按支付金额（元）解析价格带标签 */
-export function resolvePriceBandLabel(yuan: number): OperationsPriceBandLabel {
-  if (!Number.isFinite(yuan) || yuan < 0) return '≤399'
+function yuanToCent(yuan: number): number {
+  return Math.round(yuan * 100)
+}
+
+/** maxYuan=1998 表示至 1998.99 元（199899 分） */
+function bandMinCent(minYuan: number): number {
+  return minYuan * 100
+}
+
+function bandMaxCent(maxYuan: number): number {
+  return maxYuan * 100 + 99
+}
+
+/** 按支付金额（分）解析价格带标签 */
+export function resolvePriceBandLabelFromCent(cent: number): OperationsPriceBandLabel {
+  if (!Number.isFinite(cent) || cent < 0) return '≤399'
   for (const band of OPERATIONS_PRICE_BANDS) {
+    const minCent = bandMinCent(band.minYuan)
     if (band.maxYuan == null) {
-      if (yuan >= band.minYuan) return band.label
+      if (cent >= minCent) return band.label
       continue
     }
-    if (yuan >= band.minYuan && yuan <= band.maxYuan) return band.label
+    const maxCent = bandMaxCent(band.maxYuan)
+    if (cent >= minCent && cent <= maxCent) return band.label
   }
   return '1999+'
 }
 
-export function resolvePriceBandLabelFromCent(cent: number): OperationsPriceBandLabel {
-  return resolvePriceBandLabel(cent / 100)
+/** 按支付金额（元）解析价格带标签 */
+export function resolvePriceBandLabel(yuan: number): OperationsPriceBandLabel {
+  return resolvePriceBandLabelFromCent(yuanToCent(yuan))
 }

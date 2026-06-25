@@ -2,6 +2,7 @@
  * 运营报表验收（纯函数）
  * 用法: npx tsx apps/server/scripts/operations-report-acceptance.ts
  */
+import type { AnalyzedOrderView } from '../src/types/analysis'
 import { resolvePriceBandLabel } from '../src/config/operations-price-band.config'
 import { resolveProductRole } from '../src/config/operations-product-role.config'
 import {
@@ -14,6 +15,14 @@ import {
 } from '../src/services/operations-report-privacy.util'
 import { eachDayInShanghaiRange } from '../src/utils/each-day-shanghai'
 import { extractLiveSessionTraffic } from '../src/services/live-session-traffic.util'
+import { computeProductReturnRateByOrder } from '../src/services/operations-product-analysis.service'
+import { aggregateWeeklySummaryForAcceptance } from '../src/services/weekly-operations-report.service'
+import type { DailyOperationsReportPayload } from '../src/services/daily-operations-report.service'
+import { getAnchorPerformanceViews } from '../src/services/board-scoped-views.service'
+import {
+  isLowPriceBrushOrderView,
+  LOW_PRICE_BRUSH_THRESHOLD_CENT,
+} from '../src/services/low-price-brush-order.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -22,8 +31,197 @@ function assert(cond: boolean, msg: string, issues: string[]) {
 function testPriceBands(issues: string[]) {
   assert(resolvePriceBandLabel(399) === '≤399', '399 应落在 ≤399', issues)
   assert(resolvePriceBandLabel(400) === '400~599', '400 应落在 400~599', issues)
-  assert(resolvePriceBandLabel(1999) === '1600~1999', '1999 应落在 1600~1999', issues)
+  assert(resolvePriceBandLabel(1998) === '1600~1998', '1998 应落在 1600~1998', issues)
+  assert(resolvePriceBandLabel(1999) === '1999+', '1999 应落在 1999+', issues)
   assert(resolvePriceBandLabel(2000) === '1999+', '2000 应落在 1999+', issues)
+}
+
+function testProductReturnRateByOrder(issues: string[]) {
+  assert(computeProductReturnRateByOrder(10, 2) === 0.2, '退货率应为 2/10', issues)
+  assert(computeProductReturnRateByOrder(0, 1) === null, '无成交订单时退货率为 null', issues)
+  assert(computeProductReturnRateByOrder(5, 0) === 0, '无退货时为 0', issues)
+}
+
+function testWeeklyTrafficRates(issues: string[]) {
+  const baseSummary = (): DailyOperationsReportPayload['summary'] => ({
+    validAmountYuan: 100,
+    soldOrderCount: 1,
+    invalidOrderCount: 0,
+    returnOrderCount: 0,
+    returnOrderRate: null,
+    dealUserCount: null,
+    dealConversionRate: null,
+    joinUserCount: null,
+    viewSessionCount: null,
+    avgOrderAmountYuan: 100,
+    totalLiveDurationMinutes: 60,
+    hourlyAmountYuan: 100,
+    liveRoomNewFollowers: [],
+    totalNewFollowerCount: 0,
+    newFollowerRate: null,
+  })
+
+  const missingTraffic = aggregateWeeklySummaryForAcceptance([
+    {
+      dateLabel: '1.1',
+      title: 't',
+      startDate: '2026-01-01',
+      endDate: '2026-01-01',
+      summary: baseSummary(),
+      anchors: [],
+      products: [],
+      priceBands: [],
+      afterSalesReasons: [],
+      reviewNote: null,
+    },
+    {
+      dateLabel: '1.2',
+      title: 't',
+      startDate: '2026-01-02',
+      endDate: '2026-01-02',
+      summary: baseSummary(),
+      anchors: [],
+      products: [],
+      priceBands: [],
+      afterSalesReasons: [],
+      reviewNote: null,
+    },
+  ])
+  assert(missingTraffic.dealConversionRate === null, '缺失进房/成交人数时周报成交率为 null', issues)
+  assert(missingTraffic.newFollowerRate === null, '缺失场观时周报粉丝率为 null', issues)
+
+  const withTraffic = aggregateWeeklySummaryForAcceptance([
+    {
+      dateLabel: '1.1',
+      title: 't',
+      startDate: '2026-01-01',
+      endDate: '2026-01-01',
+      summary: {
+        ...baseSummary(),
+        dealUserCount: 10,
+        joinUserCount: 100,
+        viewSessionCount: 1000,
+        totalNewFollowerCount: 50,
+      },
+      anchors: [],
+      products: [],
+      priceBands: [],
+      afterSalesReasons: [],
+      reviewNote: null,
+    },
+    {
+      dateLabel: '1.2',
+      title: 't',
+      startDate: '2026-01-02',
+      endDate: '2026-01-02',
+      summary: {
+        ...baseSummary(),
+        validAmountYuan: 200,
+        soldOrderCount: 2,
+        dealUserCount: 5,
+        joinUserCount: 50,
+        viewSessionCount: 500,
+        totalNewFollowerCount: 25,
+      },
+      anchors: [],
+      products: [],
+      priceBands: [],
+      afterSalesReasons: [],
+      reviewNote: null,
+    },
+  ])
+  assert(
+    withTraffic.dealConversionRate === 15 / 150,
+    '周报成交率应为周内成交人数/进房人数',
+    issues,
+  )
+  assert(
+    withTraffic.newFollowerRate === 75 / 1500,
+    '周报粉丝率应为周内新增粉丝/场观',
+    issues,
+  )
+  assert(withTraffic.validAmountYuan === 300, '周报有效成交应等于逐日之和', issues)
+  assert(withTraffic.soldOrderCount === 3, '周报订单数应等于逐日之和', issues)
+}
+
+function makeMinimalView(partial: Partial<AnalyzedOrderView>): AnalyzedOrderView {
+  return {
+    orderId: 'o1',
+    packageId: 'p1',
+    bizOrderId: 'b1',
+    displayOrderNo: 'P1',
+    officialOrderNo: 'P1',
+    matchOrderId: 'm1',
+    orderTimeText: '2026-05-01 10:00:00',
+    buyerId: 'u1',
+    anchorId: 'a1',
+    anchorName: '子杰',
+    attributionType: 'time_rule',
+    gmvCent: 0,
+    productAmountCent: 0,
+    receivableAmountCent: 0,
+    freightCent: 0,
+    platformDiscountCent: 0,
+    actualPaidCent: 0,
+    actualSellerReceiveAmountCent: 0,
+    actualSignedAmountCent: 0,
+    orderStatusText: '已完成',
+    afterSaleStatusText: '—',
+    isSigned: true,
+    isReturned: false,
+    isActualSigned: true,
+    isQualityReturn: false,
+    returnAmountCent: 0,
+    productRefundAmountCent: 0,
+    freightRefundAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    isFreightRefundOnly: false,
+    afterSaleClosedNoRefund: false,
+    isReturnRefund: false,
+    isRefundOnly: false,
+    isRealProductRefund: false,
+    afterSaleCategory: '',
+    afterSaleStatusLabel: '',
+    afterSaleDisplayType: '',
+    isSizeMismatch: false,
+    reasonText: '',
+    effectiveGmvCent: 0,
+    paymentBaseCent: 0,
+    paymentBaseSource: '',
+    includedInGmv: true,
+    countsForSigned: true,
+    countsForGrossProfit: true,
+    gmvExcludeReason: null,
+    ...partial,
+  }
+}
+
+function testLowPriceBrushExcludedFromPerformanceViews(issues: string[]) {
+  const normal = makeMinimalView({
+    orderId: 'normal',
+    matchOrderId: 'normal',
+    paymentBaseCent: 5000,
+    effectiveGmvCent: 5000,
+  })
+  const lowPrice = makeMinimalView({
+    orderId: 'low',
+    matchOrderId: 'low',
+    paymentBaseCent: LOW_PRICE_BRUSH_THRESHOLD_CENT - 1,
+    effectiveGmvCent: LOW_PRICE_BRUSH_THRESHOLD_CENT - 1,
+    raw: { payAmount: (LOW_PRICE_BRUSH_THRESHOLD_CENT - 1) / 100 },
+  } as Partial<AnalyzedOrderView> & { raw?: Record<string, unknown> })
+
+  assert(isLowPriceBrushOrderView(lowPrice), '低价单应被识别为刷单', issues)
+
+  const filtered = getAnchorPerformanceViews(
+    [normal, lowPrice],
+    new Map([
+      ['normal', {}],
+      ['low', { payAmount: (LOW_PRICE_BRUSH_THRESHOLD_CENT - 1) / 100 }],
+    ]),
+  )
+  assert(filtered.length === 1, '有效业绩视图应排除低于29元刷单', issues)
+  assert(filtered[0]!.orderId === 'normal', '保留正常订单', issues)
 }
 
 function testProductRole(issues: string[]) {
@@ -149,6 +347,9 @@ function testTrafficNullable(issues: string[]) {
 function main() {
   const issues: string[] = []
   testPriceBands(issues)
+  testProductReturnRateByOrder(issues)
+  testWeeklyTrafficRates(issues)
+  testLowPriceBrushExcludedFromPerformanceViews(issues)
   testProductRole(issues)
   testAfterSalesReason(issues)
   testPrivacy(issues)

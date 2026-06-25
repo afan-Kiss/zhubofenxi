@@ -6,8 +6,8 @@ export const OPERATIONS_PRICE_BANDS = [
   { label: '800~999', minYuan: 800, maxYuan: 999 },
   { label: '1000~1299', minYuan: 1000, maxYuan: 1299 },
   { label: '1300~1599', minYuan: 1300, maxYuan: 1599 },
-  { label: '1600~1999', minYuan: 1600, maxYuan: 1999 },
-  { label: '1999+', minYuan: 2000, maxYuan: null },
+  { label: '1600~1998', minYuan: 1600, maxYuan: 1998 },
+  { label: '1999+', minYuan: 1999, maxYuan: null },
 ] as const
 
 export type OperationsPriceBandLabel = (typeof OPERATIONS_PRICE_BANDS)[number]['label']

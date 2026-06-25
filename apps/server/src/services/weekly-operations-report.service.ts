@@ -7,6 +7,7 @@ import {
 } from './daily-operations-report.service'
 import { getOpsReviewNote, type OpsReviewNotePayload } from './ops-review-note.service'
 import type { OperationsProductRow } from './operations-product-analysis.service'
+import { computeProductReturnRateByOrder } from './operations-product-analysis.service'
 import { productRoleLabel } from '../config/operations-product-role.config'
 
 export interface WeeklyDailyTrendRow {
@@ -80,11 +81,14 @@ function aggregateProductsFromSnapshots(
         continue
       }
       existing.soldCount += p.soldCount
+      existing.soldOrderCount += p.soldOrderCount
       existing.soldAmountYuan += p.soldAmountYuan
       existing.buyerCount += p.buyerCount
-      existing.refundCount += p.refundCount
-      const denom = existing.soldCount + existing.refundCount
-      existing.returnRate = denom > 0 ? existing.refundCount / denom : null
+      existing.returnOrderCount += p.returnOrderCount
+      existing.returnRate = computeProductReturnRateByOrder(
+        existing.soldOrderCount,
+        existing.returnOrderCount,
+      )
     }
   }
   return [...map.values()].sort((a, b) => b.soldAmountYuan - a.soldAmountYuan)
@@ -99,9 +103,9 @@ function aggregateWeeklySummary(
   let returnOrderCount = 0
   let totalLiveDurationMinutes = 0
   let totalNewFollowerCount = 0
-  let dealUserCount: number | null = 0
-  let joinUserCount: number | null = 0
-  let viewSessionCount: number | null = 0
+  let dealUserCount: number | null = null
+  let joinUserCount: number | null = null
+  let viewSessionCount: number | null = null
   const liveRoomMap = new Map<string, number>()
 
   for (const snap of snapshots) {
@@ -113,6 +117,12 @@ function aggregateWeeklySummary(
     totalNewFollowerCount += snap.summary.totalNewFollowerCount
     if (snap.summary.dealUserCount != null) {
       dealUserCount = (dealUserCount ?? 0) + snap.summary.dealUserCount
+    }
+    if (snap.summary.joinUserCount != null) {
+      joinUserCount = (joinUserCount ?? 0) + snap.summary.joinUserCount
+    }
+    if (snap.summary.viewSessionCount != null) {
+      viewSessionCount = (viewSessionCount ?? 0) + snap.summary.viewSessionCount
     }
     for (const row of snap.summary.liveRoomNewFollowers) {
       liveRoomMap.set(row.liveAccountName, (liveRoomMap.get(row.liveAccountName) ?? 0) + row.newFollowerCount)
@@ -129,13 +139,11 @@ function aggregateWeeklySummary(
     returnOrderCount,
     returnOrderRate:
       returnDenom > 0 ? Math.round((returnOrderCount / returnDenom) * 100) : null,
-    dealUserCount: dealUserCount === 0 && snapshots.every((s) => s.summary.dealUserCount == null)
-      ? null
-      : dealUserCount,
+    dealUserCount,
+    joinUserCount,
+    viewSessionCount,
     dealConversionRate:
-      joinUserCount != null &&
-      joinUserCount > 0 &&
-      dealUserCount != null
+      joinUserCount != null && joinUserCount > 0 && dealUserCount != null
         ? dealUserCount / joinUserCount
         : null,
     avgOrderAmountYuan:
@@ -153,6 +161,13 @@ function aggregateWeeklySummary(
         ? totalNewFollowerCount / viewSessionCount
         : null,
   }
+}
+
+/** 验收用：周报汇总与逐日快照金额/订单一致性校验 */
+export function aggregateWeeklySummaryForAcceptance(
+  snapshots: DailyOperationsReportPayload[],
+): DailyOperationsReportPayload['summary'] {
+  return aggregateWeeklySummary(snapshots)
 }
 
 function aggregateWeeklyAnchors(

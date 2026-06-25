@@ -37,9 +37,10 @@ export interface OperationsProductRow {
   ringSize: string
   barType: string
   soldCount: number
+  soldOrderCount: number
   soldAmountYuan: number
   buyerCount: number
-  refundCount: number
+  returnOrderCount: number
   returnRate: number | null
   productRole: string
   productRoleLabel: string
@@ -86,6 +87,8 @@ export interface DailyOperationsSummary {
   returnOrderRate: number | null
   dealUserCount: number | null
   dealConversionRate: number | null
+  joinUserCount: number | null
+  viewSessionCount: number | null
   avgOrderAmountYuan: number | null
   totalLiveDurationMinutes: number
   hourlyAmountYuan: number | null

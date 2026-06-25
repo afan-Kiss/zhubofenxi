@@ -74,6 +74,8 @@ export interface DailyOperationsSummary {
   returnOrderRate: number | null
   dealUserCount: number | null
   dealConversionRate: number | null
+  joinUserCount: number | null
+  viewSessionCount: number | null
   avgOrderAmountYuan: number | null
   totalLiveDurationMinutes: number
   hourlyAmountYuan: number | null
@@ -377,9 +379,9 @@ export async function buildDailyOperationsReport(params: {
   ).flat()
   const summaryTraffic = aggregateAnchorLiveSessionTraffic(allSessions)
 
-  const products = await buildOperationsProductAnalysis(scoped.views, scoped.rawByMatch)
+  const products = await buildOperationsProductAnalysis(performanceViewsAll, scoped.rawByMatch)
   const priceBands = buildOperationsPriceBandAnalysis(performanceViewsAll)
-  const afterSalesReasons = aggregateAfterSalesReasons(buildAfterSalesItems(scoped.views))
+  const afterSalesReasons = aggregateAfterSalesReasons(buildAfterSalesItems(performanceViewsAll))
   const reviewNote = await getOpsReviewNote({
     reportDate: params.startDate,
     reportType: 'daily',
@@ -401,6 +403,8 @@ export async function buildDailyOperationsReport(params: {
         returnDenom > 0 ? Math.round((returnOrderCount / returnDenom) * 100) : null,
       dealUserCount: summaryTraffic.dealUserCount,
       dealConversionRate: summaryTraffic.dealConversionRate,
+      joinUserCount: summaryTraffic.joinUserCount,
+      viewSessionCount: summaryTraffic.viewSessionCount,
       avgOrderAmountYuan: roundYuan(safeDivide(validAmountYuan, soldOrderCount)),
       totalLiveDurationMinutes,
       hourlyAmountYuan: roundYuan(
@@ -427,7 +431,8 @@ export async function buildOperationsAfterSalesDetail(params: {
   category?: string
 }) {
   const scoped = await getBoardScopedViewsForRange(params)
-  const items = buildAfterSalesItems(scoped.views)
+  const performanceViews = getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const items = buildAfterSalesItems(performanceViews)
   const filtered = params.category
     ? aggregateAfterSalesReasons(items).filter((r) => r.category === params.category)
     : aggregateAfterSalesReasons(items)
@@ -443,7 +448,8 @@ export async function buildOperationsProductDetailReport(params: {
   username?: string
 }) {
   const scoped = await getBoardScopedViewsForRange(params)
-  const products = await buildOperationsProductAnalysis(scoped.views, scoped.rawByMatch)
+  const performanceViews = getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const products = await buildOperationsProductAnalysis(performanceViews, scoped.rawByMatch)
   return {
     startDate: params.startDate,
     endDate: params.endDate,

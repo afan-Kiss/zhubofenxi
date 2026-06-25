@@ -16,6 +16,7 @@ import {
   resolveProductRole,
   type OperationsProductRole,
 } from '../config/operations-product-role.config'
+import { isDailyReportSoldOrder } from './daily-report-order.util'
 
 export interface OperationsProductRow {
   productKey: string
@@ -26,9 +27,10 @@ export interface OperationsProductRow {
   ringSize: string
   barType: string
   soldCount: number
+  soldOrderCount: number
   soldAmountYuan: number
   buyerCount: number
-  refundCount: number
+  returnOrderCount: number
   returnRate: number | null
   productRole: OperationsProductRole
   productRoleLabel: string
@@ -36,6 +38,15 @@ export interface OperationsProductRow {
 
 function isProductReturnOrder(v: AnalyzedOrderView): boolean {
   return v.productRefundAmountCent > 0 && !v.isFreightRefundOnly
+}
+
+/** 商品退货率（订单维度）：退货订单数 / 有效成交订单数 */
+export function computeProductReturnRateByOrder(
+  soldOrderCount: number,
+  returnOrderCount: number,
+): number | null {
+  if (soldOrderCount <= 0) return null
+  return returnOrderCount / soldOrderCount
 }
 
 export async function buildOperationsProductAnalysis(
@@ -54,8 +65,9 @@ export async function buildOperationsProductAnalysis(
     skuName: string
     soldCount: number
     soldAmountCent: number
+    soldOrderKeys: Set<string>
     buyers: Set<string>
-    refundOrderKeys: Set<string>
+    returnOrderKeys: Set<string>
   }
 
   const buckets = new Map<string, Bucket>()
@@ -79,19 +91,21 @@ export async function buildOperationsProductAnalysis(
         skuName,
         soldCount: 0,
         soldAmountCent: 0,
+        soldOrderKeys: new Set<string>(),
         buyers: new Set<string>(),
-        refundOrderKeys: new Set<string>(),
+        returnOrderKeys: new Set<string>(),
       } satisfies Bucket)
     buckets.set(productKey, bucket)
 
-    if (view.includedInGmv && view.effectiveGmvCent > 0) {
+    if (isDailyReportSoldOrder(view)) {
       bucket.soldCount += qty
       bucket.soldAmountCent += view.effectiveGmvCent
+      bucket.soldOrderKeys.add(orderKey)
       const buyerKey = view.buyerKey || view.buyerId
       if (buyerKey) bucket.buyers.add(buyerKey)
     }
     if (isProductReturnOrder(view)) {
-      bucket.refundOrderKeys.add(orderKey)
+      bucket.returnOrderKeys.add(orderKey)
     }
   }
 
@@ -101,11 +115,9 @@ export async function buildOperationsProductAnalysis(
     const specText = `${bucket.productName} ${bucket.skuName}`
     const ringSize = dim?.ringSize?.trim() || parseRingSizeFromText(specText) || '未识别'
     const barType = dim?.barType?.trim() || parseBarTypeFromText(specText) || '未识别'
-    const refundCount = bucket.refundOrderKeys.size
-    const returnRate =
-      bucket.soldCount + refundCount > 0
-        ? refundCount / (bucket.soldCount + refundCount)
-        : null
+    const soldOrderCount = bucket.soldOrderKeys.size
+    const returnOrderCount = bucket.returnOrderKeys.size
+    const returnRate = computeProductReturnRateByOrder(soldOrderCount, returnOrderCount)
     const role = resolveProductRole({
       soldCount: bucket.soldCount,
       returnRate,
@@ -120,9 +132,10 @@ export async function buildOperationsProductAnalysis(
       ringSize,
       barType,
       soldCount: bucket.soldCount,
+      soldOrderCount,
       soldAmountYuan: Math.round(bucket.soldAmountCent / 100),
       buyerCount: bucket.buyers.size,
-      refundCount,
+      returnOrderCount,
       returnRate,
       productRole: role,
       productRoleLabel: productRoleLabel(role),

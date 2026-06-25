@@ -33,6 +33,7 @@ export interface OperationsProductRow {
   itemId: string
   productName: string
   skuName: string
+  shopName: string
   productCode: string | null
   ringSize: string
   barType: string
@@ -128,14 +129,39 @@ export interface WeeklyAnchorRow {
   dealUserCount: number | null
 }
 
+export interface ProductRankDataQuality {
+  basis: 'official_exposure' | 'manual_product_dimension' | 'insufficient_data' | 'valid_performance_view'
+  reliable: boolean
+  warning?: string
+}
+
 export interface WeeklyProductHighlight {
   productKey: string
   productName: string
   skuName: string
+  shopName: string
+  productCode: string | null
+  ringSize: string
+  barType: string
   soldCount: number
+  soldOrderCount: number
   soldAmountYuan: number
+  validAmountYuan: number
+  buyerCount: number
+  returnOrderCount: number
   returnRate: number | null
+  rankReason: string
+  rankingType: 'hot' | 'slow' | 'high_return' | 'sample_too_small'
+  dataQuality: ProductRankDataQuality
+  sampleTooSmall: boolean
   productRoleLabel: string
+}
+
+export interface ProductRankingQuality {
+  hotReliable: boolean
+  slowReliable: boolean
+  highReturnReliable: boolean
+  warnings: string[]
 }
 
 export interface WeeklyOperationsReportPayload {
@@ -153,6 +179,8 @@ export interface WeeklyOperationsReportPayload {
   hotProducts: WeeklyProductHighlight[]
   slowProducts: WeeklyProductHighlight[]
   highReturnProducts: WeeklyProductHighlight[]
+  highReturnSampleTooSmall: WeeklyProductHighlight[]
+  productRankingQuality: ProductRankingQuality
   priceBands: OperationsPriceBandRow[]
   afterSalesReasons: AfterSalesReasonRow[]
   reviewNote: OpsReviewNotePayload | null

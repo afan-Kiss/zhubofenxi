@@ -15,6 +15,7 @@ export const ProductPerformanceTable: React.FC<Props> = ({ rows }) => {
       <table className="min-w-[960px] w-full text-left text-xs">
         <thead className="bg-slate-50 text-slate-600">
           <tr>
+            <th className="px-3 py-2">店铺</th>
             <th className="px-3 py-2">商品</th>
             <th className="px-3 py-2">规格</th>
             <th className="px-3 py-2">圈口</th>
@@ -30,6 +31,7 @@ export const ProductPerformanceTable: React.FC<Props> = ({ rows }) => {
         <tbody>
           {rows.slice(0, 30).map((row) => (
             <tr key={row.productKey} className="border-t border-slate-100">
+              <td className="px-3 py-2 text-slate-600">{row.shopName || '—'}</td>
               <td className="px-3 py-2 font-medium text-slate-900">{row.productName}</td>
               <td className="px-3 py-2 text-slate-600">{row.skuName || '—'}</td>
               <td className="px-3 py-2">{row.ringSize}</td>

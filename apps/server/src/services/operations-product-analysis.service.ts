@@ -6,6 +6,7 @@ import {
   pickItemIdFromRaw,
   pickProductNameFromRaw,
   pickQuantityFromRaw,
+  pickShopNameFromRaw,
   pickSkuNameFromRaw,
   parseBarTypeFromText,
   parseRingSizeFromText,
@@ -23,6 +24,7 @@ export interface OperationsProductRow {
   itemId: string
   productName: string
   skuName: string
+  shopName: string
   productCode: string | null
   ringSize: string
   barType: string
@@ -34,6 +36,19 @@ export interface OperationsProductRow {
   returnRate: number | null
   productRole: OperationsProductRole
   productRoleLabel: string
+}
+
+function resolveShopNameFromView(view: AnalyzedOrderView & { raw?: Record<string, unknown> }): string {
+  const liveAccountName = (view.liveAccountName ?? '').trim()
+  if (liveAccountName && liveAccountName !== '—') return liveAccountName
+  const fromRaw = pickShopNameFromRaw(view.raw)
+  if (fromRaw && fromRaw !== '—') return fromRaw
+  return ''
+}
+
+function pickDominantShopName(shopAmountCent: Map<string, number>): string {
+  if (shopAmountCent.size === 0) return ''
+  return [...shopAmountCent.entries()].sort((a, b) => b[1] - a[1])[0]![0]
 }
 
 function isProductReturnOrder(v: AnalyzedOrderView): boolean {
@@ -68,6 +83,7 @@ export async function buildOperationsProductAnalysis(
     soldOrderKeys: Set<string>
     buyers: Set<string>
     returnOrderKeys: Set<string>
+    shopAmountCent: Map<string, number>
   }
 
   const buckets = new Map<string, Bucket>()
@@ -94,6 +110,7 @@ export async function buildOperationsProductAnalysis(
         soldOrderKeys: new Set<string>(),
         buyers: new Set<string>(),
         returnOrderKeys: new Set<string>(),
+        shopAmountCent: new Map<string, number>(),
       } satisfies Bucket)
     buckets.set(productKey, bucket)
 
@@ -103,6 +120,13 @@ export async function buildOperationsProductAnalysis(
       bucket.soldOrderKeys.add(orderKey)
       const buyerKey = view.buyerKey || view.buyerId
       if (buyerKey) bucket.buyers.add(buyerKey)
+      const shopName = resolveShopNameFromView(view)
+      if (shopName) {
+        bucket.shopAmountCent.set(
+          shopName,
+          (bucket.shopAmountCent.get(shopName) ?? 0) + view.effectiveGmvCent,
+        )
+      }
     }
     if (isProductReturnOrder(view)) {
       bucket.returnOrderKeys.add(orderKey)
@@ -128,6 +152,7 @@ export async function buildOperationsProductAnalysis(
       itemId: bucket.itemId,
       productName: bucket.productName,
       skuName: bucket.skuName,
+      shopName: pickDominantShopName(bucket.shopAmountCent) || '—',
       productCode: dim?.productCode ?? null,
       ringSize,
       barType,

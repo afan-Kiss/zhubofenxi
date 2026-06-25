@@ -8,7 +8,16 @@ import {
 import { getOpsReviewNote, type OpsReviewNotePayload } from './ops-review-note.service'
 import type { OperationsProductRow } from './operations-product-analysis.service'
 import { computeProductReturnRateByOrder } from './operations-product-analysis.service'
-import { productRoleLabel } from '../config/operations-product-role.config'
+import {
+  buildWeeklyProductRankings,
+  type ProductRankItem,
+  type ProductRankingQuality,
+} from './operations-product-ranking.service'
+import { prisma } from '../lib/prisma'
+import {
+  productRoleLabel,
+  resolveProductRole,
+} from '../config/operations-product-role.config'
 
 export interface WeeklyDailyTrendRow {
   dateKey: string
@@ -28,15 +37,11 @@ export interface WeeklyAnchorRow {
   dealUserCount: number | null
 }
 
-export interface WeeklyProductHighlight {
-  productKey: string
-  productName: string
-  skuName: string
-  soldCount: number
+export interface WeeklyProductHighlight extends ProductRankItem {
   soldAmountYuan: number
-  returnRate: number | null
-  productRoleLabel: string
 }
+
+export type { ProductRankingQuality }
 
 export interface WeeklyOperationsReportPayload {
   weekStart: string
@@ -53,6 +58,8 @@ export interface WeeklyOperationsReportPayload {
   hotProducts: WeeklyProductHighlight[]
   slowProducts: WeeklyProductHighlight[]
   highReturnProducts: WeeklyProductHighlight[]
+  highReturnSampleTooSmall: WeeklyProductHighlight[]
+  productRankingQuality: ProductRankingQuality
   priceBands: DailyOperationsReportPayload['priceBands']
   afterSalesReasons: DailyOperationsReportPayload['afterSalesReasons']
   reviewNote: OpsReviewNotePayload | null
@@ -72,13 +79,17 @@ function changePercent(current: number, previous: number): number | null {
 function aggregateProductsFromSnapshots(
   snapshots: DailyOperationsReportPayload[],
 ): OperationsProductRow[] {
-  const map = new Map<string, OperationsProductRow>()
+  const map = new Map<string, OperationsProductRow & { topShopDayAmount: number }>()
   for (const snap of snapshots) {
     for (const p of snap.products) {
       const existing = map.get(p.productKey)
       if (!existing) {
-        map.set(p.productKey, { ...p })
+        map.set(p.productKey, { ...p, topShopDayAmount: p.soldAmountYuan })
         continue
+      }
+      if (p.shopName && p.shopName !== '—' && p.soldAmountYuan >= existing.topShopDayAmount) {
+        existing.shopName = p.shopName
+        existing.topShopDayAmount = p.soldAmountYuan
       }
       existing.soldCount += p.soldCount
       existing.soldOrderCount += p.soldOrderCount
@@ -89,9 +100,15 @@ function aggregateProductsFromSnapshots(
         existing.soldOrderCount,
         existing.returnOrderCount,
       )
+      const role = resolveProductRole({
+        soldCount: existing.soldCount,
+        returnRate: existing.returnRate,
+      })
+      existing.productRole = role
+      existing.productRoleLabel = productRoleLabel(role)
     }
   }
-  return [...map.values()].sort((a, b) => b.soldAmountYuan - a.soldAmountYuan)
+  return [...map.values()].map(({ topShopDayAmount: _drop, ...row }) => row)
 }
 
 function aggregateWeeklySummary(
@@ -257,16 +274,8 @@ function aggregateAfterSalesFromSnapshots(
     .sort((a, b) => b.orderCount - a.orderCount)
 }
 
-function toProductHighlight(p: OperationsProductRow): WeeklyProductHighlight {
-  return {
-    productKey: p.productKey,
-    productName: p.productName,
-    skuName: p.skuName,
-    soldCount: p.soldCount,
-    soldAmountYuan: p.soldAmountYuan,
-    returnRate: p.returnRate,
-    productRoleLabel: p.productRoleLabel || productRoleLabel(p.productRole),
-  }
+function toProductHighlight(p: ProductRankItem): WeeklyProductHighlight {
+  return { ...p, soldAmountYuan: p.validAmountYuan }
 }
 
 export async function buildWeeklyOperationsReport(params: {
@@ -312,23 +321,18 @@ export async function buildWeeklyOperationsReport(params: {
 
   const summaryBase = aggregateWeeklySummary(snapshots)
   const products = aggregateProductsFromSnapshots(snapshots)
-  const hotProducts = products
-    .filter((p) => p.productRole === 'hot_sale' || p.soldCount >= 5)
-    .slice(0, 10)
-    .map(toProductHighlight)
-  const slowProducts = products
-    .filter((p) => p.productRole === 'slow_moving' || p.soldCount <= 1)
-    .slice(0, 10)
-    .map(toProductHighlight)
-  const highReturnProducts = products
-    .filter((p) => p.productRole === 'high_return_risk')
-    .slice(0, 5)
-    .map(toProductHighlight)
-
-  const reviewNote = await getOpsReviewNote({
+  const dimensions = await prisma.productDimension.findMany()
+  const reviewNoteForRank = await getOpsReviewNote({
     reportDate: params.weekStart,
     reportType: 'weekly',
   })
+  const rankings = buildWeeklyProductRankings({
+    products,
+    dimensions,
+    reviewNote: reviewNoteForRank,
+  })
+
+  const reviewNote = reviewNoteForRank
 
   return {
     weekStart: params.weekStart,
@@ -349,9 +353,11 @@ export async function buildWeeklyOperationsReport(params: {
       returnOrderCount: snap.summary.returnOrderCount,
     })),
     anchors: aggregateWeeklyAnchors(snapshots),
-    hotProducts,
-    slowProducts,
-    highReturnProducts,
+    hotProducts: rankings.hotProducts.map(toProductHighlight),
+    slowProducts: rankings.slowProducts.map(toProductHighlight),
+    highReturnProducts: rankings.highReturnProducts.map(toProductHighlight),
+    highReturnSampleTooSmall: rankings.highReturnSampleTooSmall.map(toProductHighlight),
+    productRankingQuality: rankings.productRankingQuality,
     priceBands: aggregatePriceBandsFromSnapshots(snapshots),
     afterSalesReasons: aggregateAfterSalesFromSnapshots(snapshots),
     reviewNote,

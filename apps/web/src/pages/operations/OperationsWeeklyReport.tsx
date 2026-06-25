@@ -20,6 +20,30 @@ interface Props {
   weekEnd: string
 }
 
+function highlightToProductRow(
+  p: WeeklyOperationsReportPayload['hotProducts'][number],
+  role: string,
+): import('./operationsReportTypes').OperationsProductRow {
+  return {
+    productKey: p.productKey,
+    itemId: '',
+    productName: p.productName,
+    skuName: p.skuName,
+    shopName: p.shopName,
+    productCode: p.productCode,
+    ringSize: p.ringSize,
+    barType: p.barType,
+    soldCount: p.soldCount,
+    soldOrderCount: p.soldOrderCount,
+    soldAmountYuan: p.validAmountYuan ?? p.soldAmountYuan,
+    buyerCount: p.buyerCount,
+    returnOrderCount: p.returnOrderCount,
+    returnRate: p.returnRate,
+    productRole: role,
+    productRoleLabel: p.rankReason || p.productRoleLabel,
+  }
+}
+
 export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -166,70 +190,48 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
 
       <section className="grid gap-4 lg:grid-cols-3">
         <div>
-          <h3 className="mb-2 text-sm font-semibold text-slate-900">热卖前 10</h3>
+          <h3 className="mb-1 text-sm font-semibold text-slate-900">热卖前 10</h3>
+          <p className="mb-2 text-xs text-slate-500">按有效成交金额、成交订单、成交件数排序</p>
           <ProductPerformanceTable
-            rows={report.hotProducts.map((p) => ({
-              productKey: p.productKey,
-              itemId: '',
-              productName: p.productName,
-              skuName: p.skuName,
-              productCode: null,
-              ringSize: '—',
-              barType: '—',
-              soldCount: p.soldCount,
-              soldOrderCount: 0,
-              soldAmountYuan: p.soldAmountYuan,
-              buyerCount: 0,
-              returnOrderCount: 0,
-              returnRate: p.returnRate,
-              productRole: 'hot_sale',
-              productRoleLabel: p.productRoleLabel,
-            }))}
+            rows={report.hotProducts.map((p) => highlightToProductRow(p, 'hot_sale'))}
           />
         </div>
         <div>
-          <h3 className="mb-2 text-sm font-semibold text-slate-900">滞销前 10</h3>
-          <ProductPerformanceTable
-            rows={report.slowProducts.map((p) => ({
-              productKey: p.productKey,
-              itemId: '',
-              productName: p.productName,
-              skuName: p.skuName,
-              productCode: null,
-              ringSize: '—',
-              barType: '—',
-              soldCount: p.soldCount,
-              soldOrderCount: 0,
-              soldAmountYuan: p.soldAmountYuan,
-              buyerCount: 0,
-              returnOrderCount: 0,
-              returnRate: p.returnRate,
-              productRole: 'slow_moving',
-              productRoleLabel: p.productRoleLabel,
-            }))}
-          />
+          <h3 className="mb-1 text-sm font-semibold text-slate-900">
+            {report.productRankingQuality?.slowReliable
+              ? '主推未成交/低成交商品'
+              : '滞销观察'}
+          </h3>
+          {report.productRankingQuality?.slowReliable ? (
+            <p className="mb-2 text-xs text-slate-500">基于人工主推候选池，本周未成交或低成交</p>
+          ) : (
+            <p className="mb-2 text-xs text-amber-700">
+              {report.productRankingQuality?.warnings?.find((w) => w.includes('滞销') || w.includes('数据不足')) ??
+                '数据不足，暂无法可靠判断滞销'}
+            </p>
+          )}
+          {report.productRankingQuality?.slowReliable ? (
+            <ProductPerformanceTable
+              rows={report.slowProducts.map((p) => highlightToProductRow(p, 'slow_moving'))}
+            />
+          ) : null}
         </div>
         <div>
-          <h3 className="mb-2 text-sm font-semibold text-slate-900">高退货风险前 5</h3>
+          <h3 className="mb-1 text-sm font-semibold text-slate-900">高退货风险前 5</h3>
+          <p className="mb-2 text-xs text-slate-500">按商品退货订单率排序（成交≥3单）</p>
           <ProductPerformanceTable
-            rows={report.highReturnProducts.map((p) => ({
-              productKey: p.productKey,
-              itemId: '',
-              productName: p.productName,
-              skuName: p.skuName,
-              productCode: null,
-              ringSize: '—',
-              barType: '—',
-              soldCount: p.soldCount,
-              soldOrderCount: 0,
-              soldAmountYuan: p.soldAmountYuan,
-              buyerCount: 0,
-              returnOrderCount: 0,
-              returnRate: p.returnRate,
-              productRole: 'high_return_risk',
-              productRoleLabel: p.productRoleLabel,
-            }))}
+            rows={report.highReturnProducts.map((p) => highlightToProductRow(p, 'high_return_risk'))}
           />
+          {report.highReturnSampleTooSmall?.length ? (
+            <div className="mt-3">
+              <p className="mb-1 text-xs font-medium text-amber-700">样本不足，仅参考</p>
+              <ProductPerformanceTable
+                rows={report.highReturnSampleTooSmall.map((p) =>
+                  highlightToProductRow(p, 'high_return_risk'),
+                )}
+              />
+            </div>
+          ) : null}
         </div>
       </section>
 

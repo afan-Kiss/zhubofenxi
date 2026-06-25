@@ -9,6 +9,17 @@ function pickString(raw: Record<string, unknown> | undefined, keys: string[]): s
   return ''
 }
 
+export function pickShopNameFromRaw(raw: Record<string, unknown> | undefined): string {
+  return pickString(raw, [
+    'shopName',
+    'shop_name',
+    'sellerShopName',
+    'seller_shop_name',
+    'storeName',
+    'store_name',
+  ])
+}
+
 export function pickProductNameFromRaw(raw: Record<string, unknown> | undefined): string {
   if (!raw) return ''
   const skus = raw.skus

@@ -293,11 +293,94 @@ function checkWeeklyStructure(ctx: CheckContext, weekly: Record<string, unknown>
   if (!weekly.summary) addFinding(ctx, 'P0', '周报 summary 不存在')
   if (trend.length === 0) addFinding(ctx, 'P1', '周报 dailyTrend/dailyTrends 不存在或为空')
   if (!Array.isArray(weekly.anchors)) addFinding(ctx, 'P1', '周报 anchors 不存在')
+  if (!weekly.productRankingQuality) addFinding(ctx, 'P1', '周报 productRankingQuality 不存在')
+  if (!Array.isArray(weekly.hotProducts)) addFinding(ctx, 'P1', '周报 hotProducts 不存在')
+  if (!Array.isArray(weekly.slowProducts)) addFinding(ctx, 'P1', '周报 slowProducts 不存在')
+  if (!Array.isArray(weekly.highReturnProducts)) addFinding(ctx, 'P1', '周报 highReturnProducts 不存在')
   if (getWeeklyProducts(weekly).length === 0 && trend.length > 0) {
-    addNote(ctx, '周报 hotProducts/products 为空（可能本周无商品成交）')
+    addNote(ctx, '周报 hotProducts 为空（可能本周无商品成交）')
   }
   if (!Array.isArray(weekly.priceBands)) addFinding(ctx, 'P1', '周报 priceBands 不存在')
   if (!Array.isArray(weekly.afterSalesReasons)) addFinding(ctx, 'P1', '周报 afterSalesReasons 不存在')
+}
+
+function rankItemAmount(item: Record<string, unknown>): number {
+  return Number(item.validAmountYuan ?? item.soldAmountYuan ?? 0)
+}
+
+function checkProductRankings(ctx: CheckContext, weekly: Record<string, unknown>) {
+  const quality = weekly.productRankingQuality as Record<string, unknown> | undefined
+  if (!quality) return
+
+  const hot = (weekly.hotProducts ?? []) as Array<Record<string, unknown>>
+  const slow = (weekly.slowProducts ?? []) as Array<Record<string, unknown>>
+  const highReturn = (weekly.highReturnProducts ?? []) as Array<Record<string, unknown>>
+  const minSold = 3
+
+  for (let i = 1; i < hot.length; i++) {
+    const prev = hot[i - 1]!
+    const cur = hot[i]!
+    const prevAmt = rankItemAmount(prev)
+    const curAmt = rankItemAmount(cur)
+    if (curAmt > prevAmt) {
+      addFinding(ctx, 'P1', '热卖榜未按有效成交金额降序')
+      break
+    }
+    if (curAmt === prevAmt) {
+      const prevOrders = Number(prev.soldOrderCount ?? 0)
+      const curOrders = Number(cur.soldOrderCount ?? 0)
+      if (curOrders > prevOrders) {
+        addFinding(ctx, 'P1', '热卖榜同金额时未按成交订单降序')
+        break
+      }
+    }
+  }
+
+  for (const item of highReturn) {
+    const sold = Number(item.soldOrderCount ?? 0)
+    const ret = Number(item.returnOrderCount ?? 0)
+    if (sold < minSold) {
+      addFinding(ctx, 'P1', `高退货正式榜含样本不足商品 soldOrderCount=${sold}`)
+    }
+    if (sold > 0 && item.returnRate != null && !near(Number(item.returnRate), ret / sold, 0.0001)) {
+      addFinding(ctx, 'P1', `高退货榜退货率与订单维度不一致：${item.productName ?? item.productKey}`)
+    }
+  }
+
+  for (let i = 1; i < highReturn.length; i++) {
+    const prev = highReturn[i - 1]!
+    const cur = highReturn[i]!
+    if (Number(cur.returnRate ?? 0) > Number(prev.returnRate ?? 0)) {
+      addFinding(ctx, 'P1', '高退货榜未按退货率降序')
+      break
+    }
+  }
+
+  const slowReliable = quality.slowReliable === true
+  if (!slowReliable && slow.length > 0) {
+    addFinding(ctx, 'P1', '滞销榜 unreliable 但仍返回伪排行')
+  }
+
+  for (const list of [hot, slow, highReturn]) {
+    for (const item of list) {
+      if (item.soldOrderCount == null) {
+        addFinding(ctx, 'P1', '榜单项缺少 soldOrderCount')
+        break
+      }
+      if (!item.rankReason) {
+        addFinding(ctx, 'P1', '榜单项缺少 rankReason')
+        break
+      }
+      if (!item.dataQuality) {
+        addFinding(ctx, 'P1', '榜单项缺少 dataQuality')
+        break
+      }
+    }
+  }
+
+  if (Array.isArray(quality.warnings)) {
+    addNote(ctx, `榜单质量 warnings：${(quality.warnings as string[]).slice(0, 3).join('；') || '无'}`)
+  }
 }
 
 async function checkWeeklyCaliber(
@@ -709,6 +792,7 @@ async function main() {
   checkDailyStructure(ctx, daily)
   const dailyCaliber = daily.summary ? checkDailyCaliber(ctx, daily) : null
   checkWeeklyStructure(ctx, weekly)
+  checkProductRankings(ctx, weekly)
   const weeklyCaliber = weekly.summary
     ? await checkWeeklyCaliber(ctx, weekly, ctx.weekStart, ctx.weekEnd)
     : null
@@ -728,7 +812,7 @@ async function main() {
   addSection(ctx, '周报接口结果', [
     `- HTTP：${weekly.summary ? '200 ✅' : '失败 ❌'}`,
     `- dailyTrend 条数：${getDailyTrend(weekly).length}`,
-    `- anchors / hotProducts / priceBands / afterSalesReasons：${weekly.summary ? '已返回' : '缺失'}`,
+    `- anchors / hotProducts / slowProducts / highReturnProducts / productRankingQuality：${weekly.summary ? '已返回' : '缺失'}`,
   ])
 
   if (dailyCaliber) {

@@ -28,6 +28,7 @@
     "accept:after-sales-pending": "tsx apps/server/scripts/after-sales-pending-state-acceptance.ts",
     "accept:anchor-metrics-fix": "tsx apps/server/scripts/anchor-metrics-fix-acceptance.ts",
     "accept:operations-report": "tsx apps/server/scripts/operations-report-acceptance.ts",
+    "accept:operations-report-smoke": "tsx apps/server/scripts/operations-report-smoke.ts",
     "accept:metrics-exclusion": "tsx apps/server/scripts/metrics-exclusion-acceptance.ts",
     "accept:quality-refund": "tsx apps/server/scripts/dev/quality-refund-acceptance.ts",
     "check:business": "tsx apps/server/scripts/acceptance/check-business-rules.ts",

@@ -20,8 +20,9 @@ export const ProductPerformanceTable: React.FC<Props> = ({ rows }) => {
             <th className="px-3 py-2">圈口</th>
             <th className="px-3 py-2">条型</th>
             <th className="px-3 py-2">成交件数</th>
+            <th className="px-3 py-2">成交订单</th>
             <th className="px-3 py-2">成交金额</th>
-            <th className="px-3 py-2">退货件数</th>
+            <th className="px-3 py-2">退货订单</th>
             <th className="px-3 py-2">退货率</th>
             <th className="px-3 py-2">角色</th>
           </tr>
@@ -34,8 +35,9 @@ export const ProductPerformanceTable: React.FC<Props> = ({ rows }) => {
               <td className="px-3 py-2">{row.ringSize}</td>
               <td className="px-3 py-2">{row.barType}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldCount)}</td>
+              <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.soldAmountYuan)}</td>
-              <td className="px-3 py-2">{formatOrderCount(row.refundCount)}</td>
+              <td className="px-3 py-2">{formatOrderCount(row.returnOrderCount)}</td>
               <td className="px-3 py-2">{formatRatePercent(row.returnRate)}</td>
               <td className="px-3 py-2">{row.productRoleLabel}</td>
             </tr>

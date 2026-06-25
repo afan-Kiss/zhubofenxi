@@ -301,6 +301,10 @@ boardRouter.get('/operations-report/product-detail', async (req, res) => {
       sendFail(res, '请提供 startDate、endDate 与 productKey', 400)
       return
     }
+    if (startDate !== endDate) {
+      sendFail(res, '商品下钻仅支持单日范围，请按单日查询', 400)
+      return
+    }
     const { buildOperationsProductDetailReport } = await import(
       '../services/daily-operations-report.service'
     )
@@ -324,6 +328,10 @@ boardRouter.get('/operations-report/after-sales-detail', async (req, res) => {
     const endDate = req.query.endDate ? String(req.query.endDate) : ''
     if (!startDate || !endDate) {
       sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    if (startDate !== endDate) {
+      sendFail(res, '售后下钻仅支持单日范围，请按单日查询', 400)
       return
     }
     const { buildOperationsAfterSalesDetail } = await import(

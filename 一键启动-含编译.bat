@@ -4,9 +4,6 @@ setlocal enabledelayedexpansion
 
 title 主播分析软件 - 编译并启动
 
-set "ROOT=%~dp0"
-set "ROOT=%ROOT:~0,-1%"
-
 echo.
 echo ==================================================
 echo   主播分析软件 - 先编译再启动
@@ -14,8 +11,8 @@ echo   适用：刚改过代码、需要更新 dist 后再运行
 echo ==================================================
 echo.
 
-cd /d "%ROOT%" || (
-  echo [错误] 无法进入项目目录：%ROOT%
+cd /d "%~dp0" || (
+  echo [错误] 无法进入项目目录：%~dp0
   pause
   exit /b 1
 )
@@ -45,4 +42,11 @@ if errorlevel 1 (
 echo.
 echo [2/2] 编译完成，正在启动服务...
 echo.
-call "%ROOT%\一键启动.bat"
+call "%~dp0一键启动.bat"
+if errorlevel 1 (
+  echo.
+  echo [错误] 启动脚本执行失败。
+  pause
+  exit /b 1
+)
+exit /b 0

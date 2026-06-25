@@ -10,14 +10,17 @@ import {
 import {
   formatLiveDurationMinutes,
   resolveAnchorLiveSessionsForRange,
+  aggregateAnchorLiveSessionTraffic,
   sumUniqueLiveDurationMinutesForRange,
+  sumNewFollowersByLiveAccountForRange,
   type AnchorLiveSessionBrief,
+  type LiveRoomNewFollowerRow,
 } from './anchor-live-sessions.service'
 import {
   ANCHOR_SESSION_DISPLAY_FROM_0613,
   isReportDateOnOrAfterShopSessionCutoff,
   remapViewsForAnchorPerformance,
-  resolveDailyReportAnchors,
+  resolveDailyReportAnchorsForDate,
 } from './anchor-performance-attribution.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import {
@@ -42,6 +45,14 @@ export interface DailyReportAnchorRow {
   hourlyAmountYuan: number | null
   dealDensityMinutes: number | null
   amountRatio: number | null
+  viewSessionCount: number
+  joinUserCount: number
+  avgOnlineUserCount: number | null
+  avgViewDurationSeconds: number | null
+  newFollowerCount: number
+  dealUserCount: number
+  dealConversionRate: number | null
+  newFollowerRate: number | null
 }
 
 export interface DailyReportPayload {
@@ -55,6 +66,8 @@ export interface DailyReportPayload {
     totalInvalidOrderCount: number
     totalLiveDurationMinutes: number
     overallHourlyAmountYuan: number | null
+    liveRoomNewFollowers: LiveRoomNewFollowerRow[]
+    totalNewFollowerCount: number
   }
   anchors: DailyReportAnchorRow[]
 }
@@ -140,6 +153,7 @@ function buildAnchorRow(params: {
 }): DailyReportAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
+  const traffic = aggregateAnchorLiveSessionTraffic(params.sessions)
   const sessionLabel =
     params.sessionLabel ??
     formatSessionLabelWithShop(
@@ -166,6 +180,14 @@ function buildAnchorRow(params: {
       safeDivide(liveDurationMinutes, params.soldOrderCount),
     ),
     amountRatio: safeRatioPercent(params.shippedAmountYuan, params.totalShippedAmountYuan),
+    viewSessionCount: traffic.viewSessionCount,
+    joinUserCount: traffic.joinUserCount,
+    avgOnlineUserCount: traffic.avgOnlineUserCount,
+    avgViewDurationSeconds: traffic.avgViewDurationSeconds,
+    newFollowerCount: traffic.newFollowerCount,
+    dealUserCount: traffic.dealUserCount,
+    dealConversionRate: traffic.dealConversionRate,
+    newFollowerRate: traffic.newFollowerRate,
   }
 }
 
@@ -184,7 +206,7 @@ export async function buildDailyReport(params: {
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
 
-  const reportAnchors = resolveDailyReportAnchors(config, useShopSessionRules)
+  const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   for (const anchor of reportAnchors) {
     const performanceViews = getAnchorPerformanceViews(
       scoped.views,
@@ -220,7 +242,8 @@ export async function buildDailyReport(params: {
       sessions.length > 0 ||
       performanceViews.length > 0
 
-    if (!hasData) continue
+    // 6.13 起固定场次主播：与主播业绩一致，无数据也保留空行（含 6.18 起的小白）
+    if (!hasData && !useShopSessionRules) continue
 
     anchorRows.push(
       buildAnchorRow({
@@ -252,6 +275,15 @@ export async function buildDailyReport(params: {
     startDate: params.startDate,
     endDate: params.endDate,
   })
+  const liveRoomNewFollowers = await sumNewFollowersByLiveAccountForRange({
+    preset: params.preset,
+    startDate: params.startDate,
+    endDate: params.endDate,
+  })
+  const totalNewFollowerCount = liveRoomNewFollowers.reduce(
+    (sum, row) => sum + row.newFollowerCount,
+    0,
+  )
   const totalLiveHours = safeDivide(totalLiveDurationMinutes, 60)
 
   const dateLabel = formatDailyReportDateLabel(params.startDate)
@@ -269,6 +301,8 @@ export async function buildDailyReport(params: {
       overallHourlyAmountYuan: roundYuan(
         totalLiveHours != null ? safeDivide(totalShippedAmountYuan, totalLiveHours) : null,
       ),
+      liveRoomNewFollowers,
+      totalNewFollowerCount,
     },
     anchors: anchorRows,
   }

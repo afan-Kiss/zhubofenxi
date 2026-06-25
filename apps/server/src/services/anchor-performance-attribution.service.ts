@@ -2,6 +2,7 @@ import type { AnchorConfig, AnalyzedOrderView } from '../types/analysis'
 import { findAnchorByName } from './anchor-rules.service'
 import { getAnchorConfigSync } from './anchor.service'
 import { getTimeMinutes } from '../utils/time'
+import { formatDateKeyShanghai } from '../utils/business-timezone'
 import {
   aggregateViewsMetrics,
   type BoardAnchorMetrics,
@@ -9,6 +10,11 @@ import {
 
 /** 2026-06-13 起：日报 / 主播业绩按「直播号 + 早晚场」固定归属，不再走后台时间段规则 */
 export const SHOP_SESSION_ANCHOR_CUTOFF_MS = Date.parse('2026-06-13T00:00:00+08:00')
+
+/** 2026-06-18 起：14:30–18:00 支付订单与对应直播场次归属「小白」 */
+export const XIAOBAI_ANCHOR_CUTOFF_MS = Date.parse('2026-06-18T00:00:00+08:00')
+export const XIAOBAI_SLOT_START_MINUTES = 14 * 60 + 30
+export const XIAOBAI_SLOT_END_MINUTES = 18 * 60
 
 export type LiveSessionPeriod = 'morning' | 'evening'
 export type ShopSessionKey = 'xiangyu' | 'hetian' | 'shiyu'
@@ -31,6 +37,7 @@ export const ANCHOR_SESSION_DISPLAY_FROM_0613: Record<
   小红: { sessionLabel: '早场·和田雅玉', shopName: '和田雅玉' },
   飞云: { sessionLabel: '晚场·拾玉居', shopName: '拾玉居' },
   小艺: { sessionLabel: '晚场·和田雅玉', shopName: '和田雅玉' },
+  小白: { sessionLabel: '午场·14:30-18:00', shopName: '和田雅玉' },
 }
 
 const SHOP_SESSION_ANCHOR_MAP: Record<
@@ -50,6 +57,49 @@ export function isReportDateOnOrAfterShopSessionCutoff(startDate: string): boole
   return isShopSessionAnchorCutoffReached(ms)
 }
 
+export function isReportDateOnOrAfterXiaoBaiCutoff(startDate: string): boolean {
+  const ms = Date.parse(`${startDate.trim()}T00:00:00+08:00`)
+  return Number.isFinite(ms) && ms >= XIAOBAI_ANCHOR_CUTOFF_MS
+}
+
+export function isInXiaoBaiOrderSlot(date: Date): boolean {
+  const minutes = getTimeMinutes(date)
+  return minutes >= XIAOBAI_SLOT_START_MINUTES && minutes <= XIAOBAI_SLOT_END_MINUTES
+}
+
+export function isXiaoBaiAttributionActive(payMs: number): boolean {
+  return (
+    Number.isFinite(payMs) &&
+    payMs >= XIAOBAI_ANCHOR_CUTOFF_MS &&
+    isInXiaoBaiOrderSlot(new Date(payMs))
+  )
+}
+
+export function isXiaoBaiSessionStart(sessionStartMs: number): boolean {
+  return (
+    Number.isFinite(sessionStartMs) &&
+    sessionStartMs >= XIAOBAI_ANCHOR_CUTOFF_MS &&
+    isInXiaoBaiOrderSlot(new Date(sessionStartMs))
+  )
+}
+
+/** 直播场次与当日 14:30–18:00 时段有交集（6.18 起用于场次归属小白） */
+export function sessionOverlapsXiaoBaiSlot(startMs: number, endMs: number): boolean {
+  if (!Number.isFinite(startMs) || startMs < XIAOBAI_ANCHOR_CUTOFF_MS) return false
+  const dateKey = formatDateKeyShanghai(new Date(startMs))
+  const slotStartMs = Date.parse(`${dateKey}T14:30:00+08:00`)
+  const slotEndMs = Date.parse(`${dateKey}T18:00:00+08:00`)
+  let effectiveEnd = endMs
+  if (!Number.isFinite(effectiveEnd)) effectiveEnd = startMs
+  if (effectiveEnd < startMs) effectiveEnd += 86_400_000
+  return startMs <= slotEndMs && effectiveEnd >= slotStartMs
+}
+
+function resolveXiaoBaiAnchor(config: AnchorConfig): { anchorId: string; anchorName: string } {
+  const found = findAnchorByName(config, '小白')
+  return { anchorId: found?.id ?? 'extra-小白', anchorName: '小白' }
+}
+
 /** 日报 / ChatGPT 导出使用的主播列表：6.13 前走后台配置，6.13 起固定四人场次 */
 export function resolveDailyReportAnchors(
   config: AnchorConfig,
@@ -60,13 +110,28 @@ export function resolveDailyReportAnchors(
       .filter((a) => a.enabled)
       .map((a) => ({ anchorId: a.id, anchorName: a.name }))
   }
-  return Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613).map((anchorName) => {
+  const names = Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613).filter(
+    (name) => name !== '小白',
+  )
+  return names.map((anchorName) => {
     const found = findAnchorByName(config, anchorName)
     return {
       anchorId: found?.id ?? `extra-${anchorName}`,
       anchorName,
     }
   })
+}
+
+export function resolveDailyReportAnchorsForDate(
+  config: AnchorConfig,
+  startDate: string,
+): Array<{ anchorId: string; anchorName: string }> {
+  const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(startDate)
+  const anchors = resolveDailyReportAnchors(config, useShopSessionRules)
+  if (useShopSessionRules && isReportDateOnOrAfterXiaoBaiCutoff(startDate)) {
+    anchors.push(resolveXiaoBaiAnchor(config))
+  }
+  return anchors
 }
 
 /** 早场 00:00–17:59，晚场 18:00–23:59（与历史默认时间段一致） */
@@ -159,6 +224,10 @@ export function resolveAnchorForPerformanceAttribution(
     return { anchorId: view.anchorId, anchorName: view.anchorName }
   }
 
+  if (isXiaoBaiAttributionActive(payMs)) {
+    return resolveXiaoBaiAnchor(config)
+  }
+
   const liveAccountName =
     (view.liveAccountName ?? '').trim() || pickLiveAccountFromRaw(view.raw)
   const resolved = resolveShopSessionAnchorFromLiveAccount(
@@ -211,7 +280,12 @@ export function ensureAnchorPerformanceLeaderboardSlots(
   if (!isReportDateOnOrAfterShopSessionCutoff(endDate)) return rows
 
   const config = getAnchorConfigSync()
-  const fixedNames = Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613)
+  const fixedNames = Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613).filter(
+    (name) => name !== '小白',
+  )
+  if (isReportDateOnOrAfterXiaoBaiCutoff(endDate)) {
+    fixedNames.push('小白')
+  }
   const byName = new Map(rows.map((r) => [r.anchorName, r]))
   const merged: BoardAnchorMetrics[] = [...rows]
 

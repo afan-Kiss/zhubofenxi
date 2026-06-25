@@ -38,6 +38,26 @@ export function formatOrderCount(count: number | null | undefined): string {
   return `${Math.round(count)}单`
 }
 
+export function formatPeopleCount(count: number | null | undefined): string {
+  if (count == null || !Number.isFinite(count)) return '--'
+  return `${Math.round(count).toLocaleString('zh-CN')}人`
+}
+
+export function formatRatePercent(ratio: number | null | undefined): string {
+  if (ratio == null || !Number.isFinite(ratio)) return '--'
+  return `${(ratio * 100).toFixed(1)}%`
+}
+
+export function formatStayDurationSeconds(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return '--'
+  if (seconds >= 60) {
+    const m = Math.floor(seconds / 60)
+    const s = Math.round(seconds % 60)
+    return s > 0 ? `${m}分${s}秒` : `${m}分钟`
+  }
+  return `${Math.round(seconds)}秒`
+}
+
 export interface DailyReportRawOrderRow {
   orderId: string
   packageId: string

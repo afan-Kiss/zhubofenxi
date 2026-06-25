@@ -10,7 +10,7 @@ import {
   ANCHOR_SESSION_DISPLAY_FROM_0613,
   isReportDateOnOrAfterShopSessionCutoff,
   remapViewsForAnchorPerformance,
-  resolveDailyReportAnchors,
+  resolveDailyReportAnchorsForDate,
 } from './anchor-performance-attribution.service'
 import { attachRawByMatchToViews, isLowPriceBrushOrderView } from './low-price-brush-order.service'
 import { getAnchorConfigSync } from './anchor.service'
@@ -472,7 +472,7 @@ export async function buildDailyReportRawChatGptData(params: {
 
   const config = getAnchorConfigSync()
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)
-  const reportAnchors = resolveDailyReportAnchors(config, useShopSessionRules)
+  const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   const sessionsByAnchor = new Map<string, DailyReportRawLiveSessionRow[]>()
   const liveSessions: DailyReportRawLiveSessionRow[] = []
 

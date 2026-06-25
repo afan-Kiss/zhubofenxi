@@ -5,6 +5,7 @@ import { normalizeAnchorDrillQuery } from './board-scoped-views.service'
 import { viewBelongsToAnchor } from './anchor-attribution.util'
 import {
   resolveShopSessionAnchorFromLiveAccount,
+  sessionOverlapsXiaoBaiSlot,
   SHOP_SESSION_ANCHOR_CUTOFF_MS,
 } from './anchor-performance-attribution.service'
 import { findAnchorByName, matchTimeRule } from './anchor-rules.service'
@@ -12,8 +13,14 @@ import { getAnchorConfigSync } from './anchor.service'
 import { mapLiveNickToKnownAnchor } from '../utils/anchor-label'
 import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
 import { formatClockShanghai, formatDateTimeShanghai } from '../utils/business-timezone'
+import {
+  aggregateLiveSessionTraffic,
+  extractLiveSessionTrafficFromSession,
+  type AggregatedLiveSessionTraffic,
+  type LiveSessionTrafficMetrics,
+} from './live-session-traffic.util'
 
-export interface AnchorLiveSessionBrief {
+export interface AnchorLiveSessionBrief extends LiveSessionTrafficMetrics {
   liveId: string
   liveName: string
   startTime: string
@@ -104,12 +111,20 @@ function sessionMatchesTargetTimeRule(
   return hit.anchor.name === target.anchorName
 }
 
+function isXiaoBaiLiveSession(session: NormalizedLiveSession): boolean {
+  if (!session.startTime) return false
+  const startMs = session.startTime.getTime()
+  const endMs = sessionEndTime(session)?.getTime() ?? startMs
+  return sessionOverlapsXiaoBaiSlot(startMs, endMs)
+}
+
 /** 6.13 起：按直播号 + 早晚场固定归属 */
 function sessionMatchesShopSessionRule(
   session: NormalizedLiveSession,
   target: { anchorId: string; anchorName: string },
 ): boolean {
   if (!session.startTime) return false
+  if (isXiaoBaiLiveSession(session)) return false
   const resolved = resolveShopSessionAnchorFromLiveAccount(
     pickSessionLiveAccountName(session),
     session.startTime,
@@ -127,6 +142,10 @@ function liveSessionMatchesAnchor(
   if (session.errors.length > 0 || !session.startTime) return false
   const startMs = session.startTime.getTime()
   if (startMs >= SHOP_SESSION_ANCHOR_CUTOFF_MS) {
+    if (target.anchorName === '小白') {
+      return isXiaoBaiLiveSession(session)
+    }
+    if (isXiaoBaiLiveSession(session)) return false
     return sessionMatchesShopSessionRule(session, target)
   }
 
@@ -194,6 +213,7 @@ function toBrief(session: NormalizedLiveSession): AnchorLiveSessionBrief {
     endTime = formatDateTimeShanghai(new Date(session.endTime.getTime() + 86400000))
   }
   return {
+    ...extractLiveSessionTrafficFromSession(session),
     liveId: session.liveId || session.id,
     liveName: session.liveName || '—',
     startTime,
@@ -204,6 +224,18 @@ function toBrief(session: NormalizedLiveSession): AnchorLiveSessionBrief {
 }
 
 export async function resolveAnchorLiveSessionsForRange(params: {
+  preset?: string
+  startDate: string
+  endDate: string
+  anchorId?: string
+  anchorName?: string
+  anchorOrders?: AnalyzedOrderView[]
+}): Promise<AnchorLiveSessionBrief[]> {
+  const sessions = await resolveAnchorLiveSessionsWithTrafficForRange(params)
+  return sessions
+}
+
+export async function resolveAnchorLiveSessionsWithTrafficForRange(params: {
   preset?: string
   startDate: string
   endDate: string
@@ -231,6 +263,65 @@ export async function resolveAnchorLiveSessionsForRange(params: {
     .sort((a, b) => (a.startTime?.getTime() ?? 0) - (b.startTime?.getTime() ?? 0))
     .map(toBrief)
   return dedupeLiveSessionBriefs(matched)
+}
+
+export function aggregateAnchorLiveSessionTraffic(
+  sessions: AnchorLiveSessionBrief[],
+): AggregatedLiveSessionTraffic {
+  return aggregateLiveSessionTraffic(sessions)
+}
+
+export interface LiveRoomNewFollowerRow {
+  liveAccountName: string
+  newFollowerCount: number
+}
+
+const LIVE_ACCOUNT_DISPLAY_ORDER = ['祥钰', '和田雅玉', '拾玉居']
+
+function liveAccountSortIndex(name: string): number {
+  const n = name.trim()
+  for (let i = 0; i < LIVE_ACCOUNT_DISPLAY_ORDER.length; i++) {
+    if (n.includes(LIVE_ACCOUNT_DISPLAY_ORDER[i]!)) return i
+  }
+  return 999
+}
+
+/** 日期范围内按直播号汇总新增粉丝（场次按 liveId 去重） */
+export async function sumNewFollowersByLiveAccountForRange(params: {
+  preset?: string
+  startDate: string
+  endDate: string
+}): Promise<LiveRoomNewFollowerRow[]> {
+  const range = resolveDateRange(
+    (params.preset ?? 'custom') as DateRangePreset,
+    params.startDate,
+    params.endDate,
+  )
+  const all = dedupeLiveSessions(await normalizeLiveSessionsFromRaw({ range }))
+  const byAccount = new Map<string, number>()
+  const seen = new Set<string>()
+
+  for (const session of all) {
+    if (session.errors.length > 0 || !session.startTime) continue
+    const ms = session.startTime.getTime()
+    if (ms < range.startTimeMs || ms > range.endTimeMs) continue
+    const key = session.liveId?.trim() || session.id
+    if (seen.has(key)) continue
+    seen.add(key)
+
+    const accountName = pickSessionLiveAccountName(session) || session.liveName?.trim() || '未知直播号'
+    const followers = extractLiveSessionTrafficFromSession(session).newFollowerCount
+    byAccount.set(accountName, (byAccount.get(accountName) ?? 0) + followers)
+  }
+
+  return [...byAccount.entries()]
+    .map(([liveAccountName, newFollowerCount]) => ({ liveAccountName, newFollowerCount }))
+    .sort((a, b) => {
+      const ia = liveAccountSortIndex(a.liveAccountName)
+      const ib = liveAccountSortIndex(b.liveAccountName)
+      if (ia !== ib) return ia - ib
+      return a.liveAccountName.localeCompare(b.liveAccountName, 'zh-CN')
+    })
 }
 
 /** 日期范围内各直播场次时长去重求和（按 liveId，不重复累计） */

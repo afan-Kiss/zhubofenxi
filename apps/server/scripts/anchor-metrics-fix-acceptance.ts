@@ -10,6 +10,11 @@ import {
 } from '../src/services/anchor-rules.service'
 import {
   isReportDateOnOrAfterShopSessionCutoff,
+  isXiaoBaiAttributionActive,
+  isInXiaoBaiOrderSlot,
+  isReportDateOnOrAfterXiaoBaiCutoff,
+  resolveDailyReportAnchorsForDate,
+  sessionOverlapsXiaoBaiSlot,
   normalizeShopSessionKey,
   remapViewsForAnchorPerformance,
   resolveAnchorForPerformanceAttribution,
@@ -17,6 +22,7 @@ import {
   resolveShopSessionAnchorName,
   ensureAnchorPerformanceLeaderboardSlots,
   SHOP_SESSION_ANCHOR_CUTOFF_MS,
+  XIAOBAI_ANCHOR_CUTOFF_MS,
 } from '../src/services/anchor-performance-attribution.service'
 import {
   filterViewsForCoreMetrics,
@@ -223,6 +229,110 @@ function testShopSessionAnchorRules(issues: string[]) {
   assert(emptySlots.some((r) => r.anchorName === '小红'), '6.13 起应展示小红空行', issues)
   assert(emptySlots.some((r) => r.anchorName === '小艺'), '6.13 起应展示小艺空行', issues)
   assert(emptySlots.length === 4, '6.13 起应固定展示四人', issues)
+
+  const emptySlots618 = ensureAnchorPerformanceLeaderboardSlots([], '2026-06-18')
+  assert(emptySlots618.some((r) => r.anchorName === '小白'), '6.18 起应展示小白空行', issues)
+  assert(emptySlots618.length === 5, '6.18 起应固定展示五人', issues)
+
+  assert(
+    isReportDateOnOrAfterXiaoBaiCutoff('2026-06-18'),
+    '6.18 应启用小白时段规则',
+    issues,
+  )
+  assert(
+    !isReportDateOnOrAfterXiaoBaiCutoff('2026-06-17'),
+    '6.17 不应启用小白时段规则',
+    issues,
+  )
+  assert(XIAOBAI_ANCHOR_CUTOFF_MS > SHOP_SESSION_ANCHOR_CUTOFF_MS, '小白规则应晚于店铺场次规则', issues)
+
+  const june17Afternoon = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: '和田雅玉',
+      orderTimeText: '2026-06-17 15:00:00',
+    }),
+    config,
+  )
+  assert(june17Afternoon.anchorName === '小红', '6.17 15:00 和田雅玉仍归小红', issues)
+
+  const june18Afternoon = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: '和田雅玉',
+      orderTimeText: '2026-06-18 15:00:00',
+    }),
+    config,
+  )
+  assert(june18Afternoon.anchorName === '小白', '6.18 15:00 应归小白', issues)
+
+  const june18Morning = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: '和田雅玉',
+      orderTimeText: '2026-06-18 10:00:00',
+    }),
+    config,
+  )
+  assert(june18Morning.anchorName === '小红', '6.18 10:00 仍归小红', issues)
+
+  const june18EdgeStart = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: 'xy祥钰珠宝',
+      orderTimeText: '2026-06-18 14:30:00',
+    }),
+    config,
+  )
+  assert(june18EdgeStart.anchorName === '小白', '6.18 14:30 应归小白', issues)
+
+  const june18EdgeEnd = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '飞云',
+      liveAccountName: '拾玉居',
+      orderTimeText: '2026-06-18 18:00:00',
+    }),
+    config,
+  )
+  assert(june18EdgeEnd.anchorName === '小白', '6.18 18:00 应归小白', issues)
+
+  assert(isInXiaoBaiOrderSlot(new Date('2026-06-18T14:30:00+08:00')), '14:30 在小白时段内', issues)
+  assert(isInXiaoBaiOrderSlot(new Date('2026-06-18T18:00:00+08:00')), '18:00 在小白时段内', issues)
+  assert(!isInXiaoBaiOrderSlot(new Date('2026-06-18T18:01:00+08:00')), '18:01 不在小白时段内', issues)
+  assert(
+    isXiaoBaiAttributionActive(Date.parse('2026-06-18T15:00:00+08:00')),
+    '6.18 15:00 应激活小白归属',
+    issues,
+  )
+  assert(
+    !isXiaoBaiAttributionActive(Date.parse('2026-06-17T15:00:00+08:00')),
+    '6.17 15:00 不应激活小白归属',
+    issues,
+  )
+
+  const reportAnchors618 = resolveDailyReportAnchorsForDate(config, '2026-06-18')
+  assert(
+    reportAnchors618.some((a) => a.anchorName === '小白'),
+    '6.18 日报应包含小白',
+    issues,
+  )
+
+  assert(
+    sessionOverlapsXiaoBaiSlot(
+      Date.parse('2026-06-18T09:00:00+08:00'),
+      Date.parse('2026-06-18T15:00:00+08:00'),
+    ),
+    '早场跨到午后的场次应归小白时段',
+    issues,
+  )
+  assert(
+    !sessionOverlapsXiaoBaiSlot(
+      Date.parse('2026-06-18T09:00:00+08:00'),
+      Date.parse('2026-06-18T14:00:00+08:00'),
+    ),
+    '14:00 前结束的场次不应归小白',
+    issues,
+  )
 }
 
 async function testLiveDurationDedup(issues: string[]) {

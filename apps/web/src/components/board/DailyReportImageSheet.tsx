@@ -6,7 +6,10 @@ import {
   formatIntegerMoney,
   formatMoney,
   formatOrderCount,
+  formatPeopleCount,
   formatPercent,
+  formatRatePercent,
+  formatStayDurationSeconds,
 } from './dailyReportFormatters'
 
 export interface DailyReportAnchorRow {
@@ -23,6 +26,14 @@ export interface DailyReportAnchorRow {
   hourlyAmountYuan: number | null
   dealDensityMinutes: number | null
   amountRatio: number | null
+  viewSessionCount: number
+  joinUserCount: number
+  avgOnlineUserCount: number | null
+  avgViewDurationSeconds: number | null
+  newFollowerCount: number
+  dealUserCount: number
+  dealConversionRate: number | null
+  newFollowerRate: number | null
 }
 
 export interface DailyReportPayload {
@@ -36,6 +47,8 @@ export interface DailyReportPayload {
     totalInvalidOrderCount: number
     totalLiveDurationMinutes: number
     overallHourlyAmountYuan: number | null
+    liveRoomNewFollowers: Array<{ liveAccountName: string; newFollowerCount: number }>
+    totalNewFollowerCount: number
   }
   anchors: DailyReportAnchorRow[]
 }
@@ -76,6 +89,23 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} strong />
         <MetricLine label="真实卖出" value={formatOrderCount(row.soldOrderCount)} />
         <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />
+        <MetricLine label="场观人数" value={formatPeopleCount(row.viewSessionCount)} />
+        <MetricLine label="进房人数" value={formatPeopleCount(row.joinUserCount)} />
+        <MetricLine
+          label="平均在线"
+          value={
+            row.avgOnlineUserCount != null
+              ? formatPeopleCount(row.avgOnlineUserCount)
+              : '--'
+          }
+        />
+        <MetricLine
+          label="停留时长"
+          value={formatStayDurationSeconds(row.avgViewDurationSeconds)}
+        />
+        <MetricLine label="新增粉丝" value={formatPeopleCount(row.newFollowerCount)} />
+        <MetricLine label="成交率" value={formatRatePercent(row.dealConversionRate)} />
+        <MetricLine label="新增粉丝率" value={formatRatePercent(row.newFollowerRate)} />
         <MetricLine label="时均产出" value={formatHourly(row.hourlyAmountYuan)} />
         <MetricLine label="成交密度" value={formatDensity(row.dealDensityMinutes)} />
         <MetricLine
@@ -125,6 +155,25 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
             strong={data.summary.totalInvalidOrderCount > 0}
           />
         </div>
+        {(data.summary.liveRoomNewFollowers?.length ?? 0) > 0 && (
+          <div className="mt-4 border-t border-rose-100 pt-3 space-y-1">
+            <p className="text-[12px] text-slate-500">各直播号新增粉丝</p>
+            {data.summary.liveRoomNewFollowers.map((row) => (
+              <MetricLine
+                key={row.liveAccountName}
+                label={row.liveAccountName}
+                value={formatPeopleCount(row.newFollowerCount)}
+              />
+            ))}
+            {data.summary.liveRoomNewFollowers.length > 1 && (
+              <MetricLine
+                label="合计"
+                value={formatPeopleCount(data.summary.totalNewFollowerCount)}
+                strong
+              />
+            )}
+          </div>
+        )}
       </div>
 
       <div className="mt-4 space-y-3">

@@ -301,6 +301,62 @@ boardRouter.get('/operations-rankings', async (req, res) => {
   }
 })
 
+boardRouter.get('/operations-business-insight-actions', async (req, res) => {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    const scope = req.query.scope ? String(req.query.scope) : ''
+    if (!startDate || !endDate || !scope) {
+      sendFail(res, '请提供 startDate、endDate 与 scope', 400)
+      return
+    }
+    const { listBusinessInsightActions } = await import(
+      '../services/operations-business-insight-action.service'
+    )
+    const actions = await listBusinessInsightActions({ startDate, endDate, scope })
+    sendOk(res, { actions })
+  } catch (err) {
+    const mod = await import('../services/operations-business-insight-action.service')
+    if (err instanceof mod.BusinessInsightActionValidationError) {
+      sendFail(res, err.message, 400)
+      return
+    }
+    sendFail(res, err instanceof Error ? err.message : '加载经营建议处理状态失败', 500)
+  }
+})
+
+boardRouter.post('/operations-business-insight-actions', async (req, res) => {
+  try {
+    const body = req.body as Record<string, unknown> | undefined
+    const {
+      upsertBusinessInsightAction,
+      BusinessInsightActionValidationError,
+    } = await import('../services/operations-business-insight-action.service')
+    const action = await upsertBusinessInsightAction({
+      insightId: body?.insightId ? String(body.insightId) : '',
+      insightType: body?.insightType ? String(body.insightType) : '',
+      entityType: body?.entityType ? String(body.entityType) : '',
+      entityId: body?.entityId != null ? String(body.entityId) : undefined,
+      entityName: body?.entityName ? String(body.entityName) : '',
+      rangeStartDate: body?.rangeStartDate ? String(body.rangeStartDate) : '',
+      rangeEndDate: body?.rangeEndDate ? String(body.rangeEndDate) : '',
+      scope: body?.scope ? String(body.scope) : '',
+      status: body?.status ? String(body.status) : 'pending',
+      note: body?.note != null ? String(body.note) : undefined,
+      reviewResult: body?.reviewResult != null ? String(body.reviewResult) : undefined,
+      remindTomorrow: body?.remindTomorrow != null ? Boolean(body.remindTomorrow) : undefined,
+    })
+    sendOk(res, action)
+  } catch (err) {
+    const mod = await import('../services/operations-business-insight-action.service')
+    if (err instanceof mod.BusinessInsightActionValidationError) {
+      sendFail(res, err.message, 400)
+      return
+    }
+    sendFail(res, err instanceof Error ? err.message : '更新经营建议处理状态失败', 500)
+  }
+})
+
 boardRouter.get('/operations-report/weekly', async (req, res) => {
   try {
     const weekStart = req.query.weekStart ? String(req.query.weekStart) : ''

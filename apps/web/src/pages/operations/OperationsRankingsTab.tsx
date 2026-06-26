@@ -215,7 +215,13 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
       {section === 'summary' ? (
         <>
           <RankingSummaryCards items={data.bossSummary} />
-          <BusinessInsightCards insights={data.businessInsights} />
+          <BusinessInsightCards
+            insights={data.businessInsights}
+            rangeStartDate={rangeStart}
+            rangeEndDate={rangeEnd}
+            scope="custom"
+            onRefresh={load}
+          />
         </>
       ) : null}
 

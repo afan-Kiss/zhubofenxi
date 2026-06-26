@@ -611,3 +611,25 @@ model OpsReviewNote {
   @@unique([reportDate, reportType])
   @@index([reportType])
 }
+
+/// 运营报表：经营建议处理状态
+model OperationsBusinessInsightAction {
+  id             String   @id @default(cuid())
+  insightId      String
+  insightType    String
+  entityType     String
+  entityId       String?
+  entityName     String
+  rangeStartDate String
+  rangeEndDate   String
+  scope          String
+  status         String   @default("pending")
+  note           String?
+  reviewResult   String?
+  remindTomorrow Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([insightId, rangeStartDate, rangeEndDate, scope])
+  @@index([rangeStartDate, rangeEndDate, scope])
+}

@@ -19,6 +19,7 @@ import {
   buildBusinessInsightsFromSource,
   buildBusinessInsightsSourceFromComponents,
 } from './operations-business-insights.service'
+import { attachBusinessInsightActions } from './operations-business-insight-action.service'
 import type { BusinessInsightsPayload } from './operations-business-insights.types'
 import {
   productRoleLabel,
@@ -362,24 +363,31 @@ export async function buildWeeklyOperationsReport(params: {
 
   let businessInsights: BusinessInsightsPayload
   try {
-    businessInsights = buildBusinessInsightsFromSource(
-      buildBusinessInsightsSourceFromComponents({
+    businessInsights = await attachBusinessInsightActions(
+      buildBusinessInsightsFromSource(
+        buildBusinessInsightsSourceFromComponents({
+          startDate: params.weekStart,
+          endDate: params.weekEnd,
+          scope: 'weekly',
+          anchors: mergedAnchorRows,
+          products,
+          priceBands: aggregatedPriceBands,
+          afterSalesReasons: aggregatedAfterSales,
+          dimensions,
+          reviewNote,
+          summaryTraffic: {
+            dealUserCount: summaryBase.dealUserCount,
+            joinUserCount: summaryBase.joinUserCount,
+            viewSessionCount: summaryBase.viewSessionCount,
+          },
+          extraWarnings: rankings.productRankingQuality.warnings,
+        }),
+      ),
+      {
         startDate: params.weekStart,
         endDate: params.weekEnd,
         scope: 'weekly',
-        anchors: mergedAnchorRows,
-        products,
-        priceBands: aggregatedPriceBands,
-        afterSalesReasons: aggregatedAfterSales,
-        dimensions,
-        reviewNote,
-        summaryTraffic: {
-          dealUserCount: summaryBase.dealUserCount,
-          joinUserCount: summaryBase.joinUserCount,
-          viewSessionCount: summaryBase.viewSessionCount,
-        },
-        extraWarnings: rankings.productRankingQuality.warnings,
-      }),
+      },
     )
   } catch (err) {
     businessInsights = {

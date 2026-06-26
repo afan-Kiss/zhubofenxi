@@ -25,6 +25,7 @@ import {
   buildBusinessInsightsFromSource,
   type BusinessInsightsSource,
 } from './operations-business-insights.service'
+import { attachBusinessInsightActions } from './operations-business-insight-action.service'
 
 export type OperationsRankingsPreset =
   | 'today'
@@ -306,7 +307,14 @@ export async function getOperationsRankings(params: {
       afterSales,
       extraWarnings: payload.dataQuality.warnings,
     }
-    payload.businessInsights = buildBusinessInsightsFromSource(insightSource)
+    payload.businessInsights = await attachBusinessInsightActions(
+      buildBusinessInsightsFromSource(insightSource),
+      {
+        startDate,
+        endDate,
+        scope: params.scope ?? 'custom',
+      },
+    )
   } catch (err) {
     payload.businessInsights = {
       items: [],

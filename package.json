@@ -32,6 +32,7 @@
     "accept:operations-report-gray-check": "tsx apps/server/scripts/operations-report-gray-check.ts",
     "accept:operations-rankings": "tsx apps/server/scripts/operations-rankings-acceptance.ts",
     "accept:operations-business-insights": "tsx apps/server/scripts/operations-business-insights-acceptance.ts",
+    "accept:operations-business-insight-actions": "tsx apps/server/scripts/operations-business-insight-actions-acceptance.ts",
     "accept:metrics-exclusion": "tsx apps/server/scripts/metrics-exclusion-acceptance.ts",
     "accept:quality-refund": "tsx apps/server/scripts/dev/quality-refund-acceptance.ts",
     "check:business": "tsx apps/server/scripts/acceptance/check-business-rules.ts",

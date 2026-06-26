@@ -141,7 +141,13 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
         ))}
       </div>
 
-      <BusinessInsightCards insights={report.businessInsights} />
+      <BusinessInsightCards
+        insights={report.businessInsights}
+        rangeStartDate={dateKey}
+        rangeEndDate={dateKey}
+        scope="daily"
+        onRefresh={loadReport}
+      />
 
       {report.reportDataQuality?.warnings?.length ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">

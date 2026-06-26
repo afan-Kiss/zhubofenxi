@@ -40,6 +40,16 @@ export interface BusinessInsightEntity {
   name: string
 }
 
+export type BusinessInsightActionStatus = 'pending' | 'handled' | 'ignored' | 'reviewed'
+
+export interface BusinessInsightActionState {
+  status: BusinessInsightActionStatus
+  note?: string
+  reviewResult?: string
+  remindTomorrow?: boolean
+  updatedAt?: string
+}
+
 export interface BusinessInsightDataQuality {
   reliable: boolean
   confidence: BusinessInsightConfidence
@@ -56,6 +66,7 @@ export interface BusinessInsightItem {
   evidence: BusinessInsightEvidence[]
   relatedEntity: BusinessInsightEntity
   dataQuality: BusinessInsightDataQuality
+  actionState?: BusinessInsightActionState
 }
 
 export interface BusinessInsightsPayload {

@@ -161,6 +161,12 @@ function checkBusinessInsights(ctx: CheckContext, label: string, payload: Record
     if (!Array.isArray(ev) || ev.length === 0) {
       addFinding(ctx, 'P1', `${label} 经营建议缺少 evidence：${String(item.title ?? item.id)}`)
     }
+    const actionState = item.actionState as { status?: string } | undefined
+    if (!actionState?.status) {
+      addFinding(ctx, 'P1', `${label} 经营建议缺少 actionState.status：${String(item.title ?? item.id)}`)
+    } else if (!['pending', 'handled', 'ignored', 'reviewed'].includes(actionState.status)) {
+      addFinding(ctx, 'P1', `${label} actionState.status 非法：${actionState.status}`)
+    }
   }
   if (items.length > 8) addFinding(ctx, 'P2', `${label} 经营建议超过 8 条`)
   if (bi.dataQuality?.warnings?.length) {

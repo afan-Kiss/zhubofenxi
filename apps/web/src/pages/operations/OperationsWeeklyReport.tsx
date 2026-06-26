@@ -158,7 +158,13 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
         </div>
       </div>
 
-      <BusinessInsightCards insights={report.businessInsights} />
+      <BusinessInsightCards
+        insights={report.businessInsights}
+        rangeStartDate={weekStart}
+        rangeEndDate={weekEnd}
+        scope="weekly"
+        onRefresh={loadReport}
+      />
 
       <section>
         <h3 className="mb-2 text-sm font-semibold text-slate-900">每日趋势</h3>

@@ -1,6 +1,7 @@
 /**
  * 运营报表成品缓存：日报 / 周报 / 月报 / 榜单中心
  * 仅加速读取，不改变报表构建口径。
+ * 当前系统无登录和权限区分，所有人共用一份本地看板缓存（local_viewer / 本地看板）。
  */
 import { BUSINESS_SYNC_INTERVAL_MINUTES } from '../config/business-sync.constants'
 import { LOCAL_VIEWER_USER } from '../constants/local-viewer'
@@ -60,6 +61,20 @@ const pendingBuilds = new Map<string, Promise<OperationsReportCacheEntry>>()
 let prewarmRunning = false
 let prewarmPromise: Promise<{ warmed: number; failed: number; totalMs: number }> | null = null
 
+/** 运营报表缓存统一身份：无登录权限时全员共用 */
+export function getLocalViewerCacheIdentity(): { role: UserRole; username: string } {
+  return { role: LOCAL_VIEWER_USER.role, username: LOCAL_VIEWER_USER.username }
+}
+
+function normalizeCacheKeyInput(input: OperationsReportCacheKeyInput): OperationsReportCacheKeyInput {
+  const identity = getLocalViewerCacheIdentity()
+  return {
+    ...input,
+    role: identity.role,
+    username: identity.username,
+  }
+}
+
 function getCacheTtlMs(): number {
   const raw = process.env.OPERATIONS_REPORT_CACHE_TTL_MINUTES?.trim()
   const minutes = raw ? Number(raw) : BUSINESS_SYNC_INTERVAL_MINUTES
@@ -69,17 +84,18 @@ function getCacheTtlMs(): number {
 }
 
 export function buildOperationsReportCacheKey(input: OperationsReportCacheKeyInput): string {
-  const sections = (input.sections ?? []).slice().sort().join(',')
+  const normalized = normalizeCacheKeyInput(input)
+  const sections = (normalized.sections ?? []).slice().sort().join(',')
   return [
-    input.kind,
-    input.startDate,
-    input.endDate,
-    input.month ?? '',
-    input.preset ?? 'custom',
-    input.scope ?? '',
-    input.role ?? '',
-    input.username ?? '',
-    input.limit != null ? String(input.limit) : '',
+    normalized.kind,
+    normalized.startDate,
+    normalized.endDate,
+    normalized.month ?? '',
+    normalized.preset ?? 'custom',
+    normalized.scope ?? '',
+    normalized.role ?? '',
+    normalized.username ?? '',
+    normalized.limit != null ? String(normalized.limit) : '',
     sections,
   ].join('|')
 }
@@ -87,7 +103,7 @@ export function buildOperationsReportCacheKey(input: OperationsReportCacheKeyInp
 export function getOperationsReportCache<T>(
   input: OperationsReportCacheKeyInput,
 ): OperationsReportCacheEntry<T> | null {
-  const key = buildOperationsReportCacheKey(input)
+  const key = buildOperationsReportCacheKey(normalizeCacheKeyInput(input))
   return (cache.get(key) as OperationsReportCacheEntry<T> | undefined) ?? null
 }
 
@@ -184,9 +200,10 @@ export async function getOrBuildOperationsReportCache<T>(
   cache: OperationsReportCacheMeta
   warning?: string
 }> {
+  const normalizedInput = normalizeCacheKeyInput(input)
   const forceRebuild = options?.forceRebuild ?? false
   const staleWhileRevalidate = options?.staleWhileRevalidate ?? true
-  const key = buildOperationsReportCacheKey(input)
+  const key = buildOperationsReportCacheKey(normalizedInput)
   const existing = cache.get(key) as OperationsReportCacheEntry<T> | undefined
 
   if (!forceRebuild && existing && isEntryFresh(existing)) {
@@ -198,8 +215,8 @@ export async function getOrBuildOperationsReportCache<T>(
   }
 
   if (!forceRebuild && existing && !isEntryFresh(existing) && staleWhileRevalidate) {
-    logInfo('运营报表缓存', `cache stale hit ${input.kind} ${key}，后台刷新`)
-    scheduleBackgroundRebuild(input, builder)
+    logInfo('运营报表缓存', `cache stale hit ${normalizedInput.kind} ${key}，后台刷新`)
+    scheduleBackgroundRebuild(normalizedInput, builder)
     return {
       payload: existing.payload,
       cache: buildCacheMeta(existing, { hit: true, stale: true, refreshing: true }),
@@ -227,7 +244,7 @@ export async function getOrBuildOperationsReportCache<T>(
     }
   }
 
-  const buildPromise = executeBuild(input, builder).finally(() => {
+  const buildPromise = executeBuild(normalizedInput, builder).finally(() => {
     pendingBuilds.delete(key)
   })
   pendingBuilds.set(key, buildPromise as Promise<OperationsReportCacheEntry>)
@@ -268,7 +285,7 @@ export function resolveMonthlyCacheKeyInput(params: {
   const resolved = resolveMonthlyReportRange(params)
   const todayKey = formatDateKeyShanghai(new Date())
   const endDate = resolved.endDate > todayKey ? todayKey : resolved.endDate
-  return {
+  return normalizeCacheKeyInput({
     kind: 'monthly',
     startDate: resolved.startDate,
     endDate,
@@ -277,7 +294,12 @@ export function resolveMonthlyCacheKeyInput(params: {
     scope: params.month?.trim() ? 'monthly' : 'custom',
     role: params.role,
     username: params.username,
-  }
+  })
+}
+
+/** 验收脚本：列出当前内存中的缓存 key */
+export function listOperationsReportCacheKeys(): string[] {
+  return [...cache.keys()]
 }
 
 export function getOperationsReportCacheStatus(): {
@@ -315,7 +337,7 @@ type PrewarmTask = {
 }
 
 function prewarmIdentity(): { role: UserRole; username: string } {
-  return { role: LOCAL_VIEWER_USER.role, username: LOCAL_VIEWER_USER.username }
+  return getLocalViewerCacheIdentity()
 }
 
 async function buildPrewarmTasks(forceRebuild: boolean): Promise<PrewarmTask[]> {

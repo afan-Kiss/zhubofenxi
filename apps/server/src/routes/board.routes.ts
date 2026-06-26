@@ -253,14 +253,13 @@ boardRouter.get('/operations-report/daily', async (req, res) => {
       return
     }
     const preset = req.query.preset ? String(req.query.preset) : 'custom'
-    const role = req.user!.role as import('../types/roles').UserRole
-    const username = req.user!.username
     const { buildDailyOperationsReport } = await import(
       '../services/daily-operations-report.service'
     )
-    const { getOrBuildOperationsReportCache } = await import(
+    const { getOrBuildOperationsReportCache, getLocalViewerCacheIdentity } = await import(
       '../services/operations-report-cache.service'
     )
+    const viewer = getLocalViewerCacheIdentity()
     const result = await getOrBuildOperationsReportCache(
       {
         kind: 'daily',
@@ -268,16 +267,14 @@ boardRouter.get('/operations-report/daily', async (req, res) => {
         endDate,
         preset,
         scope: 'daily',
-        role,
-        username,
+        ...viewer,
       },
       () =>
         buildDailyOperationsReport({
           preset,
           startDate,
           endDate,
-          role,
-          username,
+          ...viewer,
         }),
     )
     sendOk(res, {
@@ -311,12 +308,11 @@ boardRouter.get('/operations-rankings', async (req, res) => {
       ? (String(req.query.scope) as 'daily' | 'weekly' | 'custom')
       : 'custom'
     const sections = req.query.sections ? String(req.query.sections).split(',') : undefined
-    const role = req.user!.role as import('../types/roles').UserRole
-    const username = req.user!.username
     const { getOperationsRankings } = await import('../services/operations-rankings.service')
-    const { getOrBuildOperationsReportCache } = await import(
+    const { getOrBuildOperationsReportCache, getLocalViewerCacheIdentity } = await import(
       '../services/operations-report-cache.service'
     )
+    const viewer = getLocalViewerCacheIdentity()
     const result = await getOrBuildOperationsReportCache(
       {
         kind: 'rankings',
@@ -326,8 +322,7 @@ boardRouter.get('/operations-rankings', async (req, res) => {
         scope,
         limit,
         sections,
-        role,
-        username,
+        ...viewer,
       },
       () =>
         getOperationsRankings({
@@ -337,8 +332,7 @@ boardRouter.get('/operations-rankings', async (req, res) => {
           scope,
           sections,
           limit,
-          role,
-          username,
+          ...viewer,
         }),
     )
     sendOk(res, {
@@ -444,14 +438,13 @@ boardRouter.get('/operations-report/weekly', async (req, res) => {
       return
     }
     const preset = req.query.preset ? String(req.query.preset) : 'custom'
-    const role = req.user!.role as import('../types/roles').UserRole
-    const username = req.user!.username
     const { buildWeeklyOperationsReport } = await import(
       '../services/weekly-operations-report.service'
     )
-    const { getOrBuildOperationsReportCache } = await import(
+    const { getOrBuildOperationsReportCache, getLocalViewerCacheIdentity } = await import(
       '../services/operations-report-cache.service'
     )
+    const viewer = getLocalViewerCacheIdentity()
     const result = await getOrBuildOperationsReportCache(
       {
         kind: 'weekly',
@@ -459,16 +452,14 @@ boardRouter.get('/operations-report/weekly', async (req, res) => {
         endDate: weekEnd,
         preset,
         scope: 'weekly',
-        role,
-        username,
+        ...viewer,
       },
       () =>
         buildWeeklyOperationsReport({
           weekStart,
           weekEnd,
           preset,
-          role,
-          username,
+          ...viewer,
         }),
     )
     sendOk(res, {
@@ -491,8 +482,6 @@ boardRouter.get('/operations-monthly-report', async (req, res) => {
       return
     }
     const preset = req.query.preset ? String(req.query.preset) : 'custom'
-    const role = req.user!.role as import('../types/roles').UserRole
-    const username = req.user!.username
     const {
       getMonthlyOperationsReport,
       MonthlyOperationsReportValidationError,
@@ -500,14 +489,15 @@ boardRouter.get('/operations-monthly-report', async (req, res) => {
     const {
       getOrBuildOperationsReportCache,
       resolveMonthlyCacheKeyInput,
+      getLocalViewerCacheIdentity,
     } = await import('../services/operations-report-cache.service')
+    const viewer = getLocalViewerCacheIdentity()
     const cacheKeyInput = resolveMonthlyCacheKeyInput({
       month,
       startDate,
       endDate,
       preset,
-      role,
-      username,
+      ...viewer,
     })
     const result = await getOrBuildOperationsReportCache(
       cacheKeyInput,
@@ -517,8 +507,7 @@ boardRouter.get('/operations-monthly-report', async (req, res) => {
           startDate,
           endDate,
           preset,
-          role,
-          username,
+          ...viewer,
         }),
     )
     sendOk(res, {

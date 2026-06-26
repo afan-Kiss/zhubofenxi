@@ -405,6 +405,36 @@ boardRouter.get('/operations-report/weekly', async (req, res) => {
   }
 })
 
+boardRouter.get('/operations-monthly-report', async (req, res) => {
+  try {
+    const month = req.query.month ? String(req.query.month) : undefined
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined
+    if (!month && (!startDate || !endDate)) {
+      sendFail(res, '请提供 month 或 startDate 与 endDate', 400)
+      return
+    }
+    const { getMonthlyOperationsReport, MonthlyOperationsReportValidationError } =
+      await import('../services/monthly-operations-report.service')
+    const data = await getMonthlyOperationsReport({
+      month,
+      startDate,
+      endDate,
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    const mod = await import('../services/monthly-operations-report.service')
+    if (err instanceof mod.MonthlyOperationsReportValidationError) {
+      sendFail(res, err.message, 400)
+      return
+    }
+    sendFail(res, err instanceof Error ? err.message : '加载运营月报失败', 500)
+  }
+})
+
 boardRouter.get('/operations-report/product-detail', async (req, res) => {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : ''

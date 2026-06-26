@@ -46,7 +46,7 @@ export const RankingSection: React.FC<SectionProps> = ({
       )}
       {sampleTooSmall ? (
         <div className="mt-2">
-          <p className="mb-1 text-xs font-medium text-amber-700">样本不足，仅参考</p>
+          <p className="mb-1 text-xs font-medium text-amber-700">样本太少，只能先参考，别直接下结论</p>
           {sampleTooSmall}
         </div>
       ) : null}

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import { formatRatePercent } from './operationsReportFormatters'
+import { PLAIN } from './operationPlainText'
 import type { BusinessInsightActionStatsPayload } from '../../pages/operations/operationsReportTypes'
 
 const TYPE_LABEL: Record<string, string> = {
@@ -81,9 +82,7 @@ export const BusinessInsightActionStatsCard: React.FC<Props> = ({
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <h4 className="text-sm font-semibold text-slate-900">经营建议执行统计</h4>
-      <p className="mt-1 text-xs text-slate-500">
-        统计当前周期内已记录的处理状态，未操作的建议不计入总数
-      </p>
+      <p className="mt-1 text-xs text-slate-500">{PLAIN.insightStatsNote}</p>
       <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-700">
         <span>共 {summary.total} 条</span>
         <span>待处理 {summary.pending}</span>

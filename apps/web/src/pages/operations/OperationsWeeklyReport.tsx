@@ -133,7 +133,7 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
           <p className="mt-1 text-base font-semibold">{formatIntegerMoney(s.validAmountYuan)}</p>
           {s.validAmountChangePercent != null ? (
             <p className="mt-1 text-xs text-slate-500">
-              较上周 {s.validAmountChangePercent >= 0 ? '+' : ''}
+              比上期 {s.validAmountChangePercent >= 0 ? '+' : ''}
               {s.validAmountChangePercent}%
             </p>
           ) : null}
@@ -143,7 +143,7 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
           <p className="mt-1 text-base font-semibold">{formatOrderCount(s.soldOrderCount)}</p>
           {s.soldOrderChangePercent != null ? (
             <p className="mt-1 text-xs text-slate-500">
-              较上周 {s.soldOrderChangePercent >= 0 ? '+' : ''}
+              比上期 {s.soldOrderChangePercent >= 0 ? '+' : ''}
               {s.soldOrderChangePercent}%
             </p>
           ) : null}

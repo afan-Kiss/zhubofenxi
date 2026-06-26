@@ -32,7 +32,7 @@ export const AnchorRankingTable: React.FC<Props> = ({ rows }) => {
             <th className="px-3 py-2">成交人数</th>
             <th className="px-3 py-2">成交率</th>
             <th className="px-3 py-2">新增粉丝</th>
-            <th className="px-3 py-2">说明</th>
+            <th className="px-3 py-2">上榜原因</th>
           </tr>
         </thead>
         <tbody>

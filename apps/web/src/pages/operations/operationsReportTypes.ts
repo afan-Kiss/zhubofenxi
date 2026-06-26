@@ -466,3 +466,79 @@ export interface WeeklyOperationsReportPayload {
   reviewNote: OpsReviewNotePayload | null
   businessInsights?: BusinessInsightsPayload
 }
+
+export interface MonthlyOperationsReportPayload {
+  range: {
+    month: string
+    startDate: string
+    endDate: string
+    prevStartDate?: string
+    prevEndDate?: string
+  }
+  title: string
+  summary: {
+    validAmountYuan: number
+    soldOrderCount: number
+    soldCount: number
+    buyerCount: number
+    averageOrderValue: number | null
+    productReturnOrderCount: number
+    productReturnRate: number | null
+    liveDurationHours: number | null
+    hourlyAmountYuan: number | null
+    viewSessionCount: number | null
+    joinUserCount: number | null
+    dealUserCount: number | null
+    dealConversionRate: number | null
+    newFollowerCount: number | null
+    followerConversionRate: number | null
+  }
+  compareWithPreviousMonth: {
+    validAmountYuanChangePercent: number | null
+    soldOrderCountChangePercent: number | null
+    productReturnRateChangePercent: number | null
+    dealConversionRateChangePercent: number | null
+    newFollowerCountChangePercent: number | null
+    warnings: string[]
+  }
+  dailyTrend: Array<{
+    date: string
+    validAmountYuan: number
+    soldOrderCount: number
+    productReturnOrderCount: number
+    productReturnRate: number | null
+  }>
+  rankings: {
+    anchors: {
+      byAmount: RankingListPayload<AnchorRankItem>
+      byOrders: RankingListPayload<AnchorRankItem>
+      byHourlyAmount: RankingListPayload<AnchorRankItem>
+      byDealConversion: RankingListPayload<AnchorRankItem>
+      byReturnRate: RankingListPayload<AnchorRankItem>
+    }
+    products: {
+      hot: RankingListPayload<ProductRankListItem>
+      highReturn: RankingListPayload<ProductRankListItem>
+      slow: RankingListPayload<ProductRankListItem>
+      highAverageOrderValue: RankingListPayload<ProductRankListItem>
+    }
+    priceBands: {
+      byAmount: RankingListPayload<PriceBandRankItem>
+      byShare: RankingListPayload<PriceBandRankItem>
+      byReturnRate: RankingListPayload<PriceBandRankItem>
+    }
+    afterSales: {
+      byReason: RankingListPayload<AfterSalesRankItem>
+      byRefundAmount: RankingListPayload<AfterSalesRankItem>
+    }
+  }
+  businessInsights: BusinessInsightsPayload
+  insightActionStats: BusinessInsightActionStatsPayload
+  plainLanguageSummary: {
+    title: string
+    items: Array<{ label: string; text: string; level: 'good' | 'warning' | 'bad' | 'info' }>
+  }
+  riskReminders: Array<{ text: string; level: 'warning' | 'info' }>
+  nextMonthActions: Array<{ text: string; evidence: BusinessInsightEvidence[] }>
+  dataQuality: { reliable: boolean; warnings: string[]; missingFields?: string[] }
+}

@@ -79,12 +79,12 @@ function formatDateLabel(dateKey: string): string {
   return `${Number(m[2])}.${Number(m[3])}`
 }
 
-function changePercent(current: number, previous: number): number | null {
+export function changePercent(current: number, previous: number): number | null {
   if (!Number.isFinite(current) || !Number.isFinite(previous) || previous <= 0) return null
   return Math.round(((current - previous) / previous) * 100)
 }
 
-function aggregateProductsFromSnapshots(
+export function aggregateProductsFromSnapshots(
   snapshots: DailyOperationsReportPayload[],
 ): OperationsProductRow[] {
   const map = new Map<string, OperationsProductRow & { topShopDayAmount: number }>()
@@ -241,7 +241,7 @@ function aggregateWeeklyAnchors(
   return [...map.values()].sort((a, b) => b.validAmountYuan - a.validAmountYuan)
 }
 
-function aggregatePriceBandsFromSnapshots(
+export function aggregatePriceBandsFromSnapshots(
   snapshots: DailyOperationsReportPayload[],
 ): DailyOperationsReportPayload['priceBands'] {
   const map = new Map<string, DailyOperationsReportPayload['priceBands'][number]>()
@@ -273,7 +273,7 @@ function aggregatePriceBandsFromSnapshots(
     .sort((a, b) => b.amountYuan - a.amountYuan)
 }
 
-function aggregateAfterSalesFromSnapshots(
+export function aggregateAfterSalesFromSnapshots(
   snapshots: DailyOperationsReportPayload[],
 ): DailyOperationsReportPayload['afterSalesReasons'] {
   const map = new Map<string, DailyOperationsReportPayload['afterSalesReasons'][number]>()

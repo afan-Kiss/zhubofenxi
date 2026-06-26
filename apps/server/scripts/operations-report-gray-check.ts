@@ -933,6 +933,52 @@ async function main() {
   checkInsightActionStats(ctx, '榜单 custom', insightStatsCustom)
   checkInsightActionStats(ctx, '日报 daily', insightStatsDaily)
   checkInsightActionStats(ctx, '周报 weekly', insightStatsWeekly)
+
+  let monthlyReport: Record<string, unknown> | null = null
+  try {
+    const monthKey = ctx.targetDate.slice(0, 7)
+    const monthlyRes = await fetchJson<Record<string, unknown>>(
+      '/api/board/operations-monthly-report',
+      { month: monthKey },
+    )
+    if (monthlyRes.status === 200 && monthlyRes.body.ok && monthlyRes.body.data) {
+      monthlyReport = monthlyRes.body.data as Record<string, unknown>
+    } else if (monthlyRes.status !== 200) {
+      addFinding(ctx, 'P1', `月报接口 HTTP ${monthlyRes.status}`)
+    }
+    const badMonth = await fetchJson<Record<string, unknown>>(
+      '/api/board/operations-monthly-report',
+      { month: '2026-13' },
+    )
+    if (badMonth.status !== 400) {
+      addFinding(ctx, 'P1', `月报非法 month 应返回 400，实际 ${badMonth.status}`)
+    }
+  } catch (err) {
+    addFinding(ctx, 'P1', `月报接口失败：${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  if (monthlyReport) {
+    const summary = monthlyReport.summary as Record<string, unknown> | undefined
+    if (!summary || Number.isNaN(Number(summary.validAmountYuan))) {
+      addFinding(ctx, 'P1', '月报 summary.validAmountYuan 无效')
+    }
+    if (!monthlyReport.rankings) addFinding(ctx, 'P1', '月报 rankings 缺失')
+    checkBusinessInsights(ctx, '月报', monthlyReport)
+    checkInsightActionStats(ctx, '月报 custom', monthlyReport.insightActionStats as Record<string, unknown>)
+    const dq = monthlyReport.dataQuality as { warnings?: unknown } | undefined
+    if (!Array.isArray(dq?.warnings)) addFinding(ctx, 'P1', '月报 dataQuality.warnings 应为数组')
+    const json = JSON.stringify(monthlyReport)
+    for (const f of ['phone', 'mobile', 'platformRawJson', 'rawJson']) {
+      if (json.includes(`"${f}"`)) addFinding(ctx, 'P1', `月报含隐私字段 ${f}`)
+    }
+    const cmp = monthlyReport.compareWithPreviousMonth as { warnings?: string[] } | undefined
+    if (cmp?.warnings?.some((w) => w.includes('上月'))) {
+      addNote(ctx, '月报无上月对比数据时已给出 warning')
+    }
+  } else {
+    addFinding(ctx, 'P1', '月报数据缺失')
+  }
+
   const weeklyCaliber = weekly.summary
     ? await checkWeeklyCaliber(ctx, weekly, ctx.weekStart, ctx.weekEnd)
     : null
@@ -959,6 +1005,11 @@ async function main() {
     `- HTTP：${rankings.bossSummary ? '200 ✅' : '失败 ❌'}`,
     `- bossSummary / anchors / products / priceBands / businessInsights：${rankings.bossSummary ? '已返回' : '缺失'}`,
     `- 经营建议执行统计：${insightStatsCustom ? '已返回 ✅' : '缺失 ❌'}`,
+  ])
+
+  addSection(ctx, '月报接口', [
+    `- HTTP：${monthlyReport?.summary ? '200 ✅' : '失败 ❌'}`,
+    `- summary / rankings / businessInsights / insightActionStats：${monthlyReport?.summary ? '已返回' : '缺失'}`,
   ])
 
   if (dailyCaliber) {

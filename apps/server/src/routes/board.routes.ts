@@ -268,6 +268,39 @@ boardRouter.get('/operations-report/daily', async (req, res) => {
   }
 })
 
+boardRouter.get('/operations-rankings', async (req, res) => {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    if (!startDate || !endDate) {
+      sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) {
+      sendFail(res, 'startDate 与 endDate 格式应为 YYYY-MM-DD', 400)
+      return
+    }
+    const rawLimit = req.query.limit ? Number(req.query.limit) : 10
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(Math.round(rawLimit), 1), 50)
+      : 10
+    const { getOperationsRankings } = await import('../services/operations-rankings.service')
+    const data = await getOperationsRankings({
+      startDate,
+      endDate,
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      scope: req.query.scope ? String(req.query.scope) as 'daily' | 'weekly' | 'custom' : 'custom',
+      sections: req.query.sections ? String(req.query.sections).split(',') : undefined,
+      limit,
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '加载榜单中心失败', 500)
+  }
+})
+
 boardRouter.get('/operations-report/weekly', async (req, res) => {
   try {
     const weekStart = req.query.weekStart ? String(req.query.weekStart) : ''

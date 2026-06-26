@@ -85,6 +85,8 @@ function testWeeklyTrafficRates(issues: string[]) {
     joinUserCount: null,
     viewSessionCount: null,
     avgOrderAmountYuan: 100,
+    avgOnlineUserCount: null,
+    avgViewDurationSeconds: null,
     totalLiveDurationMinutes: 60,
     hourlyAmountYuan: 100,
     liveRoomNewFollowers: [],
@@ -104,6 +106,8 @@ function testWeeklyTrafficRates(issues: string[]) {
       priceBands: [],
       afterSalesReasons: [],
       reviewNote: null,
+      rankings: {} as DailyOperationsReportPayload['rankings'],
+      reportDataQuality: { reliable: true, warnings: [] },
     },
     {
       dateLabel: '1.2',
@@ -116,6 +120,8 @@ function testWeeklyTrafficRates(issues: string[]) {
       priceBands: [],
       afterSalesReasons: [],
       reviewNote: null,
+      rankings: {} as DailyOperationsReportPayload['rankings'],
+      reportDataQuality: { reliable: true, warnings: [] },
     },
   ])
   assert(missingTraffic.dealConversionRate === null, '缺失进房/成交人数时周报成交率为 null', issues)
@@ -139,6 +145,8 @@ function testWeeklyTrafficRates(issues: string[]) {
       priceBands: [],
       afterSalesReasons: [],
       reviewNote: null,
+      rankings: {} as DailyOperationsReportPayload['rankings'],
+      reportDataQuality: { reliable: true, warnings: [] },
     },
     {
       dateLabel: '1.2',
@@ -159,6 +167,8 @@ function testWeeklyTrafficRates(issues: string[]) {
       priceBands: [],
       afterSalesReasons: [],
       reviewNote: null,
+      rankings: {} as DailyOperationsReportPayload['rankings'],
+      reportDataQuality: { reliable: true, warnings: [] },
     },
   ])
   assert(

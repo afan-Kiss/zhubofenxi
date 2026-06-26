@@ -236,9 +236,36 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
       </section>
 
       <section>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">价格带分析</h3>
+        <h3 className="mb-1 text-sm font-semibold text-slate-900">价格带分析</h3>
+        <p className="mb-2 text-xs text-slate-500">
+          金额占比按成交金额计算；退货率见榜单中心「商品退货订单率」口径
+        </p>
         <PriceBandTable rows={report.priceBands} />
       </section>
+
+      {report.productRankingQuality || report.reviewNote ? (
+        <section className="rounded-2xl border border-amber-100 bg-amber-50/50 p-3">
+          <h3 className="mb-2 text-sm font-semibold text-slate-900">风险与数据质量</h3>
+          {report.productRankingQuality?.warnings?.length ? (
+            <ul className="mb-2 text-xs text-amber-800 space-y-0.5">
+              {report.productRankingQuality.warnings.map((w) => (
+                <li key={w}>{w}</li>
+              ))}
+            </ul>
+          ) : null}
+          {report.summary.dealUserCount == null ? (
+            <p className="text-xs text-amber-800">官方成交人数缺失，成交率不可计算</p>
+          ) : null}
+          {report.highReturnProducts.length === 0 && report.highReturnSampleTooSmall?.length ? (
+            <p className="text-xs text-amber-800">高退货商品均未达正式榜样本门槛</p>
+          ) : null}
+          {!report.productRankingQuality?.slowReliable ? (
+            <p className="text-xs text-amber-800">
+              滞销：无曝光/主推依据，未生成自然滞销榜
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       <section>
         <h3 className="mb-2 text-sm font-semibold text-slate-900">售后原因</h3>

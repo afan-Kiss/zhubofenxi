@@ -3,7 +3,9 @@ import { toPng } from 'html-to-image'
 import { createPortal } from 'react-dom'
 import { apiRequest } from '../../lib/api'
 import { AnchorOperationsTable } from '../../components/operations/AnchorOperationsTable'
+import { ProductRankingTable } from '../../components/operations/ProductRankingTable'
 import { ProductPerformanceTable } from '../../components/operations/ProductPerformanceTable'
+import { RankingQualityBadge } from '../../components/operations/RankingQualityBadge'
 import { PriceBandTable } from '../../components/operations/PriceBandTable'
 import { AfterSalesReasonTable } from '../../components/operations/AfterSalesReasonTable'
 import { OperationsReviewEditor } from '../../components/operations/OperationsReviewEditor'
@@ -16,6 +18,7 @@ import {
   formatPeopleCount,
   formatPercent,
   formatRatePercent,
+  formatStayDurationSeconds,
 } from '../../components/operations/operationsReportFormatters'
 import type {
   DailyOperationsReportPayload,
@@ -123,6 +126,12 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
           ['成交率', formatRatePercent(s.dealConversionRate)],
           ['直播时长', formatDuration(s.totalLiveDurationMinutes)],
           ['每小时成交', formatHourly(s.hourlyAmountYuan)],
+          ['场观', formatPeopleCount(s.viewSessionCount)],
+          ['进房人数', formatPeopleCount(s.joinUserCount)],
+          ['平均在线', formatPeopleCount(s.avgOnlineUserCount)],
+          ['平均停留', formatStayDurationSeconds(s.avgViewDurationSeconds)],
+          ['新增粉丝', formatPeopleCount(s.totalNewFollowerCount)],
+          ['粉丝率', formatRatePercent(s.newFollowerRate)],
         ].map(([label, value]) => (
           <div key={label} className="rounded-2xl border border-slate-200 bg-white p-3">
             <p className="text-xs text-slate-500">{label}</p>
@@ -130,6 +139,44 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
           </div>
         ))}
       </div>
+
+      {report.reportDataQuality?.warnings?.length ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
+          <p className="mb-1 text-xs font-medium text-amber-800">数据质量提示</p>
+          <ul className="text-xs text-amber-800 space-y-0.5">
+            {report.reportDataQuality.warnings.map((w) => (
+              <li key={w}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {report.rankings ? (
+        <section className="grid gap-4 lg:grid-cols-2">
+          <div>
+            <h3 className="mb-1 text-sm font-semibold text-slate-900">热卖前 10</h3>
+            <p className="mb-2 text-xs text-slate-500">按有效成交金额、成交订单、成交件数排序</p>
+            <ProductRankingTable rows={report.rankings.products.hot.items} />
+          </div>
+          <div>
+            <h3 className="mb-1 text-sm font-semibold text-slate-900">高退货前 10</h3>
+            <p className="mb-2 text-xs text-slate-500">按商品退货订单率排序（成交≥3单为正式榜）</p>
+            <ProductRankingTable rows={report.rankings.products.highReturn.items} />
+            {report.rankings.products.highReturn.sampleTooSmall?.length ? (
+              <div className="mt-2">
+                <p className="mb-1 text-xs font-medium text-amber-700">样本不足，仅参考</p>
+                <ProductRankingTable rows={report.rankings.products.highReturn.sampleTooSmall} />
+              </div>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      <RankingQualityBadge
+        reliable={report.reportDataQuality?.reliable ?? true}
+        confidence={report.reportDataQuality?.reliable ? 'high' : 'insufficient'}
+        warnings={report.reportDataQuality?.warnings}
+      />
 
       <section>
         <h3 className="mb-2 text-sm font-semibold text-slate-900">主播表现</h3>

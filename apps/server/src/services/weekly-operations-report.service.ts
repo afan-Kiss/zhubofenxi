@@ -123,6 +123,10 @@ function aggregateWeeklySummary(
   let dealUserCount: number | null = null
   let joinUserCount: number | null = null
   let viewSessionCount: number | null = null
+  let avgOnlineWeighted = 0
+  let avgOnlineWeight = 0
+  let avgStayWeighted = 0
+  let avgStayWeight = 0
   const liveRoomMap = new Map<string, number>()
 
   for (const snap of snapshots) {
@@ -140,6 +144,15 @@ function aggregateWeeklySummary(
     }
     if (snap.summary.viewSessionCount != null) {
       viewSessionCount = (viewSessionCount ?? 0) + snap.summary.viewSessionCount
+    }
+    const joinW = snap.summary.joinUserCount ?? snap.summary.viewSessionCount ?? 0
+    if (snap.summary.avgOnlineUserCount != null && joinW > 0) {
+      avgOnlineWeighted += snap.summary.avgOnlineUserCount * joinW
+      avgOnlineWeight += joinW
+    }
+    if (snap.summary.avgViewDurationSeconds != null && joinW > 0) {
+      avgStayWeighted += snap.summary.avgViewDurationSeconds * joinW
+      avgStayWeight += joinW
     }
     for (const row of snap.summary.liveRoomNewFollowers) {
       liveRoomMap.set(row.liveAccountName, (liveRoomMap.get(row.liveAccountName) ?? 0) + row.newFollowerCount)
@@ -159,6 +172,8 @@ function aggregateWeeklySummary(
     dealUserCount,
     joinUserCount,
     viewSessionCount,
+    avgOnlineUserCount: avgOnlineWeight > 0 ? avgOnlineWeighted / avgOnlineWeight : null,
+    avgViewDurationSeconds: avgStayWeight > 0 ? avgStayWeighted / avgStayWeight : null,
     dealConversionRate:
       joinUserCount != null && joinUserCount > 0 && dealUserCount != null
         ? dealUserCount / joinUserCount

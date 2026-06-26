@@ -38,8 +38,12 @@ import {
 import { getOpsReviewNote, type OpsReviewNotePayload } from './ops-review-note.service'
 import type { OperationsPriceBandRow } from './operations-price-band.service'
 import type { AfterSalesReasonRow } from './after-sales-reason-normalize.service'
-import type { AnchorConfig } from '../types/analysis'
-import type { AnalyzedOrderView } from '../types/analysis'
+import type { AnchorConfig, AnalyzedOrderView } from '../types/analysis'
+import type { DailyReportRankingsSlice } from './operations-rankings.types'
+import {
+  buildDailyReportDataQualityWarnings,
+  buildDailyReportRankingsSlice,
+} from './operations-daily-rankings.service'
 
 export interface DailyOperationsAnchorRow {
   anchorName: string
@@ -76,6 +80,8 @@ export interface DailyOperationsSummary {
   dealConversionRate: number | null
   joinUserCount: number | null
   viewSessionCount: number | null
+  avgOnlineUserCount: number | null
+  avgViewDurationSeconds: number | null
   avgOrderAmountYuan: number | null
   totalLiveDurationMinutes: number
   hourlyAmountYuan: number | null
@@ -95,6 +101,11 @@ export interface DailyOperationsReportPayload {
   priceBands: OperationsPriceBandRow[]
   afterSalesReasons: AfterSalesReasonRow[]
   reviewNote: OpsReviewNotePayload | null
+  rankings: DailyReportRankingsSlice
+  reportDataQuality: {
+    reliable: boolean
+    warnings: string[]
+  }
 }
 
 function formatDailyReportDateLabel(dateKey: string): string {
@@ -231,7 +242,7 @@ function buildAnchorRow(params: {
   }
 }
 
-function buildAfterSalesItems(views: AnalyzedOrderView[]): Array<{
+export function buildAfterSalesItemsFromViews(views: AnalyzedOrderView[]): Array<{
   rawReason: string
   refundAmountCent: number
   orderKey: string
@@ -381,13 +392,31 @@ export async function buildDailyOperationsReport(params: {
 
   const products = await buildOperationsProductAnalysis(performanceViewsAll, scoped.rawByMatch)
   const priceBands = buildOperationsPriceBandAnalysis(performanceViewsAll)
-  const afterSalesReasons = aggregateAfterSalesReasons(buildAfterSalesItems(performanceViewsAll))
+  const afterSalesReasons = aggregateAfterSalesReasons(buildAfterSalesItemsFromViews(performanceViewsAll))
   const reviewNote = await getOpsReviewNote({
     reportDate: params.startDate,
     reportType: 'daily',
   })
 
   const dateLabel = formatDailyReportDateLabel(params.startDate)
+
+  const rankings = await buildDailyReportRankingsSlice({
+    anchors: anchorRows,
+    products,
+    limit: 10,
+  })
+  const reportDataQuality = {
+    reliable: rankings.products.hot.items.length > 0 || anchorRows.some((a) => a.validAmountYuan > 0),
+    warnings: buildDailyReportDataQualityWarnings({
+      summary: {
+        dealUserCount: summaryTraffic.dealUserCount,
+        joinUserCount: summaryTraffic.joinUserCount,
+        viewSessionCount: summaryTraffic.viewSessionCount,
+      },
+      rankings,
+      reviewNote,
+    }),
+  }
 
   return {
     dateLabel,
@@ -405,6 +434,8 @@ export async function buildDailyOperationsReport(params: {
       dealConversionRate: summaryTraffic.dealConversionRate,
       joinUserCount: summaryTraffic.joinUserCount,
       viewSessionCount: summaryTraffic.viewSessionCount,
+      avgOnlineUserCount: summaryTraffic.avgOnlineUserCount,
+      avgViewDurationSeconds: summaryTraffic.avgViewDurationSeconds,
       avgOrderAmountYuan: roundYuan(safeDivide(validAmountYuan, soldOrderCount)),
       totalLiveDurationMinutes,
       hourlyAmountYuan: roundYuan(
@@ -419,6 +450,8 @@ export async function buildDailyOperationsReport(params: {
     priceBands,
     afterSalesReasons,
     reviewNote,
+    rankings,
+    reportDataQuality,
   }
 }
 
@@ -432,7 +465,7 @@ export async function buildOperationsAfterSalesDetail(params: {
 }) {
   const scoped = await getBoardScopedViewsForRange(params)
   const performanceViews = getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
-  const items = buildAfterSalesItems(performanceViews)
+  const items = buildAfterSalesItemsFromViews(performanceViews)
   const filtered = params.category
     ? aggregateAfterSalesReasons(items).filter((r) => r.category === params.category)
     : aggregateAfterSalesReasons(items)

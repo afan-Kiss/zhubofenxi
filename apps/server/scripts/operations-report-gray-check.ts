@@ -116,6 +116,31 @@ async function fetchDaily(dateKey: string) {
   return body.data
 }
 
+async function fetchRankings(startDate: string, endDate: string) {
+  const { status, body } = await fetchJson<Record<string, unknown>>('/api/board/operations-rankings', {
+    startDate,
+    endDate,
+    preset: 'custom',
+  })
+  if (status !== 200 || !body.ok || body.data == null) {
+    throw new Error(`榜单中心接口失败 HTTP ${status}: ${body.message ?? 'unknown'}`)
+  }
+  return body.data
+}
+
+function checkRankingsApi(ctx: CheckContext, rankings: Record<string, unknown>) {
+  if (!rankings.bossSummary) addFinding(ctx, 'P1', '榜单中心 bossSummary 缺失')
+  if (!rankings.anchors) addFinding(ctx, 'P1', '榜单中心 anchors 缺失')
+  if (!rankings.products) addFinding(ctx, 'P1', '榜单中心 products 缺失')
+  const dq = rankings.dataQuality as { warnings?: string[] } | undefined
+  if (!dq) addFinding(ctx, 'P1', '榜单中心 dataQuality 缺失')
+  const json = JSON.stringify(rankings)
+  for (const f of ['phone', 'mobile', 'address', 'receiver', 'buyerName', 'platformRawJson', 'rawJson']) {
+    if (json.includes(`"${f}"`)) addFinding(ctx, 'P1', `榜单中心响应含隐私字段名 ${f}`)
+  }
+  if (dq?.warnings?.length) addNote(ctx, `榜单 warnings：${dq.warnings.slice(0, 3).join('；')}`)
+}
+
 async function fetchWeekly(weekStart: string, weekEnd: string) {
   const { status, body } = await fetchJson<Record<string, unknown>>('/api/board/operations-report/weekly', {
     weekStart,
@@ -171,7 +196,7 @@ function checkTrafficNotFakeZero(
 
 function checkDailyStructure(ctx: CheckContext, daily: Record<string, unknown>) {
   const summary = daily.summary as Record<string, unknown> | undefined
-  const requiredTop = ['summary', 'anchors', 'products', 'priceBands', 'afterSalesReasons', 'reviewNote']
+  const requiredTop = ['summary', 'anchors', 'products', 'priceBands', 'afterSalesReasons', 'reviewNote', 'rankings', 'reportDataQuality']
   for (const key of requiredTop) {
     if (!(key in daily)) {
       addFinding(ctx, 'P1', `日报缺少字段 ${key}`)
@@ -780,19 +805,23 @@ async function main() {
 
   let daily: Record<string, unknown>
   let weekly: Record<string, unknown>
+  let rankings: Record<string, unknown>
   try {
     daily = await fetchDaily(ctx.targetDate)
     weekly = await fetchWeekly(ctx.weekStart, ctx.weekEnd)
+    rankings = await fetchRankings(ctx.weekStart, ctx.weekEnd)
   } catch (err) {
     addFinding(ctx, 'P0', err instanceof Error ? err.message : String(err))
     daily = {}
     weekly = {}
+    rankings = {}
   }
 
   checkDailyStructure(ctx, daily)
   const dailyCaliber = daily.summary ? checkDailyCaliber(ctx, daily) : null
   checkWeeklyStructure(ctx, weekly)
   checkProductRankings(ctx, weekly)
+  checkRankingsApi(ctx, rankings)
   const weeklyCaliber = weekly.summary
     ? await checkWeeklyCaliber(ctx, weekly, ctx.weekStart, ctx.weekEnd)
     : null
@@ -812,7 +841,12 @@ async function main() {
   addSection(ctx, '周报接口结果', [
     `- HTTP：${weekly.summary ? '200 ✅' : '失败 ❌'}`,
     `- dailyTrend 条数：${getDailyTrend(weekly).length}`,
-    `- anchors / hotProducts / slowProducts / highReturnProducts / productRankingQuality：${weekly.summary ? '已返回' : '缺失'}`,
+    `- anchors / hotProducts / productRankingQuality：${weekly.summary ? '已返回' : '缺失'}`,
+  ])
+
+  addSection(ctx, '榜单中心接口', [
+    `- HTTP：${rankings.bossSummary ? '200 ✅' : '失败 ❌'}`,
+    `- bossSummary / anchors / products / priceBands：${rankings.bossSummary ? '已返回' : '缺失'}`,
   ])
 
   if (dailyCaliber) {

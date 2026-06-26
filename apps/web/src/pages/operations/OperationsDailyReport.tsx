@@ -24,7 +24,9 @@ import {
 import type {
   DailyOperationsReportPayload,
   OpsReviewNotePayload,
+  WithOperationsReportCacheMeta,
 } from './operationsReportTypes'
+import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
 
 interface Props {
   dateKey: string
@@ -35,6 +37,10 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<DailyOperationsReportPayload | null>(null)
+  const [cacheMeta, setCacheMeta] = useState<
+    WithOperationsReportCacheMeta<DailyOperationsReportPayload>['cacheMeta']
+  >(undefined)
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
@@ -43,10 +49,13 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
     setError(null)
     try {
       const qs = new URLSearchParams({ startDate: dateKey, endDate: dateKey, preset: 'custom' })
-      const data = await apiRequest<DailyOperationsReportPayload>(
+      const data = await apiRequest<WithOperationsReportCacheMeta<DailyOperationsReportPayload>>(
         `/api/board/operations-report/daily?${qs}`,
       )
-      setReport(data)
+      const { cacheMeta: meta, cacheWarning: warning, ...payload } = data
+      setReport(payload)
+      setCacheMeta(meta)
+      setCacheWarning(warning ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载运营日报失败')
       setReport(null)
@@ -106,7 +115,10 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
+        <div className="min-w-0">
+          <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
+          <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} className="mt-1" />
+        </div>
         <button
           type="button"
           disabled={exporting}

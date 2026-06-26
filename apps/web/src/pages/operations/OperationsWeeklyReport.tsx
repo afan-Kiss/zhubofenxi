@@ -14,7 +14,9 @@ import {
 import type {
   OpsReviewNotePayload,
   WeeklyOperationsReportPayload,
+  WithOperationsReportCacheMeta,
 } from './operationsReportTypes'
+import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
 
 interface Props {
   weekStart: string
@@ -49,16 +51,23 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<WeeklyOperationsReportPayload | null>(null)
+  const [cacheMeta, setCacheMeta] = useState<
+    WithOperationsReportCacheMeta<WeeklyOperationsReportPayload>['cacheMeta']
+  >(undefined)
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
 
   const loadReport = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const qs = new URLSearchParams({ weekStart, weekEnd, preset: 'custom' })
-      const data = await apiRequest<WeeklyOperationsReportPayload>(
+      const data = await apiRequest<WithOperationsReportCacheMeta<WeeklyOperationsReportPayload>>(
         `/api/board/operations-report/weekly?${qs}`,
       )
-      setReport(data)
+      const { cacheMeta: meta, cacheWarning: warning, ...payload } = data
+      setReport(payload)
+      setCacheMeta(meta)
+      setCacheWarning(warning ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载运营周报失败')
       setReport(null)
@@ -125,7 +134,10 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
 
   return (
     <div className="space-y-4">
-      <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
+      <div>
+        <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
+        <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} className="mt-1" />
+      </div>
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-slate-200 bg-white p-3">

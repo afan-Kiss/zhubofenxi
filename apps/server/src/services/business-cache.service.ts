@@ -367,4 +367,12 @@ export function invalidateBusinessBoardCache(): void {
 /** 数据同步 / 维护后：先清空再按常用范围重建（与其他重建请求串行执行） */
 export async function invalidateAndRebuildBusinessBoardCache(reason: string): Promise<void> {
   await enqueueFullBusinessCacheRebuild(reason)
+  void import('./operations-report-cache.service').then((m) =>
+    m.prewarmCommonOperationsReportsAfterBusinessSync().catch((err) => {
+      logWarn(
+        '运营报表缓存',
+        `同步后提前计算失败：${err instanceof Error ? err.message : String(err)}`,
+      )
+    }),
+  )
 }

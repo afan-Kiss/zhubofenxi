@@ -25,6 +25,15 @@ export function startDeferredBootTasks(): void {
 
     await warmupBusinessCacheOnBoot()
 
+    void import('./operations-report-cache.service').then((m) =>
+      m.prewarmCommonOperationsReportsOnBoot().catch((err) => {
+        logWarn(
+          '运营报表缓存',
+          `提前计算失败：${err instanceof Error ? err.message : String(err)}`,
+        )
+      }),
+    )
+
     try {
       await ensureBuyerRankingCacheOnBoot()
     } catch (err) {

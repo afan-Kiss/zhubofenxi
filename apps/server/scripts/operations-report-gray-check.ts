@@ -116,6 +116,52 @@ async function fetchDaily(dateKey: string) {
   return body.data
 }
 
+async function fetchDailyTimed(dateKey: string) {
+  const started = Date.now()
+  const data = await fetchDaily(dateKey)
+  return { data, ms: Date.now() - started }
+}
+
+async function fetchWeeklyTimed(weekStart: string, weekEnd: string) {
+  const started = Date.now()
+  const data = await fetchWeekly(weekStart, weekEnd)
+  return { data, ms: Date.now() - started }
+}
+
+async function fetchRankingsTimed(startDate: string, endDate: string) {
+  const started = Date.now()
+  const data = await fetchRankings(startDate, endDate)
+  return { data, ms: Date.now() - started }
+}
+
+function checkCacheMeta(
+  ctx: CheckContext,
+  label: string,
+  payload: Record<string, unknown>,
+  secondHit?: boolean,
+) {
+  const meta = payload.cacheMeta as
+    | {
+        hit?: boolean
+        stale?: boolean
+        builtAt?: string | null
+        message?: string
+      }
+    | undefined
+  if (!meta) {
+    addFinding(ctx, 'P1', `${label} 缺少 cacheMeta`)
+    return
+  }
+  if (typeof meta.hit !== 'boolean') addFinding(ctx, 'P1', `${label} cacheMeta.hit 无效`)
+  if (typeof meta.stale !== 'boolean') addFinding(ctx, 'P1', `${label} cacheMeta.stale 无效`)
+  if (secondHit && meta.hit !== true) {
+    addFinding(ctx, 'P1', `${label} 第二次请求 cacheMeta.hit 应为 true`)
+  }
+  if (meta.message && /cacheMeta|TTL|prewarm|payload|stale|hit/i.test(meta.message)) {
+    addFinding(ctx, 'P1', `${label} cacheMeta.message 含技术词`)
+  }
+}
+
 async function fetchRankings(startDate: string, endDate: string) {
   const { status, body } = await fetchJson<Record<string, unknown>>('/api/board/operations-rankings', {
     startDate,
@@ -886,10 +932,49 @@ async function main() {
   let daily: Record<string, unknown>
   let weekly: Record<string, unknown>
   let rankings: Record<string, unknown>
+  let cachePerfNotes: string[] = []
   try {
-    daily = await fetchDaily(ctx.targetDate)
-    weekly = await fetchWeekly(ctx.weekStart, ctx.weekEnd)
-    rankings = await fetchRankings(ctx.weekStart, ctx.weekEnd)
+    const dailyTimed = await fetchDailyTimed(ctx.targetDate)
+    daily = dailyTimed.data
+    checkCacheMeta(ctx, '日报', daily)
+
+    const dailySecond = await fetchDailyTimed(ctx.targetDate)
+    checkCacheMeta(ctx, '日报（第二次）', dailySecond.data, true)
+    cachePerfNotes.push(
+      `- 日报：首次 ${dailyTimed.ms}ms / 第二次 ${dailySecond.ms}ms${dailySecond.ms < dailyTimed.ms ? ' ✅' : ''}`,
+    )
+    const dSummary = (daily.summary as Record<string, unknown> | undefined) ?? {}
+    const d2Summary = (dailySecond.data.summary as Record<string, unknown> | undefined) ?? {}
+    if (dSummary.soldOrderCount != null && d2Summary.soldOrderCount != null) {
+      if (dSummary.soldOrderCount !== d2Summary.soldOrderCount) {
+        addFinding(ctx, 'P1', '日报缓存命中改变了 soldOrderCount')
+      }
+    }
+
+    const weeklyTimed = await fetchWeeklyTimed(ctx.weekStart, ctx.weekEnd)
+    weekly = weeklyTimed.data
+    checkCacheMeta(ctx, '周报', weekly)
+    const weeklySecond = await fetchWeeklyTimed(ctx.weekStart, ctx.weekEnd)
+    checkCacheMeta(ctx, '周报（第二次）', weeklySecond.data, true)
+    cachePerfNotes.push(
+      `- 周报：首次 ${weeklyTimed.ms}ms / 第二次 ${weeklySecond.ms}ms${weeklySecond.ms < weeklyTimed.ms ? ' ✅' : ''}`,
+    )
+
+    const rankingsTimed = await fetchRankingsTimed(ctx.weekStart, ctx.weekEnd)
+    rankings = rankingsTimed.data
+    checkCacheMeta(ctx, '榜单中心', rankings)
+    const rankingsSecond = await fetchRankingsTimed(ctx.weekStart, ctx.weekEnd)
+    checkCacheMeta(ctx, '榜单中心（第二次）', rankingsSecond.data, true)
+    cachePerfNotes.push(
+      `- 榜单：首次 ${rankingsTimed.ms}ms / 第二次 ${rankingsSecond.ms}ms${rankingsSecond.ms < rankingsTimed.ms ? ' ✅' : ''}`,
+    )
+    const rAnchors = (rankings.anchors as { byAmount?: { items?: unknown[] } } | undefined)?.byAmount
+      ?.items
+    const r2Anchors = (rankingsSecond.data.anchors as { byAmount?: { items?: unknown[] } } | undefined)
+      ?.byAmount?.items
+    if (Array.isArray(rAnchors) && Array.isArray(r2Anchors) && rAnchors.length !== r2Anchors.length) {
+      addFinding(ctx, 'P1', '榜单缓存命中改变了 anchors 数量')
+    }
   } catch (err) {
     addFinding(ctx, 'P0', err instanceof Error ? err.message : String(err))
     daily = {}
@@ -943,6 +1028,23 @@ async function main() {
     )
     if (monthlyRes.status === 200 && monthlyRes.body.ok && monthlyRes.body.data) {
       monthlyReport = monthlyRes.body.data as Record<string, unknown>
+      checkCacheMeta(ctx, '月报', monthlyReport)
+      const monthlySecond = await fetchJson<Record<string, unknown>>(
+        '/api/board/operations-monthly-report',
+        { month: monthKey },
+      )
+      if (monthlySecond.status === 200 && monthlySecond.body.ok && monthlySecond.body.data) {
+        checkCacheMeta(ctx, '月报（第二次）', monthlySecond.body.data as Record<string, unknown>, true)
+        const m1 = (monthlyReport.summary as Record<string, unknown> | undefined) ?? {}
+        const m2 = (monthlySecond.body.data as Record<string, unknown>).summary as
+          | Record<string, unknown>
+          | undefined
+        if (m1.validAmountYuan != null && m2?.validAmountYuan != null) {
+          if (m1.validAmountYuan !== m2.validAmountYuan) {
+            addFinding(ctx, 'P1', '月报缓存命中改变了 validAmountYuan')
+          }
+        }
+      }
     } else if (monthlyRes.status !== 200) {
       addFinding(ctx, 'P1', `月报接口 HTTP ${monthlyRes.status}`)
     }
@@ -1061,6 +1163,13 @@ async function main() {
       : `- 默认脱敏：${privacy.masked ? '通过 ✅' : '未验证'}`,
     '- local_viewer 下 confirmRaw=1 不返回完整 raw',
   ])
+
+  if (cachePerfNotes.length > 0) {
+    addSection(ctx, '报表缓存性能', [
+      ...cachePerfNotes,
+      '- 目标：第二次请求尽量 < 500ms，且明显快于首次',
+    ])
+  }
 
   const verdict = resolveVerdict(ctx)
   const report = buildMarkdownReport(ctx, verdict, {

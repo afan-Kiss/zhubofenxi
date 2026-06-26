@@ -9,7 +9,8 @@ import { RankingSummaryCards } from '../../components/operations/RankingSummaryC
 import { BusinessInsightCards } from '../../components/operations/BusinessInsightCards'
 import { RankingSection } from '../../components/operations/RankingMetricTooltip'
 import { RankingQualityBadge } from '../../components/operations/RankingQualityBadge'
-import type { OperationsRankingsPayload } from './operationsReportTypes'
+import type { OperationsRankingsPayload, WithOperationsReportCacheMeta } from './operationsReportTypes'
+import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
 
 type RankingsTab = 'summary' | 'anchors' | 'products' | 'priceBands' | 'afterSales'
 
@@ -27,6 +28,10 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<OperationsRankingsPayload | null>(null)
+  const [cacheMeta, setCacheMeta] = useState<
+    WithOperationsReportCacheMeta<OperationsRankingsPayload>['cacheMeta']
+  >(undefined)
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
   const [section, setSection] = useState<RankingsTab>('summary')
   const [rangeStart, setRangeStart] = useState(startDate)
   const [rangeEnd, setRangeEnd] = useState(endDate)
@@ -42,10 +47,13 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
         preset: rangePreset,
         scope: 'custom',
       })
-      const res = await apiRequest<OperationsRankingsPayload>(
+      const res = await apiRequest<WithOperationsReportCacheMeta<OperationsRankingsPayload>>(
         `/api/board/operations-rankings?${qs}`,
       )
-      setData(res)
+      const { cacheMeta: meta, cacheWarning: warning, ...payload } = res
+      setData(payload)
+      setCacheMeta(meta)
+      setCacheWarning(warning ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载榜单失败')
       setData(null)
@@ -116,6 +124,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
   return (
     <div className="space-y-4">
+      <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} />
       <div className="flex flex-wrap items-center gap-2">
         {['today', 'yesterday', 'thisWeek', 'lastWeek', 'thisMonth', 'custom'].map((p) => (
           <button

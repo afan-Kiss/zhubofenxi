@@ -542,3 +542,18 @@ export interface MonthlyOperationsReportPayload {
   nextMonthActions: Array<{ text: string; evidence: BusinessInsightEvidence[] }>
   dataQuality: { reliable: boolean; warnings: string[]; missingFields?: string[] }
 }
+
+export interface OperationsReportCacheMeta {
+  hit: boolean
+  stale: boolean
+  builtAt: string | null
+  expiresAt: string | null
+  buildDurationMs: number | null
+  refreshing?: boolean
+  message?: string
+}
+
+export type WithOperationsReportCacheMeta<T> = T & {
+  cacheMeta?: OperationsReportCacheMeta
+  cacheWarning?: string
+}

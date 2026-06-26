@@ -16,7 +16,8 @@ import {
   formatPeopleCount,
   formatRatePercent,
 } from '../../components/operations/operationsReportFormatters'
-import type { MonthlyOperationsReportPayload } from './operationsReportTypes'
+import type { MonthlyOperationsReportPayload, WithOperationsReportCacheMeta } from './operationsReportTypes'
+import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
 
 interface Props {
   month: string
@@ -33,16 +34,23 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<MonthlyOperationsReportPayload | null>(null)
+  const [cacheMeta, setCacheMeta] = useState<
+    WithOperationsReportCacheMeta<MonthlyOperationsReportPayload>['cacheMeta']
+  >(undefined)
+  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
 
   const loadReport = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const qs = new URLSearchParams({ month, preset: 'custom' })
-      const data = await apiRequest<MonthlyOperationsReportPayload>(
+      const data = await apiRequest<WithOperationsReportCacheMeta<MonthlyOperationsReportPayload>>(
         `/api/board/operations-monthly-report?${qs}`,
       )
-      setReport(data)
+      const { cacheMeta: meta, cacheWarning: warning, ...payload } = data
+      setReport(payload)
+      setCacheMeta(meta)
+      setCacheWarning(warning ?? null)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载运营月报失败')
       setReport(null)
@@ -83,6 +91,7 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
     <div className="space-y-6">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
+        <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} className="mt-1" />
         <p className="mt-1 text-xs text-slate-500">
           {report.range.startDate} ~ {report.range.endDate}
         </p>

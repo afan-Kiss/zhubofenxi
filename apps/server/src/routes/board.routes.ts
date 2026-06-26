@@ -252,17 +252,39 @@ boardRouter.get('/operations-report/daily', async (req, res) => {
       sendFail(res, '运营日报仅支持单日范围', 400)
       return
     }
+    const preset = req.query.preset ? String(req.query.preset) : 'custom'
+    const role = req.user!.role as import('../types/roles').UserRole
+    const username = req.user!.username
     const { buildDailyOperationsReport } = await import(
       '../services/daily-operations-report.service'
     )
-    const data = await buildDailyOperationsReport({
-      preset: req.query.preset ? String(req.query.preset) : 'custom',
-      startDate,
-      endDate,
-      role: req.user!.role as import('../types/roles').UserRole,
-      username: req.user!.username,
+    const { getOrBuildOperationsReportCache } = await import(
+      '../services/operations-report-cache.service'
+    )
+    const result = await getOrBuildOperationsReportCache(
+      {
+        kind: 'daily',
+        startDate,
+        endDate,
+        preset,
+        scope: 'daily',
+        role,
+        username,
+      },
+      () =>
+        buildDailyOperationsReport({
+          preset,
+          startDate,
+          endDate,
+          role,
+          username,
+        }),
+    )
+    sendOk(res, {
+      ...result.payload,
+      cacheMeta: result.cache,
+      ...(result.warning ? { cacheWarning: result.warning } : {}),
     })
-    sendOk(res, data)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '加载运营日报失败', 500)
   }
@@ -284,18 +306,46 @@ boardRouter.get('/operations-rankings', async (req, res) => {
     const limit = Number.isFinite(rawLimit)
       ? Math.min(Math.max(Math.round(rawLimit), 1), 50)
       : 10
+    const preset = req.query.preset ? String(req.query.preset) : 'custom'
+    const scope = req.query.scope
+      ? (String(req.query.scope) as 'daily' | 'weekly' | 'custom')
+      : 'custom'
+    const sections = req.query.sections ? String(req.query.sections).split(',') : undefined
+    const role = req.user!.role as import('../types/roles').UserRole
+    const username = req.user!.username
     const { getOperationsRankings } = await import('../services/operations-rankings.service')
-    const data = await getOperationsRankings({
-      startDate,
-      endDate,
-      preset: req.query.preset ? String(req.query.preset) : 'custom',
-      scope: req.query.scope ? String(req.query.scope) as 'daily' | 'weekly' | 'custom' : 'custom',
-      sections: req.query.sections ? String(req.query.sections).split(',') : undefined,
-      limit,
-      role: req.user!.role as import('../types/roles').UserRole,
-      username: req.user!.username,
+    const { getOrBuildOperationsReportCache } = await import(
+      '../services/operations-report-cache.service'
+    )
+    const result = await getOrBuildOperationsReportCache(
+      {
+        kind: 'rankings',
+        startDate,
+        endDate,
+        preset,
+        scope,
+        limit,
+        sections,
+        role,
+        username,
+      },
+      () =>
+        getOperationsRankings({
+          startDate,
+          endDate,
+          preset,
+          scope,
+          sections,
+          limit,
+          role,
+          username,
+        }),
+    )
+    sendOk(res, {
+      ...result.payload,
+      cacheMeta: result.cache,
+      ...(result.warning ? { cacheWarning: result.warning } : {}),
     })
-    sendOk(res, data)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '加载榜单中心失败', 500)
   }
@@ -346,6 +396,10 @@ boardRouter.post('/operations-business-insight-actions', async (req, res) => {
       reviewResult: body?.reviewResult != null ? String(body.reviewResult) : undefined,
       remindTomorrow: body?.remindTomorrow != null ? Boolean(body.remindTomorrow) : undefined,
     })
+    const { invalidateOperationsReportCache } = await import(
+      '../services/operations-report-cache.service'
+    )
+    invalidateOperationsReportCache('经营建议处理状态已更新')
     sendOk(res, action)
   } catch (err) {
     const mod = await import('../services/operations-business-insight-action.service')
@@ -389,17 +443,39 @@ boardRouter.get('/operations-report/weekly', async (req, res) => {
       sendFail(res, '请提供 weekStart 与 weekEnd', 400)
       return
     }
+    const preset = req.query.preset ? String(req.query.preset) : 'custom'
+    const role = req.user!.role as import('../types/roles').UserRole
+    const username = req.user!.username
     const { buildWeeklyOperationsReport } = await import(
       '../services/weekly-operations-report.service'
     )
-    const data = await buildWeeklyOperationsReport({
-      weekStart,
-      weekEnd,
-      preset: req.query.preset ? String(req.query.preset) : 'custom',
-      role: req.user!.role as import('../types/roles').UserRole,
-      username: req.user!.username,
+    const { getOrBuildOperationsReportCache } = await import(
+      '../services/operations-report-cache.service'
+    )
+    const result = await getOrBuildOperationsReportCache(
+      {
+        kind: 'weekly',
+        startDate: weekStart,
+        endDate: weekEnd,
+        preset,
+        scope: 'weekly',
+        role,
+        username,
+      },
+      () =>
+        buildWeeklyOperationsReport({
+          weekStart,
+          weekEnd,
+          preset,
+          role,
+          username,
+        }),
+    )
+    sendOk(res, {
+      ...result.payload,
+      cacheMeta: result.cache,
+      ...(result.warning ? { cacheWarning: result.warning } : {}),
     })
-    sendOk(res, data)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '加载运营周报失败', 500)
   }
@@ -414,17 +490,42 @@ boardRouter.get('/operations-monthly-report', async (req, res) => {
       sendFail(res, '请提供 month 或 startDate 与 endDate', 400)
       return
     }
-    const { getMonthlyOperationsReport, MonthlyOperationsReportValidationError } =
-      await import('../services/monthly-operations-report.service')
-    const data = await getMonthlyOperationsReport({
+    const preset = req.query.preset ? String(req.query.preset) : 'custom'
+    const role = req.user!.role as import('../types/roles').UserRole
+    const username = req.user!.username
+    const {
+      getMonthlyOperationsReport,
+      MonthlyOperationsReportValidationError,
+    } = await import('../services/monthly-operations-report.service')
+    const {
+      getOrBuildOperationsReportCache,
+      resolveMonthlyCacheKeyInput,
+    } = await import('../services/operations-report-cache.service')
+    const cacheKeyInput = resolveMonthlyCacheKeyInput({
       month,
       startDate,
       endDate,
-      preset: req.query.preset ? String(req.query.preset) : 'custom',
-      role: req.user!.role as import('../types/roles').UserRole,
-      username: req.user!.username,
+      preset,
+      role,
+      username,
     })
-    sendOk(res, data)
+    const result = await getOrBuildOperationsReportCache(
+      cacheKeyInput,
+      () =>
+        getMonthlyOperationsReport({
+          month,
+          startDate,
+          endDate,
+          preset,
+          role,
+          username,
+        }),
+    )
+    sendOk(res, {
+      ...result.payload,
+      cacheMeta: result.cache,
+      ...(result.warning ? { cacheWarning: result.warning } : {}),
+    })
   } catch (err) {
     const mod = await import('../services/monthly-operations-report.service')
     if (err instanceof mod.MonthlyOperationsReportValidationError) {
@@ -432,6 +533,32 @@ boardRouter.get('/operations-monthly-report', async (req, res) => {
       return
     }
     sendFail(res, err instanceof Error ? err.message : '加载运营月报失败', 500)
+  }
+})
+
+boardRouter.get('/operations-report-cache/status', requireMaintenanceTools, async (_req, res) => {
+  try {
+    const { getOperationsReportCacheStatus } = await import(
+      '../services/operations-report-cache.service'
+    )
+    sendOk(res, getOperationsReportCacheStatus())
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '读取运营报表缓存状态失败', 500)
+  }
+})
+
+boardRouter.post('/operations-report-cache/prewarm', requireMaintenanceTools, async (req, res) => {
+  try {
+    const body = req.body as { force?: boolean } | undefined
+    const { prewarmOperationsReportCache } = await import(
+      '../services/operations-report-cache.service'
+    )
+    const result = await prewarmOperationsReportCache('手动触发', {
+      forceRebuild: body?.force === true,
+    })
+    sendOk(res, result)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '运营报表缓存预热失败', 500)
   }
 })
 

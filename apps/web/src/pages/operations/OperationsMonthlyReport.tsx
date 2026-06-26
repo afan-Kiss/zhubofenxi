@@ -25,6 +25,8 @@ import {
   productDrillTarget,
 } from '../../components/operations/operationsBiDrillHelpers'
 import type { OperationsBiDrillContextProps, OperationsBiDrillRequest } from './operationsBiDrillTypes'
+import { OperationsCoreMetrics, CollapsibleWarnings } from '../../components/operations/charts/OperationsCoreMetrics'
+import { MonthlyReportCharts } from '../../components/operations/charts/MonthlyReportCharts'
 
 interface Props {
   month: string
@@ -107,7 +109,7 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 overflow-x-hidden">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
         <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} className="mt-1" />
@@ -116,56 +118,62 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
         </p>
       </div>
 
-      <section className="space-y-3">
-        <h3 className="text-sm font-semibold text-slate-900">本月总览</h3>
-        <p className="text-xs text-slate-500">{PLAIN.monthlyOverviewHint}</p>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <OperationsMetricDrillCard
-            label={PLAIN.validAmount}
-            value={formatIntegerMoney(s.validAmountYuan)}
-            drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
-          />
-          <OperationsMetricDrillCard
-            label={PLAIN.soldOrders}
-            value={formatOrderCount(s.soldOrderCount)}
-            drillRequest={{ ...drillBase, target: 'summary_orders' }}
-          />
-          <MetricCard label={PLAIN.soldCount} value={String(s.soldCount)} />
-          <MetricCard label="客单价" value={formatIntegerMoney(s.averageOrderValue)} />
-          <OperationsMetricDrillCard
-            label={PLAIN.productReturnRate}
-            value={formatRatePercent(s.productReturnRate)}
-            drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
-          />
-          <MetricCard
-            label="直播时长"
-            value={s.liveDurationHours != null ? `${s.liveDurationHours.toFixed(1)} 小时` : '--'}
-          />
-          <OperationsMetricDrillCard
-            label="每小时成交"
-            value={formatHourly(s.hourlyAmountYuan)}
-            drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
-          />
-          <MetricCard label="场观" value={formatPeopleCount(s.viewSessionCount)} />
-          <MetricCard label="进房" value={formatPeopleCount(s.joinUserCount)} />
-          <OperationsMetricDrillCard
-            label="成交人数"
-            value={formatPeopleCount(s.dealUserCount)}
-            drillRequest={{ ...drillBase, target: 'summary_buyer_count' }}
-          />
-          <OperationsMetricDrillCard
-            label={PLAIN.dealRate}
-            value={
-              s.dealConversionRate != null
-                ? formatRatePercent(s.dealConversionRate)
-                : PLAIN.dealRateMissing
-            }
-            drillRequest={{ ...drillBase, target: 'summary_deal_conversion' }}
-          />
-          <MetricCard label="新增粉丝" value={formatPeopleCount(s.newFollowerCount)} />
-          <MetricCard label={PLAIN.followerRate} value={formatRatePercent(s.followerConversionRate)} />
-        </div>
-      </section>
+      <OperationsCoreMetrics
+        core={
+          <>
+            <OperationsMetricDrillCard
+              label={PLAIN.validAmount}
+              value={formatIntegerMoney(s.validAmountYuan)}
+              drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+            />
+            <OperationsMetricDrillCard
+              label={PLAIN.soldOrders}
+              value={formatOrderCount(s.soldOrderCount)}
+              drillRequest={{ ...drillBase, target: 'summary_orders' }}
+            />
+            <OperationsMetricDrillCard
+              label={PLAIN.productReturnRate}
+              value={formatRatePercent(s.productReturnRate)}
+              drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
+            />
+            <OperationsMetricDrillCard
+              label={PLAIN.dealRate}
+              value={
+                s.dealConversionRate != null
+                  ? formatRatePercent(s.dealConversionRate)
+                  : PLAIN.dealRateMissing
+              }
+              drillRequest={{ ...drillBase, target: 'summary_deal_conversion' }}
+            />
+          </>
+        }
+        more={
+          <>
+            <MetricCard label={PLAIN.soldCount} value={String(s.soldCount)} />
+            <MetricCard label="客单价" value={formatIntegerMoney(s.averageOrderValue)} />
+            <MetricCard
+              label="直播时长"
+              value={s.liveDurationHours != null ? `${s.liveDurationHours.toFixed(1)} 小时` : '--'}
+            />
+            <OperationsMetricDrillCard
+              label="每小时成交"
+              value={formatHourly(s.hourlyAmountYuan)}
+              drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+            />
+            <MetricCard label="场观" value={formatPeopleCount(s.viewSessionCount)} />
+            <MetricCard label="进房" value={formatPeopleCount(s.joinUserCount)} />
+            <OperationsMetricDrillCard
+              label="成交人数"
+              value={formatPeopleCount(s.dealUserCount)}
+              drillRequest={{ ...drillBase, target: 'summary_buyer_count' }}
+            />
+            <MetricCard label="新增粉丝" value={formatPeopleCount(s.newFollowerCount)} />
+            <MetricCard label={PLAIN.followerRate} value={formatRatePercent(s.followerConversionRate)} />
+          </>
+        }
+      />
+
+      <MonthlyReportCharts drillContext={rankingDrillContext} report={report} />
 
       <section className="space-y-2">
         <h3 className="text-sm font-semibold text-slate-900">跟上月对比</h3>
@@ -192,17 +200,13 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
             value={formatChangePercent(cmp.newFollowerCountChangePercent)}
           />
         </div>
-        {cmp.warnings.map((w) => (
-          <p key={w} className="text-xs text-amber-700">
-            {humanizeWarning(w)}
-          </p>
-        ))}
+        {cmp.warnings.length > 0 ? <CollapsibleWarnings warnings={cmp.warnings.map(humanizeWarning)} /> : null}
       </section>
 
       <section className="space-y-2">
         <h3 className="text-sm font-semibold text-slate-900">{report.plainLanguageSummary.title}</h3>
         <div className="grid gap-2 sm:grid-cols-2">
-          {report.plainLanguageSummary.items.map((item) => (
+          {report.plainLanguageSummary.items.slice(0, 4).map((item) => (
             <div
               key={item.label}
               className={`rounded-2xl border p-3 text-xs ${LEVEL_CLASS[item.level]}`}
@@ -214,37 +218,8 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
         </div>
       </section>
 
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">每日趋势</h3>
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-          <table className="min-w-[720px] w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600">
-              <tr>
-                <th className="px-3 py-2">日期</th>
-                <th className="px-3 py-2">{PLAIN.validAmount}</th>
-                <th className="px-3 py-2">{PLAIN.soldOrders}</th>
-                <th className="px-3 py-2">商品退货单</th>
-                <th className="px-3 py-2">{PLAIN.productReturnRate}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.dailyTrend.map((row) => (
-                <tr key={row.date} className="border-t border-slate-100">
-                  <td className="px-3 py-2">{row.date}</td>
-                  <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
-                  <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
-                  <td className="px-3 py-2">{formatOrderCount(row.productReturnOrderCount)}</td>
-                  <td className="px-3 py-2">{formatRatePercent(row.productReturnRate)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
       <section className="space-y-4">
-        <h3 className="text-sm font-semibold text-slate-900">主播月度表现</h3>
-        <p className="text-xs text-slate-500">{PLAIN.anchorAmountHint}</p>
+        <h3 className="text-sm font-semibold text-slate-900">主播月度明细</h3>
         {(
           [
             report.rankings.anchors.byAmount,

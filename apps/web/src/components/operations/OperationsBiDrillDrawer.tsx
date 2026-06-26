@@ -5,7 +5,7 @@ import {
   formatOrderCount,
   formatRatePercent,
 } from './operationsReportFormatters'
-import type { OperationsBiDrillPayload } from '../../pages/operations/operationsBiDrillTypes'
+import type { OperationsBiDrillPayload, OperationsBiDrillOrderRow } from '../../pages/operations/operationsBiDrillTypes'
 
 interface Props {
   open: boolean
@@ -36,6 +36,7 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
 }) => {
   const [openingOrder, setOpeningOrder] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   if (!open) return null
 
@@ -52,10 +53,10 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/30">
-      <div className="flex h-full w-full max-w-4xl flex-col bg-white shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 md:items-stretch md:justify-end">
+      <div className="flex h-[92vh] w-full max-w-full flex-col rounded-t-2xl bg-white shadow-xl md:h-full md:max-w-4xl md:rounded-none">
         <div className="flex items-start justify-between border-b border-slate-200 px-4 py-3">
-          <div>
+          <div className="min-w-0 pr-2">
             <h2 className="text-base font-semibold text-slate-900">
               {payload?.title ?? '数据来源'}
             </h2>
@@ -67,7 +68,7 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600"
+            className="shrink-0 rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600"
           >
             关闭
           </button>
@@ -95,7 +96,7 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                 </div>
               ) : null}
 
-              <div className="grid gap-2 sm:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                 <Metric label="订单数" value={formatOrderCount(payload.summary.orderCount)} />
                 <Metric
                   label="有效成交金额"
@@ -117,68 +118,72 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                 </p>
               ))}
 
-              <div className="overflow-x-auto rounded-xl border border-slate-200">
-                <table className="min-w-[900px] w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-600">
-                    <tr>
-                      <th className="px-2 py-2">支付时间</th>
-                      <th className="px-2 py-2">订单号</th>
-                      <th className="px-2 py-2">主播</th>
-                      <th className="px-2 py-2">店铺</th>
-                      <th className="px-2 py-2">商品</th>
-                      <th className="px-2 py-2">有效成交金额</th>
-                      <th className="px-2 py-2">商品退款</th>
-                      <th className="px-2 py-2">售后原因</th>
-                      <th className="px-2 py-2">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {payload.rows.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
-                          没有找到组成订单。
-                        </td>
-                      </tr>
-                    ) : (
-                      payload.rows.map((row) => (
-                        <tr key={row.orderId} className="border-t border-slate-100">
-                          <td className="px-2 py-2">{row.payTime ?? '—'}</td>
-                          <td className="px-2 py-2 font-mono">{row.orderNo}</td>
-                          <td className="px-2 py-2">{row.anchorName ?? '—'}</td>
-                          <td className="px-2 py-2">{row.shopName ?? '—'}</td>
-                          <td className="px-2 py-2">
-                            {row.productName}
-                            {row.skuName ? ` / ${row.skuName}` : ''}
-                          </td>
-                          <td className="px-2 py-2">
-                            {formatIntegerMoney(row.validAmountYuan ?? 0)}
-                          </td>
-                          <td className="px-2 py-2">
-                            {formatIntegerMoney(row.productRefundAmountYuan ?? 0)}
-                          </td>
-                          <td className="px-2 py-2">{row.normalizedAfterSalesReason ?? '—'}</td>
-                          <td className="px-2 py-2">
-                            {row.qianfanDetailAvailable ? (
-                              <button
-                                type="button"
-                                disabled={openingOrder === row.orderNo}
-                                onClick={() => void handleOpenQianfan(row.orderNo)}
-                                className="text-rose-700 hover:underline disabled:opacity-50"
-                              >
-                                {openingOrder === row.orderNo
-                                  ? '打开中…'
-                                  : '打开千帆订单详情'}
-                              </button>
-                            ) : (
-                              <span className="text-slate-400">暂不可用</span>
-                            )}
-                          </td>
+              {payload.rows.length === 0 ? (
+                <p className="py-6 text-center text-sm text-slate-500">没有找到组成订单。</p>
+              ) : (
+                <>
+                  <div className="space-y-2 md:hidden">
+                    {payload.rows.map((row) => (
+                      <MobileOrderCard
+                        key={row.orderId}
+                        row={row}
+                        expanded={expandedId === row.orderId}
+                        onToggle={() =>
+                          setExpandedId((id) => (id === row.orderId ? null : row.orderId))
+                        }
+                        openingOrder={openingOrder}
+                        onOpenQianfan={handleOpenQianfan}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="hidden overflow-x-auto rounded-xl border border-slate-200 md:block">
+                    <table className="min-w-[900px] w-full text-left text-xs">
+                      <thead className="bg-slate-50 text-slate-600">
+                        <tr>
+                          <th className="px-2 py-2">支付时间</th>
+                          <th className="px-2 py-2">订单号</th>
+                          <th className="px-2 py-2">主播</th>
+                          <th className="px-2 py-2">店铺</th>
+                          <th className="px-2 py-2">商品</th>
+                          <th className="px-2 py-2">有效成交金额</th>
+                          <th className="px-2 py-2">商品退款</th>
+                          <th className="px-2 py-2">售后原因</th>
+                          <th className="px-2 py-2">操作</th>
                         </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {payload.rows.map((row) => (
+                          <tr key={row.orderId} className="border-t border-slate-100">
+                            <td className="px-2 py-2">{row.payTime ?? '—'}</td>
+                            <td className="px-2 py-2 font-mono">{row.orderNo}</td>
+                            <td className="px-2 py-2">{row.anchorName ?? '—'}</td>
+                            <td className="px-2 py-2">{row.shopName ?? '—'}</td>
+                            <td className="px-2 py-2">
+                              {row.productName}
+                              {row.skuName ? ` / ${row.skuName}` : ''}
+                            </td>
+                            <td className="px-2 py-2">
+                              {formatIntegerMoney(row.validAmountYuan ?? 0)}
+                            </td>
+                            <td className="px-2 py-2">
+                              {formatIntegerMoney(row.productRefundAmountYuan ?? 0)}
+                            </td>
+                            <td className="px-2 py-2">{row.normalizedAfterSalesReason ?? '—'}</td>
+                            <td className="px-2 py-2">
+                              <QianfanButton
+                                row={row}
+                                openingOrder={openingOrder}
+                                onOpen={handleOpenQianfan}
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
 
               {payload.pagination.totalPages > 1 ? (
                 <div className="flex items-center gap-2 text-sm">
@@ -219,3 +224,54 @@ function Metric({ label, value }: { label: string; value: string }) {
     </div>
   )
 }
+
+const QianfanButton: React.FC<{
+  row: OperationsBiDrillOrderRow
+  openingOrder: string | null
+  onOpen: (orderNo: string) => void
+}> = ({ row, openingOrder, onOpen }) =>
+  row.qianfanDetailAvailable ? (
+    <button
+      type="button"
+      disabled={openingOrder === row.orderNo}
+      onClick={() => void onOpen(row.orderNo)}
+      className="text-rose-700 hover:underline disabled:opacity-50"
+    >
+      {openingOrder === row.orderNo ? '打开中…' : '打开千帆订单详情'}
+    </button>
+  ) : (
+    <span className="text-slate-400">暂不可用</span>
+  )
+
+const MobileOrderCard: React.FC<{
+  row: OperationsBiDrillOrderRow
+  expanded: boolean
+  onToggle: () => void
+  openingOrder: string | null
+  onOpenQianfan: (orderNo: string) => void
+}> = ({ row, expanded, onToggle, openingOrder, onOpenQianfan }) => (
+  <div className="rounded-xl border border-slate-200 p-3 text-xs">
+    <div className="flex items-start justify-between gap-2">
+      <div className="min-w-0">
+        <p className="font-medium text-slate-900">{row.payTime ?? '—'}</p>
+        <p className="mt-1 truncate text-slate-700">{row.productName ?? '—'}</p>
+        <p className="mt-1 font-semibold text-slate-900">
+          {formatIntegerMoney(row.validAmountYuan ?? 0)}
+        </p>
+      </div>
+      <QianfanButton row={row} openingOrder={openingOrder} onOpen={onOpenQianfan} />
+    </div>
+    <button type="button" onClick={onToggle} className="mt-2 text-slate-500 underline">
+      {expanded ? '收起详情' : '展开详情'}
+    </button>
+    {expanded ? (
+      <div className="mt-2 space-y-1 text-slate-600">
+        <p>订单号：{row.orderNo}</p>
+        <p>主播：{row.anchorName ?? '—'}</p>
+        <p>店铺：{row.shopName ?? '—'}</p>
+        <p>商品退款：{formatIntegerMoney(row.productRefundAmountYuan ?? 0)}</p>
+        <p>售后原因：{row.normalizedAfterSalesReason ?? '—'}</p>
+      </div>
+    ) : null}
+  </div>
+)

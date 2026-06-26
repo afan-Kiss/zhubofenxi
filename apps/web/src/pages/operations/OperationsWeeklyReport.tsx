@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import { AnchorOperationsTable } from '../../components/operations/AnchorOperationsTable'
 import { ProductPerformanceTable } from '../../components/operations/ProductPerformanceTable'
-import { PriceBandTable } from '../../components/operations/PriceBandTable'
 import { AfterSalesReasonTable } from '../../components/operations/AfterSalesReasonTable'
 import { OperationsReviewEditor } from '../../components/operations/OperationsReviewEditor'
 import { BusinessInsightCards } from '../../components/operations/BusinessInsightCards'
@@ -19,6 +18,9 @@ import type {
 import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
 import { OperationsMetricDrillCard } from '../../components/operations/OperationsMetricDrillCard'
 import type { OperationsBiDrillRequest } from './operationsBiDrillTypes'
+import { OperationsCoreMetrics } from '../../components/operations/charts/OperationsCoreMetrics'
+import { WeeklyReportCharts } from '../../components/operations/charts/WeeklyReportCharts'
+import { useChartTopLimit } from '../../components/operations/charts/useChartTopLimit'
 
 interface Props {
   weekStart: string
@@ -50,6 +52,8 @@ function highlightToProductRow(
 }
 
 export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) => {
+  const topLimit = useChartTopLimit()
+  const [showFullHot, setShowFullHot] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<WeeklyOperationsReportPayload | null>(null)
@@ -114,6 +118,12 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
     endDate: weekEnd,
     scope: 'weekly',
   }
+  const drillContext = {
+    source: 'weekly_summary' as const,
+    startDate: weekStart,
+    endDate: weekEnd,
+    scope: 'weekly' as const,
+  }
   const anchorRows = report.anchors.map((row) => ({
     anchorName: row.anchorName,
     sessionLabel: '周汇总',
@@ -141,46 +151,70 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
   }))
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 overflow-x-hidden">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
         <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} className="mt-1" />
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <OperationsMetricDrillCard
-          label="本周有效成交"
-          value={formatIntegerMoney(s.validAmountYuan)}
-          drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
-          footer={
-            s.validAmountChangePercent != null ? (
-              <p className="mt-1 text-xs text-slate-500">
-                比上期 {s.validAmountChangePercent >= 0 ? '+' : ''}
-                {s.validAmountChangePercent}%
-              </p>
-            ) : null
-          }
-        />
-        <OperationsMetricDrillCard
-          label="本周订单"
-          value={formatOrderCount(s.soldOrderCount)}
-          drillRequest={{ ...drillBase, target: 'summary_orders' }}
-          footer={
-            s.soldOrderChangePercent != null ? (
-              <p className="mt-1 text-xs text-slate-500">
-                比上期 {s.soldOrderChangePercent >= 0 ? '+' : ''}
-                {s.soldOrderChangePercent}%
-              </p>
-            ) : null
-          }
-        />
-        <OperationsMetricDrillCard
-          label="退货单率"
-          value={formatPercent(s.returnOrderRate)}
-          drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
-        />
-        <OperationsMetricDrillCard label="新增粉丝" value={`${s.totalNewFollowerCount}人`} />
-      </div>
+      <OperationsCoreMetrics
+        core={
+          <>
+            <OperationsMetricDrillCard
+              label="本周有效成交"
+              value={formatIntegerMoney(s.validAmountYuan)}
+              drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+              footer={
+                s.validAmountChangePercent != null ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    比上期 {s.validAmountChangePercent >= 0 ? '+' : ''}
+                    {s.validAmountChangePercent}%
+                  </p>
+                ) : null
+              }
+            />
+            <OperationsMetricDrillCard
+              label="本周订单"
+              value={formatOrderCount(s.soldOrderCount)}
+              drillRequest={{ ...drillBase, target: 'summary_orders' }}
+            />
+            <OperationsMetricDrillCard
+              label="退货单率"
+              value={formatPercent(s.returnOrderRate)}
+              drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
+            />
+            <OperationsMetricDrillCard label="新增粉丝" value={`${s.totalNewFollowerCount}人`} />
+          </>
+        }
+        more={
+          <>
+            <OperationsMetricDrillCard
+              label="比上期成交"
+              value={
+                s.validAmountChangePercent != null
+                  ? `${s.validAmountChangePercent >= 0 ? '+' : ''}${s.validAmountChangePercent}%`
+                  : '—'
+              }
+            />
+            <OperationsMetricDrillCard
+              label="比上期订单"
+              value={
+                s.soldOrderChangePercent != null
+                  ? `${s.soldOrderChangePercent >= 0 ? '+' : ''}${s.soldOrderChangePercent}%`
+                  : '—'
+              }
+            />
+          </>
+        }
+      />
+
+      <WeeklyReportCharts
+        drillContext={drillContext}
+        dailyTrend={report.dailyTrend}
+        anchors={report.anchors}
+        hotProducts={report.hotProducts}
+        priceBands={report.priceBands}
+      />
 
       <BusinessInsightCards
         insights={report.businessInsights}
@@ -191,89 +225,33 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
       />
 
       <section>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">每日趋势</h3>
-        <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-          <table className="min-w-[640px] w-full text-left text-xs">
-            <thead className="bg-slate-50 text-slate-600">
-              <tr>
-                <th className="px-3 py-2">日期</th>
-                <th className="px-3 py-2">有效成交</th>
-                <th className="px-3 py-2">订单</th>
-                <th className="px-3 py-2">退货单</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.dailyTrend.map((row) => (
-                <tr key={row.dateKey} className="border-t border-slate-100">
-                  <td className="px-3 py-2">{row.dateLabel}</td>
-                  <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
-                  <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
-                  <td className="px-3 py-2">{formatOrderCount(row.returnOrderCount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <h3 className="mb-2 text-sm font-semibold text-slate-900">主播周表现</h3>
+        <AnchorOperationsTable rows={anchorRows.slice(0, topLimit)} />
       </section>
 
       <section>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">主播周表现对比</h3>
-        <AnchorOperationsTable rows={anchorRows} />
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-3">
-        <div>
-          <h3 className="mb-1 text-sm font-semibold text-slate-900">热卖前 10</h3>
-          <p className="mb-2 text-xs text-slate-500">按有效成交金额、成交订单、成交件数排序</p>
-          <ProductPerformanceTable
-            rows={report.hotProducts.map((p) => highlightToProductRow(p, 'hot_sale'))}
-          />
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-900">热卖商品</h3>
+          {report.hotProducts.length > topLimit ? (
+            <button
+              type="button"
+              onClick={() => setShowFullHot((v) => !v)}
+              className="text-xs text-rose-700 hover:underline"
+            >
+              {showFullHot ? '收起' : '查看完整榜单'}
+            </button>
+          ) : null}
         </div>
-        <div>
-          <h3 className="mb-1 text-sm font-semibold text-slate-900">
-            {report.productRankingQuality?.slowReliable
-              ? '主推未成交/低成交商品'
-              : '滞销观察'}
-          </h3>
-          {report.productRankingQuality?.slowReliable ? (
-            <p className="mb-2 text-xs text-slate-500">基于人工主推候选池，本周未成交或低成交</p>
-          ) : (
-            <p className="mb-2 text-xs text-amber-700">
-              {report.productRankingQuality?.warnings?.find((w) => w.includes('滞销') || w.includes('数据不足')) ??
-                '数据不足，暂无法可靠判断滞销'}
-            </p>
+        <ProductPerformanceTable
+          rows={(showFullHot ? report.hotProducts : report.hotProducts.slice(0, topLimit)).map((p) =>
+            highlightToProductRow(p, 'hot_sale'),
           )}
-          {report.productRankingQuality?.slowReliable ? (
-            <ProductPerformanceTable
-              rows={report.slowProducts.map((p) => highlightToProductRow(p, 'slow_moving'))}
-            />
-          ) : null}
-        </div>
-        <div>
-          <h3 className="mb-1 text-sm font-semibold text-slate-900">高退货风险前 5</h3>
-          <p className="mb-2 text-xs text-slate-500">按商品退货订单率排序（成交≥3单）</p>
-          <ProductPerformanceTable
-            rows={report.highReturnProducts.map((p) => highlightToProductRow(p, 'high_return_risk'))}
-          />
-          {report.highReturnSampleTooSmall?.length ? (
-            <div className="mt-3">
-              <p className="mb-1 text-xs font-medium text-amber-700">样本不足，仅参考</p>
-              <ProductPerformanceTable
-                rows={report.highReturnSampleTooSmall.map((p) =>
-                  highlightToProductRow(p, 'high_return_risk'),
-                )}
-              />
-            </div>
-          ) : null}
-        </div>
+        />
       </section>
 
       <section>
-        <h3 className="mb-1 text-sm font-semibold text-slate-900">价格带分析</h3>
-        <p className="mb-2 text-xs text-slate-500">
-          金额占比按成交金额计算；退货率见榜单中心「商品退货订单率」口径
-        </p>
-        <PriceBandTable rows={report.priceBands} />
+        <h3 className="mb-2 text-sm font-semibold text-slate-900">售后原因</h3>
+        <AfterSalesReasonTable rows={report.afterSalesReasons.slice(0, topLimit)} />
       </section>
 
       {report.productRankingQuality || report.reviewNote ? (
@@ -299,11 +277,6 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
           ) : null}
         </section>
       ) : null}
-
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">售后原因</h3>
-        <AfterSalesReasonTable rows={report.afterSalesReasons} />
-      </section>
 
       <OperationsReviewEditor
         reportDate={weekStart}

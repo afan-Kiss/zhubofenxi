@@ -2,6 +2,8 @@
  * 运营报表灰度接口冒烟 + 口径抽样
  * 用法: METRICS_BASE_URL=http://127.0.0.1:4723 npm run accept:operations-report-smoke
  */
+import fs from 'node:fs'
+import path from 'node:path'
 import { addDaysShanghai, formatDateKeyShanghai } from '../src/utils/business-timezone'
 
 const BASE = (process.env.METRICS_BASE_URL ?? process.env.E2E_BASE_URL ?? 'http://127.0.0.1:4723').replace(
@@ -333,6 +335,53 @@ function checkWeeklyCaliber(weekly: WeeklyPayload) {
   }
 }
 
+async function checkChartAssets() {
+  const webRoot = path.resolve(__dirname, '../../web/src')
+  const pages = [
+    'pages/operations/OperationsDailyReport.tsx',
+    'pages/operations/OperationsWeeklyReport.tsx',
+    'pages/operations/OperationsMonthlyReport.tsx',
+    'pages/operations/OperationsRankingsTab.tsx',
+  ]
+  for (const p of pages) {
+    const full = path.join(webRoot, p)
+    if (!fs.existsSync(full)) {
+      fail(`图表页面缺失 ${p}`)
+      continue
+    }
+    const src = fs.readFileSync(full, 'utf8')
+    assert(src.includes('Chart') || src.includes('chart'), `${p} 含图表组件引用`)
+    assert(src.includes('md:') || src.includes('overflow-x-hidden'), `${p} 含响应式布局`)
+  }
+
+  const drillFile = path.join(webRoot, 'components/operations/charts/operationsChartDrill.ts')
+  assert(fs.existsSync(drillFile), 'operationsChartDrill.ts 存在')
+  const drillSrc = fs.readFileSync(drillFile, 'utf8')
+  assert(drillSrc.includes('buildAnchorAmountDrill'), '图表钻取 helper 含主播下钻')
+  assert(drillSrc.includes('buildProductHotDrill'), '图表钻取 helper 含商品下钻')
+  assert(drillSrc.includes('buildPriceBandAmountDrill'), '图表钻取 helper 含价格带下钻')
+
+  const cardFile = path.join(webRoot, 'components/operations/charts/OperationsChartCard.tsx')
+  assert(fs.existsSync(cardFile), 'OperationsChartCard 存在')
+  const cardSrc = fs.readFileSync(cardFile, 'utf8')
+  assert(cardSrc.includes('data-operations-chart'), '图表卡片含 data-operations-chart 标记')
+
+  const indexRes = await fetch(`${BASE}/`)
+  const indexHtml = await indexRes.text()
+  const jsMatches = [...indexHtml.matchAll(/assets\/[^"]+\.js/g)].map((m) => m[0])
+  let hasRecharts = false
+  for (const jsPath of jsMatches) {
+    const jsRes = await fetch(`${BASE}/${jsPath}`)
+    const js = await jsRes.text()
+    if (js.includes('recharts') || js.includes('ResponsiveContainer')) {
+      hasRecharts = true
+      break
+    }
+  }
+  if (hasRecharts) pass('前端 bundle 含 recharts 图表库')
+  else fail('前端 bundle 含 recharts')
+}
+
 async function checkPageAssets() {
   const pageRes = await fetch(`${BASE}/operations-report`)
   assert(pageRes.status === 200, '/operations-report SPA 入口可访问')
@@ -370,6 +419,7 @@ async function main() {
   await checkPrivacyExport(sampleDate)
   checkDailyCaliber(daily, sampleDate)
   checkWeeklyCaliber(weekly)
+  await checkChartAssets()
   await checkPageAssets()
 
   console.log(`\n[operations-report-smoke] passed=${passed} failed=${issues.length}`)

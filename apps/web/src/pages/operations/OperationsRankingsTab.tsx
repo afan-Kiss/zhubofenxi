@@ -18,6 +18,8 @@ import {
   productDrillTarget,
 } from '../../components/operations/operationsBiDrillHelpers'
 import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
+import { RankingsTabChart } from '../../components/operations/charts/RankingsTabChart'
+import type { BusinessInsightActionStatsPayload } from './operationsReportTypes'
 
 type RankingsTab = 'summary' | 'anchors' | 'products' | 'priceBands' | 'afterSales'
 
@@ -40,6 +42,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
   >(undefined)
   const [cacheWarning, setCacheWarning] = useState<string | null>(null)
   const [section, setSection] = useState<RankingsTab>('summary')
+  const [insightStatsSummary, setInsightStatsSummary] = useState<BusinessInsightActionStatsPayload['summary'] | null>(null)
   const [rangeStart, setRangeStart] = useState(startDate)
   const [rangeEnd, setRangeEnd] = useState(endDate)
   const [rangePreset, setRangePreset] = useState(preset)
@@ -72,6 +75,30 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!data) return
+    let cancelled = false
+    const fetchStats = async () => {
+      try {
+        const qs = new URLSearchParams({
+          startDate: rangeStart,
+          endDate: rangeEnd,
+          scope: 'custom',
+        })
+        const res = await apiRequest<BusinessInsightActionStatsPayload>(
+          `/api/board/operations-business-insight-action-stats?${qs}`,
+        )
+        if (!cancelled) setInsightStatsSummary(res.summary)
+      } catch {
+        if (!cancelled) setInsightStatsSummary(null)
+      }
+    }
+    void fetchStats()
+    return () => {
+      cancelled = true
+    }
+  }, [data, rangeStart, rangeEnd])
 
   const applyPreset = (p: string) => {
     const today = formatDateKeyShanghai(new Date())
@@ -138,7 +165,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 overflow-x-hidden">
       <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} />
       <div className="flex flex-wrap items-center gap-2">
         {['today', 'yesterday', 'thisWeek', 'lastWeek', 'thisMonth', 'custom'].map((p) => (
@@ -238,6 +265,12 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'summary' ? (
         <>
+          <RankingsTabChart
+            tab="summary"
+            data={data}
+            drillContext={drillContext}
+            insightStats={insightStatsSummary}
+          />
           <RankingSummaryCards
             items={data.bossSummary}
             getDrillRequest={(item) => buildBossSummaryDrillRequest(item, drillContext, data)}
@@ -254,6 +287,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'anchors' ? (
         <div className="space-y-6">
+          <RankingsTabChart tab="anchors" data={data} drillContext={drillContext} />
           {(
             [
               data.anchors.byAmount,
@@ -294,6 +328,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'products' ? (
         <div className="space-y-6">
+          <RankingsTabChart tab="products" data={data} drillContext={drillContext} />
           {(
             [
               data.products.hot,
@@ -334,6 +369,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'priceBands' ? (
         <div className="space-y-6">
+          <RankingsTabChart tab="priceBands" data={data} drillContext={drillContext} />
           {(
             [
               data.priceBands.byAmount,
@@ -371,6 +407,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'afterSales' ? (
         <div className="space-y-6">
+          <RankingsTabChart tab="afterSales" data={data} drillContext={drillContext} />
           <RankingSection
             title={data.afterSales.byReason.title}
             subtitle={data.afterSales.byReason.subtitle}

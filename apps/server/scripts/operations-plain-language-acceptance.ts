@@ -26,11 +26,22 @@ const FORBIDDEN = [
   'productReturnRate',
   'followerConversionRate',
   'GMV',
+  'pie chart',
+  'bar chart',
+  'line chart',
+  'visualization',
+  'dataset',
 ]
+
+const CHART_FORBIDDEN = ['drill', 'pie chart', 'bar chart', 'line chart', 'visualization', 'dataset', 'tooltip', 'legend']
 
 const ALLOWLIST = new Set([
   'operationPlainText.ts',
   'operationsReportTypes.ts',
+  'operationsBiDrillTypes.ts',
+  'operationsChartDrill.ts',
+  'operationsChartFormat.ts',
+  'useChartTopLimit.ts',
 ])
 
 function collectTsxFiles(dir: string): string[] {
@@ -74,11 +85,16 @@ function lineHasForbiddenUserText(line: string, word: string): boolean {
 function scanFile(filePath: string, issues: string[]) {
   if (ALLOWLIST.has(path.basename(filePath))) return
   const rel = path.relative(path.resolve(__dirname, '../..'), filePath).replace(/\\/g, '/')
+  const isChartFile = rel.includes('/charts/')
+  const forbidden = isChartFile ? [...FORBIDDEN, ...CHART_FORBIDDEN] : FORBIDDEN
   const lines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/)
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!
     if (isSkippableLine(line)) continue
-    for (const word of FORBIDDEN) {
+    if (isChartFile && (line.includes('recharts') || line.includes('OperationsBiDrill') || line.includes('onItemClick'))) {
+      continue
+    }
+    for (const word of forbidden) {
       if (lineHasForbiddenUserText(line, word)) {
         issues.push(`${rel}:${i + 1} 含禁用词「${word}」→ ${line.trim().slice(0, 80)}`)
       }

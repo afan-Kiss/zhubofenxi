@@ -2,13 +2,9 @@ import React, { useCallback, useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
 import { createPortal } from 'react-dom'
 import { apiRequest } from '../../lib/api'
-import { AnchorOperationsTable } from '../../components/operations/AnchorOperationsTable'
 import { ProductRankingTable } from '../../components/operations/ProductRankingTable'
-import { ProductPerformanceTable } from '../../components/operations/ProductPerformanceTable'
 import { RankingQualityBadge } from '../../components/operations/RankingQualityBadge'
 import { BusinessInsightCards } from '../../components/operations/BusinessInsightCards'
-import { PriceBandTable } from '../../components/operations/PriceBandTable'
-import { AfterSalesReasonTable } from '../../components/operations/AfterSalesReasonTable'
 import { OperationsReviewEditor } from '../../components/operations/OperationsReviewEditor'
 import { OperationsReportImageSheet } from '../../components/operations/OperationsReportImageSheet'
 import {
@@ -29,6 +25,9 @@ import type {
 import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
 import { OperationsMetricDrillCard } from '../../components/operations/OperationsMetricDrillCard'
 import type { OperationsBiDrillRequest } from './operationsBiDrillTypes'
+import { OperationsCoreMetrics, CollapsibleWarnings } from '../../components/operations/charts/OperationsCoreMetrics'
+import { DailyReportCharts } from '../../components/operations/charts/DailyReportCharts'
+import { useChartTopLimit } from '../../components/operations/charts/useChartTopLimit'
 
 interface Props {
   dateKey: string
@@ -36,6 +35,7 @@ interface Props {
 
 export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
   const sheetRef = useRef<HTMLDivElement>(null)
+  const topLimit = useChartTopLimit()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<DailyOperationsReportPayload | null>(null)
@@ -45,6 +45,8 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
   const [cacheWarning, setCacheWarning] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [showFullHot, setShowFullHot] = useState(false)
+  const [showFullReturn, setShowFullReturn] = useState(false)
 
   const loadReport = useCallback(async () => {
     setLoading(true)
@@ -119,15 +121,18 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
     endDate: dateKey,
     scope: 'daily',
   }
-  const productDrillContext = {
+  const drillContext = {
     source: 'daily_summary' as const,
     startDate: dateKey,
     endDate: dateKey,
     scope: 'daily' as const,
   }
 
+  const hotRows = report.rankings?.products.hot.items ?? []
+  const returnRows = report.rankings?.products.highReturn.items ?? []
+
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 overflow-x-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
@@ -143,46 +148,61 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
         </button>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <OperationsMetricDrillCard
-          label="有效成交金额"
-          value={formatIntegerMoney(s.validAmountYuan)}
-          drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
-        />
-        <OperationsMetricDrillCard
-          label="有效成交订单"
-          value={formatOrderCount(s.soldOrderCount)}
-          drillRequest={{ ...drillBase, target: 'summary_orders' }}
-        />
-        <OperationsMetricDrillCard
-          label="退货单率"
-          value={formatPercent(s.returnOrderRate)}
-          drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
-        />
-        <OperationsMetricDrillCard label="客单价" value={formatIntegerMoney(s.avgOrderAmountYuan)} />
-        <OperationsMetricDrillCard
-          label="成交人数"
-          value={formatPeopleCount(s.dealUserCount)}
-          drillRequest={{ ...drillBase, target: 'summary_buyer_count' }}
-        />
-        <OperationsMetricDrillCard
-          label="成交率"
-          value={formatRatePercent(s.dealConversionRate)}
-          drillRequest={{ ...drillBase, target: 'summary_deal_conversion' }}
-        />
-        <OperationsMetricDrillCard label="直播时长" value={formatDuration(s.totalLiveDurationMinutes)} />
-        <OperationsMetricDrillCard
-          label="每小时成交"
-          value={formatHourly(s.hourlyAmountYuan)}
-          drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
-        />
-        <OperationsMetricDrillCard label="场观" value={formatPeopleCount(s.viewSessionCount)} />
-        <OperationsMetricDrillCard label="进房人数" value={formatPeopleCount(s.joinUserCount)} />
-        <OperationsMetricDrillCard label="平均在线" value={formatPeopleCount(s.avgOnlineUserCount)} />
-        <OperationsMetricDrillCard label="平均停留" value={formatStayDurationSeconds(s.avgViewDurationSeconds)} />
-        <OperationsMetricDrillCard label="新增粉丝" value={formatPeopleCount(s.totalNewFollowerCount)} />
-        <OperationsMetricDrillCard label="粉丝率" value={formatRatePercent(s.newFollowerRate)} />
-      </div>
+      <OperationsCoreMetrics
+        core={
+          <>
+            <OperationsMetricDrillCard
+              label="有效成交金额"
+              value={formatIntegerMoney(s.validAmountYuan)}
+              drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+            />
+            <OperationsMetricDrillCard
+              label="有效成交订单"
+              value={formatOrderCount(s.soldOrderCount)}
+              drillRequest={{ ...drillBase, target: 'summary_orders' }}
+            />
+            <OperationsMetricDrillCard
+              label="退货单率"
+              value={formatPercent(s.returnOrderRate)}
+              drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
+            />
+            <OperationsMetricDrillCard
+              label="成交率"
+              value={formatRatePercent(s.dealConversionRate)}
+              drillRequest={{ ...drillBase, target: 'summary_deal_conversion' }}
+            />
+          </>
+        }
+        more={
+          <>
+            <OperationsMetricDrillCard label="客单价" value={formatIntegerMoney(s.avgOrderAmountYuan)} />
+            <OperationsMetricDrillCard
+              label="成交人数"
+              value={formatPeopleCount(s.dealUserCount)}
+              drillRequest={{ ...drillBase, target: 'summary_buyer_count' }}
+            />
+            <OperationsMetricDrillCard label="直播时长" value={formatDuration(s.totalLiveDurationMinutes)} />
+            <OperationsMetricDrillCard
+              label="每小时成交"
+              value={formatHourly(s.hourlyAmountYuan)}
+              drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+            />
+            <OperationsMetricDrillCard label="场观" value={formatPeopleCount(s.viewSessionCount)} />
+            <OperationsMetricDrillCard label="进房人数" value={formatPeopleCount(s.joinUserCount)} />
+            <OperationsMetricDrillCard label="平均在线" value={formatPeopleCount(s.avgOnlineUserCount)} />
+            <OperationsMetricDrillCard label="平均停留" value={formatStayDurationSeconds(s.avgViewDurationSeconds)} />
+            <OperationsMetricDrillCard label="新增粉丝" value={formatPeopleCount(s.totalNewFollowerCount)} />
+            <OperationsMetricDrillCard label="粉丝率" value={formatRatePercent(s.newFollowerRate)} />
+          </>
+        }
+      />
+
+      <DailyReportCharts
+        drillContext={drillContext}
+        priceBands={report.priceBands}
+        anchors={report.anchors}
+        afterSalesReasons={report.afterSalesReasons}
+      />
 
       <BusinessInsightCards
         insights={report.businessInsights}
@@ -193,45 +213,48 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
       />
 
       {report.reportDataQuality?.warnings?.length ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">
-          <p className="mb-1 text-xs font-medium text-amber-800">数据质量提示</p>
-          <ul className="text-xs text-amber-800 space-y-0.5">
-            {report.reportDataQuality.warnings.map((w) => (
-              <li key={w}>{w}</li>
-            ))}
-          </ul>
-        </div>
+        <CollapsibleWarnings warnings={report.reportDataQuality.warnings} />
       ) : null}
 
       {report.rankings ? (
         <section className="grid gap-4 lg:grid-cols-2">
           <div>
-            <h3 className="mb-1 text-sm font-semibold text-slate-900">热卖前 10</h3>
-            <p className="mb-2 text-xs text-slate-500">按有效成交金额、成交订单、成交件数排序</p>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">热卖商品</h3>
+              {hotRows.length > topLimit ? (
+                <button
+                  type="button"
+                  onClick={() => setShowFullHot((v) => !v)}
+                  className="text-xs text-rose-700 hover:underline"
+                >
+                  {showFullHot ? '收起' : '查看完整榜单'}
+                </button>
+              ) : null}
+            </div>
             <ProductRankingTable
-              rows={report.rankings.products.hot.items}
-              drillContext={productDrillContext}
+              rows={showFullHot ? hotRows : hotRows.slice(0, topLimit)}
+              drillContext={drillContext}
               drillTarget="product_hot"
             />
           </div>
           <div>
-            <h3 className="mb-1 text-sm font-semibold text-slate-900">高退货前 10</h3>
-            <p className="mb-2 text-xs text-slate-500">按商品退货订单率排序（成交≥3单为正式榜）</p>
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">高退货商品</h3>
+              {returnRows.length > topLimit ? (
+                <button
+                  type="button"
+                  onClick={() => setShowFullReturn((v) => !v)}
+                  className="text-xs text-rose-700 hover:underline"
+                >
+                  {showFullReturn ? '收起' : '查看完整榜单'}
+                </button>
+              ) : null}
+            </div>
             <ProductRankingTable
-              rows={report.rankings.products.highReturn.items}
-              drillContext={productDrillContext}
+              rows={showFullReturn ? returnRows : returnRows.slice(0, topLimit)}
+              drillContext={drillContext}
               drillTarget="product_high_return"
             />
-            {report.rankings.products.highReturn.sampleTooSmall?.length ? (
-              <div className="mt-2">
-                <p className="mb-1 text-xs font-medium text-amber-700">样本不足，仅参考</p>
-                <ProductRankingTable
-                  rows={report.rankings.products.highReturn.sampleTooSmall}
-                  drillContext={productDrillContext}
-                  drillTarget="product_high_return"
-                />
-              </div>
-            ) : null}
           </div>
         </section>
       ) : null}
@@ -241,26 +264,6 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
         confidence={report.reportDataQuality?.reliable ? 'high' : 'insufficient'}
         warnings={report.reportDataQuality?.warnings}
       />
-
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">主播表现</h3>
-        <AnchorOperationsTable rows={report.anchors} />
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">商品分析</h3>
-        <ProductPerformanceTable rows={report.products} />
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">价格带分析</h3>
-        <PriceBandTable rows={report.priceBands} />
-      </section>
-
-      <section>
-        <h3 className="mb-2 text-sm font-semibold text-slate-900">售后原因</h3>
-        <AfterSalesReasonTable rows={report.afterSalesReasons} />
-      </section>
 
       <OperationsReviewEditor
         reportDate={dateKey}

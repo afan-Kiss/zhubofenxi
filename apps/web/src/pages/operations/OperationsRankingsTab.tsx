@@ -18,10 +18,40 @@ import {
   productDrillTarget,
 } from '../../components/operations/operationsBiDrillHelpers'
 import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
-import { RankingsTabChart } from '../../components/operations/charts/RankingsTabChart'
+import { RankingsTabCharts } from '../../components/operations/charts/RankingsTabCharts'
+import { CollapsibleWarnings } from '../../components/operations/charts/OperationsCoreMetrics'
 import type { BusinessInsightActionStatsPayload } from './operationsReportTypes'
 
 type RankingsTab = 'summary' | 'anchors' | 'products' | 'priceBands' | 'afterSales'
+
+const TABLE_DEFAULT_LIMIT = 5
+
+function RankingsLimitedTable<T>({
+  rows,
+  render,
+  limit = TABLE_DEFAULT_LIMIT,
+}: {
+  rows: T[]
+  limit?: number
+  render: (visibleRows: T[]) => React.ReactNode
+}) {
+  const [expanded, setExpanded] = React.useState(false)
+  const visible = expanded ? rows : rows.slice(0, limit)
+  return (
+    <>
+      {render(visible)}
+      {rows.length > limit ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="mt-2 text-xs text-rose-700 hover:underline"
+        >
+          {expanded ? '收起' : `查看完整榜单（共 ${rows.length} 条）`}
+        </button>
+      ) : null}
+    </>
+  )
+}
 
 interface Props {
   startDate: string
@@ -164,6 +194,8 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
     preset: rangePreset,
   }
 
+  const isSingleDay = rangeStart === rangeEnd
+
   return (
     <div className="space-y-4 overflow-x-hidden">
       <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} />
@@ -233,11 +265,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
       </div>
 
       {data.dataQuality.warnings.length > 0 ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          {data.dataQuality.warnings.slice(0, 6).map((w) => (
-            <p key={w}>{w}</p>
-          ))}
-        </div>
+        <CollapsibleWarnings warnings={data.dataQuality.warnings} max={5} />
       ) : null}
 
       <div className="flex flex-wrap gap-2">
@@ -265,10 +293,11 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'summary' ? (
         <>
-          <RankingsTabChart
+          <RankingsTabCharts
             tab="summary"
             data={data}
             drillContext={drillContext}
+            isSingleDay={isSingleDay}
             insightStats={insightStatsSummary}
           />
           <RankingSummaryCards
@@ -287,7 +316,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'anchors' ? (
         <div className="space-y-6">
-          <RankingsTabChart tab="anchors" data={data} drillContext={drillContext} />
+          <RankingsTabCharts tab="anchors" data={data} drillContext={drillContext} isSingleDay={isSingleDay} />
           {(
             [
               data.anchors.byAmount,
@@ -316,10 +345,15 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
                   : undefined
               }
             >
-              <AnchorRankingTable
+              <RankingsLimitedTable
                 rows={list.items}
-                drillContext={drillContext}
-                drillTarget={anchorDrillTarget(list.rankingType)}
+                render={(visibleRows) => (
+                  <AnchorRankingTable
+                    rows={visibleRows}
+                    drillContext={drillContext}
+                    drillTarget={anchorDrillTarget(list.rankingType)}
+                  />
+                )}
               />
             </RankingSection>
           ))}
@@ -328,7 +362,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'products' ? (
         <div className="space-y-6">
-          <RankingsTabChart tab="products" data={data} drillContext={drillContext} />
+          <RankingsTabCharts tab="products" data={data} drillContext={drillContext} isSingleDay={isSingleDay} />
           {(
             [
               data.products.hot,
@@ -357,10 +391,15 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
                   : undefined
               }
             >
-              <ProductRankingTable
+              <RankingsLimitedTable
                 rows={list.items}
-                drillContext={drillContext}
-                drillTarget={productDrillTarget(list.rankingType)}
+                render={(visibleRows) => (
+                  <ProductRankingTable
+                    rows={visibleRows}
+                    drillContext={drillContext}
+                    drillTarget={productDrillTarget(list.rankingType)}
+                  />
+                )}
               />
             </RankingSection>
           ))}
@@ -369,7 +408,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'priceBands' ? (
         <div className="space-y-6">
-          <RankingsTabChart tab="priceBands" data={data} drillContext={drillContext} />
+          <RankingsTabCharts tab="priceBands" data={data} drillContext={drillContext} isSingleDay={isSingleDay} />
           {(
             [
               data.priceBands.byAmount,
@@ -395,10 +434,15 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
                   : undefined
               }
             >
-              <PriceBandRankingTable
+              <RankingsLimitedTable
                 rows={list.items}
-                drillContext={drillContext}
-                drillTarget={priceBandDrillTarget(list.rankingType)}
+                render={(visibleRows) => (
+                  <PriceBandRankingTable
+                    rows={visibleRows}
+                    drillContext={drillContext}
+                    drillTarget={priceBandDrillTarget(list.rankingType)}
+                  />
+                )}
               />
             </RankingSection>
           ))}
@@ -407,16 +451,21 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'afterSales' ? (
         <div className="space-y-6">
-          <RankingsTabChart tab="afterSales" data={data} drillContext={drillContext} />
+          <RankingsTabCharts tab="afterSales" data={data} drillContext={drillContext} isSingleDay={isSingleDay} />
           <RankingSection
             title={data.afterSales.byReason.title}
             subtitle={data.afterSales.byReason.subtitle}
             dataQuality={data.afterSales.byReason.dataQuality}
           >
-            <AfterSalesRankingTable
+            <RankingsLimitedTable
               rows={data.afterSales.byReason.items}
-              drillContext={drillContext}
-              drillTarget="after_sales_reason"
+              render={(visibleRows) => (
+                <AfterSalesRankingTable
+                  rows={visibleRows}
+                  drillContext={drillContext}
+                  drillTarget="after_sales_reason"
+                />
+              )}
             />
           </RankingSection>
           <RankingSection
@@ -424,10 +473,15 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
             subtitle={data.afterSales.byRefundAmount.subtitle}
             dataQuality={data.afterSales.byRefundAmount.dataQuality}
           >
-            <AfterSalesRankingTable
+            <RankingsLimitedTable
               rows={data.afterSales.byRefundAmount.items}
-              drillContext={drillContext}
-              drillTarget="after_sales_refund_amount"
+              render={(visibleRows) => (
+                <AfterSalesRankingTable
+                  rows={visibleRows}
+                  drillContext={drillContext}
+                  drillTarget="after_sales_refund_amount"
+                />
+              )}
             />
           </RankingSection>
         </div>

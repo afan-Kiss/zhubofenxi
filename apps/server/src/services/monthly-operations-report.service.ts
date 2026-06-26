@@ -19,6 +19,7 @@ import {
 import { attachBusinessInsightActions } from './operations-business-insight-action.service'
 import { getOperationsRankings } from './operations-rankings.service'
 import { computeProductReturnRateByOrder } from './operations-product-analysis.service'
+import { buildOperationsDailyTrendFromSnapshots } from './operations-daily-trend.service'
 import { mergeAnchorRowsForRange } from './operations-anchor-ranking.service'
 import { getOpsReviewNote } from './ops-review-note.service'
 import { prisma } from '../lib/prisma'
@@ -158,26 +159,6 @@ function buildMonthlySummary(
     newFollowerCount: base.totalNewFollowerCount,
     followerConversionRate: base.newFollowerRate,
   }
-}
-
-function buildDailyTrend(snapshots: DailyOperationsReportPayload[]): MonthlyDailyTrendRow[] {
-  return snapshots.map((snap) => {
-    const productReturnOrderCount = snap.products.reduce(
-      (sum, p) => sum + p.returnOrderCount,
-      0,
-    )
-    const productSoldOrderCount = snap.products.reduce((sum, p) => sum + p.soldOrderCount, 0)
-    return {
-      date: snap.startDate,
-      validAmountYuan: snap.summary.validAmountYuan,
-      soldOrderCount: snap.summary.soldOrderCount,
-      productReturnOrderCount,
-      productReturnRate: computeProductReturnRateByOrder(
-        productSoldOrderCount,
-        productReturnOrderCount,
-      ),
-    }
-  })
 }
 
 async function buildPreviousMonthSummary(params: {
@@ -392,7 +373,7 @@ export async function getMonthlyOperationsReport(params: {
     username: params.username,
   })
   const compareWithPreviousMonth = buildCompareWithPreviousMonth(summary, previousSummary)
-  const dailyTrend = buildDailyTrend(snapshots)
+  const dailyTrend = buildOperationsDailyTrendFromSnapshots(snapshots)
 
   const rankingsPayload = await getOperationsRankings({
     startDate: range.startDate,

@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { RankingQualityBadge } from './RankingQualityBadge'
 import type { RankingConfidence } from '../../pages/operations/operationsReportTypes'
 
@@ -27,7 +27,9 @@ export const RankingSection: React.FC<SectionProps> = ({
   sampleTooSmall,
   forceShowTable = false,
 }) => {
+  const [sampleExpanded, setSampleExpanded] = useState(false)
   const showTable = forceShowTable || dataQuality.reliable || dataQuality.confidence !== 'insufficient'
+
   return (
     <section className="space-y-2">
       <div>
@@ -39,15 +41,21 @@ export const RankingSection: React.FC<SectionProps> = ({
         confidence={dataQuality.confidence}
         warnings={dataQuality.warnings}
       />
-      {showTable ? children : (
+      {showTable ? <div className="overflow-x-auto">{children}</div> : (
         <p className="text-sm text-slate-500">
           {dataQuality.warnings[0] ?? '数据不足，暂无法展示可靠排行'}
         </p>
       )}
       {sampleTooSmall ? (
         <div className="mt-2">
-          <p className="mb-1 text-xs font-medium text-amber-700">样本太少，只能先参考，别直接下结论</p>
-          {sampleTooSmall}
+          <button
+            type="button"
+            onClick={() => setSampleExpanded((v) => !v)}
+            className="text-xs font-medium text-amber-700 hover:underline"
+          >
+            {sampleExpanded ? '收起样本不足参考' : '样本太少，只能先参考（展开查看）'}
+          </button>
+          {sampleExpanded ? <div className="mt-2 overflow-x-auto">{sampleTooSmall}</div> : null}
         </div>
       ) : null}
     </section>

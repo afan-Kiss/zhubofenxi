@@ -33,7 +33,7 @@ const FORBIDDEN = [
   'dataset',
 ]
 
-const CHART_FORBIDDEN = ['drill', 'pie chart', 'bar chart', 'line chart', 'visualization', 'dataset', 'tooltip', 'legend']
+const CHART_FORBIDDEN = ['drill', 'chart', 'pie chart', 'bar chart', 'line chart', 'visualization', 'dataset', 'tooltip', 'legend']
 
 const ALLOWLIST = new Set([
   'operationPlainText.ts',

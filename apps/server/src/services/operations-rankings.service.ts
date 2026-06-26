@@ -7,6 +7,7 @@ import {
   buildDailyOperationsReport,
   buildAfterSalesItemsFromViews,
   type DailyOperationsAnchorRow,
+  type DailyOperationsReportPayload,
 } from './daily-operations-report.service'
 import { getAnchorPerformanceViews, getBoardScopedViewsForRange } from './board-scoped-views.service'
 import { buildOperationsProductAnalysis } from './operations-product-analysis.service'
@@ -21,6 +22,7 @@ import { buildProductRankingLists } from './operations-product-ranking-lists.ser
 import { buildPriceBandRankingLists } from './operations-price-band-ranking.service'
 import { buildAfterSalesRankingLists } from './operations-after-sales-ranking.service'
 import type { BossSummaryItem, OperationsRankingsPayload } from './operations-rankings.types'
+import { buildOperationsDailyTrendFromSnapshots } from './operations-daily-trend.service'
 import {
   buildBusinessInsightsFromSource,
   type BusinessInsightsSource,
@@ -34,6 +36,8 @@ export type OperationsRankingsPreset =
   | 'lastWeek'
   | 'thisMonth'
   | 'custom'
+
+const MAX_DAILY_TREND_DAYS = 31
 
 function formatMoneyYuan(yuan: number): string {
   return `¥${Math.round(yuan).toLocaleString('zh-CN')}`
@@ -198,26 +202,37 @@ function resolvePrevRange(startDate: string, endDate: string): { prevStartDate: 
   return { prevStartDate, prevEndDate }
 }
 
-async function loadMergedAnchorsForRange(params: {
+async function loadDailySnapshotsForRange(params: {
   preset?: string
   startDate: string
   endDate: string
   role?: UserRole
   username?: string
-}): Promise<DailyOperationsAnchorRow[]> {
+}): Promise<DailyOperationsReportPayload[]> {
   const days = eachDayInShanghaiRange(params.startDate, params.endDate)
-  const snapshots: DailyOperationsAnchorRow[][] = []
+  const snapshots: DailyOperationsReportPayload[] = []
   for (const day of days) {
-    const report = await buildDailyOperationsReport({
-      preset: params.preset,
-      startDate: day,
-      endDate: day,
-      role: params.role,
-      username: params.username,
-    })
-    snapshots.push(report.anchors)
+    snapshots.push(
+      await buildDailyOperationsReport({
+        preset: params.preset,
+        startDate: day,
+        endDate: day,
+        role: params.role,
+        username: params.username,
+      }),
+    )
   }
-  return mergeAnchorRowsForRange(snapshots)
+  return snapshots
+}
+
+function buildDailyTrendFromSnapshots(
+  snapshots: DailyOperationsReportPayload[],
+): OperationsRankingsPayload['dailyTrend'] {
+  const trendSnapshots =
+    snapshots.length > MAX_DAILY_TREND_DAYS
+      ? snapshots.slice(0, MAX_DAILY_TREND_DAYS)
+      : snapshots
+  return buildOperationsDailyTrendFromSnapshots(trendSnapshots)
 }
 
 export async function getOperationsRankings(params: {
@@ -251,13 +266,24 @@ export async function getOperationsRankings(params: {
     buildAfterSalesItemsFromViews(performanceViews),
   )
 
-  const mergedAnchors = await loadMergedAnchorsForRange({
-    preset,
-    startDate,
-    endDate,
-    role: params.role,
-    username: params.username,
-  })
+  let mergedAnchors: DailyOperationsAnchorRow[] = []
+  let dailyTrend: OperationsRankingsPayload['dailyTrend'] = []
+  let dailyTrendError: string | null = null
+  try {
+    const daySnapshots = await loadDailySnapshotsForRange({
+      preset,
+      startDate,
+      endDate,
+      role: params.role,
+      username: params.username,
+    })
+    mergedAnchors = mergeAnchorRowsForRange(daySnapshots.map((snap) => snap.anchors))
+    dailyTrend = buildDailyTrendFromSnapshots(daySnapshots)
+  } catch (err) {
+    dailyTrendError = err instanceof Error ? err.message : '未知错误'
+    mergedAnchors = []
+    dailyTrend = []
+  }
 
   const dimensions = await prisma.productDimension.findMany()
   const isSingleDay = startDate === endDate
@@ -284,6 +310,7 @@ export async function getOperationsRankings(params: {
       reliable: bossSummary.some((b) => !b.empty),
       warnings: [],
     },
+    dailyTrend,
     bossSummary,
     anchors,
     products: productLists,
@@ -295,6 +322,10 @@ export async function getOperationsRankings(params: {
   }
 
   payload.dataQuality.warnings = collectWarnings(payload)
+
+  if (dailyTrendError) {
+    payload.dataQuality.warnings.push(`成交走势生成失败：${dailyTrendError}`)
+  }
 
   try {
     const insightSource: BusinessInsightsSource = {

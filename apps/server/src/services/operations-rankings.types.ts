@@ -108,12 +108,21 @@ export interface OperationsRankingsRange {
   prevEndDate?: string
 }
 
+export interface OperationsRankingsDailyTrendRow {
+  date: string
+  validAmountYuan: number
+  soldOrderCount: number
+  productReturnOrderCount: number
+  productReturnRate: number | null
+}
+
 export interface OperationsRankingsPayload {
   range: OperationsRankingsRange
   dataQuality: {
     reliable: boolean
     warnings: string[]
   }
+  dailyTrend: OperationsRankingsDailyTrendRow[]
   bossSummary: BossSummaryItem[]
   businessInsights?: import('./operations-business-insights.types').BusinessInsightsPayload
   anchors: {

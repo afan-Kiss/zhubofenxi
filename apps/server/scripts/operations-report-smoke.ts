@@ -335,6 +335,61 @@ function checkWeeklyCaliber(weekly: WeeklyPayload) {
   }
 }
 
+async function checkRankingsCharts() {
+  const webRoot = path.resolve(__dirname, '../../web/src')
+  const chartsFile = path.join(webRoot, 'components/operations/charts/RankingsTabCharts.tsx')
+  assert(fs.existsSync(chartsFile), 'RankingsTabCharts.tsx 存在')
+  const src = fs.readFileSync(chartsFile, 'utf8')
+  assert(src.includes('OperationsLineChart'), '榜单摘要 Tab 有走势图')
+  assert(src.includes('OperationsPieChart'), '榜单摘要 Tab 有占比图')
+  assert(src.includes('哪些主播成交高'), '主播 Tab 有成交排行图')
+  assert(src.includes('哪些主播出单多'), '主播 Tab 有订单排行图')
+  assert(src.includes('哪些商品卖得好'), '商品 Tab 有热卖排行图')
+  assert(src.includes('成交主要靠哪些商品'), '商品 Tab 有成交占比图')
+  assert(src.includes('钱主要来自哪些价位'), '价格带 Tab 有成交占比图')
+  assert(src.includes('哪些价位出单多'), '价格带 Tab 有订单排行图')
+  assert(src.includes('顾客主要因为什么不满意'), '售后 Tab 有原因排行图')
+  assert(src.includes('哪些问题退款金额高'), '售后 Tab 有退款排行图')
+  assert(src.includes('buildDailyAmountDrill'), '走势图可生成 BI 下钻')
+  assert(src.includes('buildAnchorAmountDrill'), '主播排行图可生成 BI 下钻')
+  assert(src.includes('min-w-[280px]') || src.includes('CHART_HEIGHT'), '手机端图表容器类存在')
+
+  const tabFile = path.join(webRoot, 'pages/operations/OperationsRankingsTab.tsx')
+  const tabSrc = fs.readFileSync(tabFile, 'utf8')
+  assert(tabSrc.includes('RankingsTabCharts'), 'OperationsRankingsTab 引用 RankingsTabCharts')
+  assert(
+    src.includes('lg:grid-cols-2') || src.includes('grid-cols-1'),
+    '榜单页含响应式布局',
+  )
+}
+
+async function checkRankingsDailyTrendApi() {
+  const week = thisWeekRange()
+  const data = await fetchExpectOk<{
+    dailyTrend?: Array<{
+      date: string
+      validAmountYuan: number
+      soldOrderCount: number
+      productReturnOrderCount: number
+      productReturnRate: number | null
+    }>
+  }>('/api/board/operations-rankings', {
+    startDate: week.weekStart,
+    endDate: week.weekEnd,
+    preset: 'custom',
+  })
+  assert(Array.isArray(data.dailyTrend), '榜单中心返回 dailyTrend')
+  for (const row of data.dailyTrend ?? []) {
+    assert(!Number.isNaN(row.validAmountYuan), 'dailyTrend.validAmountYuan 无 NaN')
+    assert(!Number.isNaN(row.soldOrderCount), 'dailyTrend.soldOrderCount 无 NaN')
+    assert(!Number.isNaN(row.productReturnOrderCount), 'dailyTrend.productReturnOrderCount 无 NaN')
+    if (row.productReturnRate != null) {
+      assert(!Number.isNaN(row.productReturnRate), 'dailyTrend.productReturnRate 无 NaN')
+    }
+  }
+  pass('榜单中心 dailyTrend 字段正常')
+}
+
 async function checkChartAssets() {
   const webRoot = path.resolve(__dirname, '../../web/src')
   const pages = [
@@ -358,8 +413,11 @@ async function checkChartAssets() {
   assert(fs.existsSync(drillFile), 'operationsChartDrill.ts 存在')
   const drillSrc = fs.readFileSync(drillFile, 'utf8')
   assert(drillSrc.includes('buildAnchorAmountDrill'), '图表钻取 helper 含主播下钻')
+  assert(drillSrc.includes('buildAnchorOrdersDrill'), '图表钻取 helper 含主播订单下钻')
   assert(drillSrc.includes('buildProductHotDrill'), '图表钻取 helper 含商品下钻')
   assert(drillSrc.includes('buildPriceBandAmountDrill'), '图表钻取 helper 含价格带下钻')
+  assert(drillSrc.includes('buildAfterSalesRefundAmountDrill'), '图表钻取 helper 含退款金额下钻')
+  assert(drillSrc.includes('buildDailyAmountDrill'), '图表钻取 helper 含走势下钻')
 
   const cardFile = path.join(webRoot, 'components/operations/charts/OperationsChartCard.tsx')
   assert(fs.existsSync(cardFile), 'OperationsChartCard 存在')
@@ -419,6 +477,8 @@ async function main() {
   await checkPrivacyExport(sampleDate)
   checkDailyCaliber(daily, sampleDate)
   checkWeeklyCaliber(weekly)
+  await checkRankingsCharts()
+  await checkRankingsDailyTrendApi()
   await checkChartAssets()
   await checkPageAssets()
 

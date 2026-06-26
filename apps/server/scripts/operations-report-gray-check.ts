@@ -224,6 +224,28 @@ function checkRankingsApi(ctx: CheckContext, rankings: Record<string, unknown>) 
   if (!rankings.bossSummary) addFinding(ctx, 'P1', '榜单中心 bossSummary 缺失')
   if (!rankings.anchors) addFinding(ctx, 'P1', '榜单中心 anchors 缺失')
   if (!rankings.products) addFinding(ctx, 'P1', '榜单中心 products 缺失')
+  const dailyTrend = rankings.dailyTrend as unknown[] | undefined
+  if (!Array.isArray(dailyTrend)) {
+    addFinding(ctx, 'P1', '榜单中心 dailyTrend 缺失')
+  } else {
+    for (const row of dailyTrend) {
+      const r = row as Record<string, unknown>
+      for (const key of [
+        'validAmountYuan',
+        'soldOrderCount',
+        'productReturnOrderCount',
+        'productReturnRate',
+      ]) {
+        const v = r[key]
+        if (typeof v === 'number' && Number.isNaN(v)) {
+          addFinding(ctx, 'P1', `榜单中心 dailyTrend.${key} 含 NaN`)
+        }
+      }
+    }
+    if (dailyTrend.length > 31) {
+      addFinding(ctx, 'P1', `榜单中心 dailyTrend 超过 31 天：${dailyTrend.length}`)
+    }
+  }
   const dq = rankings.dataQuality as { warnings?: string[] } | undefined
   if (!dq) addFinding(ctx, 'P1', '榜单中心 dataQuality 缺失')
   const json = JSON.stringify(rankings)
@@ -232,6 +254,51 @@ function checkRankingsApi(ctx: CheckContext, rankings: Record<string, unknown>) 
   }
   if (dq?.warnings?.length) addNote(ctx, `榜单 warnings：${dq.warnings.slice(0, 3).join('；')}`)
   checkBusinessInsights(ctx, '榜单中心', rankings)
+}
+
+function checkRankingsDailyTrendCache(
+  ctx: CheckContext,
+  first: Record<string, unknown>,
+  second: Record<string, unknown>,
+) {
+  const t1 = JSON.stringify(first.dailyTrend ?? [])
+  const t2 = JSON.stringify(second.dailyTrend ?? [])
+  if (t1 !== t2) {
+    addFinding(ctx, 'P1', '榜单缓存命中后 dailyTrend 发生变化')
+  }
+}
+
+function checkRankingsChartDataCounts(ctx: CheckContext, rankings: Record<string, unknown>) {
+  const anchors = rankings.anchors as {
+    byAmount?: { items?: unknown[] }
+    byOrders?: { items?: unknown[] }
+    byReturnRate?: { items?: unknown[] }
+  } | undefined
+  const products = rankings.products as {
+    hot?: { items?: unknown[] }
+    highReturn?: { items?: unknown[] }
+  } | undefined
+  const priceBands = rankings.priceBands as {
+    byAmount?: { items?: unknown[] }
+    byOrders?: { items?: unknown[] }
+    byReturnRate?: { items?: unknown[] }
+  } | undefined
+  const afterSales = rankings.afterSales as {
+    byReason?: { items?: unknown[] }
+    byRefundAmount?: { items?: unknown[] }
+  } | undefined
+  const counts = [
+    anchors?.byAmount?.items?.length ?? 0,
+    anchors?.byOrders?.items?.length ?? 0,
+    products?.hot?.items?.length ?? 0,
+    priceBands?.byAmount?.items?.length ?? 0,
+    afterSales?.byReason?.items?.length ?? 0,
+  ]
+  if (counts.every((c) => c === 0)) {
+    addNote(ctx, '榜单图表数据均为空，可能本期无成交')
+  } else if (counts.some((c) => c > 20)) {
+    addFinding(ctx, 'P2', `榜单图表数据条数偏多：${counts.join('/')}`)
+  }
 }
 
 function checkInsightActionStats(ctx: CheckContext, label: string, payload: Record<string, unknown> | null) {
@@ -986,6 +1053,49 @@ async function checkBiDrill(
     lines.push(`- 售后原因下钻：${reasonDrill.status}${reasonDrill.status === 200 ? ' ✅' : ' ❌'}`)
   }
 
+  const dailyTrend = rankings.dailyTrend as Array<{ date?: string }> | undefined
+  const trendDay = dailyTrend?.[0]?.date ?? weekStart
+  const trendDrill = await drill({
+    source: 'rankings',
+    target: 'summary_valid_amount',
+    startDate: trendDay,
+    endDate: trendDay,
+    scope: 'daily',
+  })
+  lines.push(`- 榜单走势单日下钻：${trendDrill.status}${trendDrill.status === 200 ? ' ✅' : ' ❌'}`)
+  if (trendDrill.status !== 200) addFinding(ctx, 'P1', '榜单走势单日下钻失败')
+
+  const anchorItem = (
+    rankings.anchors as { byAmount?: { items?: Array<{ anchorName?: string }> } } | undefined
+  )?.byAmount?.items?.[0]
+  if (anchorItem?.anchorName) {
+    const anchorDrill = await drill({
+      source: 'anchor_ranking',
+      target: 'anchor_amount',
+      startDate: weekStart,
+      endDate: weekEnd,
+      anchorName: anchorItem.anchorName,
+    })
+    lines.push(`- 榜单主播成交下钻：${anchorDrill.status}${anchorDrill.status === 200 ? ' ✅' : ' ❌'}`)
+    if (anchorDrill.status !== 200) addFinding(ctx, 'P1', '榜单主播成交下钻失败')
+  }
+
+  const refundItem = (
+    rankings.afterSales as { byRefundAmount?: { items?: Array<{ category?: string; categoryLabel?: string }> } } | undefined
+  )?.byRefundAmount?.items?.[0]
+  if (refundItem?.category) {
+    const refundDrill = await drill({
+      source: 'after_sales_ranking',
+      target: 'after_sales_refund_amount',
+      startDate: weekStart,
+      endDate: weekEnd,
+      afterSalesCategory: refundItem.category,
+      afterSalesReason: refundItem.categoryLabel,
+    })
+    lines.push(`- 榜单退款金额下钻：${refundDrill.status}${refundDrill.status === 200 ? ' ✅' : ' ❌'}`)
+    if (refundDrill.status !== 200) addFinding(ctx, 'P1', '榜单退款金额下钻失败')
+  }
+
   const trafficDrill = await drill({
     source: 'daily_summary',
     target: 'summary_deal_conversion',
@@ -1111,6 +1221,7 @@ async function main() {
     if (Array.isArray(rAnchors) && Array.isArray(r2Anchors) && rAnchors.length !== r2Anchors.length) {
       addFinding(ctx, 'P1', '榜单缓存命中改变了 anchors 数量')
     }
+    checkRankingsDailyTrendCache(ctx, rankings, rankingsSecond.data)
   } catch (err) {
     addFinding(ctx, 'P0', err instanceof Error ? err.message : String(err))
     daily = {}
@@ -1123,6 +1234,7 @@ async function main() {
   checkWeeklyStructure(ctx, weekly)
   checkProductRankings(ctx, weekly)
   checkRankingsApi(ctx, rankings)
+  checkRankingsChartDataCounts(ctx, rankings)
   let insightStatsCustom: Record<string, unknown> | null = null
   let insightStatsDaily: Record<string, unknown> | null = null
   let insightStatsWeekly: Record<string, unknown> | null = null
@@ -1247,6 +1359,7 @@ async function main() {
   addSection(ctx, '榜单中心接口', [
     `- HTTP：${rankings.bossSummary ? '200 ✅' : '失败 ❌'}`,
     `- bossSummary / anchors / products / priceBands / businessInsights：${rankings.bossSummary ? '已返回' : '缺失'}`,
+    `- dailyTrend 条数：${Array.isArray(rankings.dailyTrend) ? (rankings.dailyTrend as unknown[]).length : 0}`,
     `- 经营建议执行统计：${insightStatsCustom ? '已返回 ✅' : '缺失 ❌'}`,
   ])
 

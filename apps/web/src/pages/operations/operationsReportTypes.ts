@@ -226,6 +226,13 @@ export interface OperationsRankingsPayload {
     prevEndDate?: string
   }
   dataQuality: { reliable: boolean; warnings: string[] }
+  dailyTrend: Array<{
+    date: string
+    validAmountYuan: number
+    soldOrderCount: number
+    productReturnOrderCount: number
+    productReturnRate: number | null
+  }>
   bossSummary: BossSummaryItem[]
   businessInsights?: BusinessInsightsPayload
   anchors: {

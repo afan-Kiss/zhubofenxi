@@ -128,6 +128,46 @@ async function fetchRankings(startDate: string, endDate: string) {
   return body.data
 }
 
+function checkBusinessInsights(ctx: CheckContext, label: string, payload: Record<string, unknown>) {
+  const bi = payload.businessInsights as
+    | {
+        items?: Array<Record<string, unknown>>
+        dataQuality?: { warnings?: string[] }
+      }
+    | undefined
+  if (!bi) {
+    addFinding(ctx, 'P1', `${label} businessInsights 缺失`)
+    return
+  }
+  const items = bi.items ?? []
+  const json = JSON.stringify(bi)
+  for (const f of [
+    'phone',
+    'mobile',
+    'address',
+    'receiver',
+    'buyerName',
+    'buyerPhone',
+    'platformRawJson',
+    'rawJson',
+    'idCard',
+    'buyerId',
+    'buyerKey',
+  ]) {
+    if (json.includes(`"${f}"`)) addFinding(ctx, 'P1', `${label} businessInsights 含隐私字段 ${f}`)
+  }
+  for (const item of items) {
+    const ev = item.evidence as unknown[] | undefined
+    if (!Array.isArray(ev) || ev.length === 0) {
+      addFinding(ctx, 'P1', `${label} 经营建议缺少 evidence：${String(item.title ?? item.id)}`)
+    }
+  }
+  if (items.length > 8) addFinding(ctx, 'P2', `${label} 经营建议超过 8 条`)
+  if (bi.dataQuality?.warnings?.length) {
+    addNote(ctx, `${label} 经营建议 warnings：${bi.dataQuality.warnings.slice(0, 2).join('；')}`)
+  }
+}
+
 function checkRankingsApi(ctx: CheckContext, rankings: Record<string, unknown>) {
   if (!rankings.bossSummary) addFinding(ctx, 'P1', '榜单中心 bossSummary 缺失')
   if (!rankings.anchors) addFinding(ctx, 'P1', '榜单中心 anchors 缺失')
@@ -139,6 +179,7 @@ function checkRankingsApi(ctx: CheckContext, rankings: Record<string, unknown>) 
     if (json.includes(`"${f}"`)) addFinding(ctx, 'P1', `榜单中心响应含隐私字段名 ${f}`)
   }
   if (dq?.warnings?.length) addNote(ctx, `榜单 warnings：${dq.warnings.slice(0, 3).join('；')}`)
+  checkBusinessInsights(ctx, '榜单中心', rankings)
 }
 
 async function fetchWeekly(weekStart: string, weekEnd: string) {
@@ -210,6 +251,7 @@ function checkDailyStructure(ctx: CheckContext, daily: Record<string, unknown>) 
     if (!(key in summary)) addFinding(ctx, 'P1', `日报 summary 缺少 ${key}`)
   }
   checkTrafficNotFakeZero(ctx, summary, '日报')
+  checkBusinessInsights(ctx, '日报', daily)
 }
 
 function checkDailyCaliber(ctx: CheckContext, daily: Record<string, unknown>) {
@@ -327,6 +369,7 @@ function checkWeeklyStructure(ctx: CheckContext, weekly: Record<string, unknown>
   }
   if (!Array.isArray(weekly.priceBands)) addFinding(ctx, 'P1', '周报 priceBands 不存在')
   if (!Array.isArray(weekly.afterSalesReasons)) addFinding(ctx, 'P1', '周报 afterSalesReasons 不存在')
+  checkBusinessInsights(ctx, '周报', weekly)
 }
 
 function rankItemAmount(item: Record<string, unknown>): number {
@@ -835,18 +878,18 @@ async function main() {
 
   addSection(ctx, '日报接口结果', [
     `- HTTP：${daily.summary ? '200 ✅' : '失败 ❌'}`,
-    `- summary / anchors / products / priceBands / afterSalesReasons / reviewNote：${daily.summary ? '已返回' : '缺失'}`,
+    `- summary / anchors / products / priceBands / afterSalesReasons / reviewNote / businessInsights：${daily.summary ? '已返回' : '缺失'}`,
   ])
 
   addSection(ctx, '周报接口结果', [
     `- HTTP：${weekly.summary ? '200 ✅' : '失败 ❌'}`,
     `- dailyTrend 条数：${getDailyTrend(weekly).length}`,
-    `- anchors / hotProducts / productRankingQuality：${weekly.summary ? '已返回' : '缺失'}`,
+    `- anchors / hotProducts / productRankingQuality / businessInsights：${weekly.summary ? '已返回' : '缺失'}`,
   ])
 
   addSection(ctx, '榜单中心接口', [
     `- HTTP：${rankings.bossSummary ? '200 ✅' : '失败 ❌'}`,
-    `- bossSummary / anchors / products / priceBands：${rankings.bossSummary ? '已返回' : '缺失'}`,
+    `- bossSummary / anchors / products / priceBands / businessInsights：${rankings.bossSummary ? '已返回' : '缺失'}`,
   ])
 
   if (dailyCaliber) {

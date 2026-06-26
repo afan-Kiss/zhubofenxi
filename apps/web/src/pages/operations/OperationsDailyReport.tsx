@@ -6,6 +6,7 @@ import { AnchorOperationsTable } from '../../components/operations/AnchorOperati
 import { ProductRankingTable } from '../../components/operations/ProductRankingTable'
 import { ProductPerformanceTable } from '../../components/operations/ProductPerformanceTable'
 import { RankingQualityBadge } from '../../components/operations/RankingQualityBadge'
+import { BusinessInsightCards } from '../../components/operations/BusinessInsightCards'
 import { PriceBandTable } from '../../components/operations/PriceBandTable'
 import { AfterSalesReasonTable } from '../../components/operations/AfterSalesReasonTable'
 import { OperationsReviewEditor } from '../../components/operations/OperationsReviewEditor'
@@ -139,6 +140,8 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
           </div>
         ))}
       </div>
+
+      <BusinessInsightCards insights={report.businessInsights} />
 
       {report.reportDataQuality?.warnings?.length ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3">

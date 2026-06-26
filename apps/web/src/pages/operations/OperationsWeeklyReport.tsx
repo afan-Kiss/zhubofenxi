@@ -5,6 +5,7 @@ import { ProductPerformanceTable } from '../../components/operations/ProductPerf
 import { PriceBandTable } from '../../components/operations/PriceBandTable'
 import { AfterSalesReasonTable } from '../../components/operations/AfterSalesReasonTable'
 import { OperationsReviewEditor } from '../../components/operations/OperationsReviewEditor'
+import { BusinessInsightCards } from '../../components/operations/BusinessInsightCards'
 import {
   formatIntegerMoney,
   formatOrderCount,
@@ -156,6 +157,8 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
           <p className="mt-1 text-base font-semibold">{s.totalNewFollowerCount}人</p>
         </div>
       </div>
+
+      <BusinessInsightCards insights={report.businessInsights} />
 
       <section>
         <h3 className="mb-2 text-sm font-semibold text-slate-900">每日趋势</h3>

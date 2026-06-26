@@ -14,6 +14,12 @@ import {
   type ProductRankingQuality,
 } from './operations-product-ranking.service'
 import { prisma } from '../lib/prisma'
+import { mergeAnchorRowsForRange } from './operations-anchor-ranking.service'
+import {
+  buildBusinessInsightsFromSource,
+  buildBusinessInsightsSourceFromComponents,
+} from './operations-business-insights.service'
+import type { BusinessInsightsPayload } from './operations-business-insights.types'
 import {
   productRoleLabel,
   resolveProductRole,
@@ -63,6 +69,7 @@ export interface WeeklyOperationsReportPayload {
   priceBands: DailyOperationsReportPayload['priceBands']
   afterSalesReasons: DailyOperationsReportPayload['afterSalesReasons']
   reviewNote: OpsReviewNotePayload | null
+  businessInsights: BusinessInsightsPayload
 }
 
 function formatDateLabel(dateKey: string): string {
@@ -349,6 +356,43 @@ export async function buildWeeklyOperationsReport(params: {
 
   const reviewNote = reviewNoteForRank
 
+  const aggregatedPriceBands = aggregatePriceBandsFromSnapshots(snapshots)
+  const aggregatedAfterSales = aggregateAfterSalesFromSnapshots(snapshots)
+  const mergedAnchorRows = mergeAnchorRowsForRange(snapshots.map((s) => s.anchors))
+
+  let businessInsights: BusinessInsightsPayload
+  try {
+    businessInsights = buildBusinessInsightsFromSource(
+      buildBusinessInsightsSourceFromComponents({
+        startDate: params.weekStart,
+        endDate: params.weekEnd,
+        scope: 'weekly',
+        anchors: mergedAnchorRows,
+        products,
+        priceBands: aggregatedPriceBands,
+        afterSalesReasons: aggregatedAfterSales,
+        dimensions,
+        reviewNote,
+        summaryTraffic: {
+          dealUserCount: summaryBase.dealUserCount,
+          joinUserCount: summaryBase.joinUserCount,
+          viewSessionCount: summaryBase.viewSessionCount,
+        },
+        extraWarnings: rankings.productRankingQuality.warnings,
+      }),
+    )
+  } catch (err) {
+    businessInsights = {
+      items: [],
+      dataQuality: {
+        reliable: false,
+        warnings: [
+          `经营建议生成失败：${err instanceof Error ? err.message : '未知错误'}`,
+        ],
+      },
+    }
+  }
+
   return {
     weekStart: params.weekStart,
     weekEnd: params.weekEnd,
@@ -373,8 +417,9 @@ export async function buildWeeklyOperationsReport(params: {
     highReturnProducts: rankings.highReturnProducts.map(toProductHighlight),
     highReturnSampleTooSmall: rankings.highReturnSampleTooSmall.map(toProductHighlight),
     productRankingQuality: rankings.productRankingQuality,
-    priceBands: aggregatePriceBandsFromSnapshots(snapshots),
-    afterSalesReasons: aggregateAfterSalesFromSnapshots(snapshots),
+    priceBands: aggregatedPriceBands,
+    afterSalesReasons: aggregatedAfterSales,
     reviewNote,
+    businessInsights,
   }
 }

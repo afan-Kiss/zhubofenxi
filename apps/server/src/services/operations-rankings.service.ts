@@ -21,6 +21,10 @@ import { buildProductRankingLists } from './operations-product-ranking-lists.ser
 import { buildPriceBandRankingLists } from './operations-price-band-ranking.service'
 import { buildAfterSalesRankingLists } from './operations-after-sales-ranking.service'
 import type { BossSummaryItem, OperationsRankingsPayload } from './operations-rankings.types'
+import {
+  buildBusinessInsightsFromSource,
+  type BusinessInsightsSource,
+} from './operations-business-insights.service'
 
 export type OperationsRankingsPreset =
   | 'today'
@@ -290,5 +294,30 @@ export async function getOperationsRankings(params: {
   }
 
   payload.dataQuality.warnings = collectWarnings(payload)
+
+  try {
+    const insightSource: BusinessInsightsSource = {
+      startDate,
+      endDate,
+      scope: params.scope ?? 'custom',
+      anchors,
+      products: productLists,
+      priceBands,
+      afterSales,
+      extraWarnings: payload.dataQuality.warnings,
+    }
+    payload.businessInsights = buildBusinessInsightsFromSource(insightSource)
+  } catch (err) {
+    payload.businessInsights = {
+      items: [],
+      dataQuality: {
+        reliable: false,
+        warnings: [
+          `经营建议生成失败：${err instanceof Error ? err.message : '未知错误'}`,
+        ],
+      },
+    }
+  }
+
   return payload
 }

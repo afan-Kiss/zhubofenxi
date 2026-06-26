@@ -6,6 +6,7 @@ import { ProductRankingTable } from '../../components/operations/ProductRankingT
 import { PriceBandRankingTable } from '../../components/operations/PriceBandRankingTable'
 import { AfterSalesRankingTable } from '../../components/operations/AfterSalesRankingTable'
 import { RankingSummaryCards } from '../../components/operations/RankingSummaryCards'
+import { BusinessInsightCards } from '../../components/operations/BusinessInsightCards'
 import { RankingSection } from '../../components/operations/RankingMetricTooltip'
 import { RankingQualityBadge } from '../../components/operations/RankingQualityBadge'
 import type { OperationsRankingsPayload } from './operationsReportTypes'
@@ -212,7 +213,10 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
       </div>
 
       {section === 'summary' ? (
-        <RankingSummaryCards items={data.bossSummary} />
+        <>
+          <RankingSummaryCards items={data.bossSummary} />
+          <BusinessInsightCards insights={data.businessInsights} />
+        </>
       ) : null}
 
       {section === 'anchors' ? (

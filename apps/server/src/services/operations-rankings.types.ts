@@ -115,6 +115,7 @@ export interface OperationsRankingsPayload {
     warnings: string[]
   }
   bossSummary: BossSummaryItem[]
+  businessInsights?: import('./operations-business-insights.types').BusinessInsightsPayload
   anchors: {
     byAmount: RankingListPayload<AnchorRankItem>
     byOrders: RankingListPayload<AnchorRankItem>

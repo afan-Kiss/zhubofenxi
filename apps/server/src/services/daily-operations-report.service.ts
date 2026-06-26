@@ -44,6 +44,12 @@ import {
   buildDailyReportDataQualityWarnings,
   buildDailyReportRankingsSlice,
 } from './operations-daily-rankings.service'
+import {
+  buildBusinessInsightsFromSource,
+  buildBusinessInsightsSourceFromComponents,
+} from './operations-business-insights.service'
+import type { BusinessInsightsPayload } from './operations-business-insights.types'
+import { prisma } from '../lib/prisma'
 
 export interface DailyOperationsAnchorRow {
   anchorName: string
@@ -106,6 +112,7 @@ export interface DailyOperationsReportPayload {
     reliable: boolean
     warnings: string[]
   }
+  businessInsights: BusinessInsightsPayload
 }
 
 function formatDailyReportDateLabel(dateKey: string): string {
@@ -418,6 +425,40 @@ export async function buildDailyOperationsReport(params: {
     }),
   }
 
+  let businessInsights: BusinessInsightsPayload
+  try {
+    const dimensions = await prisma.productDimension.findMany()
+    businessInsights = buildBusinessInsightsFromSource(
+      buildBusinessInsightsSourceFromComponents({
+        startDate: params.startDate,
+        endDate: params.endDate,
+        scope: 'daily',
+        anchors: anchorRows,
+        products,
+        priceBands,
+        afterSalesReasons,
+        dimensions,
+        reviewNote,
+        summaryTraffic: {
+          dealUserCount: summaryTraffic.dealUserCount,
+          joinUserCount: summaryTraffic.joinUserCount,
+          viewSessionCount: summaryTraffic.viewSessionCount,
+        },
+        extraWarnings: reportDataQuality.warnings,
+      }),
+    )
+  } catch (err) {
+    businessInsights = {
+      items: [],
+      dataQuality: {
+        reliable: false,
+        warnings: [
+          `经营建议生成失败：${err instanceof Error ? err.message : '未知错误'}`,
+        ],
+      },
+    }
+  }
+
   return {
     dateLabel,
     title: `${dateLabel} 运营日报`,
@@ -452,6 +493,7 @@ export async function buildDailyOperationsReport(params: {
     reviewNote,
     rankings,
     reportDataQuality,
+    businessInsights,
   }
 }
 

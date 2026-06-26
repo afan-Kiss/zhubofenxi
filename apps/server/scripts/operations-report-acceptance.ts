@@ -108,6 +108,7 @@ function testWeeklyTrafficRates(issues: string[]) {
       reviewNote: null,
       rankings: {} as DailyOperationsReportPayload['rankings'],
       reportDataQuality: { reliable: true, warnings: [] },
+      businessInsights: { items: [], dataQuality: { reliable: false, warnings: [] } },
     },
     {
       dateLabel: '1.2',
@@ -122,6 +123,7 @@ function testWeeklyTrafficRates(issues: string[]) {
       reviewNote: null,
       rankings: {} as DailyOperationsReportPayload['rankings'],
       reportDataQuality: { reliable: true, warnings: [] },
+      businessInsights: { items: [], dataQuality: { reliable: false, warnings: [] } },
     },
   ])
   assert(missingTraffic.dealConversionRate === null, '缺失进房/成交人数时周报成交率为 null', issues)
@@ -147,6 +149,7 @@ function testWeeklyTrafficRates(issues: string[]) {
       reviewNote: null,
       rankings: {} as DailyOperationsReportPayload['rankings'],
       reportDataQuality: { reliable: true, warnings: [] },
+      businessInsights: { items: [], dataQuality: { reliable: false, warnings: [] } },
     },
     {
       dateLabel: '1.2',
@@ -169,6 +172,7 @@ function testWeeklyTrafficRates(issues: string[]) {
       reviewNote: null,
       rankings: {} as DailyOperationsReportPayload['rankings'],
       reportDataQuality: { reliable: true, warnings: [] },
+      businessInsights: { items: [], dataQuality: { reliable: false, warnings: [] } },
     },
   ])
   assert(

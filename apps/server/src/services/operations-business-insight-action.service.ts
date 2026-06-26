@@ -1,4 +1,6 @@
 import { prisma } from '../lib/prisma'
+import { addDaysShanghai, endOfDayMsShanghai, formatDateKeyShanghai, startOfDayMsShanghai } from '../utils/business-timezone'
+import { eachDayInShanghaiRange } from '../utils/each-day-shanghai'
 import type {
   BusinessInsightActionState,
   BusinessInsightsPayload,
@@ -304,4 +306,133 @@ export async function attachBusinessInsightActions(
 ): Promise<BusinessInsightsPayload> {
   const actions = await listBusinessInsightActions(params)
   return mergeBusinessInsightActions(payload, actions)
+}
+
+export interface BusinessInsightActionStatsSummary {
+  total: number
+  pending: number
+  handled: number
+  reviewed: number
+  ignored: number
+  handleRate: number | null
+  ignoreRate: number | null
+}
+
+export interface BusinessInsightActionStatsBucket {
+  key: string
+  total: number
+  pending: number
+  handled: number
+  reviewed: number
+  ignored: number
+  handleRate: number | null
+  ignoreRate: number | null
+}
+
+export interface BusinessInsightActionStatsDailyTrend {
+  date: string
+  total: number
+  pending: number
+  handled: number
+  reviewed: number
+  ignored: number
+  handleRate: number | null
+}
+
+export interface BusinessInsightActionStatsPayload {
+  summary: BusinessInsightActionStatsSummary
+  byType: BusinessInsightActionStatsBucket[]
+  byEntityType: BusinessInsightActionStatsBucket[]
+  dailyTrend: BusinessInsightActionStatsDailyTrend[]
+}
+
+function countByStatus(rows: OperationsBusinessInsightActionRecord[]): Omit<
+  BusinessInsightActionStatsSummary,
+  'handleRate' | 'ignoreRate'
+> {
+  const counts = { total: rows.length, pending: 0, handled: 0, reviewed: 0, ignored: 0 }
+  for (const row of rows) {
+    counts[row.status] += 1
+  }
+  return counts
+}
+
+function withRates(
+  counts: Omit<BusinessInsightActionStatsSummary, 'handleRate' | 'ignoreRate'>,
+): BusinessInsightActionStatsSummary {
+  return {
+    ...counts,
+    handleRate: counts.total > 0 ? (counts.handled + counts.reviewed) / counts.total : null,
+    ignoreRate: counts.total > 0 ? counts.ignored / counts.total : null,
+  }
+}
+
+function toBucket(key: string, rows: OperationsBusinessInsightActionRecord[]): BusinessInsightActionStatsBucket {
+  const counts = countByStatus(rows)
+  return {
+    key,
+    ...counts,
+    handleRate: counts.total > 0 ? (counts.handled + counts.reviewed) / counts.total : null,
+    ignoreRate: counts.total > 0 ? counts.ignored / counts.total : null,
+  }
+}
+
+function groupByKey(
+  rows: OperationsBusinessInsightActionRecord[],
+  pick: (row: OperationsBusinessInsightActionRecord) => string,
+): BusinessInsightActionStatsBucket[] {
+  const map = new Map<string, OperationsBusinessInsightActionRecord[]>()
+  for (const row of rows) {
+    const key = pick(row)
+    const list = map.get(key) ?? []
+    list.push(row)
+    map.set(key, list)
+  }
+  return [...map.entries()]
+    .map(([key, group]) => toBucket(key, group))
+    .sort((a, b) => b.total - a.total || a.key.localeCompare(b.key, 'zh-CN'))
+}
+
+export async function getBusinessInsightActionStats(params: {
+  startDate: string
+  endDate: string
+  scope: string
+}): Promise<BusinessInsightActionStatsPayload> {
+  const validated = validateListBusinessInsightActionsParams(params)
+  const rows = await listBusinessInsightActions(validated)
+  const summary = withRates(countByStatus(rows))
+  const byType = groupByKey(rows, (row) => row.insightType)
+  const byEntityType = groupByKey(rows, (row) => row.entityType)
+
+  const trendEnd = validated.endDate
+  const trendStart = addDaysShanghai(trendEnd, -6)
+  const trendDays = eachDayInShanghaiRange(trendStart, trendEnd)
+  const trendRows = await prisma.operationsBusinessInsightAction.findMany({
+    where: {
+      scope: validated.scope,
+      updatedAt: {
+        gte: new Date(startOfDayMsShanghai(trendStart)),
+        lte: new Date(endOfDayMsShanghai(trendEnd)),
+      },
+    },
+  })
+  const trendByDay = new Map<string, OperationsBusinessInsightActionRecord[]>()
+  for (const day of trendDays) {
+    trendByDay.set(day, [])
+  }
+  for (const row of trendRows) {
+    const dayKey = formatDateKeyShanghai(row.updatedAt)
+    const bucket = trendByDay.get(dayKey)
+    if (bucket) bucket.push(toRecord(row))
+  }
+  const dailyTrend: BusinessInsightActionStatsDailyTrend[] = trendDays.map((date) => {
+    const counts = countByStatus(trendByDay.get(date) ?? [])
+    return {
+      date,
+      ...counts,
+      handleRate: counts.total > 0 ? (counts.handled + counts.reviewed) / counts.total : null,
+    }
+  })
+
+  return { summary, byType, byEntityType, dailyTrend }
 }

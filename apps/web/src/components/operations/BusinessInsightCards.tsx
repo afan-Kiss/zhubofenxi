@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { apiRequest } from '../../lib/api'
+import { BusinessInsightActionStatsCard } from './BusinessInsightActionStatsCard'
 import type {
   BusinessInsightActionState,
   BusinessInsightActionStatus,
@@ -74,6 +75,7 @@ export const BusinessInsightCards: React.FC<Props> = ({
   const items = insights?.items ?? []
   const [showIgnored, setShowIgnored] = useState(false)
   const [savingId, setSavingId] = useState<string | null>(null)
+  const [statsRefresh, setStatsRefresh] = useState(0)
 
   const stats = useMemo(() => {
     const counts = { total: items.length, pending: 0, handled: 0, reviewed: 0, ignored: 0 }
@@ -112,6 +114,7 @@ export const BusinessInsightCards: React.FC<Props> = ({
         }),
       })
       await onRefresh?.()
+      setStatsRefresh((v) => v + 1)
     } finally {
       setSavingId(null)
     }
@@ -119,6 +122,12 @@ export const BusinessInsightCards: React.FC<Props> = ({
 
   return (
     <section className="space-y-3">
+      <BusinessInsightActionStatsCard
+        rangeStartDate={rangeStartDate}
+        rangeEndDate={rangeEndDate}
+        scope={scope}
+        refreshToken={statsRefresh}
+      />
       <div className="flex flex-wrap items-end justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-900">经营动作建议</h3>
         {items.length > 0 ? (

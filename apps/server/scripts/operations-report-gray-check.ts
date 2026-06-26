@@ -188,6 +188,37 @@ function checkRankingsApi(ctx: CheckContext, rankings: Record<string, unknown>) 
   checkBusinessInsights(ctx, '榜单中心', rankings)
 }
 
+function checkInsightActionStats(ctx: CheckContext, label: string, payload: Record<string, unknown> | null) {
+  if (!payload) {
+    addFinding(ctx, 'P1', `${label} 经营建议执行统计缺失`)
+    return
+  }
+  const summary = payload.summary as Record<string, unknown> | undefined
+  if (!summary) {
+    addFinding(ctx, 'P1', `${label} 经营建议执行统计 summary 缺失`)
+    return
+  }
+  const total = Number(summary.total ?? 0)
+  const pending = Number(summary.pending ?? 0)
+  const handled = Number(summary.handled ?? 0)
+  const reviewed = Number(summary.reviewed ?? 0)
+  const ignored = Number(summary.ignored ?? 0)
+  if (total !== pending + handled + reviewed + ignored) {
+    addFinding(ctx, 'P1', `${label} 经营建议执行统计总数与各状态之和不一致`)
+  }
+  if (total === 0 && summary.handleRate != null) {
+    addFinding(ctx, 'P1', `${label} total=0 时 handleRate 应为 null`)
+  }
+  const dailyTrend = payload.dailyTrend as unknown[] | undefined
+  if (!Array.isArray(dailyTrend) || dailyTrend.length !== 7) {
+    addFinding(ctx, 'P1', `${label} dailyTrend 应为 7 天`)
+  }
+  const json = JSON.stringify(payload)
+  for (const f of ['phone', 'mobile', 'address', 'receiver', 'buyerName', 'platformRawJson', 'rawJson']) {
+    if (json.includes(`"${f}"`)) addFinding(ctx, 'P1', `${label} 经营建议执行统计含隐私字段 ${f}`)
+  }
+}
+
 async function fetchWeekly(weekStart: string, weekEnd: string) {
   const { status, body } = await fetchJson<Record<string, unknown>>('/api/board/operations-report/weekly', {
     weekStart,
@@ -871,6 +902,37 @@ async function main() {
   checkWeeklyStructure(ctx, weekly)
   checkProductRankings(ctx, weekly)
   checkRankingsApi(ctx, rankings)
+  let insightStatsCustom: Record<string, unknown> | null = null
+  let insightStatsDaily: Record<string, unknown> | null = null
+  let insightStatsWeekly: Record<string, unknown> | null = null
+  try {
+    const customRes = await fetchJson<Record<string, unknown>>(
+      '/api/board/operations-business-insight-action-stats',
+      { startDate: ctx.weekStart, endDate: ctx.weekEnd, scope: 'custom' },
+    )
+    if (customRes.status === 200 && customRes.body.ok && customRes.body.data) {
+      insightStatsCustom = customRes.body.data as Record<string, unknown>
+    }
+    const dailyRes = await fetchJson<Record<string, unknown>>(
+      '/api/board/operations-business-insight-action-stats',
+      { startDate: ctx.targetDate, endDate: ctx.targetDate, scope: 'daily' },
+    )
+    if (dailyRes.status === 200 && dailyRes.body.ok && dailyRes.body.data) {
+      insightStatsDaily = dailyRes.body.data as Record<string, unknown>
+    }
+    const weeklyRes = await fetchJson<Record<string, unknown>>(
+      '/api/board/operations-business-insight-action-stats',
+      { startDate: ctx.weekStart, endDate: ctx.weekEnd, scope: 'weekly' },
+    )
+    if (weeklyRes.status === 200 && weeklyRes.body.ok && weeklyRes.body.data) {
+      insightStatsWeekly = weeklyRes.body.data as Record<string, unknown>
+    }
+  } catch (err) {
+    addFinding(ctx, 'P1', `经营建议执行统计接口失败：${err instanceof Error ? err.message : String(err)}`)
+  }
+  checkInsightActionStats(ctx, '榜单 custom', insightStatsCustom)
+  checkInsightActionStats(ctx, '日报 daily', insightStatsDaily)
+  checkInsightActionStats(ctx, '周报 weekly', insightStatsWeekly)
   const weeklyCaliber = weekly.summary
     ? await checkWeeklyCaliber(ctx, weekly, ctx.weekStart, ctx.weekEnd)
     : null
@@ -896,6 +958,7 @@ async function main() {
   addSection(ctx, '榜单中心接口', [
     `- HTTP：${rankings.bossSummary ? '200 ✅' : '失败 ❌'}`,
     `- bossSummary / anchors / products / priceBands / businessInsights：${rankings.bossSummary ? '已返回' : '缺失'}`,
+    `- 经营建议执行统计：${insightStatsCustom ? '已返回 ✅' : '缺失 ❌'}`,
   ])
 
   if (dailyCaliber) {

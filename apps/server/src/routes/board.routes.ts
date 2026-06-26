@@ -357,6 +357,30 @@ boardRouter.post('/operations-business-insight-actions', async (req, res) => {
   }
 })
 
+boardRouter.get('/operations-business-insight-action-stats', async (req, res) => {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    const scope = req.query.scope ? String(req.query.scope) : ''
+    if (!startDate || !endDate || !scope) {
+      sendFail(res, '请提供 startDate、endDate 与 scope', 400)
+      return
+    }
+    const { getBusinessInsightActionStats } = await import(
+      '../services/operations-business-insight-action.service'
+    )
+    const stats = await getBusinessInsightActionStats({ startDate, endDate, scope })
+    sendOk(res, stats)
+  } catch (err) {
+    const mod = await import('../services/operations-business-insight-action.service')
+    if (err instanceof mod.BusinessInsightActionValidationError) {
+      sendFail(res, err.message, 400)
+      return
+    }
+    sendFail(res, err instanceof Error ? err.message : '加载经营建议执行统计失败', 500)
+  }
+})
+
 boardRouter.get('/operations-report/weekly', async (req, res) => {
   try {
     const weekStart = req.query.weekStart ? String(req.query.weekStart) : ''

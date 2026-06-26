@@ -153,6 +153,44 @@ export interface BusinessInsightActionState {
   updatedAt?: string
 }
 
+export interface BusinessInsightActionStatsSummary {
+  total: number
+  pending: number
+  handled: number
+  reviewed: number
+  ignored: number
+  handleRate: number | null
+  ignoreRate: number | null
+}
+
+export interface BusinessInsightActionStatsBucket {
+  key: string
+  total: number
+  pending: number
+  handled: number
+  reviewed: number
+  ignored: number
+  handleRate: number | null
+  ignoreRate: number | null
+}
+
+export interface BusinessInsightActionStatsDailyTrend {
+  date: string
+  total: number
+  pending: number
+  handled: number
+  reviewed: number
+  ignored: number
+  handleRate: number | null
+}
+
+export interface BusinessInsightActionStatsPayload {
+  summary: BusinessInsightActionStatsSummary
+  byType: BusinessInsightActionStatsBucket[]
+  byEntityType: BusinessInsightActionStatsBucket[]
+  dailyTrend: BusinessInsightActionStatsDailyTrend[]
+}
+
 export interface BusinessInsightDataQuality {
   reliable: boolean
   confidence: BusinessInsightConfidence

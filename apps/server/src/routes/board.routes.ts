@@ -551,6 +551,95 @@ boardRouter.post('/operations-report-cache/prewarm', requireMaintenanceTools, as
   }
 })
 
+boardRouter.get('/operations-bi-drill', async (req, res) => {
+  try {
+    const {
+      buildOperationsBiDrill,
+      OperationsBiDrillValidationError,
+    } = await import('../services/operations-bi-drill.service')
+    const rawLimit = req.query.pageSize ? Number(req.query.pageSize) : 20
+    const pageSize = Number.isFinite(rawLimit)
+      ? Math.min(Math.max(Math.round(rawLimit), 1), 100)
+      : 20
+    const data = await buildOperationsBiDrill({
+      source: String(req.query.source ?? '') as import('../services/operations-bi-drill.types').OperationsBiDrillSource,
+      target: String(req.query.target ?? '') as import('../services/operations-bi-drill.types').OperationsBiDrillTarget,
+      startDate: req.query.startDate ? String(req.query.startDate) : '',
+      endDate: req.query.endDate ? String(req.query.endDate) : '',
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      scope: req.query.scope
+        ? (String(req.query.scope) as 'daily' | 'weekly' | 'monthly' | 'custom')
+        : undefined,
+      page: req.query.page ? Number(req.query.page) : 1,
+      pageSize,
+      sort: req.query.sort ? String(req.query.sort) : undefined,
+      anchorId: req.query.anchorId ? String(req.query.anchorId) : undefined,
+      anchorName: req.query.anchorName ? String(req.query.anchorName) : undefined,
+      productKey: req.query.productKey ? String(req.query.productKey) : undefined,
+      productName: req.query.productName ? String(req.query.productName) : undefined,
+      skuName: req.query.skuName ? String(req.query.skuName) : undefined,
+      priceBandKey: req.query.priceBandKey ? String(req.query.priceBandKey) : undefined,
+      priceBandLabel: req.query.priceBandLabel ? String(req.query.priceBandLabel) : undefined,
+      afterSalesCategory: req.query.afterSalesCategory
+        ? String(req.query.afterSalesCategory)
+        : undefined,
+      afterSalesReason: req.query.afterSalesReason ? String(req.query.afterSalesReason) : undefined,
+      insightId: req.query.insightId ? String(req.query.insightId) : undefined,
+      insightType: req.query.insightType ? String(req.query.insightType) : undefined,
+      metricKey: req.query.metricKey ? String(req.query.metricKey) : undefined,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    const mod = await import('../services/operations-bi-drill.service')
+    if (err instanceof mod.OperationsBiDrillValidationError) {
+      sendFail(res, err.message, 400)
+      return
+    }
+    sendFail(res, err instanceof Error ? err.message : '加载数据来源失败', 500)
+  }
+})
+
+boardRouter.post('/qianfan-order-detail-ticket', async (req, res) => {
+  try {
+    const body = req.body as { orderNo?: string } | undefined
+    const {
+      createQianfanOrderOpenTicket,
+      QianfanOrderOpenTicketError,
+    } = await import('../services/qianfan-order-open-ticket.service')
+    const result = await createQianfanOrderOpenTicket(body?.orderNo ? String(body.orderNo) : '')
+    sendOk(res, result)
+  } catch (err) {
+    const mod = await import('../services/qianfan-order-open-ticket.service')
+    if (err instanceof mod.QianfanOrderOpenTicketError) {
+      sendFail(res, err.message, 400)
+      return
+    }
+    sendFail(res, err instanceof Error ? err.message : '生成订单详情入口失败', 500)
+  }
+})
+
+boardRouter.get('/qianfan-order-detail/open', async (req, res) => {
+  try {
+    const ticket = req.query.ticket ? String(req.query.ticket) : ''
+    const { consumeQianfanOrderOpenTicket } = await import(
+      '../services/qianfan-order-open-ticket.service'
+    )
+    const result = consumeQianfanOrderOpenTicket(ticket)
+    if (!result.ok) {
+      res.status(410).setHeader('Content-Type', 'text/html; charset=utf-8').send(result.html)
+      return
+    }
+    res.redirect(302, result.redirectUrl)
+  } catch (err) {
+    res
+      .status(500)
+      .setHeader('Content-Type', 'text/html; charset=utf-8')
+      .send(
+        `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>打开千帆订单详情</title></head><body><p>${err instanceof Error ? err.message : '打开失败'}</p></body></html>`,
+      )
+  }
+})
+
 boardRouter.get('/operations-report/product-detail', async (req, res) => {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : ''

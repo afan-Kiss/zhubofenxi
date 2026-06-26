@@ -889,6 +889,142 @@ function buildMarkdownReport(ctx: CheckContext, verdict: 'PASS' | 'WARN' | 'FAIL
   ].join('\n')
 }
 
+const DRILL_PRIVACY_FIELDS = [
+  'phone',
+  'mobile',
+  'address',
+  'receiver',
+  'platformRawJson',
+  'rawJson',
+  'cookie',
+  'Cookie',
+  'authorization',
+  'token',
+]
+
+async function checkBiDrill(
+  ctx: CheckContext,
+  daily: Record<string, unknown>,
+  rankings: Record<string, unknown>,
+  monthStart: string,
+  monthEnd: string,
+) {
+  const date = ctx.targetDate
+  const weekStart = ctx.weekStart
+  const weekEnd = ctx.weekEnd
+  const lines: string[] = []
+
+  async function drill(query: Record<string, string | undefined>) {
+    const { status, body } = await fetchJson<Record<string, unknown>>('/api/board/operations-bi-drill', query)
+    return { status, data: body.ok ? body.data : undefined, message: body.message }
+  }
+
+  const dailySummary = (daily.summary as Record<string, unknown> | undefined) ?? {}
+  const dailyDrill = await drill({
+    source: 'daily_summary',
+    target: 'summary_valid_amount',
+    startDate: date,
+    endDate: date,
+  })
+  if (dailyDrill.status !== 200) {
+    addFinding(ctx, 'P1', `日报有效成交金额下钻 HTTP ${dailyDrill.status}`)
+  } else {
+    lines.push(`- 日报有效成交金额下钻：${dailyDrill.status} ✅`)
+    const drillSummary = dailyDrill.data?.summary as Record<string, unknown> | undefined
+    const drillAmount = Number(drillSummary?.validAmountYuan ?? NaN)
+    const reportAmount = Number(dailySummary.validAmountYuan ?? NaN)
+    if (Number.isFinite(drillAmount) && Number.isFinite(reportAmount) && !near(drillAmount, reportAmount, 1)) {
+      addFinding(
+        ctx,
+        'P1',
+        `日报下钻有效成交金额 ${drillAmount} 与 summary ${reportAmount} 偏差较大`,
+      )
+    }
+  }
+
+  const hotItem = (
+    rankings.products as { hot?: { items?: Array<{ productKey?: string }> } } | undefined
+  )?.hot?.items?.[0]
+  if (hotItem?.productKey) {
+    const hotDrill = await drill({
+      source: 'rankings',
+      target: 'product_hot',
+      startDate: weekStart,
+      endDate: weekEnd,
+      productKey: hotItem.productKey,
+    })
+    lines.push(`- 周报热卖商品下钻：${hotDrill.status}${hotDrill.status === 200 ? ' ✅' : ' ❌'}`)
+    if (hotDrill.status !== 200) addFinding(ctx, 'P1', '榜单热卖商品下钻失败')
+  }
+
+  const priceBand = (
+    rankings.priceBands as { byAmount?: { items?: Array<{ bandLabel?: string }> } } | undefined
+  )?.byAmount?.items?.[0]
+  if (priceBand?.bandLabel) {
+    const bandDrill = await drill({
+      source: 'price_band_ranking',
+      target: 'price_band_amount',
+      startDate: monthStart,
+      endDate: monthEnd,
+      priceBandLabel: priceBand.bandLabel,
+    })
+    lines.push(`- 月报价格带下钻：${bandDrill.status}${bandDrill.status === 200 ? ' ✅' : ' ❌'}`)
+  }
+
+  const reasonItem = (
+    rankings.afterSales as { byReason?: { items?: Array<{ category?: string; categoryLabel?: string }> } } | undefined
+  )?.byReason?.items?.[0]
+  if (reasonItem?.category) {
+    const reasonDrill = await drill({
+      source: 'after_sales_ranking',
+      target: 'after_sales_reason',
+      startDate: weekStart,
+      endDate: weekEnd,
+      afterSalesCategory: reasonItem.category,
+      afterSalesReason: reasonItem.categoryLabel,
+    })
+    lines.push(`- 售后原因下钻：${reasonDrill.status}${reasonDrill.status === 200 ? ' ✅' : ' ❌'}`)
+  }
+
+  const trafficDrill = await drill({
+    source: 'daily_summary',
+    target: 'summary_deal_conversion',
+    startDate: date,
+    endDate: date,
+  })
+  if (trafficDrill.status === 200) {
+    const rows = trafficDrill.data?.rows as unknown[] | undefined
+    const warnings = (trafficDrill.data?.dataQuality as { warnings?: string[] } | undefined)?.warnings ?? []
+    if ((rows?.length ?? 0) > 0) addFinding(ctx, 'P1', '成交率下钻不应返回订单行')
+    if (!warnings.some((w) => w.includes('官方流量'))) {
+      addFinding(ctx, 'P2', '成交率下钻缺少官方流量说明')
+    }
+    lines.push('- 流量类指标下钻：说明正常 ✅')
+  }
+
+  const drillJson = JSON.stringify(dailyDrill.data ?? {})
+  for (const f of DRILL_PRIVACY_FIELDS) {
+    if (drillJson.includes(`"${f}"`)) addFinding(ctx, 'P1', `钻取响应含隐私字段 ${f}`)
+  }
+
+  try {
+    const ticketRes = await fetch(`${BASE}/api/board/qianfan-order-detail-ticket`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orderNo: '' }),
+    })
+    const ticketBody = await ticketRes.text()
+    if (ticketBody.toLowerCase().includes('cookie')) {
+      addFinding(ctx, 'P1', '千帆 ticket 接口响应含 cookie 字样')
+    }
+    lines.push('- 千帆 ticket 接口：已检查不泄露 Cookie ✅')
+  } catch (err) {
+    addFinding(ctx, 'P2', `千帆 ticket 检查失败：${err instanceof Error ? err.message : String(err)}`)
+  }
+
+  addSection(ctx, 'BI 钻取核对', lines)
+}
+
 async function main() {
   const ctx: CheckContext = {
     targetDate: '',
@@ -1084,6 +1220,11 @@ async function main() {
   const weeklyCaliber = weekly.summary
     ? await checkWeeklyCaliber(ctx, weekly, ctx.weekStart, ctx.weekEnd)
     : null
+  const monthStart = ctx.targetDate.slice(0, 8) + '01'
+  const monthEnd = ctx.targetDate
+  if (daily.summary && rankings.bossSummary) {
+    await checkBiDrill(ctx, daily, rankings, monthStart, monthEnd)
+  }
   const privacy = await checkPrivacyExport(ctx, ctx.targetDate)
   const priceBandLines = checkPriceBandBoundaries(ctx)
   const lowPrice = await checkLowPriceBrush(ctx, ctx.targetDate)

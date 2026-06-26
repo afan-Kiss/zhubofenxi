@@ -5,6 +5,7 @@ import { OperationsDailyReport } from './OperationsDailyReport'
 import { OperationsWeeklyReport } from './OperationsWeeklyReport'
 import { OperationsMonthlyReport } from './OperationsMonthlyReport'
 import { OperationsRankingsTab } from './OperationsRankingsTab'
+import { OperationsBiDrillProvider } from '../../components/operations/OperationsBiDrillProvider'
 
 function yesterdayKey(): string {
   const today = formatDateKeyShanghai(new Date())
@@ -90,6 +91,7 @@ export const OperationsReportPage: React.FC = () => {
   )
 
   return (
+    <OperationsBiDrillProvider>
     <div className="mx-auto w-full max-w-6xl space-y-4 px-3 py-4 md:px-4">
       <div>
         <h1 className="text-xl font-semibold text-slate-900">运营报表</h1>
@@ -160,5 +162,6 @@ export const OperationsReportPage: React.FC = () => {
         <OperationsRankingsTab startDate={rankStart} endDate={rankEnd} preset="custom" />
       )}
     </div>
+    </OperationsBiDrillProvider>
   )
 }

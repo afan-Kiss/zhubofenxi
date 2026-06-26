@@ -55,6 +55,8 @@ function isProductReturnOrder(v: AnalyzedOrderView): boolean {
   return v.productRefundAmountCent > 0 && !v.isFreightRefundOnly
 }
 
+export { isProductReturnOrder }
+
 /** 商品退货率（订单维度）：退货订单数 / 有效成交订单数 */
 export function computeProductReturnRateByOrder(
   soldOrderCount: number,

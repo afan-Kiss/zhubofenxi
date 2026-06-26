@@ -1,5 +1,10 @@
 import React from 'react'
 import type { AnchorRankItem } from '../../pages/operations/operationsReportTypes'
+import type {
+  OperationsBiDrillContextProps,
+  OperationsBiDrillTarget,
+} from '../../pages/operations/operationsBiDrillTypes'
+import { OperationsBiDrillLinkButton } from './OperationsBiDrillProvider'
 import {
   formatHourly,
   formatIntegerMoney,
@@ -10,9 +15,15 @@ import {
 
 interface Props {
   rows: AnchorRankItem[]
+  drillContext?: OperationsBiDrillContextProps
+  drillTarget?: OperationsBiDrillTarget
 }
 
-export const AnchorRankingTable: React.FC<Props> = ({ rows }) => {
+export const AnchorRankingTable: React.FC<Props> = ({
+  rows,
+  drillContext,
+  drillTarget = 'anchor_amount',
+}) => {
   if (rows.length === 0) {
     return <p className="text-sm text-slate-500">暂无数据</p>
   }
@@ -33,6 +44,7 @@ export const AnchorRankingTable: React.FC<Props> = ({ rows }) => {
             <th className="px-3 py-2">成交率</th>
             <th className="px-3 py-2">新增粉丝</th>
             <th className="px-3 py-2">上榜原因</th>
+            {drillContext ? <th className="px-3 py-2">操作</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -50,6 +62,18 @@ export const AnchorRankingTable: React.FC<Props> = ({ rows }) => {
               <td className="px-3 py-2">{formatRatePercent(row.dealConversionRate)}</td>
               <td className="px-3 py-2">{formatPeopleCount(row.newFollowerCount)}</td>
               <td className="px-3 py-2 text-slate-500">{row.rankReason}</td>
+              {drillContext ? (
+                <td className="px-3 py-2">
+                  <OperationsBiDrillLinkButton
+                    request={{
+                      ...drillContext,
+                      source: 'anchor_ranking',
+                      target: drillTarget,
+                      anchorName: row.anchorName,
+                    }}
+                  />
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>

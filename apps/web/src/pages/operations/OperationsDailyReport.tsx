@@ -27,6 +27,8 @@ import type {
   WithOperationsReportCacheMeta,
 } from './operationsReportTypes'
 import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
+import { OperationsMetricDrillCard } from '../../components/operations/OperationsMetricDrillCard'
+import type { OperationsBiDrillRequest } from './operationsBiDrillTypes'
 
 interface Props {
   dateKey: string
@@ -111,6 +113,18 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
   if (!report) return null
 
   const s = report.summary
+  const drillBase: Omit<OperationsBiDrillRequest, 'target'> = {
+    source: 'daily_summary',
+    startDate: dateKey,
+    endDate: dateKey,
+    scope: 'daily',
+  }
+  const productDrillContext = {
+    source: 'daily_summary' as const,
+    startDate: dateKey,
+    endDate: dateKey,
+    scope: 'daily' as const,
+  }
 
   return (
     <div className="space-y-4">
@@ -130,27 +144,44 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          ['有效成交金额', formatIntegerMoney(s.validAmountYuan)],
-          ['有效成交订单', formatOrderCount(s.soldOrderCount)],
-          ['退货单率', formatPercent(s.returnOrderRate)],
-          ['客单价', formatIntegerMoney(s.avgOrderAmountYuan)],
-          ['成交人数', formatPeopleCount(s.dealUserCount)],
-          ['成交率', formatRatePercent(s.dealConversionRate)],
-          ['直播时长', formatDuration(s.totalLiveDurationMinutes)],
-          ['每小时成交', formatHourly(s.hourlyAmountYuan)],
-          ['场观', formatPeopleCount(s.viewSessionCount)],
-          ['进房人数', formatPeopleCount(s.joinUserCount)],
-          ['平均在线', formatPeopleCount(s.avgOnlineUserCount)],
-          ['平均停留', formatStayDurationSeconds(s.avgViewDurationSeconds)],
-          ['新增粉丝', formatPeopleCount(s.totalNewFollowerCount)],
-          ['粉丝率', formatRatePercent(s.newFollowerRate)],
-        ].map(([label, value]) => (
-          <div key={label} className="rounded-2xl border border-slate-200 bg-white p-3">
-            <p className="text-xs text-slate-500">{label}</p>
-            <p className="mt-1 text-base font-semibold text-slate-900">{value}</p>
-          </div>
-        ))}
+        <OperationsMetricDrillCard
+          label="有效成交金额"
+          value={formatIntegerMoney(s.validAmountYuan)}
+          drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+        />
+        <OperationsMetricDrillCard
+          label="有效成交订单"
+          value={formatOrderCount(s.soldOrderCount)}
+          drillRequest={{ ...drillBase, target: 'summary_orders' }}
+        />
+        <OperationsMetricDrillCard
+          label="退货单率"
+          value={formatPercent(s.returnOrderRate)}
+          drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
+        />
+        <OperationsMetricDrillCard label="客单价" value={formatIntegerMoney(s.avgOrderAmountYuan)} />
+        <OperationsMetricDrillCard
+          label="成交人数"
+          value={formatPeopleCount(s.dealUserCount)}
+          drillRequest={{ ...drillBase, target: 'summary_buyer_count' }}
+        />
+        <OperationsMetricDrillCard
+          label="成交率"
+          value={formatRatePercent(s.dealConversionRate)}
+          drillRequest={{ ...drillBase, target: 'summary_deal_conversion' }}
+        />
+        <OperationsMetricDrillCard label="直播时长" value={formatDuration(s.totalLiveDurationMinutes)} />
+        <OperationsMetricDrillCard
+          label="每小时成交"
+          value={formatHourly(s.hourlyAmountYuan)}
+          drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+        />
+        <OperationsMetricDrillCard label="场观" value={formatPeopleCount(s.viewSessionCount)} />
+        <OperationsMetricDrillCard label="进房人数" value={formatPeopleCount(s.joinUserCount)} />
+        <OperationsMetricDrillCard label="平均在线" value={formatPeopleCount(s.avgOnlineUserCount)} />
+        <OperationsMetricDrillCard label="平均停留" value={formatStayDurationSeconds(s.avgViewDurationSeconds)} />
+        <OperationsMetricDrillCard label="新增粉丝" value={formatPeopleCount(s.totalNewFollowerCount)} />
+        <OperationsMetricDrillCard label="粉丝率" value={formatRatePercent(s.newFollowerRate)} />
       </div>
 
       <BusinessInsightCards
@@ -177,16 +208,28 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
           <div>
             <h3 className="mb-1 text-sm font-semibold text-slate-900">热卖前 10</h3>
             <p className="mb-2 text-xs text-slate-500">按有效成交金额、成交订单、成交件数排序</p>
-            <ProductRankingTable rows={report.rankings.products.hot.items} />
+            <ProductRankingTable
+              rows={report.rankings.products.hot.items}
+              drillContext={productDrillContext}
+              drillTarget="product_hot"
+            />
           </div>
           <div>
             <h3 className="mb-1 text-sm font-semibold text-slate-900">高退货前 10</h3>
             <p className="mb-2 text-xs text-slate-500">按商品退货订单率排序（成交≥3单为正式榜）</p>
-            <ProductRankingTable rows={report.rankings.products.highReturn.items} />
+            <ProductRankingTable
+              rows={report.rankings.products.highReturn.items}
+              drillContext={productDrillContext}
+              drillTarget="product_high_return"
+            />
             {report.rankings.products.highReturn.sampleTooSmall?.length ? (
               <div className="mt-2">
                 <p className="mb-1 text-xs font-medium text-amber-700">样本不足，仅参考</p>
-                <ProductRankingTable rows={report.rankings.products.highReturn.sampleTooSmall} />
+                <ProductRankingTable
+                  rows={report.rankings.products.highReturn.sampleTooSmall}
+                  drillContext={productDrillContext}
+                  drillTarget="product_high_return"
+                />
               </div>
             ) : null}
           </div>

@@ -17,6 +17,8 @@ import type {
   WithOperationsReportCacheMeta,
 } from './operationsReportTypes'
 import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
+import { OperationsMetricDrillCard } from '../../components/operations/OperationsMetricDrillCard'
+import type { OperationsBiDrillRequest } from './operationsBiDrillTypes'
 
 interface Props {
   weekStart: string
@@ -106,6 +108,12 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
   if (!report) return null
 
   const s = report.summary
+  const drillBase: Omit<OperationsBiDrillRequest, 'target'> = {
+    source: 'weekly_summary',
+    startDate: weekStart,
+    endDate: weekEnd,
+    scope: 'weekly',
+  }
   const anchorRows = report.anchors.map((row) => ({
     anchorName: row.anchorName,
     sessionLabel: '周汇总',
@@ -140,34 +148,38 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-          <p className="text-xs text-slate-500">本周有效成交</p>
-          <p className="mt-1 text-base font-semibold">{formatIntegerMoney(s.validAmountYuan)}</p>
-          {s.validAmountChangePercent != null ? (
-            <p className="mt-1 text-xs text-slate-500">
-              比上期 {s.validAmountChangePercent >= 0 ? '+' : ''}
-              {s.validAmountChangePercent}%
-            </p>
-          ) : null}
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-          <p className="text-xs text-slate-500">本周订单</p>
-          <p className="mt-1 text-base font-semibold">{formatOrderCount(s.soldOrderCount)}</p>
-          {s.soldOrderChangePercent != null ? (
-            <p className="mt-1 text-xs text-slate-500">
-              比上期 {s.soldOrderChangePercent >= 0 ? '+' : ''}
-              {s.soldOrderChangePercent}%
-            </p>
-          ) : null}
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-          <p className="text-xs text-slate-500">退货单率</p>
-          <p className="mt-1 text-base font-semibold">{formatPercent(s.returnOrderRate)}</p>
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-3">
-          <p className="text-xs text-slate-500">新增粉丝</p>
-          <p className="mt-1 text-base font-semibold">{s.totalNewFollowerCount}人</p>
-        </div>
+        <OperationsMetricDrillCard
+          label="本周有效成交"
+          value={formatIntegerMoney(s.validAmountYuan)}
+          drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+          footer={
+            s.validAmountChangePercent != null ? (
+              <p className="mt-1 text-xs text-slate-500">
+                比上期 {s.validAmountChangePercent >= 0 ? '+' : ''}
+                {s.validAmountChangePercent}%
+              </p>
+            ) : null
+          }
+        />
+        <OperationsMetricDrillCard
+          label="本周订单"
+          value={formatOrderCount(s.soldOrderCount)}
+          drillRequest={{ ...drillBase, target: 'summary_orders' }}
+          footer={
+            s.soldOrderChangePercent != null ? (
+              <p className="mt-1 text-xs text-slate-500">
+                比上期 {s.soldOrderChangePercent >= 0 ? '+' : ''}
+                {s.soldOrderChangePercent}%
+              </p>
+            ) : null
+          }
+        />
+        <OperationsMetricDrillCard
+          label="退货单率"
+          value={formatPercent(s.returnOrderRate)}
+          drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
+        />
+        <OperationsMetricDrillCard label="新增粉丝" value={`${s.totalNewFollowerCount}人`} />
       </div>
 
       <BusinessInsightCards

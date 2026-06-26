@@ -18,6 +18,13 @@ import {
 } from '../../components/operations/operationsReportFormatters'
 import type { MonthlyOperationsReportPayload, WithOperationsReportCacheMeta } from './operationsReportTypes'
 import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
+import { OperationsMetricDrillCard } from '../../components/operations/OperationsMetricDrillCard'
+import {
+  anchorDrillTarget,
+  priceBandDrillTarget,
+  productDrillTarget,
+} from '../../components/operations/operationsBiDrillHelpers'
+import type { OperationsBiDrillContextProps, OperationsBiDrillRequest } from './operationsBiDrillTypes'
 
 interface Props {
   month: string
@@ -86,6 +93,18 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
 
   const s = report.summary
   const cmp = report.compareWithPreviousMonth
+  const drillBase: Omit<OperationsBiDrillRequest, 'target'> = {
+    source: 'monthly_summary',
+    startDate: report.range.startDate,
+    endDate: report.range.endDate,
+    scope: 'monthly',
+  }
+  const rankingDrillContext: OperationsBiDrillContextProps = {
+    source: 'monthly_summary',
+    startDate: report.range.startDate,
+    endDate: report.range.endDate,
+    scope: 'monthly',
+  }
 
   return (
     <div className="space-y-6">
@@ -101,29 +120,47 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
         <h3 className="text-sm font-semibold text-slate-900">本月总览</h3>
         <p className="text-xs text-slate-500">{PLAIN.monthlyOverviewHint}</p>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <MetricCard label={PLAIN.validAmount} value={formatIntegerMoney(s.validAmountYuan)} />
-          <MetricCard label={PLAIN.soldOrders} value={formatOrderCount(s.soldOrderCount)} />
+          <OperationsMetricDrillCard
+            label={PLAIN.validAmount}
+            value={formatIntegerMoney(s.validAmountYuan)}
+            drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+          />
+          <OperationsMetricDrillCard
+            label={PLAIN.soldOrders}
+            value={formatOrderCount(s.soldOrderCount)}
+            drillRequest={{ ...drillBase, target: 'summary_orders' }}
+          />
           <MetricCard label={PLAIN.soldCount} value={String(s.soldCount)} />
           <MetricCard label="客单价" value={formatIntegerMoney(s.averageOrderValue)} />
-          <MetricCard
+          <OperationsMetricDrillCard
             label={PLAIN.productReturnRate}
             value={formatRatePercent(s.productReturnRate)}
+            drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
           />
           <MetricCard
             label="直播时长"
             value={s.liveDurationHours != null ? `${s.liveDurationHours.toFixed(1)} 小时` : '--'}
           />
-          <MetricCard label="每小时成交" value={formatHourly(s.hourlyAmountYuan)} />
+          <OperationsMetricDrillCard
+            label="每小时成交"
+            value={formatHourly(s.hourlyAmountYuan)}
+            drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+          />
           <MetricCard label="场观" value={formatPeopleCount(s.viewSessionCount)} />
           <MetricCard label="进房" value={formatPeopleCount(s.joinUserCount)} />
-          <MetricCard label="成交人数" value={formatPeopleCount(s.dealUserCount)} />
-          <MetricCard
+          <OperationsMetricDrillCard
+            label="成交人数"
+            value={formatPeopleCount(s.dealUserCount)}
+            drillRequest={{ ...drillBase, target: 'summary_buyer_count' }}
+          />
+          <OperationsMetricDrillCard
             label={PLAIN.dealRate}
             value={
               s.dealConversionRate != null
                 ? formatRatePercent(s.dealConversionRate)
                 : PLAIN.dealRateMissing
             }
+            drillRequest={{ ...drillBase, target: 'summary_deal_conversion' }}
           />
           <MetricCard label="新增粉丝" value={formatPeopleCount(s.newFollowerCount)} />
           <MetricCard label={PLAIN.followerRate} value={formatRatePercent(s.followerConversionRate)} />
@@ -224,11 +261,19 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
             dataQuality={list.dataQuality}
             sampleTooSmall={
               list.sampleTooSmall?.length ? (
-                <AnchorRankingTable rows={list.sampleTooSmall} />
+                <AnchorRankingTable
+                  rows={list.sampleTooSmall}
+                  drillContext={rankingDrillContext}
+                  drillTarget={anchorDrillTarget(list.rankingType)}
+                />
               ) : undefined
             }
           >
-            <AnchorRankingTable rows={list.items} />
+            <AnchorRankingTable
+              rows={list.items}
+              drillContext={rankingDrillContext}
+              drillTarget={anchorDrillTarget(list.rankingType)}
+            />
           </RankingSection>
         ))}
       </section>
@@ -251,11 +296,19 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
             dataQuality={list.dataQuality}
             sampleTooSmall={
               list.sampleTooSmall?.length ? (
-                <ProductRankingTable rows={list.sampleTooSmall} />
+                <ProductRankingTable
+                  rows={list.sampleTooSmall}
+                  drillContext={rankingDrillContext}
+                  drillTarget={productDrillTarget(list.rankingType)}
+                />
               ) : undefined
             }
           >
-            <ProductRankingTable rows={list.items} />
+            <ProductRankingTable
+              rows={list.items}
+              drillContext={rankingDrillContext}
+              drillTarget={productDrillTarget(list.rankingType)}
+            />
           </RankingSection>
         ))}
       </section>
@@ -276,7 +329,11 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
             subtitle={list.subtitle}
             dataQuality={list.dataQuality}
           >
-            <PriceBandRankingTable rows={list.items} />
+            <PriceBandRankingTable
+              rows={list.items}
+              drillContext={rankingDrillContext}
+              drillTarget={priceBandDrillTarget(list.rankingType)}
+            />
           </RankingSection>
         ))}
       </section>
@@ -289,14 +346,22 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
           subtitle={report.rankings.afterSales.byReason.subtitle}
           dataQuality={report.rankings.afterSales.byReason.dataQuality}
         >
-          <AfterSalesRankingTable rows={report.rankings.afterSales.byReason.items} />
+          <AfterSalesRankingTable
+            rows={report.rankings.afterSales.byReason.items}
+            drillContext={rankingDrillContext}
+            drillTarget="after_sales_reason"
+          />
         </RankingSection>
         <RankingSection
           title={report.rankings.afterSales.byRefundAmount.title}
           subtitle={report.rankings.afterSales.byRefundAmount.subtitle}
           dataQuality={report.rankings.afterSales.byRefundAmount.dataQuality}
         >
-          <AfterSalesRankingTable rows={report.rankings.afterSales.byRefundAmount.items} />
+          <AfterSalesRankingTable
+            rows={report.rankings.afterSales.byRefundAmount.items}
+            drillContext={rankingDrillContext}
+            drillTarget="after_sales_refund_amount"
+          />
         </RankingSection>
       </section>
 

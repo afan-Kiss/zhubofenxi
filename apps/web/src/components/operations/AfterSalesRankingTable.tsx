@@ -1,12 +1,23 @@
 import React from 'react'
 import type { AfterSalesRankItem } from '../../pages/operations/operationsReportTypes'
+import type {
+  OperationsBiDrillContextProps,
+  OperationsBiDrillTarget,
+} from '../../pages/operations/operationsBiDrillTypes'
+import { OperationsBiDrillLinkButton } from './OperationsBiDrillProvider'
 import { formatIntegerMoney, formatOrderCount, formatPercent } from './operationsReportFormatters'
 
 interface Props {
   rows: AfterSalesRankItem[]
+  drillContext?: OperationsBiDrillContextProps
+  drillTarget?: OperationsBiDrillTarget
 }
 
-export const AfterSalesRankingTable: React.FC<Props> = ({ rows }) => {
+export const AfterSalesRankingTable: React.FC<Props> = ({
+  rows,
+  drillContext,
+  drillTarget = 'after_sales_reason',
+}) => {
   if (rows.length === 0) {
     return <p className="text-sm text-slate-500">暂无数据</p>
   }
@@ -20,6 +31,7 @@ export const AfterSalesRankingTable: React.FC<Props> = ({ rows }) => {
             <th className="px-3 py-2">退款金额</th>
             <th className="px-3 py-2">占比</th>
             <th className="px-3 py-2">说明</th>
+            {drillContext ? <th className="px-3 py-2">操作</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -30,6 +42,19 @@ export const AfterSalesRankingTable: React.FC<Props> = ({ rows }) => {
               <td className="px-3 py-2">{formatIntegerMoney(row.refundAmountYuan)}</td>
               <td className="px-3 py-2">{formatPercent(row.sharePercent)}</td>
               <td className="px-3 py-2 text-slate-500">{row.rankReason}</td>
+              {drillContext ? (
+                <td className="px-3 py-2">
+                  <OperationsBiDrillLinkButton
+                    request={{
+                      ...drillContext,
+                      source: 'after_sales_ranking',
+                      target: drillTarget,
+                      afterSalesCategory: row.category,
+                      afterSalesReason: row.categoryLabel,
+                    }}
+                  />
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>

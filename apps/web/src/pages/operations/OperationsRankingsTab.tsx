@@ -10,6 +10,13 @@ import { BusinessInsightCards } from '../../components/operations/BusinessInsigh
 import { RankingSection } from '../../components/operations/RankingMetricTooltip'
 import { RankingQualityBadge } from '../../components/operations/RankingQualityBadge'
 import type { OperationsRankingsPayload, WithOperationsReportCacheMeta } from './operationsReportTypes'
+import type { OperationsBiDrillContextProps } from './operationsBiDrillTypes'
+import {
+  anchorDrillTarget,
+  buildBossSummaryDrillRequest,
+  priceBandDrillTarget,
+  productDrillTarget,
+} from '../../components/operations/operationsBiDrillHelpers'
 import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
 
 type RankingsTab = 'summary' | 'anchors' | 'products' | 'priceBands' | 'afterSales'
@@ -122,6 +129,14 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
   if (!data) return null
 
+  const drillContext: OperationsBiDrillContextProps = {
+    source: 'rankings',
+    startDate: rangeStart,
+    endDate: rangeEnd,
+    scope: 'custom',
+    preset: rangePreset,
+  }
+
   return (
     <div className="space-y-4">
       <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} />
@@ -223,7 +238,10 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
       {section === 'summary' ? (
         <>
-          <RankingSummaryCards items={data.bossSummary} />
+          <RankingSummaryCards
+            items={data.bossSummary}
+            getDrillRequest={(item) => buildBossSummaryDrillRequest(item, drillContext, data)}
+          />
           <BusinessInsightCards
             insights={data.businessInsights}
             rangeStartDate={rangeStart}
@@ -254,11 +272,21 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
               dataQuality={list.dataQuality}
               sampleTooSmall={
                 list.sampleTooSmall?.length
-                  ? <AnchorRankingTable rows={list.sampleTooSmall} />
+                  ? (
+                      <AnchorRankingTable
+                        rows={list.sampleTooSmall}
+                        drillContext={drillContext}
+                        drillTarget={anchorDrillTarget(list.rankingType)}
+                      />
+                    )
                   : undefined
               }
             >
-              <AnchorRankingTable rows={list.items} />
+              <AnchorRankingTable
+                rows={list.items}
+                drillContext={drillContext}
+                drillTarget={anchorDrillTarget(list.rankingType)}
+              />
             </RankingSection>
           ))}
         </div>
@@ -284,11 +312,21 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
               forceShowTable={list.rankingType === 'product_slow' && list.items.length > 0}
               sampleTooSmall={
                 list.sampleTooSmall?.length
-                  ? <ProductRankingTable rows={list.sampleTooSmall} />
+                  ? (
+                      <ProductRankingTable
+                        rows={list.sampleTooSmall}
+                        drillContext={drillContext}
+                        drillTarget={productDrillTarget(list.rankingType)}
+                      />
+                    )
                   : undefined
               }
             >
-              <ProductRankingTable rows={list.items} />
+              <ProductRankingTable
+                rows={list.items}
+                drillContext={drillContext}
+                drillTarget={productDrillTarget(list.rankingType)}
+              />
             </RankingSection>
           ))}
         </div>
@@ -311,11 +349,21 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
               dataQuality={list.dataQuality}
               sampleTooSmall={
                 list.sampleTooSmall?.length
-                  ? <PriceBandRankingTable rows={list.sampleTooSmall} />
+                  ? (
+                      <PriceBandRankingTable
+                        rows={list.sampleTooSmall}
+                        drillContext={drillContext}
+                        drillTarget={priceBandDrillTarget(list.rankingType)}
+                      />
+                    )
                   : undefined
               }
             >
-              <PriceBandRankingTable rows={list.items} />
+              <PriceBandRankingTable
+                rows={list.items}
+                drillContext={drillContext}
+                drillTarget={priceBandDrillTarget(list.rankingType)}
+              />
             </RankingSection>
           ))}
         </div>
@@ -328,14 +376,22 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
             subtitle={data.afterSales.byReason.subtitle}
             dataQuality={data.afterSales.byReason.dataQuality}
           >
-            <AfterSalesRankingTable rows={data.afterSales.byReason.items} />
+            <AfterSalesRankingTable
+              rows={data.afterSales.byReason.items}
+              drillContext={drillContext}
+              drillTarget="after_sales_reason"
+            />
           </RankingSection>
           <RankingSection
             title={data.afterSales.byRefundAmount.title}
             subtitle={data.afterSales.byRefundAmount.subtitle}
             dataQuality={data.afterSales.byRefundAmount.dataQuality}
           >
-            <AfterSalesRankingTable rows={data.afterSales.byRefundAmount.items} />
+            <AfterSalesRankingTable
+              rows={data.afterSales.byRefundAmount.items}
+              drillContext={drillContext}
+              drillTarget="after_sales_refund_amount"
+            />
           </RankingSection>
         </div>
       ) : null}

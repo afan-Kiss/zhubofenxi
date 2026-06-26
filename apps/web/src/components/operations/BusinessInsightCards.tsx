@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import { BusinessInsightActionStatsCard } from './BusinessInsightActionStatsCard'
+import { buildInsightDrillRequest } from './operationsBiDrillHelpers'
+import { OperationsBiDrillLinkButton } from './OperationsBiDrillProvider'
 import type {
   BusinessInsightActionState,
   BusinessInsightActionStatus,
@@ -157,6 +159,9 @@ export const BusinessInsightCards: React.FC<Props> = ({
                 item={item}
                 saving={savingId === item.id}
                 onSave={saveAction}
+                rangeStartDate={rangeStartDate}
+                rangeEndDate={rangeEndDate}
+                scope={scope}
               />
             ))}
           </div>
@@ -178,6 +183,9 @@ export const BusinessInsightCards: React.FC<Props> = ({
                       saving={savingId === item.id}
                       muted
                       onSave={saveAction}
+                      rangeStartDate={rangeStartDate}
+                      rangeEndDate={rangeEndDate}
+                      scope={scope}
                     />
                   ))}
                 </div>
@@ -194,17 +202,21 @@ const InsightCard: React.FC<{
   item: BusinessInsightItem
   saving: boolean
   muted?: boolean
+  rangeStartDate: string
+  rangeEndDate: string
+  scope: 'daily' | 'weekly' | 'custom'
   onSave: (
     item: BusinessInsightItem,
     status: BusinessInsightActionStatus,
     extra?: Partial<Pick<BusinessInsightActionState, 'note' | 'reviewResult' | 'remindTomorrow'>>,
   ) => Promise<void>
-}> = ({ item, saving, muted = false, onSave }) => {
+}> = ({ item, saving, muted = false, rangeStartDate, rangeEndDate, scope, onSave }) => {
   const status = resolveStatus(item)
   const [note, setNote] = useState(item.actionState?.note ?? '')
   const [reviewResult, setReviewResult] = useState(item.actionState?.reviewResult ?? '')
   const [remindTomorrow, setRemindTomorrow] = useState(item.actionState?.remindTomorrow ?? false)
   const [showReview, setShowReview] = useState(false)
+  const drillRequest = buildInsightDrillRequest(item, rangeStartDate, rangeEndDate, scope)
 
   return (
     <article
@@ -241,6 +253,14 @@ const InsightCard: React.FC<{
         <div className="mt-2 rounded-lg bg-amber-50 px-2 py-1 text-xs text-amber-800">
           {item.dataQuality.warnings.join('；')}
         </div>
+      ) : null}
+
+      {drillRequest ? (
+        <div className="mt-2">
+          <OperationsBiDrillLinkButton request={drillRequest} label="查看相关订单" />
+        </div>
+      ) : item.type === 'data_quality_warning' ? (
+        <p className="mt-2 text-xs text-slate-500">这个建议不是由订单组成的，是因为数据不够。</p>
       ) : null}
 
       <div className="mt-3 space-y-2 border-t border-slate-100 pt-3">

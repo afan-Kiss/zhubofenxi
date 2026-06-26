@@ -1,5 +1,10 @@
 import React from 'react'
 import type { PriceBandRankItem } from '../../pages/operations/operationsReportTypes'
+import type {
+  OperationsBiDrillContextProps,
+  OperationsBiDrillTarget,
+} from '../../pages/operations/operationsBiDrillTypes'
+import { OperationsBiDrillLinkButton } from './OperationsBiDrillProvider'
 import {
   formatIntegerMoney,
   formatOrderCount,
@@ -9,9 +14,15 @@ import {
 
 interface Props {
   rows: PriceBandRankItem[]
+  drillContext?: OperationsBiDrillContextProps
+  drillTarget?: OperationsBiDrillTarget
 }
 
-export const PriceBandRankingTable: React.FC<Props> = ({ rows }) => {
+export const PriceBandRankingTable: React.FC<Props> = ({
+  rows,
+  drillContext,
+  drillTarget = 'price_band_amount',
+}) => {
   if (rows.length === 0) {
     return <p className="text-sm text-slate-500">暂无数据</p>
   }
@@ -28,6 +39,7 @@ export const PriceBandRankingTable: React.FC<Props> = ({ rows }) => {
             <th className="px-3 py-2">退货订单</th>
             <th className="px-3 py-2">商品退货订单率</th>
             <th className="px-3 py-2">说明</th>
+            {drillContext ? <th className="px-3 py-2">操作</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -41,6 +53,19 @@ export const PriceBandRankingTable: React.FC<Props> = ({ rows }) => {
               <td className="px-3 py-2">{formatOrderCount(row.productReturnOrderCount)}</td>
               <td className="px-3 py-2">{formatRatePercent(row.productReturnOrderRate)}</td>
               <td className="px-3 py-2 text-slate-500">{row.rankReason}</td>
+              {drillContext ? (
+                <td className="px-3 py-2">
+                  <OperationsBiDrillLinkButton
+                    request={{
+                      ...drillContext,
+                      source: 'price_band_ranking',
+                      target: drillTarget,
+                      priceBandLabel: row.bandLabel,
+                      priceBandKey: row.bandLabel,
+                    }}
+                  />
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>

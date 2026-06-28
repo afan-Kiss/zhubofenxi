@@ -9,12 +9,15 @@ import {
   matchTimeRule,
 } from '../src/services/anchor-rules.service'
 import {
+  ANCHOR_SESSION_DISPLAY_FROM_0613,
   isReportDateOnOrAfterShopSessionCutoff,
   isXiaoBaiAttributionActive,
   isInXiaoBaiOrderSlot,
   isReportDateOnOrAfterXiaoBaiCutoff,
   resolveDailyReportAnchorsForDate,
   sessionOverlapsXiaoBaiSlot,
+  computeXiaoBaiSlotOverlapMinutes,
+  computeMorningPortionBeforeXiaoBaiSlotMinutes,
   normalizeShopSessionKey,
   remapViewsForAnchorPerformance,
   resolveAnchorForPerformanceAttribution,
@@ -231,6 +234,12 @@ function testShopSessionAnchorRules(issues: string[]) {
   assert(emptySlots.length === 4, '6.13 起应固定展示四人', issues)
 
   const emptySlots618 = ensureAnchorPerformanceLeaderboardSlots([], '2026-06-18')
+  assert(
+    ANCHOR_SESSION_DISPLAY_FROM_0613['小白']?.shopName === 'XY祥钰珠宝',
+    '小白归属店铺应为 XY祥钰珠宝',
+    issues,
+  )
+
   assert(emptySlots618.some((r) => r.anchorName === '小白'), '6.18 起应展示小白空行', issues)
   assert(emptySlots618.length === 5, '6.18 起应固定展示五人', issues)
 
@@ -264,7 +273,27 @@ function testShopSessionAnchorRules(issues: string[]) {
     }),
     config,
   )
-  assert(june18Afternoon.anchorName === '小白', '6.18 15:00 应归小白', issues)
+  assert(june18Afternoon.anchorName === '小红', '6.18 15:00 和田雅玉仍归小红', issues)
+
+  const june18XiangyuAfternoon = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: 'XY祥钰珠宝',
+      orderTimeText: '2026-06-18 15:00:00',
+    }),
+    config,
+  )
+  assert(june18XiangyuAfternoon.anchorName === '小白', '6.18 15:00 祥钰应归小白', issues)
+
+  const june18ShiyuAfternoon = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: '拾玉居',
+      orderTimeText: '2026-06-18 16:03:00',
+    }),
+    config,
+  )
+  assert(june18ShiyuAfternoon.anchorName === '未归属', '6.18 16:03 拾玉居不应归小白', issues)
 
   const june18Morning = resolveAnchorForPerformanceAttribution(
     makeView({
@@ -294,7 +323,7 @@ function testShopSessionAnchorRules(issues: string[]) {
     }),
     config,
   )
-  assert(june18EdgeEnd.anchorName === '小白', '6.18 18:00 应归小白', issues)
+  assert(june18EdgeEnd.anchorName === '飞云', '6.18 18:00 拾玉居晚场应归飞云', issues)
 
   assert(isInXiaoBaiOrderSlot(new Date('2026-06-18T14:30:00+08:00')), '14:30 在小白时段内', issues)
   assert(isInXiaoBaiOrderSlot(new Date('2026-06-18T18:00:00+08:00')), '18:00 在小白时段内', issues)
@@ -331,6 +360,27 @@ function testShopSessionAnchorRules(issues: string[]) {
       Date.parse('2026-06-18T14:00:00+08:00'),
     ),
     '14:00 前结束的场次不应归小白',
+    issues,
+  )
+
+  const crossStart = Date.parse('2026-06-18T09:51:00+08:00')
+  const crossEnd = Date.parse('2026-06-18T16:07:00+08:00')
+  assert(
+    computeXiaoBaiSlotOverlapMinutes(crossStart, crossEnd) === 97,
+    '跨场直播小白时长应仅为 14:30~下播（97 分钟）',
+    issues,
+  )
+  assert(
+    computeMorningPortionBeforeXiaoBaiSlotMinutes(crossStart, crossEnd) === 279,
+    '跨场直播早场时长应仅为开播~14:30（279 分钟）',
+    issues,
+  )
+  assert(
+    computeXiaoBaiSlotOverlapMinutes(
+      Date.parse('2026-06-18T14:30:00+08:00'),
+      Date.parse('2026-06-18T18:00:00+08:00'),
+    ) === 210,
+    '纯午场 14:30~18:00 应为 210 分钟',
     issues,
   )
 }

@@ -1,6 +1,11 @@
-import React, { createContext, useCallback, useContext, useMemo, useState } from 'react'
-import { apiRequest } from '../../lib/api'
+import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
+import { apiRequest, ApiError } from '../../lib/api'
+import {
+  DRILL_RANGE_TOO_LONG_MESSAGE,
+  isDrillRangeTooLong,
+} from '../../lib/operations-date-range'
 import { OperationsBiDrillDrawer } from './OperationsBiDrillDrawer'
+import { OperationsFloatingToast } from './OperationsViewportModal'
 import type {
   OperationsBiDrillPayload,
   OperationsBiDrillRequest,
@@ -21,51 +26,89 @@ export function useOperationsBiDrill(): OperationsBiDrillContextValue {
   return ctx
 }
 
+function OperationsToast({ message }: { message: string | null }) {
+  return <OperationsFloatingToast message={message} />
+}
+
 export const OperationsBiDrillProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [open, setOpen] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [request, setRequest] = useState<OperationsBiDrillRequest | null>(null)
   const [payload, setPayload] = useState<OperationsBiDrillPayload | null>(null)
   const [page, setPage] = useState(1)
+  const [toast, setToast] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const toastTimerRef = useRef<number | null>(null)
 
-  const load = useCallback(async (req: OperationsBiDrillRequest, nextPage = 1) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const qs = new URLSearchParams()
-      for (const [k, v] of Object.entries({ ...req, page: nextPage })) {
-        if (v != null && v !== '') qs.set(k, String(v))
-      }
-      const data = await apiRequest<OperationsBiDrillPayload>(
-        `/api/board/operations-bi-drill?${qs.toString()}`,
-      )
-      setPayload(data)
-      setPage(nextPage)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载数据来源失败')
-      setPayload(null)
-    } finally {
-      setLoading(false)
-    }
+  const showToast = useCallback((message: string) => {
+    setToast(message)
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current)
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3200)
   }, [])
+
+  const load = useCallback(
+    async (req: OperationsBiDrillRequest, nextPage = 1, signal?: AbortSignal) => {
+      setLoading(true)
+      try {
+        const qs = new URLSearchParams()
+        for (const [k, v] of Object.entries({ ...req, page: nextPage })) {
+          if (v != null && v !== '') qs.set(k, String(v))
+        }
+        const data = await apiRequest<OperationsBiDrillPayload>(
+          `/api/board/operations-bi-drill?${qs.toString()}`,
+          { signal },
+        )
+        if (signal?.aborted) return
+        setPayload(data)
+        setPage(nextPage)
+      } catch (e) {
+        if (signal?.aborted) return
+        abortRef.current = null
+        setOpen(false)
+        setPayload(null)
+        setRequest(null)
+        if (e instanceof ApiError) {
+          showToast(e.message)
+        } else {
+          showToast(e instanceof Error ? e.message : '加载订单明细失败')
+        }
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false)
+        }
+      }
+    },
+    [showToast],
+  )
 
   const openDrill = useCallback(
     (req: OperationsBiDrillRequest) => {
+      if (isDrillRangeTooLong(req.startDate, req.endDate)) {
+        showToast(DRILL_RANGE_TOO_LONG_MESSAGE)
+        return
+      }
+
+      abortRef.current?.abort()
+      const ac = new AbortController()
+      abortRef.current = ac
+
       setRequest(req)
       setOpen(true)
-      void load(req, 1)
+      setPayload(null)
+      void load(req, 1, ac.signal)
     },
-    [load],
+    [load, showToast],
   )
 
   const closeDrill = useCallback(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
     setOpen(false)
-    setError(null)
     setPayload(null)
     setRequest(null)
+    setLoading(false)
   }, [])
 
   const value = useMemo(() => ({ openDrill, closeDrill }), [openDrill, closeDrill])
@@ -73,15 +116,19 @@ export const OperationsBiDrillProvider: React.FC<{ children: React.ReactNode }> 
   return (
     <OperationsBiDrillContext.Provider value={value}>
       {children}
+      <OperationsToast message={toast} />
       <OperationsBiDrillDrawer
         open={open}
         loading={loading}
-        error={error}
         payload={payload}
         page={page}
         onClose={closeDrill}
         onPageChange={(p) => {
-          if (request) void load(request, p)
+          if (!request) return
+          abortRef.current?.abort()
+          const ac = new AbortController()
+          abortRef.current = ac
+          void load(request, p, ac.signal)
         }}
       />
     </OperationsBiDrillContext.Provider>

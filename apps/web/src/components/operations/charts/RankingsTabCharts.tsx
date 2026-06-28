@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { OperationsChartCard } from './OperationsChartCard'
 import { OperationsBarChart } from './OperationsBarChart'
 import { OperationsPieChart } from './OperationsPieChart'
@@ -22,6 +22,7 @@ import {
 import type { OperationsBiDrillContextProps } from '../../../pages/operations/operationsBiDrillTypes'
 import type { OperationsRankingsPayload } from '../../../pages/operations/operationsReportTypes'
 import { formatChartCount, formatChartMoney } from './operationsChartFormat'
+import { warnIfDailyTrendLooksAggregated } from './operationsChartTrendWarn'
 
 type RankingsTab = 'summary' | 'anchors' | 'products' | 'priceBands' | 'afterSales'
 
@@ -61,6 +62,10 @@ export const RankingsTabCharts: React.FC<Props> = ({
       })),
     [data.dailyTrend],
   )
+
+  useEffect(() => {
+    warnIfDailyTrendLooksAggregated(data.dailyTrend ?? [], 'rankings-dailyTrend')
+  }, [data.dailyTrend])
 
   const insightItems = useMemo(() => {
     if (!insightStats) return []

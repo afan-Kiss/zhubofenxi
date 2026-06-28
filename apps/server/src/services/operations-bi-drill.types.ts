@@ -98,8 +98,11 @@ export interface OperationsBiDrillOrderRow {
   freightRefundAmountYuan?: number | null
   isFreightRefundOnly?: boolean | null
   returnReason?: string | null
+  afterSaleStatus?: string | null
   normalizedAfterSalesReason?: string | null
+  afterSalesCategoryLabel?: string | null
 
+  buyerNickname?: string | null
   buyerDisplayName?: string | null
   buyerMasked?: boolean
 

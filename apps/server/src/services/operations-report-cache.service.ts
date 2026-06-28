@@ -52,6 +52,12 @@ export interface OperationsReportCacheMeta {
   builtAt: string | null
   expiresAt: string | null
   buildDurationMs: number | null
+  /** 与 hit 同义，便于前端展示 */
+  fromCache: boolean
+  /** 与 builtAt 同义 */
+  generatedAt: string | null
+  /** 与 buildDurationMs 同义 */
+  computeMs: number | null
   refreshing?: boolean
   message?: string
 }
@@ -125,6 +131,9 @@ function buildCacheMeta(
     builtAt: entry?.builtAt ?? null,
     expiresAt: entry?.expiresAt ?? null,
     buildDurationMs: entry?.buildDurationMs ?? null,
+    fromCache: opts.hit,
+    generatedAt: entry?.builtAt ?? null,
+    computeMs: entry?.buildDurationMs ?? null,
   }
   if (opts.refreshing) meta.refreshing = true
   if (opts.hit && !opts.stale) {
@@ -469,8 +478,11 @@ async function buildPrewarmTasks(forceRebuild: boolean): Promise<PrewarmTask[]> 
     wrapMonthly(thisMonth.startDate.slice(0, 7), '本月月报'),
     wrapMonthly(lastMonth.startDate.slice(0, 7), '上月月报'),
     wrapRankings(today, today, 'today', 'daily', '榜单中心（今日）'),
+    wrapRankings(yesterday, yesterday, 'yesterday', 'daily', '榜单中心（昨日）'),
     wrapRankings(thisWeekStart, today, 'thisWeek', 'weekly', '榜单中心（本周）'),
+    wrapRankings(lastWeekStart, lastWeekEnd, 'lastWeek', 'custom', '榜单中心（上周）'),
     wrapRankings(thisMonth.startDate, thisMonth.endDate, 'thisMonth', 'custom', '榜单中心（本月）'),
+    wrapRankings(lastMonth.startDate, lastMonth.endDate, 'lastMonth', 'custom', '榜单中心（上月）'),
   ]
 }
 

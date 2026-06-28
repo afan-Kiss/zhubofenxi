@@ -18,6 +18,8 @@ import {
   type OperationsProductRole,
 } from '../config/operations-product-role.config'
 import { isDailyReportSoldOrder } from './daily-report-order.util'
+import { viewCountsAsPaidOrder } from './business-metrics.service'
+import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
 
 export interface OperationsProductRow {
   productKey: string
@@ -52,18 +54,18 @@ function pickDominantShopName(shopAmountCent: Map<string, number>): string {
 }
 
 function isProductReturnOrder(v: AnalyzedOrderView): boolean {
-  return v.productRefundAmountCent > 0 && !v.isFreightRefundOnly
+  return viewCountsAsRefundOrder(v)
 }
 
 export { isProductReturnOrder }
 
-/** 商品退货率（订单维度）：退货订单数 / 有效成交订单数 */
+/** 商品退货率（订单维度）：退款订单数 / 支付订单数 */
 export function computeProductReturnRateByOrder(
-  soldOrderCount: number,
-  returnOrderCount: number,
+  paidOrderCount: number,
+  refundOrderCount: number,
 ): number | null {
-  if (soldOrderCount <= 0) return null
-  return returnOrderCount / soldOrderCount
+  if (paidOrderCount <= 0) return null
+  return refundOrderCount / paidOrderCount
 }
 
 export async function buildOperationsProductAnalysis(
@@ -83,6 +85,7 @@ export async function buildOperationsProductAnalysis(
     soldCount: number
     soldAmountCent: number
     soldOrderKeys: Set<string>
+    paidOrderKeys: Set<string>
     buyers: Set<string>
     returnOrderKeys: Set<string>
     shopAmountCent: Map<string, number>
@@ -110,11 +113,16 @@ export async function buildOperationsProductAnalysis(
         soldCount: 0,
         soldAmountCent: 0,
         soldOrderKeys: new Set<string>(),
+        paidOrderKeys: new Set<string>(),
         buyers: new Set<string>(),
         returnOrderKeys: new Set<string>(),
         shopAmountCent: new Map<string, number>(),
       } satisfies Bucket)
     buckets.set(productKey, bucket)
+
+    if (viewCountsAsPaidOrder(view)) {
+      bucket.paidOrderKeys.add(orderKey)
+    }
 
     if (isDailyReportSoldOrder(view)) {
       bucket.soldCount += qty
@@ -142,8 +150,11 @@ export async function buildOperationsProductAnalysis(
     const ringSize = dim?.ringSize?.trim() || parseRingSizeFromText(specText) || '未识别'
     const barType = dim?.barType?.trim() || parseBarTypeFromText(specText) || '未识别'
     const soldOrderCount = bucket.soldOrderKeys.size
-    const returnOrderCount = bucket.returnOrderKeys.size
-    const returnRate = computeProductReturnRateByOrder(soldOrderCount, returnOrderCount)
+    const paidOrderCount = bucket.paidOrderKeys.size
+    const returnOrderCount = [...bucket.returnOrderKeys].filter((key) =>
+      bucket.paidOrderKeys.has(key),
+    ).length
+    const returnRate = computeProductReturnRateByOrder(paidOrderCount, returnOrderCount)
     const role = resolveProductRole({
       soldCount: bucket.soldCount,
       returnRate,

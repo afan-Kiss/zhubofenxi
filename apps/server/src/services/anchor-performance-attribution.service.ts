@@ -37,7 +37,7 @@ export const ANCHOR_SESSION_DISPLAY_FROM_0613: Record<
   小红: { sessionLabel: '早场·和田雅玉', shopName: '和田雅玉' },
   飞云: { sessionLabel: '晚场·拾玉居', shopName: '拾玉居' },
   小艺: { sessionLabel: '晚场·和田雅玉', shopName: '和田雅玉' },
-  小白: { sessionLabel: '午场·14:30-18:00', shopName: '和田雅玉' },
+  小白: { sessionLabel: '午场·XY祥钰珠宝 14:30-18:00', shopName: 'XY祥钰珠宝' },
 }
 
 const SHOP_SESSION_ANCHOR_MAP: Record<
@@ -75,6 +75,17 @@ export function isXiaoBaiAttributionActive(payMs: number): boolean {
   )
 }
 
+/** 6.18 起：14:30–18:00 且来源直播号为祥钰系 → 归小白（不含拾玉居/和田雅玉等） */
+export function isXiaoBaiOrderAttribution(
+  view: AnalyzedOrderView & { raw?: Record<string, unknown> },
+  payMs: number,
+): boolean {
+  if (!isXiaoBaiAttributionActive(payMs)) return false
+  const liveAccountName =
+    (view.liveAccountName ?? '').trim() || pickLiveAccountFromRaw(view.raw)
+  return normalizeShopSessionKey(liveAccountName) === 'xiangyu'
+}
+
 export function isXiaoBaiSessionStart(sessionStartMs: number): boolean {
   return (
     Number.isFinite(sessionStartMs) &&
@@ -93,6 +104,49 @@ export function sessionOverlapsXiaoBaiSlot(startMs: number, endMs: number): bool
   if (!Number.isFinite(effectiveEnd)) effectiveEnd = startMs
   if (effectiveEnd < startMs) effectiveEnd += 86_400_000
   return startMs <= slotEndMs && effectiveEnd >= slotStartMs
+}
+
+export function resolveXiaoBaiSlotBoundsMs(sessionStartMs: number): {
+  slotStartMs: number
+  slotEndMs: number
+} {
+  const dateKey = formatDateKeyShanghai(new Date(sessionStartMs))
+  return {
+    slotStartMs: Date.parse(`${dateKey}T14:30:00+08:00`),
+    slotEndMs: Date.parse(`${dateKey}T18:00:00+08:00`),
+  }
+}
+
+function normalizeSessionEndMs(startMs: number, endMs: number): number {
+  let effectiveEnd = endMs
+  if (!Number.isFinite(effectiveEnd)) effectiveEnd = startMs
+  if (effectiveEnd < startMs) effectiveEnd += 86_400_000
+  return effectiveEnd
+}
+
+/** 直播场次与小白固定时段（14:30–18:00）的交集分钟数，用于日报时长 */
+export function computeXiaoBaiSlotOverlapMinutes(startMs: number, endMs: number): number {
+  if (!sessionOverlapsXiaoBaiSlot(startMs, endMs)) return 0
+  const effectiveEnd = normalizeSessionEndMs(startMs, endMs)
+  const { slotStartMs, slotEndMs } = resolveXiaoBaiSlotBoundsMs(startMs)
+  const overlapStart = Math.max(startMs, slotStartMs)
+  const overlapEnd = Math.min(effectiveEnd, slotEndMs)
+  if (overlapEnd <= overlapStart) return 0
+  return Math.round((overlapEnd - overlapStart) / 60_000)
+}
+
+/** 早场跨场：场次在 14:30 之前开始的分钟数（归属早场主播如子杰） */
+export function computeMorningPortionBeforeXiaoBaiSlotMinutes(
+  startMs: number,
+  endMs: number,
+): number {
+  if (!sessionOverlapsXiaoBaiSlot(startMs, endMs)) return 0
+  const effectiveEnd = normalizeSessionEndMs(startMs, endMs)
+  const { slotStartMs } = resolveXiaoBaiSlotBoundsMs(startMs)
+  if (startMs >= slotStartMs) return 0
+  const morningEnd = Math.min(effectiveEnd, slotStartMs)
+  if (morningEnd <= startMs) return 0
+  return Math.round((morningEnd - startMs) / 60_000)
 }
 
 function resolveXiaoBaiAnchor(config: AnchorConfig): { anchorId: string; anchorName: string } {
@@ -224,7 +278,7 @@ export function resolveAnchorForPerformanceAttribution(
     return { anchorId: view.anchorId, anchorName: view.anchorName }
   }
 
-  if (isXiaoBaiAttributionActive(payMs)) {
+  if (isXiaoBaiOrderAttribution(view, payMs)) {
     return resolveXiaoBaiAnchor(config)
   }
 

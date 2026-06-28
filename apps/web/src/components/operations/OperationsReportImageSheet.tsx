@@ -32,7 +32,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
       <div className="mt-4 grid grid-cols-3 gap-2">
         <MetricCard label="有效成交金额" value={formatIntegerMoney(data.summary.validAmountYuan)} />
         <MetricCard label="有效成交订单" value={formatOrderCount(data.summary.soldOrderCount)} />
-        <MetricCard label="退货单率" value={formatPercent(data.summary.returnOrderRate)} />
+        <MetricCard label="退货单率" value={formatRatePercent(data.summary.returnOrderRate)} />
         <MetricCard label="成交人数" value={formatPeopleCount(data.summary.dealUserCount)} />
         <MetricCard label="成交率" value={formatRatePercent(data.summary.dealConversionRate)} />
         <MetricCard label="客单价" value={formatIntegerMoney(data.summary.avgOrderAmountYuan)} />

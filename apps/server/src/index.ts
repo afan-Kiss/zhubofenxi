@@ -2,6 +2,7 @@ import {
   loadEnv,
   getDataDir,
   getPort,
+  getListenHost,
   assertCookieEncryptionKey,
   getDownloadDir,
   getReportDir,
@@ -11,7 +12,7 @@ import {
 } from './config/env'
 import { ensureDefaultSettings } from './services/system-setting.service'
 import { createApp } from './app'
-import { ensureDefaultAdmin } from './services/bootstrap.service'
+import { ensureDefaultAdmin, ensurePrimarySuperAdmin } from './services/bootstrap.service'
 import {
   ensureDefaultDownloadConfigs,
   migrateLegacyDownloadModes,
@@ -51,15 +52,16 @@ assertCookieEncryptionKey()
 logDatabaseStartupDiagnostics()
 
 const port = getPort()
+const listenHost = getListenHost()
 
 function listenHttp(
   app: ReturnType<typeof createApp>['app'],
   webMounted: boolean,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const server = app.listen(port, '0.0.0.0', () => {
+    const server = app.listen(port, listenHost, () => {
       const mode = webMounted ? 'API + 前端静态' : '仅 API（开发模式或未构建前端）'
-      logInfo('服务', `已启动，本机访问 http://127.0.0.1:${port}（${mode}）`)
+      logInfo('服务', `已启动，本机访问 http://127.0.0.1:${port}（${mode}，listen=${listenHost}）`)
       resolve()
     })
     server.on('error', reject)
@@ -77,7 +79,10 @@ async function main() {
   getValidationPackageDir()
 
   await ensureDefaultSettings()
+  const { ensureDefaultPagePermissions } = await import('./services/page-permission.service')
+  await ensureDefaultPagePermissions()
   await ensureDefaultAdmin()
+  await ensurePrimarySuperAdmin()
   await ensureDefaultDownloadConfigs()
   await ensureDefaultLiveAccount()
   await refreshLiveAccountRowMapperContext()

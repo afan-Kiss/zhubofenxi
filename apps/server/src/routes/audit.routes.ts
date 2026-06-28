@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { attachLocalViewer } from '../middleware/local-viewer.middleware'
+import { attachRequestUser } from '../middleware/local-viewer.middleware'
+import { requireAuth } from '../middleware/auth.middleware'
 import { getClientIp } from '../middleware/audit.middleware'
 import { requireMaintenanceTools } from '../middleware/maintenance.middleware'
 import {
@@ -15,7 +16,9 @@ import { sendFail, sendOk } from '../utils/response'
 
 export const auditRouter = Router()
 
-auditRouter.post('/client-error', attachLocalViewer, async (req, res) => {
+auditRouter.use(attachRequestUser, requireAuth)
+
+auditRouter.post('/client-error', async (req, res) => {
   const message = String(req.body?.message ?? '前端页面异常').slice(0, 500)
   const stack = req.body?.stack != null ? String(req.body.stack).slice(0, 2000) : undefined
   const path = req.body?.path != null ? String(req.body.path) : undefined
@@ -37,7 +40,7 @@ auditRouter.post('/client-error', attachLocalViewer, async (req, res) => {
   }
 })
 
-auditRouter.post('/page-view/start', attachLocalViewer, async (req, res) => {
+auditRouter.post('/page-view/start', async (req, res) => {
   const page = String(req.body?.page ?? '').trim()
   if (!page) {
     sendFail(res, '缺少页面标识')
@@ -59,7 +62,7 @@ auditRouter.post('/page-view/start', attachLocalViewer, async (req, res) => {
   }
 })
 
-auditRouter.post('/page-view/heartbeat', attachLocalViewer, async (req, res) => {
+auditRouter.post('/page-view/heartbeat', async (req, res) => {
   const viewId = String(req.body?.viewId ?? '')
   if (!viewId) {
     sendFail(res, '缺少 viewId')
@@ -69,7 +72,7 @@ auditRouter.post('/page-view/heartbeat', attachLocalViewer, async (req, res) => 
   sendOk(res, { ok })
 })
 
-auditRouter.post('/page-view/end', attachLocalViewer, async (req, res) => {
+auditRouter.post('/page-view/end', async (req, res) => {
   const viewId = String(req.body?.viewId ?? '')
   if (!viewId) {
     sendFail(res, '缺少 viewId')
@@ -79,7 +82,7 @@ auditRouter.post('/page-view/end', attachLocalViewer, async (req, res) => {
   sendOk(res, { success: true })
 })
 
-auditRouter.get('/logs', requireMaintenanceTools, attachLocalViewer, async (req, res) => {
+auditRouter.get('/logs', requireMaintenanceTools, async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1)
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20))
   try {
@@ -98,7 +101,7 @@ auditRouter.get('/logs', requireMaintenanceTools, attachLocalViewer, async (req,
   }
 })
 
-auditRouter.get('/page-views', requireMaintenanceTools, attachLocalViewer, async (req, res) => {
+auditRouter.get('/page-views', requireMaintenanceTools, async (req, res) => {
   const page = Math.max(1, Number(req.query.page) || 1)
   const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20))
   try {
@@ -116,7 +119,7 @@ auditRouter.get('/page-views', requireMaintenanceTools, attachLocalViewer, async
   }
 })
 
-auditRouter.get('/summary', requireMaintenanceTools, attachLocalViewer, async (_req, res) => {
+auditRouter.get('/summary', requireMaintenanceTools, async (_req, res) => {
   try {
     const data = await getAuditSummary()
     sendOk(res, data)

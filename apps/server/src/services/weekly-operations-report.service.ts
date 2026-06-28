@@ -7,6 +7,7 @@ import {
 } from './daily-operations-report.service'
 import { getOpsReviewNote, type OpsReviewNotePayload } from './ops-review-note.service'
 import type { OperationsProductRow } from './operations-product-analysis.service'
+import { computeReturnOrderRateRatio } from './operations-after-sale-order.util'
 import { computeProductReturnRateByOrder } from './operations-product-analysis.service'
 import {
   buildWeeklyProductRankings,
@@ -38,6 +39,7 @@ export interface WeeklyAnchorRow {
   anchorName: string
   validAmountYuan: number
   soldOrderCount: number
+  paidOrderCount: number
   returnOrderCount: number
   returnOrderRate: number | null
   liveDurationMinutes: number
@@ -126,6 +128,7 @@ function aggregateWeeklySummary(
   let soldOrderCount = 0
   let invalidOrderCount = 0
   let returnOrderCount = 0
+  let paidOrderCount = 0
   let totalLiveDurationMinutes = 0
   let totalNewFollowerCount = 0
   let dealUserCount: number | null = null
@@ -142,6 +145,7 @@ function aggregateWeeklySummary(
     soldOrderCount += snap.summary.soldOrderCount
     invalidOrderCount += snap.summary.invalidOrderCount
     returnOrderCount += snap.summary.returnOrderCount
+    paidOrderCount += snap.summary.paidOrderCount ?? 0
     totalLiveDurationMinutes += snap.summary.totalLiveDurationMinutes
     totalNewFollowerCount += snap.summary.totalNewFollowerCount
     if (snap.summary.dealUserCount != null) {
@@ -167,7 +171,6 @@ function aggregateWeeklySummary(
     }
   }
 
-  const returnDenom = soldOrderCount + returnOrderCount
   const totalLiveHours = totalLiveDurationMinutes / 60
 
   return {
@@ -175,8 +178,8 @@ function aggregateWeeklySummary(
     soldOrderCount,
     invalidOrderCount,
     returnOrderCount,
-    returnOrderRate:
-      returnDenom > 0 ? Math.round((returnOrderCount / returnDenom) * 100) : null,
+    returnOrderRate: computeReturnOrderRateRatio(paidOrderCount, returnOrderCount),
+    paidOrderCount,
     dealUserCount,
     joinUserCount,
     viewSessionCount,
@@ -220,6 +223,7 @@ function aggregateWeeklyAnchors(
         anchorName: row.anchorName,
         validAmountYuan: 0,
         soldOrderCount: 0,
+        paidOrderCount: 0,
         returnOrderCount: 0,
         returnOrderRate: null,
         liveDurationMinutes: 0,
@@ -227,14 +231,16 @@ function aggregateWeeklyAnchors(
       }
       existing.validAmountYuan += row.validAmountYuan
       existing.soldOrderCount += row.soldOrderCount
+      existing.paidOrderCount += row.paidOrderCount
       existing.returnOrderCount += row.returnOrderCount
       existing.liveDurationMinutes += row.liveDurationMinutes
       if (row.dealUserCount != null) {
         existing.dealUserCount = (existing.dealUserCount ?? 0) + row.dealUserCount
       }
-      const denom = existing.soldOrderCount + existing.returnOrderCount
-      existing.returnOrderRate =
-        denom > 0 ? Math.round((existing.returnOrderCount / denom) * 100) : null
+      existing.returnOrderRate = computeReturnOrderRateRatio(
+        existing.paidOrderCount,
+        existing.returnOrderCount,
+      )
       map.set(row.anchorName, existing)
     }
   }
@@ -256,9 +262,10 @@ export function aggregatePriceBandsFromSnapshots(
       existing.amountYuan += band.amountYuan
       existing.buyerCount += band.buyerCount
       existing.returnOrderCount += band.returnOrderCount
-      const denom = existing.orderCount + existing.returnOrderCount
-      existing.returnRate =
-        denom > 0 ? Math.round((existing.returnOrderCount / denom) * 100) : null
+      existing.returnRate = computeReturnOrderRateRatio(
+        existing.orderCount,
+        existing.returnOrderCount,
+      )
     }
   }
   const totalAmount = [...map.values()].reduce((s, b) => s + b.amountYuan, 0)
@@ -315,7 +322,7 @@ export async function buildWeeklyOperationsReport(params: {
   for (const dateKey of days) {
     snapshots.push(
       await buildDailyOperationsReport({
-        preset: params.preset ?? 'custom',
+        preset: 'custom',
         startDate: dateKey,
         endDate: dateKey,
         role: params.role,
@@ -332,7 +339,7 @@ export async function buildWeeklyOperationsReport(params: {
   let prevSoldOrderCount = 0
   for (const dateKey of prevDays) {
     const snap = await buildDailyOperationsReport({
-      preset: params.preset ?? 'custom',
+      preset: 'custom',
       startDate: dateKey,
       endDate: dateKey,
       role: params.role,

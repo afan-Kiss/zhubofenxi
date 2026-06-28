@@ -1,8 +1,15 @@
 import type { NextFunction, Request, Response } from 'express'
-import { LOCAL_VIEWER_USER } from '../constants/local-viewer'
+import { resolveRequestUser } from '../services/auth.service'
 
-/** 为免登录本地看板附加固定身份，不校验会话 */
-export function attachLocalViewer(req: Request, _res: Response, next: NextFunction): void {
-  req.user = LOCAL_VIEWER_USER
-  next()
+/** 解析当前请求用户（登录会话或本地免登录模式） */
+export function attachRequestUser(req: Request, _res: Response, next: NextFunction): void {
+  void resolveRequestUser(req)
+    .then((user) => {
+      if (user) req.user = user
+      next()
+    })
+    .catch(next)
 }
+
+/** @deprecated 使用 attachRequestUser */
+export const attachLocalViewer = attachRequestUser

@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { attachLocalViewer } from '../middleware/local-viewer.middleware'
+import { attachRequestUser } from '../middleware/local-viewer.middleware'
+import { requireAuth } from '../middleware/auth.middleware'
 import { requireMaintenanceTools } from '../middleware/maintenance.middleware'
 import {
   getCredentialPublic,
@@ -44,8 +45,10 @@ import { triggerBusinessSyncIfStale } from '../services/business-sync-scheduler.
 
 export const settingsRouter = Router()
 
+settingsRouter.use(attachRequestUser, requireAuth)
+
 /** 金额显示模式（原 /api/dashboard/display-settings，主看板仍使用） */
-settingsRouter.get('/display-settings', attachLocalViewer, async (_req, res) => {
+settingsRouter.get('/display-settings', async (_req, res) => {
   try {
     const amountDisplayMode = await getAmountDisplayMode()
     sendOk(res, { amountDisplayMode })
@@ -54,7 +57,7 @@ settingsRouter.get('/display-settings', attachLocalViewer, async (_req, res) => 
   }
 })
 
-settingsRouter.get('/app-favicon', attachLocalViewer, async (_req, res) => {
+settingsRouter.get('/app-favicon', async (_req, res) => {
   try {
     const appFaviconPath = await getAppFaviconPathSetting()
     sendOk(res, { appFaviconPath })
@@ -63,7 +66,7 @@ settingsRouter.get('/app-favicon', attachLocalViewer, async (_req, res) => {
   }
 })
 
-settingsRouter.put('/app-favicon', attachLocalViewer, async (req, res) => {
+settingsRouter.put('/app-favicon', async (req, res) => {
   try {
     const appFaviconPath = await setAppFaviconPathSetting(
       String(req.body?.appFaviconPath ?? req.body?.path ?? ''),
@@ -77,7 +80,7 @@ settingsRouter.put('/app-favicon', attachLocalViewer, async (req, res) => {
   }
 })
 
-settingsRouter.get('/credential', attachLocalViewer, async (_req, res) => {
+settingsRouter.get('/credential', async (_req, res) => {
   try {
     const data = await getCredentialPublic()
     sendOk(res, data)
@@ -86,7 +89,7 @@ settingsRouter.get('/credential', attachLocalViewer, async (_req, res) => {
   }
 })
 
-settingsRouter.put('/credential', attachLocalViewer, async (req, res) => {
+settingsRouter.put('/credential', async (req, res) => {
   const platformName = String(req.body?.platformName ?? 'xiaohongshu').trim()
   const cookie = String(req.body?.cookie ?? '')
   const remark = req.body?.remark != null ? String(req.body.remark) : undefined
@@ -112,7 +115,7 @@ settingsRouter.put('/credential', attachLocalViewer, async (req, res) => {
   }
 })
 
-settingsRouter.get('/credential/sign-status', attachLocalViewer, async (req, res) => {
+settingsRouter.get('/credential/sign-status', async (req, res) => {
   const platformName = String(req.query.platformName ?? 'xiaohongshu').trim()
   try {
     const status = await getXhsSignStatus(platformName)
@@ -122,7 +125,7 @@ settingsRouter.get('/credential/sign-status', attachLocalViewer, async (req, res
   }
 })
 
-settingsRouter.post('/credential/test-sign', attachLocalViewer, async (req, res) => {
+settingsRouter.post('/credential/test-sign', async (req, res) => {
   const platformName = String(req.body?.platformName ?? 'xiaohongshu').trim()
   try {
     const cookie = await getDecryptedCookie(platformName)
@@ -168,7 +171,7 @@ settingsRouter.post('/credential/test-sign', attachLocalViewer, async (req, res)
   }
 })
 
-settingsRouter.post('/credential/test', attachLocalViewer, async (req, res) => {
+settingsRouter.post('/credential/test', async (req, res) => {
   const platformName = String(req.body?.platformName ?? 'xiaohongshu').trim()
   try {
     const result = await testCredentialDecrypt(platformName)
@@ -182,7 +185,7 @@ settingsRouter.post('/credential/test', attachLocalViewer, async (req, res) => {
   }
 })
 
-settingsRouter.get('/download-configs', requireMaintenanceTools, attachLocalViewer, async (_req, res) => {
+settingsRouter.get('/download-configs', requireMaintenanceTools, async (_req, res) => {
   try {
     const configs = await listDownloadConfigs()
     sendOk(res, configs)
@@ -191,7 +194,7 @@ settingsRouter.get('/download-configs', requireMaintenanceTools, attachLocalView
   }
 })
 
-settingsRouter.post('/download-configs/restore-auto-export', requireMaintenanceTools, attachLocalViewer, async (_req, res) => {
+settingsRouter.post('/download-configs/restore-auto-export', requireMaintenanceTools, async (_req, res) => {
   try {
     const configs = await restoreAllDownloadConfigsToAutoExport()
     sendOk(res, {
@@ -203,7 +206,7 @@ settingsRouter.post('/download-configs/restore-auto-export', requireMaintenanceT
   }
 })
 
-settingsRouter.get('/auto-refresh', requireMaintenanceTools, attachLocalViewer, async (_req, res) => {
+settingsRouter.get('/auto-refresh', requireMaintenanceTools, async (_req, res) => {
   try {
     const settings = await getAutoRefreshSettings()
     sendOk(res, {
@@ -216,7 +219,7 @@ settingsRouter.get('/auto-refresh', requireMaintenanceTools, attachLocalViewer, 
   }
 })
 
-settingsRouter.put('/auto-refresh', requireMaintenanceTools, attachLocalViewer, async (req, res) => {
+settingsRouter.put('/auto-refresh', requireMaintenanceTools, async (req, res) => {
   try {
     const settings = await updateAutoRefreshSettings({
       autoRefreshEnabled:
@@ -243,7 +246,7 @@ settingsRouter.put('/auto-refresh', requireMaintenanceTools, attachLocalViewer, 
   }
 })
 
-settingsRouter.get('/live-accounts/cookie-health', attachLocalViewer, async (_req, res) => {
+settingsRouter.get('/live-accounts/cookie-health', async (_req, res) => {
   try {
     const { buildCookieHealthWithQualitySync } = await import(
       '../services/quality-badcase-sync-debug.service'
@@ -255,7 +258,7 @@ settingsRouter.get('/live-accounts/cookie-health', attachLocalViewer, async (_re
   }
 })
 
-settingsRouter.get('/live-accounts', attachLocalViewer, async (_req, res) => {
+settingsRouter.get('/live-accounts', async (_req, res) => {
   try {
     const accounts = await listLiveAccountsForSettings()
     sendOk(res, { accounts })
@@ -264,7 +267,7 @@ settingsRouter.get('/live-accounts', attachLocalViewer, async (_req, res) => {
   }
 })
 
-settingsRouter.post('/live-accounts', attachLocalViewer, async (req, res) => {
+settingsRouter.post('/live-accounts', async (req, res) => {
   try {
     const result = await createLiveAccount({
       name: String(req.body?.name ?? ''),
@@ -283,7 +286,7 @@ settingsRouter.post('/live-accounts', attachLocalViewer, async (req, res) => {
   }
 })
 
-settingsRouter.get('/live-accounts/:id/cookie', attachLocalViewer, async (req, res) => {
+settingsRouter.get('/live-accounts/:id/cookie', async (req, res) => {
   try {
     const cookieText = await getLiveAccountCookiePlaintext(req.params.id)
     sendOk(res, { cookie: cookieText, cookieText })
@@ -292,7 +295,7 @@ settingsRouter.get('/live-accounts/:id/cookie', attachLocalViewer, async (req, r
   }
 })
 
-settingsRouter.post('/live-accounts/:id/test-cookie', attachLocalViewer, async (req, res) => {
+settingsRouter.post('/live-accounts/:id/test-cookie', async (req, res) => {
   try {
     const account = await (
       await import('../services/live-account.service')
@@ -319,7 +322,7 @@ settingsRouter.post('/live-accounts/:id/test-cookie', attachLocalViewer, async (
   }
 })
 
-settingsRouter.put('/live-accounts/:id/cookie', attachLocalViewer, async (req, res) => {
+settingsRouter.put('/live-accounts/:id/cookie', async (req, res) => {
   try {
     const result = await updateLiveAccountCookie(
       req.params.id,
@@ -337,7 +340,7 @@ settingsRouter.put('/live-accounts/:id/cookie', attachLocalViewer, async (req, r
   }
 })
 
-settingsRouter.put('/live-accounts/:id', attachLocalViewer, async (req, res) => {
+settingsRouter.put('/live-accounts/:id', async (req, res) => {
   try {
     const account = await updateLiveAccountMeta(req.params.id, {
       name: req.body?.name != null ? String(req.body.name) : undefined,
@@ -352,7 +355,6 @@ settingsRouter.put('/live-accounts/:id', attachLocalViewer, async (req, res) => 
 
 settingsRouter.post(
   '/data-maintenance/clear-business-data',
-  attachLocalViewer,
   async (req, res) => {
     try {
       const result = await clearBusinessDataForSettings({
@@ -376,7 +378,6 @@ settingsRouter.post(
 
 settingsRouter.post(
   '/data-maintenance/trigger-business-sync',
-  attachLocalViewer,
   async (_req, res) => {
     try {
       const result = await triggerBusinessSyncIfStale('catchup')
@@ -396,7 +397,7 @@ settingsRouter.post(
   },
 )
 
-settingsRouter.delete('/live-accounts/:id', attachLocalViewer, async (req, res) => {
+settingsRouter.delete('/live-accounts/:id', async (req, res) => {
   try {
     await deleteLiveAccount(req.params.id)
     sendOk(res, { message: '直播号已删除' })
@@ -406,7 +407,7 @@ settingsRouter.delete('/live-accounts/:id', attachLocalViewer, async (req, res) 
   }
 })
 
-settingsRouter.put('/download-configs/:type', requireMaintenanceTools, attachLocalViewer, async (req, res) => {
+settingsRouter.put('/download-configs/:type', requireMaintenanceTools, async (req, res) => {
   const { type } = req.params
   if (!isDownloadType(type)) {
     sendFail(res, '下载类型无效')

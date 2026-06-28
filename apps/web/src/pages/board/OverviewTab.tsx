@@ -10,6 +10,7 @@ import {
   type BoardMetricKey,
 } from '../../components/board/BoardMetricDrawer'
 import { BoardSyncStatusHeader } from '../../components/board/BoardSyncStatusHeader'
+import { DataLastUpdateBanner } from '../../components/board/DataLastUpdateBanner'
 import { BusinessSyncProgressCard } from '../../components/board/BusinessSyncProgressCard'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
 import { OfficialQualitySyncNote } from '../../components/board/OfficialQualitySyncNote'
@@ -20,6 +21,7 @@ import {
 import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
 import { showLongPeriodRates } from '../../lib/board-rate-display'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
+import { useDataFreshness } from '../../hooks/useDataFreshness'
 
 export const OverviewTab: React.FC = () => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
@@ -52,6 +54,8 @@ export const OverviewTab: React.FC = () => {
     triggerBusinessSync,
     triggerSyncBusy,
   } = useBoardLiveQuery()
+
+  const { data: dataFreshness, loading: dataFreshnessLoading } = useDataFreshness(startDate, endDate)
 
   const [metricDrawer, setMetricDrawer] = useState<BoardMetricKey | null>(null)
 
@@ -142,6 +146,10 @@ export const OverviewTab: React.FC = () => {
             syncMeta={syncMeta}
             hasDisplayData={Boolean(ds)}
             totalRawOrders={totalRawOrders}
+          />
+          <DataLastUpdateBanner
+            freshness={dataFreshness}
+            loading={dataFreshnessLoading}
           />
           <OfficialQualitySyncNote qualityFeedback={qualityFeedback} showLastUpdated={false} />
         </div>

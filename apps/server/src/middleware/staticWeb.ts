@@ -32,10 +32,10 @@ export function mountWebStatic(app: Express): boolean {
       '/assets',
       express.static(assetsDir, {
         index: false,
-        maxAge: '365d',
-        immutable: true,
+        maxAge: '1h',
         setHeaders(res) {
-          res.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
+          // 避免前端发版后浏览器长期命中旧 bundle（此前 immutable 365d 会导致「查看日报」等修复不生效）
+          res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate')
         },
       }),
     )

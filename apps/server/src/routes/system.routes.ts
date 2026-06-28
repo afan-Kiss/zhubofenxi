@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import path from 'node:path'
-import { attachLocalViewer } from '../middleware/local-viewer.middleware'
+import { attachRequestUser } from '../middleware/local-viewer.middleware'
+import { requireAuth } from '../middleware/auth.middleware'
 import { requireMaintenanceTools } from '../middleware/maintenance.middleware'
 import { sendFail, sendOk } from '../utils/response'
 import { getSystemStatus } from '../services/system-status.service'
@@ -19,13 +20,15 @@ import { getDataSyncStatus } from '../services/data-sync-status.service'
 
 export const systemRouter = Router()
 
+systemRouter.use(attachRequestUser, requireAuth)
+
 const auditCtx = (req: import('express').Request) => ({
   requestId: req.requestId,
   ip: getClientIp(req),
   userAgent: req.headers['user-agent'] ?? undefined,
 })
 
-systemRouter.get('/status', requireMaintenanceTools, attachLocalViewer, async (_req, res, next) => {
+systemRouter.get('/status', requireMaintenanceTools, async (_req, res, next) => {
   try {
     sendOk(res, await getSystemStatus())
   } catch (err) {
@@ -33,7 +36,7 @@ systemRouter.get('/status', requireMaintenanceTools, attachLocalViewer, async (_
   }
 })
 
-systemRouter.get('/cleanup/preview', requireMaintenanceTools, attachLocalViewer, async (_req, res, next) => {
+systemRouter.get('/cleanup/preview', requireMaintenanceTools, async (_req, res, next) => {
   try {
     sendOk(res, await previewCleanup())
   } catch (err) {
@@ -41,7 +44,7 @@ systemRouter.get('/cleanup/preview', requireMaintenanceTools, attachLocalViewer,
   }
 })
 
-systemRouter.get('/cleanup/settings', requireMaintenanceTools, attachLocalViewer, async (_req, res, next) => {
+systemRouter.get('/cleanup/settings', requireMaintenanceTools, async (_req, res, next) => {
   try {
     sendOk(res, await getCleanupSettings())
   } catch (err) {
@@ -49,7 +52,7 @@ systemRouter.get('/cleanup/settings', requireMaintenanceTools, attachLocalViewer
   }
 })
 
-systemRouter.post('/cleanup/settings', requireMaintenanceTools, attachLocalViewer, async (req, res, next) => {
+systemRouter.post('/cleanup/settings', requireMaintenanceTools, async (req, res, next) => {
   try {
     const updated = await updateCleanupSettings(req.body ?? {})
     sendOk(res, updated)
@@ -58,7 +61,7 @@ systemRouter.post('/cleanup/settings', requireMaintenanceTools, attachLocalViewe
   }
 })
 
-systemRouter.post('/cleanup', requireMaintenanceTools, attachLocalViewer, async (req, res, next) => {
+systemRouter.post('/cleanup', requireMaintenanceTools, async (req, res, next) => {
   try {
     const dryRun = req.body?.dryRun === true || req.body?.dryRun === 'true'
     const result = await runCleanup(dryRun)
@@ -81,7 +84,7 @@ systemRouter.post('/cleanup', requireMaintenanceTools, attachLocalViewer, async 
   }
 })
 
-systemRouter.get('/acceptance', requireMaintenanceTools, attachLocalViewer, async (req, res, next) => {
+systemRouter.get('/acceptance', requireMaintenanceTools, async (req, res, next) => {
   try {
     const preset = String(req.query.preset ?? 'today')
     sendOk(res, await runSystemAcceptanceChecks(preset as import('../utils/date-range').DateRangePreset))
@@ -90,7 +93,7 @@ systemRouter.get('/acceptance', requireMaintenanceTools, attachLocalViewer, asyn
   }
 })
 
-systemRouter.get('/backups', requireMaintenanceTools, attachLocalViewer, async (_req, res, next) => {
+systemRouter.get('/backups', requireMaintenanceTools, async (_req, res, next) => {
   try {
     sendOk(res, listBackups())
   } catch (err) {
@@ -98,7 +101,7 @@ systemRouter.get('/backups', requireMaintenanceTools, attachLocalViewer, async (
   }
 })
 
-systemRouter.post('/backup', requireMaintenanceTools, attachLocalViewer, async (req, res, next) => {
+systemRouter.post('/backup', requireMaintenanceTools, async (req, res, next) => {
   try {
     const backup = await createSystemBackup()
     const ctx = auditCtx(req)
@@ -123,7 +126,6 @@ systemRouter.post('/backup', requireMaintenanceTools, attachLocalViewer, async (
 systemRouter.get(
   '/backups/:id/download',
   requireMaintenanceTools,
-  attachLocalViewer,
   async (req, res, next) => {
     try {
       const backup = getBackupById(req.params.id!)
@@ -154,7 +156,6 @@ systemRouter.get(
 systemRouter.get(
   '/data/sync-status',
   requireMaintenanceTools,
-  attachLocalViewer,
   async (_req, res, next) => {
     try {
       sendOk(res, await getDataSyncStatus())
@@ -164,7 +165,7 @@ systemRouter.get(
   },
 )
 
-systemRouter.post('/data/clear-all', requireMaintenanceTools, attachLocalViewer, async (req, res, next) => {
+systemRouter.post('/data/clear-all', requireMaintenanceTools, async (req, res, next) => {
   try {
     const result = await clearAllBusinessData({
       confirmPhrase: String(req.body?.confirmPhrase ?? ''),
@@ -180,7 +181,7 @@ systemRouter.post('/data/clear-all', requireMaintenanceTools, attachLocalViewer,
   }
 })
 
-systemRouter.post('/data/full-read', requireMaintenanceTools, attachLocalViewer, async (req, res, next) => {
+systemRouter.post('/data/full-read', requireMaintenanceTools, async (req, res, next) => {
   try {
     const scope = String(req.body?.scope ?? '90') as FullReadScope
     const allowed: FullReadScope[] = ['30', '90', '180', 'custom', 'all']

@@ -18,7 +18,10 @@ import {
 } from './operations-business-insights.service'
 import { attachBusinessInsightActions } from './operations-business-insight-action.service'
 import { getOperationsRankings } from './operations-rankings.service'
-import { computeProductReturnRateByOrder } from './operations-product-analysis.service'
+import {
+  computeReturnOrderRateRatio,
+  isReturnOrderRateAbnormal,
+} from './operations-after-sale-order.util'
 import { buildOperationsDailyTrendFromSnapshots } from './operations-daily-trend.service'
 import { mergeAnchorRowsForRange } from './operations-anchor-ranking.service'
 import { getOpsReviewNote } from './ops-review-note.service'
@@ -116,7 +119,7 @@ async function loadDailySnapshots(params: {
   for (const dateKey of days) {
     snapshots.push(
       await buildDailyOperationsReport({
-        preset: params.preset ?? 'custom',
+        preset: 'custom',
         startDate: dateKey,
         endDate: dateKey,
         role: params.role,
@@ -134,10 +137,12 @@ function buildMonthlySummary(
   const base = aggregateWeeklySummaryForAcceptance(snapshots)
   const soldCount = products.reduce((sum, p) => sum + p.soldCount, 0)
   const buyerCount = products.reduce((sum, p) => sum + p.buyerCount, 0)
-  const productReturnOrderCount = products.reduce((sum, p) => sum + p.returnOrderCount, 0)
-  const productSoldOrderCount = products.reduce((sum, p) => sum + p.soldOrderCount, 0)
   const liveDurationHours =
     base.totalLiveDurationMinutes > 0 ? base.totalLiveDurationMinutes / 60 : null
+  const productReturnRate = computeReturnOrderRateRatio(
+    base.paidOrderCount,
+    base.returnOrderCount,
+  )
 
   return {
     validAmountYuan: base.validAmountYuan,
@@ -145,17 +150,18 @@ function buildMonthlySummary(
     soldCount,
     buyerCount,
     averageOrderValue: base.avgOrderAmountYuan,
-    productReturnOrderCount,
-    productReturnRate: computeProductReturnRateByOrder(
-      productSoldOrderCount,
-      productReturnOrderCount,
-    ),
+    productReturnOrderCount: base.returnOrderCount,
+    productReturnRate,
+    productReturnRateAbnormal: isReturnOrderRateAbnormal(productReturnRate),
     liveDurationHours,
     hourlyAmountYuan: base.hourlyAmountYuan,
     viewSessionCount: base.viewSessionCount,
     joinUserCount: base.joinUserCount,
     dealUserCount: base.dealUserCount,
     dealConversionRate: base.dealConversionRate,
+    dealConversionNumerator: base.dealUserCount,
+    dealConversionDenominator: base.joinUserCount,
+    dealConversionDenominatorLabel: '进房人数',
     newFollowerCount: base.totalNewFollowerCount,
     followerConversionRate: base.newFollowerRate,
   }
@@ -373,7 +379,10 @@ export async function getMonthlyOperationsReport(params: {
     username: params.username,
   })
   const compareWithPreviousMonth = buildCompareWithPreviousMonth(summary, previousSummary)
-  const dailyTrend = buildOperationsDailyTrendFromSnapshots(snapshots)
+  const dailyTrend = buildOperationsDailyTrendFromSnapshots(snapshots, {
+    startDate: range.startDate,
+    endDate: range.endDate,
+  })
 
   const rankingsPayload = await getOperationsRankings({
     startDate: range.startDate,

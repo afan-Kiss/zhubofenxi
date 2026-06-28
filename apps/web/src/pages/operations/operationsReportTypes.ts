@@ -491,12 +491,16 @@ export interface MonthlyOperationsReportPayload {
     averageOrderValue: number | null
     productReturnOrderCount: number
     productReturnRate: number | null
+    productReturnRateAbnormal?: boolean
     liveDurationHours: number | null
     hourlyAmountYuan: number | null
     viewSessionCount: number | null
     joinUserCount: number | null
     dealUserCount: number | null
     dealConversionRate: number | null
+    dealConversionNumerator?: number | null
+    dealConversionDenominator?: number | null
+    dealConversionDenominatorLabel?: string
     newFollowerCount: number | null
     followerConversionRate: number | null
   }
@@ -556,6 +560,9 @@ export interface OperationsReportCacheMeta {
   builtAt: string | null
   expiresAt: string | null
   buildDurationMs: number | null
+  fromCache?: boolean
+  generatedAt?: string | null
+  computeMs?: number | null
   refreshing?: boolean
   message?: string
 }

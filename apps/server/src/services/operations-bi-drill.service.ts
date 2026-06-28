@@ -16,6 +16,12 @@ import {
   resolveProductKey,
 } from './operations-product-fields.util'
 import { isProductReturnOrder } from './operations-product-analysis.service'
+import {
+  formatAfterSaleStatusDisplay,
+  formatAfterSalesCategoryLabel,
+  formatAfterSalesReasonDisplay,
+  isActualAfterSaleOrder,
+} from './operations-after-sale-order.util'
 import { normalizeAfterSalesReason } from './after-sales-reason-normalize.service'
 import { mapViewToOperationsBiDrillRow } from './operations-bi-drill-row.mapper'
 import type {
@@ -167,7 +173,7 @@ function viewMatchesAfterSales(
   return true
 }
 
-type FilterMode = 'sold' | 'return' | 'sold_or_return' | 'any_included'
+type FilterMode = 'sold' | 'return' | 'after_sale' | 'any_included'
 
 function filterViewsForTarget(
   views: AnalyzedOrderView[],
@@ -192,9 +198,7 @@ function filterViewsForTarget(
 
     if (mode === 'sold') return isDailyReportSoldOrder(view)
     if (mode === 'return') return isProductReturnOrder(view)
-    if (mode === 'sold_or_return') {
-      return isDailyReportSoldOrder(view) || isProductReturnOrder(view)
-    }
+    if (mode === 'after_sale') return isActualAfterSaleOrder(view)
     return Boolean(resolveMetricOrderNo(view) || view.paymentBaseCent > 0)
   })
 }
@@ -202,15 +206,15 @@ function filterViewsForTarget(
 function resolveFilterMode(target: OperationsBiDrillTarget): FilterMode {
   if (
     target === 'summary_return_orders' ||
+    target === 'summary_return_rate' ||
     target === 'anchor_return_rate' ||
     target === 'product_high_return' ||
     target === 'after_sales_reason' ||
     target === 'after_sales_refund_amount' ||
     target === 'price_band_return_rate'
   ) {
-    return 'return'
+    return 'after_sale'
   }
-  if (target === 'summary_return_rate') return 'sold_or_return'
   if (target === 'product_slow') return 'sold'
   return 'sold'
 }
@@ -258,6 +262,34 @@ function validateRequiredDimensions(input: OperationsBiDrillRequest): void {
   }
 }
 
+function buildDrillTitle(target: OperationsBiDrillTarget): string {
+  switch (target) {
+    case 'summary_return_rate':
+    case 'summary_return_orders':
+    case 'anchor_return_rate':
+    case 'product_high_return':
+    case 'price_band_return_rate':
+      return '退货/退款订单明细'
+    case 'after_sales_refund_amount':
+      return '退款订单明细'
+    case 'after_sales_reason':
+      return '售后原因订单明细'
+    case 'summary_valid_amount':
+    case 'anchor_amount':
+    case 'product_hot':
+    case 'product_amount':
+    case 'price_band_amount':
+      return '成交订单明细'
+    case 'summary_orders':
+    case 'anchor_orders':
+    case 'product_orders':
+    case 'price_band_orders':
+      return '成交订单明细'
+    default:
+      return `订单明细：${TARGET_LABELS[target]}`
+  }
+}
+
 function buildExplanation(input: OperationsBiDrillRequest, mode: FilterMode, total: number): string {
   if (TRAFFIC_ONLY_TARGETS.has(input.target)) {
     return '这个指标来自官方流量数据，不是由订单直接组成。'
@@ -271,11 +303,8 @@ function buildExplanation(input: OperationsBiDrillRequest, mode: FilterMode, tot
   if (input.target === 'anchor_hourly_amount') {
     return '这里展示该主播的有效成交订单；直播时长在报表里单独汇总。'
   }
-  if (mode === 'return') {
-    return '这里展示计入商品退货的订单，纯运费退款已排除。'
-  }
-  if (mode === 'sold_or_return') {
-    return '这里展示有效成交订单和商品退货订单，方便核对退货率。'
+  if (mode === 'after_sale') {
+    return '这里只显示发生实际退款或退货的订单。'
   }
   return '这里展示与报表同一口径的有效成交订单。'
 }
@@ -314,7 +343,9 @@ export async function buildOperationsBiDrill(
     throw new OperationsBiDrillValidationError('日期范围无效')
   }
   if (days.length > MAX_RANGE_DAYS) {
-    throw new OperationsBiDrillValidationError('日期范围太长了，先选 31 天以内再查看订单明细')
+    throw new OperationsBiDrillValidationError(
+      '这个范围订单较多，请缩小日期或分批查看明细。',
+    )
   }
 
   validateRequiredDimensions(input)
@@ -401,7 +432,7 @@ export async function buildOperationsBiDrill(
   }
 
   const soldCount = filtered.filter((v) => isDailyReportSoldOrder(v)).length
-  const returnCount = filtered.filter((v) => isProductReturnOrder(v)).length
+  const returnCount = filtered.filter((v) => isActualAfterSaleOrder(v)).length
   const validAmountYuan = filtered.reduce(
     (sum, v) => sum + (isDailyReportSoldOrder(v) ? Math.round(v.effectiveGmvCent / 100) : 0),
     0,
@@ -439,7 +470,7 @@ export async function buildOperationsBiDrill(
   }
 
   return {
-    title: `数据来源：${TARGET_LABELS[effectiveTarget]}`,
+    title: buildDrillTitle(effectiveTarget),
     subtitle: `${input.startDate} ~ ${input.endDate}`,
     explanation: buildExplanation(input, mode, paged.total),
     sourceLabel: input.source,

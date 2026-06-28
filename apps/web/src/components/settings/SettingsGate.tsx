@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { isSettingsUnlocked, unlockSettings } from '../../lib/settings-gate'
+import { useAuth } from '../../providers/AuthProvider'
 import { SettingsPasswordDialog } from './SettingsPasswordDialog'
 
 interface Props {
@@ -7,10 +8,12 @@ interface Props {
 }
 
 export const SettingsGate: React.FC<Props> = ({ children }) => {
-  const [unlocked, setUnlocked] = useState(() => isSettingsUnlocked())
-  const [dialogOpen, setDialogOpen] = useState(() => !isSettingsUnlocked())
+  const { mode, canAccess } = useAuth()
+  const sessionUnlocked = mode === 'session' && canAccess('settings')
+  const [unlocked, setUnlocked] = useState(() => sessionUnlocked || isSettingsUnlocked())
+  const [dialogOpen, setDialogOpen] = useState(() => !sessionUnlocked && !isSettingsUnlocked())
 
-  if (unlocked) {
+  if (sessionUnlocked || unlocked) {
     return <div data-testid="settings-page-unlocked">{children}</div>
   }
 

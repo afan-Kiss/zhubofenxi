@@ -63,7 +63,9 @@
     "db:migrate": "npm run db:migrate -w @live/server",
     "db:generate": "npm run db:generate -w @live/server",
     "db:push": "npm run db:push -w @live/server",
-    "deploy:check": "node scripts/deploy-check.cjs"
+    "deploy:check": "node scripts/deploy-check.cjs",
+    "deploy:aliyun": "python deploy/aliyun/upload-and-deploy.py",
+    "deploy:aliyun:finish": "python deploy/aliyun/finish-deploy.py"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",

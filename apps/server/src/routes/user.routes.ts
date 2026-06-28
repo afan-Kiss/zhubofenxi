@@ -8,28 +8,46 @@ import {
   listUsers,
   resetUserPassword,
   updateUser,
+  type AdminUserView,
 } from '../services/user.service'
 import type { UserRole } from '../types/roles'
 import { isUserRole } from '../types/roles'
 import { sendFail, sendOk } from '../utils/response'
+import { formatClientInfo, formatUserAgentLabel } from '../utils/user-agent-label'
 
 export const userRouter = Router()
 
 userRouter.use(requireAuth, requireRole('super_admin'))
 
+function serializeAdminUser(u: AdminUserView) {
+  return {
+    ...u,
+    managedPassword: u.managedPassword,
+    registeredIp: u.registeredIp,
+    registeredUserAgent: u.registeredUserAgent,
+    registeredClientLabel: formatUserAgentLabel(u.registeredUserAgent),
+    registeredClientInfo: formatClientInfo({
+      ip: u.registeredIp,
+      userAgent: u.registeredUserAgent,
+    }),
+    lastLoginIp: u.lastLoginIp,
+    lastLoginUserAgent: u.lastLoginUserAgent,
+    lastLoginClientLabel: formatUserAgentLabel(u.lastLoginUserAgent),
+    lastLoginClientInfo: formatClientInfo({
+      ip: u.lastLoginIp,
+      userAgent: u.lastLoginUserAgent,
+    }),
+    passwordChangedAt: u.passwordChangedAt?.toISOString() ?? null,
+    lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
+    createdAt: u.createdAt.toISOString(),
+    updatedAt: u.updatedAt.toISOString(),
+  }
+}
+
 userRouter.get('/', async (_req, res) => {
   try {
     const users = await listUsers()
-    sendOk(
-      res,
-      users.map((u) => ({
-        ...u,
-        passwordChangedAt: u.passwordChangedAt?.toISOString() ?? null,
-        lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
-        createdAt: u.createdAt.toISOString(),
-        updatedAt: u.updatedAt.toISOString(),
-      })),
-    )
+    sendOk(res, users.map(serializeAdminUser))
   } catch {
     sendFail(res, '获取用户列表失败', 500)
   }
@@ -54,18 +72,16 @@ userRouter.post('/', async (req, res) => {
   }
 
   try {
-    const user = await createUser({ username, password, role })
-    sendOk(
-      res,
-      {
-        ...user,
-        passwordChangedAt: user.passwordChangedAt?.toISOString() ?? null,
-        lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
-        createdAt: user.createdAt.toISOString(),
-        updatedAt: user.updatedAt.toISOString(),
+    const user = await createUser({
+      username,
+      password,
+      role,
+      registration: {
+        ip: getClientIp(req),
+        userAgent: req.headers['user-agent'] ?? undefined,
       },
-      201,
-    )
+    })
+    sendOk(res, serializeAdminUser(user), 201)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '创建用户失败')
   }
@@ -95,13 +111,7 @@ userRouter.patch('/:id/password', async (req, res) => {
     })
     sendOk(res, {
       message: '密码已修改',
-      user: {
-        ...user,
-        passwordChangedAt: user.passwordChangedAt?.toISOString() ?? null,
-        lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
-        createdAt: user.createdAt.toISOString(),
-        updatedAt: user.updatedAt.toISOString(),
-      },
+      user: serializeAdminUser(user),
     })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '重置密码失败')

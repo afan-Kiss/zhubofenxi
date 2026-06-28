@@ -34,6 +34,17 @@ export type SafeUser = {
 
 
 
+/** 超级管理员用户列表专用，含可查看的登录密码与客户端信息 */
+export type AdminUserView = SafeUser & {
+  managedPassword: string | null
+  registeredIp: string | null
+  registeredUserAgent: string | null
+  lastLoginIp: string | null
+  lastLoginUserAgent: string | null
+}
+
+
+
 function toSafeUser(user: {
 
   id: string
@@ -88,6 +99,58 @@ function toSafeUser(user: {
 
 
 
+function toAdminUser(user: {
+
+  id: string
+
+  username: string
+
+  role: string
+
+  enabled: boolean
+
+  mustChangePassword: boolean
+
+  passwordChangedAt: Date | null
+
+  lastLoginAt: Date | null
+
+  createdAt: Date
+
+  updatedAt: Date
+
+  managedPassword: string | null
+
+  registeredIp: string | null
+
+  registeredUserAgent: string | null
+
+  lastLoginIp: string | null
+
+  lastLoginUserAgent: string | null
+
+}): AdminUserView {
+
+  return {
+
+    ...toSafeUser(user),
+
+    managedPassword: user.managedPassword,
+
+    registeredIp: user.registeredIp,
+
+    registeredUserAgent: user.registeredUserAgent,
+
+    lastLoginIp: user.lastLoginIp,
+
+    lastLoginUserAgent: user.lastLoginUserAgent,
+
+  }
+
+}
+
+
+
 export async function findUserByUsername(username: string) {
 
   return prisma.user.findUnique({ where: { username } })
@@ -104,11 +167,11 @@ export async function findUserById(id: string) {
 
 
 
-export async function listUsers(): Promise<SafeUser[]> {
+export async function listUsers(): Promise<AdminUserView[]> {
 
   const users = await prisma.user.findMany({ orderBy: { createdAt: 'asc' } })
 
-  return users.map(toSafeUser)
+  return users.map(toAdminUser)
 
 }
 
@@ -122,7 +185,9 @@ export async function createUser(input: {
 
   role: UserRole
 
-}): Promise<SafeUser> {
+  registration?: { ip?: string | null; userAgent?: string | null }
+
+}): Promise<AdminUserView> {
 
   const exists = await prisma.user.findUnique({ where: { username: input.username } })
 
@@ -140,6 +205,12 @@ export async function createUser(input: {
 
       passwordHash,
 
+      managedPassword: input.password,
+
+      registeredIp: input.registration?.ip?.trim() || null,
+
+      registeredUserAgent: input.registration?.userAgent?.trim() || null,
+
       role: input.role,
 
       enabled: true,
@@ -152,7 +223,7 @@ export async function createUser(input: {
 
   })
 
-  return toSafeUser(user)
+  return toAdminUser(user)
 
 }
 
@@ -192,15 +263,37 @@ export async function disableUser(id: string): Promise<SafeUser> {
 
 
 
-export async function touchLastLogin(userId: string): Promise<void> {
+export async function recordUserLogin(
+
+  userId: string,
+
+  client?: { ip?: string | null; userAgent?: string | null },
+
+): Promise<void> {
 
   await prisma.user.update({
 
     where: { id: userId },
 
-    data: { lastLoginAt: new Date() },
+    data: {
+
+      lastLoginAt: new Date(),
+
+      lastLoginIp: client?.ip?.trim() || null,
+
+      lastLoginUserAgent: client?.userAgent?.trim() || null,
+
+    },
 
   })
+
+}
+
+
+
+export async function touchLastLogin(userId: string): Promise<void> {
+
+  await recordUserLogin(userId)
 
 }
 
@@ -262,6 +355,8 @@ export async function changeOwnPassword(input: {
 
       passwordHash,
 
+      managedPassword: null,
+
       mustChangePassword: false,
 
       passwordChangedAt: new Date(),
@@ -322,7 +417,7 @@ export async function resetUserPassword(input: {
 
   audit?: { requestId?: string; ip?: string; userAgent?: string }
 
-}): Promise<SafeUser> {
+}): Promise<AdminUserView> {
 
   const { targetId, newPassword, confirmPassword } = input
 
@@ -353,6 +448,8 @@ export async function resetUserPassword(input: {
     data: {
 
       passwordHash,
+
+      managedPassword: newPassword,
 
       mustChangePassword: mustChange,
 
@@ -398,7 +495,7 @@ export async function resetUserPassword(input: {
 
 
 
-  return toSafeUser(updated)
+  return toAdminUser(updated)
 
 }
 

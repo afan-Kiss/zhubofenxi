@@ -81,7 +81,10 @@ export interface OperationsBiDrillOrderRow {
   validAmountYuan?: number | null
   productRefundAmountYuan?: number | null
   orderStatusText?: string | null
+  afterSaleStatus?: string | null
   normalizedAfterSalesReason?: string | null
+  buyerNickname?: string | null
+  buyerDisplayName?: string | null
   inclusionReason?: string | null
   qianfanDetailAvailable: boolean
 }

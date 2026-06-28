@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { apiRequest } from '../../lib/api'
+import { useOperationsReportFetch } from '../../hooks/useOperationsReportFetch'
+import { OperationsReportLoadShell } from '../../components/operations/OperationsReportLoadShell'
 import { AnchorOperationsTable } from '../../components/operations/AnchorOperationsTable'
 import { ProductPerformanceTable } from '../../components/operations/ProductPerformanceTable'
 import { AfterSalesReasonTable } from '../../components/operations/AfterSalesReasonTable'
@@ -8,8 +10,9 @@ import { BusinessInsightCards } from '../../components/operations/BusinessInsigh
 import {
   formatIntegerMoney,
   formatOrderCount,
-  formatPercent,
+  formatRatePercent,
 } from '../../components/operations/operationsReportFormatters'
+import { FOLLOWER_DRILL_UNAVAILABLE_MESSAGE } from '../../lib/operations-follower-drill'
 import type {
   OpsReviewNotePayload,
   WeeklyOperationsReportPayload,
@@ -25,6 +28,13 @@ import { useChartTopLimit } from '../../components/operations/charts/useChartTop
 interface Props {
   weekStart: string
   weekEnd: string
+  onLoadingChange?: (loading: boolean) => void
+}
+
+type WeeklyLoadResult = {
+  report: WeeklyOperationsReportPayload
+  cacheMeta: WithOperationsReportCacheMeta<WeeklyOperationsReportPayload>['cacheMeta']
+  cacheWarning: string | null
 }
 
 function highlightToProductRow(
@@ -51,47 +61,51 @@ function highlightToProductRow(
   }
 }
 
-export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) => {
+export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd, onLoadingChange }) => {
   const topLimit = useChartTopLimit()
   const [showFullHot, setShowFullHot] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [report, setReport] = useState<WeeklyOperationsReportPayload | null>(null)
-  const [cacheMeta, setCacheMeta] = useState<
-    WithOperationsReportCacheMeta<WeeklyOperationsReportPayload>['cacheMeta']
-  >(undefined)
-  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
+  const [showFullReturn, setShowFullReturn] = useState(false)
 
-  const loadReport = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
+  const {
+    data: loaded,
+    loading,
+    refreshing,
+    error,
+    load,
+    setData,
+  } = useOperationsReportFetch<WeeklyLoadResult>(
+    async (signal) => {
       const qs = new URLSearchParams({ weekStart, weekEnd, preset: 'custom' })
       const data = await apiRequest<WithOperationsReportCacheMeta<WeeklyOperationsReportPayload>>(
         `/api/board/operations-report/weekly?${qs}`,
+        { signal },
       )
       const { cacheMeta: meta, cacheWarning: warning, ...payload } = data
-      setReport(payload)
-      setCacheMeta(meta)
-      setCacheWarning(warning ?? null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载运营周报失败')
-      setReport(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [weekStart, weekEnd])
+      return { report: payload, cacheMeta: meta, cacheWarning: warning ?? null }
+    },
+    [weekStart, weekEnd],
+  )
+
+  const report = loaded?.report ?? null
+  const cacheMeta = loaded?.cacheMeta
+  const cacheWarning = loaded?.cacheWarning ?? null
 
   useEffect(() => {
-    void loadReport()
-  }, [loadReport])
+    onLoadingChange?.(loading)
+  }, [loading, onLoadingChange])
 
   const handleReviewSaved = (note: OpsReviewNotePayload) => {
-    setReport((prev) => (prev ? { ...prev, reviewNote: note } : prev))
+    setData((prev) =>
+      prev ? { ...prev, report: { ...prev.report, reviewNote: note } } : prev,
+    )
   }
 
   if (loading && !report) {
-    return <p className="text-sm text-slate-500">加载运营周报...</p>
+    return (
+      <OperationsReportLoadShell loading={loading} refreshing={false}>
+        <p className="py-6 text-sm text-slate-500">加载运营周报…</p>
+      </OperationsReportLoadShell>
+    )
   }
 
   if (error && !report) {
@@ -100,7 +114,7 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
         <p className="text-sm text-red-600">{error}</p>
         <button
           type="button"
-          onClick={() => void loadReport()}
+          onClick={() => void load()}
           className="mt-2 rounded-full border border-slate-200 px-3 py-1 text-sm"
         >
           重试
@@ -151,6 +165,7 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
   }))
 
   return (
+    <OperationsReportLoadShell loading={loading} refreshing={refreshing}>
     <div className="space-y-4 overflow-x-hidden">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
@@ -180,10 +195,14 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
             />
             <OperationsMetricDrillCard
               label="退货单率"
-              value={formatPercent(s.returnOrderRate)}
+              value={formatRatePercent(s.returnOrderRate)}
               drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
             />
-            <OperationsMetricDrillCard label="新增粉丝" value={`${s.totalNewFollowerCount}人`} />
+            <OperationsMetricDrillCard
+              label="新增粉丝"
+              value={`${s.totalNewFollowerCount}人`}
+              drillUnavailableMessage={FOLLOWER_DRILL_UNAVAILABLE_MESSAGE}
+            />
           </>
         }
         more={
@@ -221,7 +240,7 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
         rangeStartDate={weekStart}
         rangeEndDate={weekEnd}
         scope="weekly"
-        onRefresh={loadReport}
+        onRefresh={load}
       />
 
       <section>
@@ -285,5 +304,6 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd }) 
         onSaved={handleReviewSaved}
       />
     </div>
+    </OperationsReportLoadShell>
   )
 }

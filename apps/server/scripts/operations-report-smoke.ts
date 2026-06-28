@@ -388,6 +388,37 @@ async function checkRankingsDailyTrendApi() {
     }
   }
   pass('榜单中心 dailyTrend 字段正常')
+
+  const checkTrendNotAllSame = (
+    rows: Array<{ validAmountYuan: number; soldOrderCount: number }>,
+    label: string,
+  ) => {
+    if (rows.length < 3) return
+    const first = rows[0]!
+    const allSame =
+      rows.every(
+        (r) =>
+          r.validAmountYuan === first.validAmountYuan &&
+          r.soldOrderCount === first.soldOrderCount &&
+          first.validAmountYuan > 0,
+      )
+    if (allSame) {
+      fail(`${label} dailyTrend 连续多天 amount/orderCount 完全相同，疑似周期汇总重复`)
+    } else {
+      pass(`${label} dailyTrend 未出现整段周期汇总重复`)
+    }
+  }
+
+  checkTrendNotAllSame(data.dailyTrend ?? [], '榜单 custom')
+
+  const dataThisWeek = await fetchExpectOk<{
+    dailyTrend?: Array<{ date: string; validAmountYuan: number; soldOrderCount: number }>
+  }>('/api/board/operations-rankings', {
+    startDate: week.weekStart,
+    endDate: week.weekEnd,
+    preset: 'thisWeek',
+  })
+  checkTrendNotAllSame(dataThisWeek.dailyTrend ?? [], '榜单 thisWeek')
 }
 
 async function checkChartAssets() {

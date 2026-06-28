@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { OperationsChartCard } from './OperationsChartCard'
 import { OperationsBarChart } from './OperationsBarChart'
 import { OperationsPieChart } from './OperationsPieChart'
@@ -17,6 +17,7 @@ import type {
   WeeklyDailyTrendRow,
   WeeklyOperationsReportPayload,
 } from '../../../pages/operations/operationsReportTypes'
+import { warnIfDailyTrendLooksAggregated } from './operationsChartTrendWarn'
 
 interface Props {
   drillContext: OperationsBiDrillContextProps
@@ -46,6 +47,10 @@ export const WeeklyReportCharts: React.FC<Props> = ({
       })),
     [dailyTrend],
   )
+
+  useEffect(() => {
+    warnIfDailyTrendLooksAggregated(dailyTrend, 'weekly-dailyTrend')
+  }, [dailyTrend])
 
   const anchorItems = useMemo(
     () =>

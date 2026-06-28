@@ -1,5 +1,4 @@
 import type { UserRole } from '../types/roles'
-import { getAnchorConfigSync } from './anchor.service'
 import { viewMatchesBuyerKey } from './buyer-identity.service'
 import type { AnalyzedOrderView } from '../types/analysis'
 
@@ -10,26 +9,10 @@ export type StaffAnchorScope =
 
 export const STAFF_UNBOUND_MESSAGE = '当前账号尚未绑定主播，请联系管理员配置。'
 
-export function resolveStaffAnchorScope(role: UserRole, username: string): StaffAnchorScope {
-  if (role === 'local_viewer' || role === 'super_admin' || role === 'boss') {
+export function resolveStaffAnchorScope(role: UserRole, _username: string): StaffAnchorScope {
+  // 员工与老板相同：查看全量主播业绩与买家数据，不按登录名分割
+  if (role === 'local_viewer' || role === 'super_admin' || role === 'boss' || role === 'staff') {
     return { kind: 'all' }
-  }
-  if (role !== 'staff') {
-    return { kind: 'unbound' }
-  }
-  const login = username.trim()
-  if (!login) return { kind: 'unbound' }
-
-  const config = getAnchorConfigSync()
-  for (const a of config.anchors) {
-    if (!a.enabled) continue
-    if (a.name === login) {
-      return { kind: 'anchor', anchorId: a.id, anchorName: a.name }
-    }
-    const ext = a.externalId?.trim()
-    if (ext && ext === login) {
-      return { kind: 'anchor', anchorId: a.id, anchorName: a.name }
-    }
   }
   return { kind: 'unbound' }
 }

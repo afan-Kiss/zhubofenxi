@@ -50,12 +50,15 @@ export const BoardDrawerShell: React.FC<Props> = ({
       className={`fixed inset-0 z-[100] flex justify-end transition-opacity duration-300 ${
         open ? 'opacity-100' : 'pointer-events-none opacity-0'
       }`}
+      style={{ height: '100dvh', maxHeight: '100dvh' }}
       aria-hidden={!open}
       role="presentation"
     >
       <button
         type="button"
-        className="absolute inset-0 bg-black/30 backdrop-blur-[2px] transition-opacity"
+        className={`absolute inset-0 bg-black/30 backdrop-blur-[2px] transition-opacity duration-200 ${
+          open ? 'viewport-modal-backdrop opacity-100' : 'opacity-0'
+        }`}
         onClick={onClose}
         aria-label="关闭"
       />

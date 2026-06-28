@@ -11,11 +11,17 @@ model User {
   id                 String    @id @default(cuid())
   username           String    @unique
   passwordHash       String
+  /// 管理员可见的登录密码（创建/重置时写入；用户自行改密后清空）
+  managedPassword    String?
   role               String
   enabled            Boolean   @default(true)
   mustChangePassword Boolean   @default(false)
   passwordChangedAt  DateTime?
   lastLoginAt        DateTime?
+  registeredIp       String?
+  registeredUserAgent String?
+  lastLoginIp        String?
+  lastLoginUserAgent String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   sessions           Session[]

@@ -1,0 +1,8 @@
+Host zhubofenxi-vps
+    HostName 45.196.233.210
+    User root
+    IdentityFile ~/.ssh/zhubofenxi_tunnel_ed25519
+    IdentitiesOnly yes
+    ServerAliveInterval 30
+    ServerAliveCountMax 3
+    StrictHostKeyChecking accept-new

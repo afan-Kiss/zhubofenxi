@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { attachLocalViewer } from '../middleware/local-viewer.middleware'
+import { attachRequestUser } from '../middleware/local-viewer.middleware'
+import { requireAuth } from '../middleware/auth.middleware'
 import {
   createAnchor,
   disableAnchor,
@@ -15,7 +16,9 @@ import type { AnchorMetricType } from '../services/anchor-metric-detail.service'
 
 export const anchorRouter = Router()
 
-anchorRouter.get('/options', attachLocalViewer, async (_req, res) => {
+anchorRouter.use(attachRequestUser, requireAuth)
+
+anchorRouter.get('/options', async (_req, res) => {
   try {
     const data = await listAnchorFilterOptions()
     sendOk(res, data)
@@ -24,7 +27,7 @@ anchorRouter.get('/options', attachLocalViewer, async (_req, res) => {
   }
 })
 
-anchorRouter.get('/', attachLocalViewer, async (req, res) => {
+anchorRouter.get('/', async (req, res) => {
   try {
     const includeDeleted = req.query.includeDeleted === '1'
     const list = await listAnchorsForAdmin(includeDeleted)
@@ -34,7 +37,7 @@ anchorRouter.get('/', attachLocalViewer, async (req, res) => {
   }
 })
 
-anchorRouter.post('/', attachLocalViewer, async (req, res) => {
+anchorRouter.post('/', async (req, res) => {
   try {
     const body = req.body ?? {}
     const anchor = await createAnchor({
@@ -54,7 +57,6 @@ anchorRouter.post('/', attachLocalViewer, async (req, res) => {
 
 anchorRouter.get(
   '/:anchorId/metric-detail',
-  attachLocalViewer,
   async (req, res) => {
     try {
       const metric = String(req.query.metric ?? '') as AnchorMetricType
@@ -89,7 +91,7 @@ anchorRouter.get(
   },
 )
 
-anchorRouter.post('/reorder', attachLocalViewer, async (req, res) => {
+anchorRouter.post('/reorder', async (req, res) => {
   try {
     const ids = Array.isArray(req.body?.ids) ? (req.body.ids as string[]) : []
     const list = await reorderAnchors(ids)
@@ -99,7 +101,7 @@ anchorRouter.post('/reorder', attachLocalViewer, async (req, res) => {
   }
 })
 
-anchorRouter.patch('/:id', attachLocalViewer, async (req, res) => {
+anchorRouter.patch('/:id', async (req, res) => {
   try {
     const anchor = await updateAnchor(req.params.id, {
       name: req.body?.name != null ? String(req.body.name) : undefined,
@@ -126,7 +128,7 @@ anchorRouter.patch('/:id', attachLocalViewer, async (req, res) => {
   }
 })
 
-anchorRouter.post('/:id/disable', attachLocalViewer, async (req, res) => {
+anchorRouter.post('/:id/disable', async (req, res) => {
   try {
     const anchor = await disableAnchor(req.params.id)
     sendOk(res, anchor)
@@ -135,7 +137,7 @@ anchorRouter.post('/:id/disable', attachLocalViewer, async (req, res) => {
   }
 })
 
-anchorRouter.post('/:id/delete', attachLocalViewer, async (req, res) => {
+anchorRouter.post('/:id/delete', async (req, res) => {
   try {
     const result = await softDeleteAnchor(req.params.id)
     sendOk(res, result)

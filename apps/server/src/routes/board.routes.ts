@@ -1,5 +1,6 @@
 import { Router } from 'express'
-import { attachLocalViewer } from '../middleware/local-viewer.middleware'
+import { attachRequestUser } from '../middleware/local-viewer.middleware'
+import { requireAuth } from '../middleware/auth.middleware'
 import { requireMaintenanceTools } from '../middleware/maintenance.middleware'
 import { getClientIp } from '../middleware/audit.middleware'
 import { sendFail, sendOk } from '../utils/response'
@@ -37,7 +38,7 @@ const auditCtx = (req: import('express').Request) => ({
   userAgent: req.headers['user-agent'] ?? undefined,
 })
 
-boardRouter.use(attachLocalViewer)
+boardRouter.use(attachRequestUser, requireAuth)
 
 boardRouter.get('/local-data', async (req, res) => {
   try {
@@ -54,6 +55,21 @@ boardRouter.get('/local-data', async (req, res) => {
     sendOk(res, data)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '加载本地经营数据失败', 500)
+  }
+})
+
+boardRouter.get('/data-freshness', async (req, res) => {
+  try {
+    const startDate = String(req.query.startDate ?? '').trim()
+    const endDate = String(req.query.endDate ?? '').trim()
+    if (!startDate || !endDate) {
+      sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    const { getDataFreshness } = await import('../services/data-freshness.service')
+    sendOk(res, await getDataFreshness(startDate, endDate))
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '读取数据更新时间失败', 500)
   }
 })
 

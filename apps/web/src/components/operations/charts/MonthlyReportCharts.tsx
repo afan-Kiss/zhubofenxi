@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { OperationsChartCard } from './OperationsChartCard'
 import { OperationsBarChart } from './OperationsBarChart'
 import { OperationsPieChart } from './OperationsPieChart'
@@ -15,6 +15,7 @@ import {
 import type { OperationsBiDrillContextProps } from '../../../pages/operations/operationsBiDrillTypes'
 import type { MonthlyOperationsReportPayload } from '../../../pages/operations/operationsReportTypes'
 import { formatChartCount } from './operationsChartFormat'
+import { warnIfDailyTrendLooksAggregated } from './operationsChartTrendWarn'
 
 interface Props {
   drillContext: OperationsBiDrillContextProps
@@ -35,6 +36,10 @@ export const MonthlyReportCharts: React.FC<Props> = ({ drillContext, report }) =
       })),
     [report.dailyTrend],
   )
+
+  useEffect(() => {
+    warnIfDailyTrendLooksAggregated(report.dailyTrend, 'monthly-dailyTrend')
+  }, [report.dailyTrend])
 
   const anchorItems = useMemo(
     () =>

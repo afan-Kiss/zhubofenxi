@@ -1,6 +1,8 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import { addDaysShanghai, formatDateKeyShanghai } from '../../lib/business-timezone'
+import { useOperationsReportFetch } from '../../hooks/useOperationsReportFetch'
+import { OperationsReportLoadShell } from '../../components/operations/OperationsReportLoadShell'
 import { AnchorRankingTable } from '../../components/operations/AnchorRankingTable'
 import { ProductRankingTable } from '../../components/operations/ProductRankingTable'
 import { PriceBandRankingTable } from '../../components/operations/PriceBandRankingTable'
@@ -57,30 +59,39 @@ interface Props {
   startDate: string
   endDate: string
   preset: string
+  onLoadingChange?: (loading: boolean) => void
 }
 
 function yesterdayKey(): string {
   return addDaysShanghai(formatDateKeyShanghai(new Date()), -1)
 }
 
-export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, preset }) => {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [data, setData] = useState<OperationsRankingsPayload | null>(null)
-  const [cacheMeta, setCacheMeta] = useState<
-    WithOperationsReportCacheMeta<OperationsRankingsPayload>['cacheMeta']
-  >(undefined)
-  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
+type RankingsLoadResult = {
+  payload: OperationsRankingsPayload
+  cacheMeta: WithOperationsReportCacheMeta<OperationsRankingsPayload>['cacheMeta']
+  cacheWarning: string | null
+}
+
+export const OperationsRankingsTab: React.FC<Props> = ({
+  startDate,
+  endDate,
+  preset,
+  onLoadingChange,
+}) => {
   const [section, setSection] = useState<RankingsTab>('summary')
   const [insightStatsSummary, setInsightStatsSummary] = useState<BusinessInsightActionStatsPayload['summary'] | null>(null)
   const [rangeStart, setRangeStart] = useState(startDate)
   const [rangeEnd, setRangeEnd] = useState(endDate)
   const [rangePreset, setRangePreset] = useState(preset)
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
+  const {
+    data: loaded,
+    loading,
+    refreshing,
+    error,
+    load,
+  } = useOperationsReportFetch<RankingsLoadResult>(
+    async (signal) => {
       const qs = new URLSearchParams({
         startDate: rangeStart,
         endDate: rangeEnd,
@@ -89,22 +100,21 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
       })
       const res = await apiRequest<WithOperationsReportCacheMeta<OperationsRankingsPayload>>(
         `/api/board/operations-rankings?${qs}`,
+        { signal },
       )
       const { cacheMeta: meta, cacheWarning: warning, ...payload } = res
-      setData(payload)
-      setCacheMeta(meta)
-      setCacheWarning(warning ?? null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载榜单失败')
-      setData(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [rangeStart, rangeEnd, rangePreset])
+      return { payload, cacheMeta: meta, cacheWarning: warning ?? null }
+    },
+    [rangeStart, rangeEnd, rangePreset],
+  )
+
+  const data = loaded?.payload ?? null
+  const cacheMeta = loaded?.cacheMeta
+  const cacheWarning = loaded?.cacheWarning ?? null
 
   useEffect(() => {
-    void load()
-  }, [load])
+    onLoadingChange?.(loading)
+  }, [loading, onLoadingChange])
 
   useEffect(() => {
     if (!data) return
@@ -157,6 +167,14 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
       const m = /^(\d{4})-(\d{2})/.exec(today)
       if (m) setRangeStart(`${m[1]}-${m[2]}-01`)
       setRangeEnd(today)
+    } else if (p === 'lastMonth') {
+      const m = /^(\d{4})-(\d{2})/.exec(today)
+      if (m) {
+        const thisMonthStart = `${m[1]}-${m[2]}-01`
+        const lastMonthEnd = addDaysShanghai(thisMonthStart, -1)
+        setRangeStart(`${lastMonthEnd.slice(0, 7)}-01`)
+        setRangeEnd(lastMonthEnd)
+      }
     }
   }
 
@@ -170,7 +188,11 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
   }
 
   if (loading && !data) {
-    return <p className="text-sm text-slate-500">加载榜单中心...</p>
+    return (
+      <OperationsReportLoadShell loading={loading} refreshing={false}>
+        <p className="py-6 text-sm text-slate-500">加载榜单中心…</p>
+      </OperationsReportLoadShell>
+    )
   }
 
   if (error && !data) {
@@ -186,6 +208,8 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
 
   if (!data) return null
 
+  const controlsDisabled = loading
+
   const drillContext: OperationsBiDrillContextProps = {
     source: 'rankings',
     startDate: rangeStart,
@@ -197,15 +221,20 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
   const isSingleDay = rangeStart === rangeEnd
 
   return (
+    <OperationsReportLoadShell loading={loading} refreshing={refreshing}>
     <div className="space-y-4 overflow-x-hidden">
       <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} />
+      {error && data ? (
+        <p className="text-sm text-amber-700">{error}（仍显示上次数据）</p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        {['today', 'yesterday', 'thisWeek', 'lastWeek', 'thisMonth', 'custom'].map((p) => (
+        {['today', 'yesterday', 'thisWeek', 'lastWeek', 'thisMonth', 'lastMonth', 'custom'].map((p) => (
           <button
             key={p}
             type="button"
+            disabled={controlsDisabled}
             onClick={() => applyPreset(p)}
-            className={`rounded-full px-3 py-1 text-xs ${
+            className={`rounded-full px-3 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50 ${
               rangePreset === p
                 ? 'bg-rose-600 text-white'
                 : 'border border-slate-200 bg-white text-slate-700'
@@ -221,37 +250,42 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
                     ? '上周'
                     : p === 'thisMonth'
                       ? '本月'
-                      : '自定义'}
+                      : p === 'lastMonth'
+                        ? '上月'
+                        : '自定义'}
           </button>
         ))}
         <label className="text-xs text-slate-600">
           起
           <input
             type="date"
+            disabled={controlsDisabled}
             value={rangeStart}
             onChange={(e) => {
               setRangePreset('custom')
               setRangeStart(e.target.value)
             }}
-            className="ml-1 rounded border border-slate-200 px-2 py-1"
+            className="ml-1 rounded border border-slate-200 px-2 py-1 disabled:opacity-50"
           />
         </label>
         <label className="text-xs text-slate-600">
           止
           <input
             type="date"
+            disabled={controlsDisabled}
             value={rangeEnd}
             onChange={(e) => {
               setRangePreset('custom')
               setRangeEnd(e.target.value)
             }}
-            className="ml-1 rounded border border-slate-200 px-2 py-1"
+            className="ml-1 rounded border border-slate-200 px-2 py-1 disabled:opacity-50"
           />
         </label>
         <button
           type="button"
+          disabled={controlsDisabled}
           onClick={() => void load()}
-          className="rounded-full border border-slate-200 px-3 py-1 text-xs"
+          className="rounded-full border border-slate-200 px-3 py-1 text-xs disabled:opacity-50"
         >
           刷新
         </button>
@@ -493,5 +527,6 @@ export const OperationsRankingsTab: React.FC<Props> = ({ startDate, endDate, pre
         warnings={data.dataQuality.warnings}
       />
     </div>
+    </OperationsReportLoadShell>
   )
 }

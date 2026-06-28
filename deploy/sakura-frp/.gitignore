@@ -1,0 +1,8 @@
+# Sakura Frp 部署目录 — 忽略真实密钥与运行时文件
+sakura-frp.env
+.frpc.pid
+frpc.log
+frpc.stderr.log
+
+# 客户端二进制（请用 download-sakura-frpc.ps1 从官方 CDN 下载）
+bin/frpc.exe

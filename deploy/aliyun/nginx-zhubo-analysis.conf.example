@@ -1,0 +1,46 @@
+# 宝塔 / Nginx 站点示例 — 复制到宝塔「网站」→ 配置文件，或：
+# /www/server/panel/vhost/nginx/zhubo-analysis.conf
+#
+# 启用 Basic Auth 前请先创建密码文件（见 README）：
+#   htpasswd -c /www/wwwroot/zhubo-analysis/.htpasswd 你的用户名
+
+server {
+    listen 80;
+    server_name 8.137.126.18 xiangyuzhubao.xyz www.xiangyuzhubao.xyz;
+
+    client_max_body_size 20m;
+
+    # 健康检查可单独放行（若启用 Basic Auth）
+    location = /api/health {
+        proxy_pass http://127.0.0.1:4723;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        # 取消下面两行注释以启用简单访问口令（用户名密码由你本地 htpasswd 生成）
+        # auth_basic "Zhubo Analysis";
+        # auth_basic_user_file /www/wwwroot/zhubo-analysis/.htpasswd;
+
+        proxy_pass http://127.0.0.1:4723;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+    }
+
+    access_log /www/wwwlogs/zhubo-analysis.access.log;
+    error_log /www/wwwlogs/zhubo-analysis.error.log;
+}

@@ -1,6 +1,6 @@
 import React from 'react'
 import type { OperationsPriceBandRow } from '../../pages/operations/operationsReportTypes'
-import { formatIntegerMoney, formatOrderCount, formatPercent } from './operationsReportFormatters'
+import { formatIntegerMoney, formatOrderCount, formatPercent, formatRatePercent } from './operationsReportFormatters'
 
 interface Props {
   rows: OperationsPriceBandRow[]
@@ -33,7 +33,7 @@ export const PriceBandTable: React.FC<Props> = ({ rows }) => {
               <td className="px-3 py-2">{formatPercent(row.amountSharePercent)}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.avgOrderAmountYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.returnOrderCount)}</td>
-              <td className="px-3 py-2">{formatPercent(row.returnRate)}</td>
+              <td className="px-3 py-2">{formatRatePercent(row.returnRate)}</td>
             </tr>
           ))}
         </tbody>

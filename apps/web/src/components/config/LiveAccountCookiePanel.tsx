@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
 import {
   cookieStatusLabel,
@@ -201,6 +202,8 @@ export const LiveAccountCookiePanel: React.FC = () => {
   >({})
   const toastTimer = useRef<number | null>(null)
   const accountsRef = useRef<LiveAccountPublic[]>([])
+  const [sectionOpen, setSectionOpen] = useState(false)
+  const [expandedAccountIds, setExpandedAccountIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     accountsRef.current = accounts
@@ -548,6 +551,21 @@ export const LiveAccountCookiePanel: React.FC = () => {
     }
   }
 
+  const toggleAccountExpanded = (id: string) => {
+    setExpandedAccountIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const sectionSummary = useMemo(() => {
+    const enabled = accounts.filter((a) => a.enabled).length
+    const valid = accounts.filter((a) => a.cookieStatus === 'valid').length
+    return `共 ${accounts.length} 个直播号 · ${enabled} 个已启用 · ${valid} 个 Cookie 正常`
+  }, [accounts])
+
   const renderTestResultBlock = (account: LiveAccountPublic) => {
     const latest = testResults[account.id]
     const isTesting = testingIds.has(account.id)
@@ -612,23 +630,48 @@ export const LiveAccountCookiePanel: React.FC = () => {
   return (
     <section id="live-account-cookie" className="scroll-mt-4 rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-semibold text-slate-800">直播号 Cookie 管理</h3>
-          <p className="mt-1 text-xs text-slate-500">
-            每个直播号独立保存 Cookie，启用后参与经营数据同步。Cookie 可在本页完整查看和复制。
-          </p>
-          <p className="mt-0.5 text-[10px] text-slate-400">
-            用于确认各直播号 Cookie 是否还能正常查询订单接口。
-          </p>
-        </div>
         <button
           type="button"
-          disabled={batchTesting || loading || accounts.length === 0}
-          onClick={() => void handleTestAllEnabledCookies()}
-          className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          onClick={() => setSectionOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-start gap-2 text-left"
         >
-          {batchTesting ? '批量检测中…' : '检测全部启用 Cookie'}
+          {sectionOpen ? (
+            <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+          ) : (
+            <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+          )}
+          <div className="min-w-0 flex-1">
+            <h3 className="text-sm font-semibold text-slate-800">直播号 Cookie 管理</h3>
+            <p className="mt-1 text-xs text-slate-500">
+              {sectionOpen
+                ? '每个直播号独立保存 Cookie，启用后参与经营数据同步。Cookie 可在本页完整查看和复制。'
+                : sectionSummary}
+            </p>
+            {sectionOpen ? (
+              <p className="mt-0.5 text-[10px] text-slate-400">
+                用于确认各直播号 Cookie 是否还能正常查询订单接口。
+              </p>
+            ) : null}
+          </div>
         </button>
+        {sectionOpen ? (
+          <button
+            type="button"
+            disabled={batchTesting || loading || accounts.length === 0}
+            onClick={() => void handleTestAllEnabledCookies()}
+            className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {batchTesting ? '批量检测中…' : '检测全部启用 Cookie'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setSectionOpen(true)}
+            className="shrink-0 rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-700 hover:bg-slate-50"
+          >
+            展开管理
+          </button>
+        )}
       </div>
 
       {toast && (
@@ -640,6 +683,9 @@ export const LiveAccountCookiePanel: React.FC = () => {
           {toast.text}
         </p>
       )}
+
+      {!sectionOpen ? null : (
+        <>
 
       {batchProgress && (
         <div
@@ -684,9 +730,52 @@ export const LiveAccountCookiePanel: React.FC = () => {
             const isTesting = testingIds.has(account.id)
             const isBusy = busyId === account.id
             const cookieText = resolveAccountCookie(account)
+            const accountExpanded = expandedAccountIds.has(account.id)
 
             return (
-              <div key={account.id} className="rounded-lg border border-slate-200 p-3">
+              <div key={account.id} className="rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => toggleAccountExpanded(account.id)}
+                  className="flex w-full items-start gap-2 p-3 text-left"
+                >
+                  {accountExpanded ? (
+                    <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+                  ) : (
+                    <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-slate-500" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-slate-900">{account.name}</span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                          account.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        {account.enabled ? '已启用' : '已停用'}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieStatusTone(account.cookieStatus)}`}
+                      >
+                        Cookie {cookieStatusLabel(account.cookieStatus)}
+                      </span>
+                      {isTesting && (
+                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
+                          检测中…
+                        </span>
+                      )}
+                    </div>
+                    {!accountExpanded ? (
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        最近同步 {formatTime(account.lastSyncSuccessAt)} · Cookie 更新{' '}
+                        {formatTime(account.cookieUpdatedAt)}
+                      </p>
+                    ) : null}
+                  </div>
+                </button>
+
+                {accountExpanded ? (
+              <div className="border-t border-slate-100 p-3 pt-0">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="min-w-0 flex-1">
                     {editingNameId === account.id ? (
@@ -715,8 +804,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
                         </button>
                       </div>
                     ) : (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-slate-900">{account.name}</span>
+                      <div className="flex flex-wrap items-center gap-2 pt-3">
                         <button
                           type="button"
                           disabled={isBusy}
@@ -730,25 +818,6 @@ export const LiveAccountCookiePanel: React.FC = () => {
                         </button>
                       </div>
                     )}
-                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                          account.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
-                        }`}
-                      >
-                        {account.enabled ? '已启用' : '已停用'}
-                      </span>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieStatusTone(account.cookieStatus)}`}
-                      >
-                        Cookie {cookieStatusLabel(account.cookieStatus)}
-                      </span>
-                      {isTesting && (
-                        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">
-                          检测中…
-                        </span>
-                      )}
-                    </div>
                   </div>
                 </div>
 
@@ -848,6 +917,8 @@ export const LiveAccountCookiePanel: React.FC = () => {
                   </button>
                 </div>
               </div>
+                ) : null}
+              </div>
             )
           })}
         </div>
@@ -879,6 +950,8 @@ export const LiveAccountCookiePanel: React.FC = () => {
           {creating ? '保存并检测中…' : '新增直播号'}
         </button>
       </div>
+        </>
+      )}
     </section>
   )
 }

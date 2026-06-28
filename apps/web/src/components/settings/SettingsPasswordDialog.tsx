@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { ViewportModal } from '../ui/ViewportModal'
 import { verifySettingsPassword } from '../../lib/settings-gate'
 
 interface Props {
@@ -18,11 +19,9 @@ export const SettingsPasswordDialog: React.FC<Props> = ({ open, onVerified, onCa
       setError(null)
       return
     }
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 50)
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 120)
     return () => window.clearTimeout(timer)
   }, [open])
-
-  if (!open) return null
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -35,14 +34,15 @@ export const SettingsPasswordDialog: React.FC<Props> = ({ open, onVerified, onCa
   }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm"
-      data-testid="settings-password-dialog"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-password-title"
+    <ViewportModal
+      open={open}
+      onClose={onCancel}
+      labelledBy="settings-password-title"
+      zIndexClass="z-[120]"
+      panelClassName="w-full max-w-sm overflow-visible p-6"
+      backdropClassName="bg-slate-900/40"
     >
-      <div className="w-full max-w-sm rounded-2xl border border-rose-100 bg-white p-6 shadow-xl">
+      <div data-testid="settings-password-dialog">
         <h2 id="settings-password-title" className="text-lg font-semibold text-slate-900">
           系统设置验证
         </h2>
@@ -85,6 +85,6 @@ export const SettingsPasswordDialog: React.FC<Props> = ({ open, onVerified, onCa
           </div>
         </form>
       </div>
-    </div>
+    </ViewportModal>
   )
 }

@@ -1,7 +1,7 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { centToYuan } from '../utils/money'
 import { resolveDisplayOrderNoForView } from './order-display-no.service'
-import { formatBuyerIdentityCode, resolveBuyerIdentityFromView } from './buyer-identity.service'
+import { formatBuyerIdentityCode, pickBuyerNicknameFromView, resolveBuyerIdentityFromView } from './buyer-identity.service'
 import {
   pickItemIdFromRaw,
   pickProductNameFromRaw,
@@ -13,7 +13,11 @@ import {
   resolveProductKey,
 } from './operations-product-fields.util'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
-import { normalizeAfterSalesReason } from './after-sales-reason-normalize.service'
+import {
+  formatAfterSaleStatusDisplay,
+  formatAfterSalesCategoryLabel,
+  formatAfterSalesReasonDisplay,
+} from './operations-after-sale-order.util'
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
 import type { OperationsBiDrillOrderRow } from './operations-bi-drill.types'
 
@@ -48,13 +52,15 @@ export function mapViewToOperationsBiDrillRow(
     ? formatBuyerIdentityCode(identity.buyerKey, identity.buyerId)
     : ''
   const reasonRaw =
-    withRaw.afterSaleReasonText ??
-    withRaw.reasonText ??
-    withRaw.afterSalesWorkbenchReason ??
+    withRaw.afterSaleReasonText?.trim() ||
+    withRaw.afterSalesWorkbenchReason?.trim() ||
+    withRaw.reasonText?.trim() ||
+    withRaw.finalAfterSaleReason?.trim() ||
     ''
-  const normalized = normalizeAfterSalesReason(String(reasonRaw))
   const displayNo = resolveDisplayOrderNoForView(withRaw)
   const orderNo = displayNo || withRaw.orderId || withRaw.packageId || '—'
+  const buyerNickname = pickBuyerNicknameFromView(withRaw) || null
+  const afterSaleStatus = formatAfterSaleStatusDisplay(withRaw)
 
   return {
     orderId: withRaw.orderId || withRaw.packageId || orderNo,
@@ -80,9 +86,12 @@ export function mapViewToOperationsBiDrillRow(
     freightRefundAmountYuan: Math.round(centToYuan(withRaw.freightRefundAmountCent || 0)),
     isFreightRefundOnly: withRaw.isFreightRefundOnly ?? null,
     returnReason: reasonRaw ? String(reasonRaw) : null,
-    normalizedAfterSalesReason: normalized.categoryLabel,
-    buyerDisplayName: buyerCode ? maskBuyerLabel(buyerCode) : null,
-    buyerMasked: true,
+    afterSaleStatus,
+    normalizedAfterSalesReason: formatAfterSalesReasonDisplay(withRaw, reasonRaw),
+    afterSalesCategoryLabel: formatAfterSalesCategoryLabel(withRaw, reasonRaw),
+    buyerNickname,
+    buyerDisplayName: buyerNickname || (buyerCode ? maskBuyerLabel(buyerCode) : null),
+    buyerMasked: !buyerNickname && Boolean(buyerCode),
     qianfanDetailAvailable: Boolean(orderNo && orderNo !== '—'),
     inclusionReason: inclusionReason ?? null,
   }

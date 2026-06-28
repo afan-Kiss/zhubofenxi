@@ -20,6 +20,14 @@ apps/server/prisma/data/
 .env
 apps/server/.env
 
+# Sakura Frp（内网穿透，真实密钥勿提交）
+deploy/sakura-frp/sakura-frp.env
+deploy/sakura-frp/.frpc.pid
+deploy/sakura-frp/frpc.log
+deploy/sakura-frp/frpc.stderr.log
+tools/sakura-frp/frpc.exe
+deploy/sakura-frp/bin/frpc.exe
+
 .DS_Store
 Thumbs.db
 debug/buyer-ranking-har/

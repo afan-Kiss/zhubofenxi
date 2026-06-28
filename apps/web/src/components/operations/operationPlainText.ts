@@ -25,7 +25,7 @@ export const PLAIN = {
   buyerCount: '成交买家数',
   productReturnRate: '商品退货率',
   followerRate: '涨粉率',
-  dealRate: '成交率',
+  dealRate: '进房成交率',
   comparePrev: '比上期',
   monthlyOverviewHint: '本月一共卖了多少钱、出了多少单、退货压力大不大、流量和成交有没有跟上。',
   compareHint: '比上个月多卖了/少卖了多少钱，订单是涨了还是掉了，退货有没有变严重。',

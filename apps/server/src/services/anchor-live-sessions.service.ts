@@ -4,9 +4,13 @@ import { normalizeLiveSessionsFromRaw } from './xhs-api-sync/xhs-json-normalizer
 import { normalizeAnchorDrillQuery } from './board-scoped-views.service'
 import { viewBelongsToAnchor } from './anchor-attribution.util'
 import {
+  normalizeShopSessionKey,
   resolveShopSessionAnchorFromLiveAccount,
   sessionOverlapsXiaoBaiSlot,
   SHOP_SESSION_ANCHOR_CUTOFF_MS,
+  computeXiaoBaiSlotOverlapMinutes,
+  computeMorningPortionBeforeXiaoBaiSlotMinutes,
+  resolveXiaoBaiSlotBoundsMs,
 } from './anchor-performance-attribution.service'
 import { findAnchorByName, matchTimeRule } from './anchor-rules.service'
 import { getAnchorConfigSync } from './anchor.service'
@@ -124,14 +128,23 @@ function sessionMatchesShopSessionRule(
   target: { anchorId: string; anchorName: string },
 ): boolean {
   if (!session.startTime) return false
-  if (isXiaoBaiLiveSession(session)) return false
+  const liveName = pickSessionLiveAccountName(session)
   const resolved = resolveShopSessionAnchorFromLiveAccount(
-    pickSessionLiveAccountName(session),
+    liveName,
     session.startTime,
   )
   if (!resolved) return false
-  if (target.anchorName === resolved.anchorName) return true
-  return Boolean(target.anchorId && target.anchorId === resolved.anchorId)
+  const matchesTarget =
+    target.anchorName === resolved.anchorName ||
+    Boolean(target.anchorId && target.anchorId === resolved.anchorId)
+  if (!matchesTarget) return false
+  if (isXiaoBaiLiveSession(session)) {
+    const startMs = session.startTime.getTime()
+    const { slotStartMs } = resolveXiaoBaiSlotBoundsMs(startMs)
+    // 跨场直播：早场主播只认领 14:30 之前开播的部分
+    return startMs < slotStartMs
+  }
+  return true
 }
 
 function liveSessionMatchesAnchor(
@@ -143,9 +156,10 @@ function liveSessionMatchesAnchor(
   const startMs = session.startTime.getTime()
   if (startMs >= SHOP_SESSION_ANCHOR_CUTOFF_MS) {
     if (target.anchorName === '小白') {
-      return isXiaoBaiLiveSession(session)
+      if (!isXiaoBaiLiveSession(session)) return false
+      const liveName = pickSessionLiveAccountName(session)
+      return normalizeShopSessionKey(liveName) === 'xiangyu'
     }
-    if (isXiaoBaiLiveSession(session)) return false
     return sessionMatchesShopSessionRule(session, target)
   }
 
@@ -223,6 +237,45 @@ function toBrief(session: NormalizedLiveSession): AnchorLiveSessionBrief {
   }
 }
 
+function clipBriefForTargetAnchor(
+  brief: AnchorLiveSessionBrief,
+  session: NormalizedLiveSession,
+  target: { anchorId: string; anchorName: string },
+): AnchorLiveSessionBrief {
+  if (!session.startTime || session.startTime.getTime() < SHOP_SESSION_ANCHOR_CUTOFF_MS) {
+    return brief
+  }
+  const startMs = session.startTime.getTime()
+  const endMs = sessionEndTime(session)?.getTime() ?? startMs
+  if (!sessionOverlapsXiaoBaiSlot(startMs, endMs)) return brief
+
+  if (target.anchorName === '小白') {
+    const overlapMinutes = computeXiaoBaiSlotOverlapMinutes(startMs, endMs)
+    if (overlapMinutes <= 0) return brief
+    const effectiveEnd = endMs < startMs ? endMs + 86_400_000 : endMs
+    const { slotStartMs, slotEndMs } = resolveXiaoBaiSlotBoundsMs(startMs)
+    const overlapStart = Math.max(startMs, slotStartMs)
+    const overlapEnd = Math.min(effectiveEnd, slotEndMs)
+    return {
+      ...brief,
+      startTime: formatDateTimeShanghai(new Date(overlapStart)),
+      endTime: formatDateTimeShanghai(new Date(overlapEnd)),
+      durationMinutes: overlapMinutes,
+      durationText: formatLiveDurationMinutes(overlapMinutes),
+    }
+  }
+
+  const morningMinutes = computeMorningPortionBeforeXiaoBaiSlotMinutes(startMs, endMs)
+  if (morningMinutes <= 0) return brief
+  const { slotStartMs } = resolveXiaoBaiSlotBoundsMs(startMs)
+  return {
+    ...brief,
+    endTime: formatDateTimeShanghai(new Date(slotStartMs)),
+    durationMinutes: morningMinutes,
+    durationText: formatLiveDurationMinutes(morningMinutes),
+  }
+}
+
 export async function resolveAnchorLiveSessionsForRange(params: {
   preset?: string
   startDate: string
@@ -261,7 +314,8 @@ export async function resolveAnchorLiveSessionsWithTrafficForRange(params: {
       return liveSessionMatchesAnchor(s, target, anchorOrders)
     })
     .sort((a, b) => (a.startTime?.getTime() ?? 0) - (b.startTime?.getTime() ?? 0))
-    .map(toBrief)
+    .map((s) => clipBriefForTargetAnchor(toBrief(s), s, target))
+    .filter((s) => s.durationMinutes > 0)
   return dedupeLiveSessionBriefs(matched)
 }
 

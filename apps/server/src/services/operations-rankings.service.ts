@@ -214,7 +214,7 @@ async function loadDailySnapshotsForRange(params: {
   for (const day of days) {
     snapshots.push(
       await buildDailyOperationsReport({
-        preset: params.preset,
+        preset: 'custom',
         startDate: day,
         endDate: day,
         role: params.role,
@@ -227,12 +227,23 @@ async function loadDailySnapshotsForRange(params: {
 
 function buildDailyTrendFromSnapshots(
   snapshots: DailyOperationsReportPayload[],
+  startDate: string,
+  endDate: string,
 ): OperationsRankingsPayload['dailyTrend'] {
+  const days = eachDayInShanghaiRange(startDate, endDate)
+  const cappedEnd =
+    days.length > MAX_DAILY_TREND_DAYS
+      ? days[MAX_DAILY_TREND_DAYS - 1]!
+      : endDate
+  const cappedStart = days.length > MAX_DAILY_TREND_DAYS ? days[0]! : startDate
   const trendSnapshots =
-    snapshots.length > MAX_DAILY_TREND_DAYS
+    days.length > MAX_DAILY_TREND_DAYS
       ? snapshots.slice(0, MAX_DAILY_TREND_DAYS)
       : snapshots
-  return buildOperationsDailyTrendFromSnapshots(trendSnapshots)
+  return buildOperationsDailyTrendFromSnapshots(trendSnapshots, {
+    startDate: cappedStart,
+    endDate: cappedEnd,
+  })
 }
 
 export async function getOperationsRankings(params: {
@@ -278,7 +289,7 @@ export async function getOperationsRankings(params: {
       username: params.username,
     })
     mergedAnchors = mergeAnchorRowsForRange(daySnapshots.map((snap) => snap.anchors))
-    dailyTrend = buildDailyTrendFromSnapshots(daySnapshots)
+    dailyTrend = buildDailyTrendFromSnapshots(daySnapshots, startDate, endDate)
   } catch (err) {
     dailyTrendError = err instanceof Error ? err.message : '未知错误'
     mergedAnchors = []

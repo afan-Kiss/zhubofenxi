@@ -21,12 +21,16 @@ export interface MonthlyOperationsReportSummary {
   averageOrderValue: number | null
   productReturnOrderCount: number
   productReturnRate: number | null
+  productReturnRateAbnormal?: boolean
   liveDurationHours: number | null
   hourlyAmountYuan: number | null
   viewSessionCount: number | null
   joinUserCount: number | null
   dealUserCount: number | null
   dealConversionRate: number | null
+  dealConversionNumerator?: number | null
+  dealConversionDenominator?: number | null
+  dealConversionDenominatorLabel?: string
   newFollowerCount: number | null
   followerConversionRate: number | null
 }

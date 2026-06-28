@@ -1,4 +1,5 @@
 import { OPERATIONS_ANCHOR_RANKING } from '../config/operations-anchor-ranking.config'
+import { computeReturnOrderRateRatio } from './operations-after-sale-order.util'
 import { safeDivide } from './daily-report-order.util'
 import type { DailyOperationsAnchorRow } from './daily-operations-report.service'
 import {
@@ -10,7 +11,7 @@ import {
 
 function anchorToBase(row: DailyOperationsAnchorRow): Omit<AnchorRankItem, 'rankReason' | 'sampleTooSmall'> {
   const returnRate =
-    row.soldOrderCount > 0 ? row.returnOrderCount / row.soldOrderCount : null
+    row.paidOrderCount > 0 ? row.returnOrderCount / row.paidOrderCount : null
   const followerConversionRate =
     row.viewSessionCount != null &&
     row.viewSessionCount > 0 &&
@@ -268,28 +269,28 @@ export function buildAnchorRankingsByReturnRate(
 ): RankingListPayload<AnchorRankItem> {
   const minOrders = OPERATIONS_ANCHOR_RANKING.minSoldOrderCountForReturnRate
   const withReturns = rows.filter(
-    (r) => r.returnOrderCount > 0 && r.soldOrderCount > 0,
+    (r) => r.returnOrderCount > 0 && r.paidOrderCount > 0,
   )
-  const formalPool = withReturns.filter((r) => r.soldOrderCount >= minOrders)
+  const formalPool = withReturns.filter((r) => r.paidOrderCount >= minOrders)
   const samplePool = withReturns.filter(
-    (r) => r.soldOrderCount > 0 && r.soldOrderCount < minOrders,
+    (r) => r.paidOrderCount > 0 && r.paidOrderCount < minOrders,
   )
 
   const sortReturn = (a: DailyOperationsAnchorRow, b: DailyOperationsAnchorRow) => {
-    const ar = a.returnOrderCount / a.soldOrderCount
-    const br = b.returnOrderCount / b.soldOrderCount
+    const ar = a.returnOrderCount / a.paidOrderCount
+    const br = b.returnOrderCount / b.paidOrderCount
     return br - ar || b.returnOrderCount - a.returnOrderCount
   }
 
   const warnings: string[] = []
   if (samplePool.length > 0) {
-    warnings.push(`成交订单不足 ${minOrders} 单的主播仅进入参考区`)
+    warnings.push(`支付订单不足 ${minOrders} 单的主播仅进入参考区`)
   }
 
   return {
     rankingType: 'anchor_by_return_rate',
     title: '主播退货率榜',
-    subtitle: '商品退货订单率 = 退货订单 / 有效成交订单；排除纯运费退款',
+    subtitle: '退货率 = 退款单数 ÷ 支付单数（选定日期范围内）',
     rankReasonTemplate: '商品退货订单率最高',
     items: [...formalPool].sort(sortReturn).slice(0, limit).map((r) =>
       buildAnchorItem(
@@ -344,6 +345,7 @@ export function mergeAnchorRowsForRange(
       existing.soldOrderCount += row.soldOrderCount
       existing.invalidOrderCount += row.invalidOrderCount
       existing.returnOrderCount += row.returnOrderCount
+      existing.paidOrderCount = (existing.paidOrderCount ?? 0) + row.paidOrderCount
       existing.liveDurationMinutes += row.liveDurationMinutes
       existing.liveDurationText = formatMergedDuration(existing.liveDurationMinutes)
 
@@ -368,9 +370,10 @@ export function mergeAnchorRowsForRange(
       row.soldOrderCount > 0
         ? Math.round(row.validAmountYuan / row.soldOrderCount)
         : null
-    const returnDenom = row.soldOrderCount + row.returnOrderCount
-    row.returnOrderRate =
-      returnDenom > 0 ? Math.round((row.returnOrderCount / returnDenom) * 100) : null
+    row.returnOrderRate = computeReturnOrderRateRatio(
+      row.paidOrderCount ?? 0,
+      row.returnOrderCount,
+    )
     row.dealConversionRate =
       row.joinUserCount != null && row.joinUserCount > 0 && row.dealUserCount != null
         ? row.dealUserCount / row.joinUserCount

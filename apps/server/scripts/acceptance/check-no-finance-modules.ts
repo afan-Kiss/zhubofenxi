@@ -19,9 +19,9 @@ const ALLOWED_PRIMARY_ROUTES = new Set([
   '/settings',
 ])
 
+const AUTH_ROUTES = new Set(['/login', '/register'])
+
 const REDIRECT_ONLY_ROUTES = new Set([
-  '/login',
-  '/register',
   '/orders',
   '/billing',
   '/dashboard',
@@ -118,6 +118,7 @@ function checkAppRoutes(): string[] {
     }
 
     if (ALLOWED_PRIMARY_ROUTES.has(routePath)) continue
+    if (AUTH_ROUTES.has(routePath)) continue
     if (REDIRECT_ONLY_ROUTES.has(routePath)) {
       if (!isRedirectRoute(source, routePath)) {
         issues.push(`App.tsx 路由 ${routePath} 应为重定向，不应渲染独立页面`)

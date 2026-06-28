@@ -25,6 +25,50 @@ import { buildPriceBandRankingLists } from '../src/services/operations-price-ban
 import type { OperationsPriceBandRow } from '../src/services/operations-price-band.service'
 import { buildAfterSalesRankingLists } from '../src/services/operations-after-sales-ranking.service'
 import { normalizeAfterSalesReason } from '../src/services/after-sales-reason-normalize.service'
+import {
+  buildOperationsDailyTrendFromSnapshots,
+  detectSuspiciousDailyTrendRepeat,
+} from '../src/services/operations-daily-trend.service'
+import type { DailyOperationsReportPayload } from '../src/services/daily-operations-report.service'
+
+function mockDailySnapshot(
+  date: string,
+  validAmountYuan: number,
+  soldOrderCount: number,
+): DailyOperationsReportPayload {
+  return {
+    startDate: date,
+    endDate: date,
+    dateLabel: date,
+    summary: {
+      validAmountYuan,
+      soldOrderCount,
+      invalidOrderCount: 0,
+      returnOrderCount: 0,
+      returnOrderRate: null,
+      avgOrderAmountYuan: null,
+      totalLiveDurationMinutes: 0,
+      totalLiveHours: null,
+      hourlyAmountYuan: null,
+      totalNewFollowerCount: 0,
+      newFollowerRate: null,
+      dealUserCount: null,
+      joinUserCount: null,
+      viewSessionCount: null,
+      dealConversionRate: null,
+      avgOnlineUserCount: null,
+      avgViewDurationSeconds: null,
+    },
+    anchors: [],
+    products: [],
+    priceBands: [],
+    afterSalesReasons: [],
+    liveRoomNewFollowers: [],
+    reviewNote: null,
+    businessInsights: { items: [], dataQuality: { reliable: false, warnings: [] } },
+    rankings: {} as DailyOperationsReportPayload['rankings'],
+  }
+}
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -189,12 +233,40 @@ function testAfterSalesRankings(issues: string[]) {
   }
 }
 
+function testDailyTrendHelpers(issues: string[]) {
+  const trend = buildOperationsDailyTrendFromSnapshots(
+    [mockDailySnapshot('2026-06-01', 100, 2), mockDailySnapshot('2026-06-03', 50, 1)],
+    { startDate: '2026-06-01', endDate: '2026-06-03' },
+  )
+  assert(trend.length === 3, 'dailyTrend 应补齐日期', issues)
+  assert(trend[0]!.validAmountYuan === 100, 'dailyTrend 第1天金额', issues)
+  assert(trend[1]!.validAmountYuan === 0, 'dailyTrend 无数据日补 0', issues)
+  assert(trend[1]!.soldOrderCount === 0, 'dailyTrend 无数据日订单补 0', issues)
+  assert(trend[2]!.validAmountYuan === 50, 'dailyTrend 第3天金额', issues)
+
+  const repeated = [
+    { date: 'a', validAmountYuan: 100, soldOrderCount: 5, productReturnOrderCount: 0, productReturnRate: null },
+    { date: 'b', validAmountYuan: 100, soldOrderCount: 5, productReturnOrderCount: 0, productReturnRate: null },
+    { date: 'c', validAmountYuan: 100, soldOrderCount: 5, productReturnOrderCount: 0, productReturnRate: null },
+  ]
+  assert(detectSuspiciousDailyTrendRepeat(repeated), '应检出连续相同 trend', issues)
+  assert(
+    !detectSuspiciousDailyTrendRepeat([
+      { date: 'a', validAmountYuan: 100, soldOrderCount: 5, productReturnOrderCount: 0, productReturnRate: null },
+      { date: 'b', validAmountYuan: 80, soldOrderCount: 4, productReturnOrderCount: 0, productReturnRate: null },
+    ]),
+    '不同天不应误报',
+    issues,
+  )
+}
+
 function main() {
   const issues: string[] = []
   testAnchorRankings(issues)
   testProductRankings(issues)
   testPriceBandRankings(issues)
   testAfterSalesRankings(issues)
+  testDailyTrendHelpers(issues)
 
   if (issues.length > 0) {
     console.error('[operations-rankings-acceptance] FAILED')

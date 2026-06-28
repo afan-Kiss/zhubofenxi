@@ -1,7 +1,9 @@
-import React, { useCallback, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { toPng } from 'html-to-image'
 import { createPortal } from 'react-dom'
 import { apiRequest } from '../../lib/api'
+import { useOperationsReportFetch } from '../../hooks/useOperationsReportFetch'
+import { OperationsReportLoadShell } from '../../components/operations/OperationsReportLoadShell'
 import { ProductRankingTable } from '../../components/operations/ProductRankingTable'
 import { RankingQualityBadge } from '../../components/operations/RankingQualityBadge'
 import { BusinessInsightCards } from '../../components/operations/BusinessInsightCards'
@@ -13,16 +15,17 @@ import {
   formatIntegerMoney,
   formatOrderCount,
   formatPeopleCount,
-  formatPercent,
   formatRatePercent,
   formatStayDurationSeconds,
 } from '../../components/operations/operationsReportFormatters'
+import { FOLLOWER_DRILL_UNAVAILABLE_MESSAGE } from '../../lib/operations-follower-drill'
 import type {
   DailyOperationsReportPayload,
   OpsReviewNotePayload,
   WithOperationsReportCacheMeta,
 } from './operationsReportTypes'
 import { OperationsReportCacheHint } from '../../components/operations/OperationsReportCacheHint'
+import { ViewportModal } from '../../components/ui/ViewportModal'
 import { OperationsMetricDrillCard } from '../../components/operations/OperationsMetricDrillCard'
 import type { OperationsBiDrillRequest } from './operationsBiDrillTypes'
 import { OperationsCoreMetrics, CollapsibleWarnings } from '../../components/operations/charts/OperationsCoreMetrics'
@@ -31,50 +34,56 @@ import { useChartTopLimit } from '../../components/operations/charts/useChartTop
 
 interface Props {
   dateKey: string
+  onLoadingChange?: (loading: boolean) => void
 }
 
-export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
+type DailyLoadResult = {
+  report: DailyOperationsReportPayload
+  cacheMeta: WithOperationsReportCacheMeta<DailyOperationsReportPayload>['cacheMeta']
+  cacheWarning: string | null
+}
+
+export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChange }) => {
   const sheetRef = useRef<HTMLDivElement>(null)
   const topLimit = useChartTopLimit()
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [report, setReport] = useState<DailyOperationsReportPayload | null>(null)
-  const [cacheMeta, setCacheMeta] = useState<
-    WithOperationsReportCacheMeta<DailyOperationsReportPayload>['cacheMeta']
-  >(undefined)
-  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [exportError, setExportError] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [showFullHot, setShowFullHot] = useState(false)
   const [showFullReturn, setShowFullReturn] = useState(false)
 
-  const loadReport = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
+  const {
+    data: loaded,
+    loading,
+    refreshing,
+    error,
+    load,
+    setData,
+  } = useOperationsReportFetch<DailyLoadResult>(
+    async (signal) => {
       const qs = new URLSearchParams({ startDate: dateKey, endDate: dateKey, preset: 'custom' })
       const data = await apiRequest<WithOperationsReportCacheMeta<DailyOperationsReportPayload>>(
         `/api/board/operations-report/daily?${qs}`,
+        { signal },
       )
       const { cacheMeta: meta, cacheWarning: warning, ...payload } = data
-      setReport(payload)
-      setCacheMeta(meta)
-      setCacheWarning(warning ?? null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载运营日报失败')
-      setReport(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [dateKey])
+      return { report: payload, cacheMeta: meta, cacheWarning: warning ?? null }
+    },
+    [dateKey],
+  )
 
-  React.useEffect(() => {
-    void loadReport()
-  }, [loadReport])
+  const report = loaded?.report ?? null
+  const cacheMeta = loaded?.cacheMeta
+  const cacheWarning = loaded?.cacheWarning ?? null
+
+  useEffect(() => {
+    onLoadingChange?.(loading)
+  }, [loading, onLoadingChange])
 
   const handleExportImage = async () => {
     if (!sheetRef.current || !report) return
     setExporting(true)
+    setExportError(null)
     try {
       const dataUrl = await toPng(sheetRef.current, {
         cacheBust: true,
@@ -83,18 +92,24 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
       })
       setPreviewUrl(dataUrl)
     } catch (e) {
-      setError(e instanceof Error ? e.message : '导出长图失败')
+      setExportError(e instanceof Error ? e.message : '导出长图失败')
     } finally {
       setExporting(false)
     }
   }
 
   const handleReviewSaved = (note: OpsReviewNotePayload) => {
-    setReport((prev) => (prev ? { ...prev, reviewNote: note } : prev))
+    setData((prev) =>
+      prev ? { ...prev, report: { ...prev.report, reviewNote: note } } : prev,
+    )
   }
 
   if (loading && !report) {
-    return <p className="text-sm text-slate-500">加载运营日报...</p>
+    return (
+      <OperationsReportLoadShell loading={loading} refreshing={false}>
+        <p className="py-6 text-sm text-slate-500">加载运营日报…</p>
+      </OperationsReportLoadShell>
+    )
   }
 
   if (error && !report) {
@@ -103,7 +118,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
         <p className="text-sm text-red-600">{error}</p>
         <button
           type="button"
-          onClick={() => void loadReport()}
+          onClick={() => void load()}
           className="mt-2 rounded-full border border-slate-200 px-3 py-1 text-sm"
         >
           重试
@@ -132,6 +147,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
   const returnRows = report.rankings?.products.highReturn.items ?? []
 
   return (
+    <OperationsReportLoadShell loading={loading} refreshing={refreshing}>
     <div className="space-y-4 overflow-x-hidden">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
@@ -163,7 +179,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
             />
             <OperationsMetricDrillCard
               label="退货单率"
-              value={formatPercent(s.returnOrderRate)}
+              value={formatRatePercent(s.returnOrderRate)}
               drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
             />
             <OperationsMetricDrillCard
@@ -191,7 +207,11 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
             <OperationsMetricDrillCard label="进房人数" value={formatPeopleCount(s.joinUserCount)} />
             <OperationsMetricDrillCard label="平均在线" value={formatPeopleCount(s.avgOnlineUserCount)} />
             <OperationsMetricDrillCard label="平均停留" value={formatStayDurationSeconds(s.avgViewDurationSeconds)} />
-            <OperationsMetricDrillCard label="新增粉丝" value={formatPeopleCount(s.totalNewFollowerCount)} />
+            <OperationsMetricDrillCard
+              label="新增粉丝"
+              value={formatPeopleCount(s.totalNewFollowerCount)}
+              drillUnavailableMessage={FOLLOWER_DRILL_UNAVAILABLE_MESSAGE}
+            />
             <OperationsMetricDrillCard label="粉丝率" value={formatRatePercent(s.newFollowerRate)} />
           </>
         }
@@ -209,7 +229,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
         rangeStartDate={dateKey}
         rangeEndDate={dateKey}
         scope="daily"
-        onRefresh={loadReport}
+        onRefresh={load}
       />
 
       {report.reportDataQuality?.warnings?.length ? (
@@ -281,22 +301,18 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey }) => {
           )
         : null}
 
-      {previewUrl
-        ? createPortal(
-            <div
-              className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/55 p-4"
-              onClick={() => setPreviewUrl(null)}
-            >
-              <div
-                className="max-h-[92vh] overflow-auto rounded-2xl bg-white p-4"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <img src={previewUrl} alt="运营日报" className="max-w-full rounded-xl" />
-              </div>
-            </div>,
-            document.body,
-          )
-        : null}
+      {previewUrl ? (
+        <ViewportModal
+          open={Boolean(previewUrl)}
+          onClose={() => setPreviewUrl(null)}
+          zIndexClass="z-[10000]"
+          panelClassName="max-h-[min(92dvh,calc(100dvh-2rem))] w-[min(760px,calc(100vw-1.5rem))] overflow-auto p-4"
+          backdropClassName="bg-black/55"
+        >
+          <img src={previewUrl} alt="运营日报" className="max-w-full rounded-xl" />
+        </ViewportModal>
+      ) : null}
     </div>
+    </OperationsReportLoadShell>
   )
 }

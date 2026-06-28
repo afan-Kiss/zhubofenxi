@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import {
   formatIntegerMoney,
@@ -6,11 +6,11 @@ import {
   formatRatePercent,
 } from './operationsReportFormatters'
 import type { OperationsBiDrillPayload, OperationsBiDrillOrderRow } from '../../pages/operations/operationsBiDrillTypes'
+import { OperationsViewportModal } from './OperationsViewportModal'
 
 interface Props {
   open: boolean
   loading: boolean
-  error: string | null
   payload: OperationsBiDrillPayload | null
   page: number
   onClose: () => void
@@ -25,10 +25,51 @@ async function openQianfanDetail(orderNo: string) {
   window.open(res.openUrl, '_blank', 'noopener,noreferrer')
 }
 
+function displayDash(value: string | null | undefined): string {
+  const t = value?.trim()
+  return t ? t : '—'
+}
+
+function CopyOrderButton({ orderNo }: { orderNo: string }) {
+  const [copied, setCopied] = useState(false)
+  const onCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(orderNo)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+    } catch {
+      setCopied(false)
+    }
+  }, [orderNo])
+
+  return (
+    <button
+      type="button"
+      onClick={() => void onCopy()}
+      className="mt-0.5 text-[11px] text-slate-500 hover:text-rose-700"
+    >
+      {copied ? '已复制' : '复制'}
+    </button>
+  )
+}
+
+function StatusTag({ text, tone }: { text: string; tone: 'rose' | 'slate' | 'amber' }) {
+  const cls =
+    tone === 'rose'
+      ? 'bg-rose-50 text-rose-800 ring-rose-100'
+      : tone === 'amber'
+        ? 'bg-amber-50 text-amber-800 ring-amber-100'
+        : 'bg-slate-100 text-slate-700 ring-slate-200'
+  return (
+    <span className={`inline-block max-w-full break-words rounded-full px-2 py-0.5 text-[11px] ring-1 ${cls}`}>
+      {text}
+    </span>
+  )
+}
+
 export const OperationsBiDrillDrawer: React.FC<Props> = ({
   open,
   loading,
-  error,
   payload,
   page,
   onClose,
@@ -36,9 +77,6 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
 }) => {
   const [openingOrder, setOpeningOrder] = useState<string | null>(null)
   const [openError, setOpenError] = useState<string | null>(null)
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-
-  if (!open) return null
 
   const handleOpenQianfan = async (orderNo: string) => {
     setOpeningOrder(orderNo)
@@ -52,13 +90,22 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
     }
   }
 
+  const isAfterSaleDrill =
+    payload?.title.includes('退货') ||
+    payload?.title.includes('退款') ||
+    payload?.title.includes('售后')
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/30 md:items-stretch md:justify-end">
-      <div className="flex h-[92vh] w-full max-w-full flex-col rounded-t-2xl bg-white shadow-xl md:h-full md:max-w-4xl md:rounded-none">
-        <div className="flex items-start justify-between border-b border-slate-200 px-4 py-3">
+    <OperationsViewportModal
+      open={open}
+      onClose={onClose}
+      labelledBy="ops-bi-drill-title"
+    >
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-4 py-3">
           <div className="min-w-0 pr-2">
-            <h2 className="text-base font-semibold text-slate-900">
-              {payload?.title ?? '数据来源'}
+            <h2 id="ops-bi-drill-title" className="text-base font-semibold text-slate-900">
+              {payload?.title ?? '订单明细'}
             </h2>
             <p className="mt-1 text-xs text-slate-500">{payload?.subtitle}</p>
             {payload?.explanation ? (
@@ -74,15 +121,14 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
           </button>
         </div>
 
-        <div className="flex-1 overflow-auto p-4 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4">
           {loading && !payload ? (
-            <p className="text-sm text-slate-500">正在加载组成订单…</p>
+            <p className="py-8 text-center text-sm text-slate-500">正在加载订单明细…</p>
           ) : null}
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          {openError ? <p className="text-sm text-amber-700">{openError}</p> : null}
+          {openError ? <p className="mb-3 text-sm text-amber-700">{openError}</p> : null}
 
           {payload ? (
-            <>
+            <div className="space-y-3">
               {payload.filters.length > 0 ? (
                 <div className="flex flex-wrap gap-2">
                   {payload.filters.map((f) => (
@@ -102,14 +148,18 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                   label="有效成交金额"
                   value={formatIntegerMoney(payload.summary.validAmountYuan)}
                 />
-                <Metric
-                  label="商品退货订单"
-                  value={formatOrderCount(payload.summary.productReturnOrderCount)}
-                />
-                <Metric
-                  label="商品退货率"
-                  value={formatRatePercent(payload.summary.productReturnRate)}
-                />
+                {isAfterSaleDrill ? (
+                  <>
+                    <Metric
+                      label="退款/退货订单"
+                      value={formatOrderCount(payload.summary.productReturnOrderCount)}
+                    />
+                    <Metric
+                      label="退货单率"
+                      value={formatRatePercent(payload.summary.productReturnRate)}
+                    />
+                  </>
+                ) : null}
               </div>
 
               {payload.dataQuality.warnings.map((w) => (
@@ -119,7 +169,9 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
               ))}
 
               {payload.rows.length === 0 ? (
-                <p className="py-6 text-center text-sm text-slate-500">没有找到组成订单。</p>
+                <div className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-500">
+                  没有找到符合条件的订单
+                </div>
               ) : (
                 <>
                   <div className="space-y-2 md:hidden">
@@ -127,60 +179,100 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                       <MobileOrderCard
                         key={row.orderId}
                         row={row}
-                        expanded={expandedId === row.orderId}
-                        onToggle={() =>
-                          setExpandedId((id) => (id === row.orderId ? null : row.orderId))
-                        }
                         openingOrder={openingOrder}
                         onOpenQianfan={handleOpenQianfan}
                       />
                     ))}
                   </div>
 
-                  <div className="hidden overflow-x-auto rounded-xl border border-slate-200 md:block">
-                    <table className="min-w-[900px] w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-slate-600">
-                        <tr>
-                          <th className="px-2 py-2">支付时间</th>
-                          <th className="px-2 py-2">订单号</th>
-                          <th className="px-2 py-2">主播</th>
-                          <th className="px-2 py-2">店铺</th>
-                          <th className="px-2 py-2">商品</th>
-                          <th className="px-2 py-2">有效成交金额</th>
-                          <th className="px-2 py-2">商品退款</th>
-                          <th className="px-2 py-2">售后原因</th>
-                          <th className="px-2 py-2">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {payload.rows.map((row) => (
-                          <tr key={row.orderId} className="border-t border-slate-100">
-                            <td className="px-2 py-2">{row.payTime ?? '—'}</td>
-                            <td className="px-2 py-2 font-mono">{row.orderNo}</td>
-                            <td className="px-2 py-2">{row.anchorName ?? '—'}</td>
-                            <td className="px-2 py-2">{row.shopName ?? '—'}</td>
-                            <td className="px-2 py-2">
-                              {row.productName}
-                              {row.skuName ? ` / ${row.skuName}` : ''}
-                            </td>
-                            <td className="px-2 py-2">
-                              {formatIntegerMoney(row.validAmountYuan ?? 0)}
-                            </td>
-                            <td className="px-2 py-2">
-                              {formatIntegerMoney(row.productRefundAmountYuan ?? 0)}
-                            </td>
-                            <td className="px-2 py-2">{row.normalizedAfterSalesReason ?? '—'}</td>
-                            <td className="px-2 py-2">
-                              <QianfanButton
-                                row={row}
-                                openingOrder={openingOrder}
-                                onOpen={handleOpenQianfan}
-                              />
-                            </td>
+                  <div className="hidden overflow-hidden rounded-xl border border-slate-200 md:block">
+                    <div className="max-h-[min(52vh,520px)] overflow-y-auto overflow-x-hidden">
+                      <table className="w-full table-fixed border-collapse text-left text-xs">
+                        <colgroup>
+                          <col className="w-[10%]" />
+                          <col className="w-[9%]" />
+                          <col className="w-[11%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[16%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[10%]" />
+                          <col className="w-[6%]" />
+                        </colgroup>
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 shadow-[0_1px_0_#e2e8f0]">
+                          <tr>
+                            <th className="px-2 py-2 font-medium">支付时间</th>
+                            <th className="px-2 py-2 font-medium">买家昵称</th>
+                            <th className="px-2 py-2 font-medium">订单号</th>
+                            <th className="px-2 py-2 font-medium">主播</th>
+                            <th className="px-2 py-2 font-medium">店铺</th>
+                            <th className="px-2 py-2 font-medium">商品</th>
+                            <th className="px-2 py-2 text-right font-medium">成交金额</th>
+                            <th className="px-2 py-2 text-right font-medium">退款金额</th>
+                            <th className="px-2 py-2 font-medium">售后状态</th>
+                            <th className="px-2 py-2 font-medium">售后原因</th>
+                            <th className="px-2 py-2 font-medium">操作</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {payload.rows.map((row) => (
+                            <tr key={row.orderId} className="border-t border-slate-100 align-top">
+                              <td className="px-2 py-2 break-words text-slate-700">
+                                {displayDash(row.payTime)}
+                              </td>
+                              <td className="px-2 py-2 break-words text-slate-800">
+                                {displayDash(row.buyerNickname ?? row.buyerDisplayName)}
+                              </td>
+                              <td className="px-2 py-2">
+                                <div className="break-all font-mono text-[11px] text-slate-700">
+                                  {row.orderNo}
+                                </div>
+                                <CopyOrderButton orderNo={row.orderNo} />
+                              </td>
+                              <td className="px-2 py-2 break-words">{displayDash(row.anchorName)}</td>
+                              <td className="px-2 py-2 break-words">{displayDash(row.shopName)}</td>
+                              <td className="px-2 py-2 break-words text-slate-700">
+                                {row.productName}
+                                {row.skuName && row.skuName !== '—' ? (
+                                  <span className="text-slate-500"> / {row.skuName}</span>
+                                ) : null}
+                              </td>
+                              <td className="px-2 py-2 text-right font-medium text-slate-900">
+                                {formatIntegerMoney(row.validAmountYuan ?? 0)}
+                              </td>
+                              <td className="px-2 py-2 text-right font-semibold text-rose-700">
+                                {(row.productRefundAmountYuan ?? 0) > 0
+                                  ? formatIntegerMoney(row.productRefundAmountYuan ?? 0)
+                                  : '—'}
+                              </td>
+                              <td className="px-2 py-2">
+                                {row.afterSaleStatus ? (
+                                  <StatusTag text={row.afterSaleStatus} tone="amber" />
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                              <td className="px-2 py-2 break-words">
+                                {row.normalizedAfterSalesReason ? (
+                                  <StatusTag text={row.normalizedAfterSalesReason} tone="slate" />
+                                ) : (
+                                  '—'
+                                )}
+                              </td>
+                              <td className="px-2 py-2">
+                                <QianfanButton
+                                  row={row}
+                                  openingOrder={openingOrder}
+                                  onOpen={handleOpenQianfan}
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </>
               )}
@@ -196,7 +288,7 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                     上一页
                   </button>
                   <span className="text-slate-600">
-                    第 {page} / {payload.pagination.totalPages} 页
+                    第 {page} / {payload.pagination.totalPages} 页（共 {payload.pagination.total} 条）
                   </span>
                   <button
                     type="button"
@@ -208,11 +300,11 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                   </button>
                 </div>
               ) : null}
-            </>
+            </div>
           ) : null}
         </div>
       </div>
-    </div>
+    </OperationsViewportModal>
   )
 }
 
@@ -235,9 +327,9 @@ const QianfanButton: React.FC<{
       type="button"
       disabled={openingOrder === row.orderNo}
       onClick={() => void onOpen(row.orderNo)}
-      className="text-rose-700 hover:underline disabled:opacity-50"
+      className="whitespace-nowrap text-rose-700 hover:underline disabled:opacity-50"
     >
-      {openingOrder === row.orderNo ? '打开中…' : '打开千帆订单详情'}
+      {openingOrder === row.orderNo ? '打开中…' : '打开详情'}
     </button>
   ) : (
     <span className="text-slate-400">暂不可用</span>
@@ -245,33 +337,38 @@ const QianfanButton: React.FC<{
 
 const MobileOrderCard: React.FC<{
   row: OperationsBiDrillOrderRow
-  expanded: boolean
-  onToggle: () => void
   openingOrder: string | null
   onOpenQianfan: (orderNo: string) => void
-}> = ({ row, expanded, onToggle, openingOrder, onOpenQianfan }) => (
+}> = ({ row, openingOrder, onOpenQianfan }) => (
   <div className="rounded-xl border border-slate-200 p-3 text-xs">
     <div className="flex items-start justify-between gap-2">
       <div className="min-w-0">
-        <p className="font-medium text-slate-900">{row.payTime ?? '—'}</p>
-        <p className="mt-1 truncate text-slate-700">{row.productName ?? '—'}</p>
-        <p className="mt-1 font-semibold text-slate-900">
-          {formatIntegerMoney(row.validAmountYuan ?? 0)}
+        <p className="font-medium text-slate-900">{displayDash(row.payTime)}</p>
+        <p className="mt-1 text-slate-600">
+          买家：{displayDash(row.buyerNickname ?? row.buyerDisplayName)}
         </p>
+        <p className="mt-1 break-all font-mono text-[11px] text-slate-500">{row.orderNo}</p>
+        <p className="mt-1 break-words text-slate-700">{row.productName ?? '—'}</p>
+        <p className="mt-1 font-semibold text-slate-900">
+          成交 {formatIntegerMoney(row.validAmountYuan ?? 0)}
+        </p>
+        {(row.productRefundAmountYuan ?? 0) > 0 ? (
+          <p className="mt-0.5 font-semibold text-rose-700">
+            退款 {formatIntegerMoney(row.productRefundAmountYuan ?? 0)}
+          </p>
+        ) : null}
       </div>
       <QianfanButton row={row} openingOrder={openingOrder} onOpen={onOpenQianfan} />
     </div>
-    <button type="button" onClick={onToggle} className="mt-2 text-slate-500 underline">
-      {expanded ? '收起详情' : '展开详情'}
-    </button>
-    {expanded ? (
-      <div className="mt-2 space-y-1 text-slate-600">
-        <p>订单号：{row.orderNo}</p>
-        <p>主播：{row.anchorName ?? '—'}</p>
-        <p>店铺：{row.shopName ?? '—'}</p>
-        <p>商品退款：{formatIntegerMoney(row.productRefundAmountYuan ?? 0)}</p>
-        <p>售后原因：{row.normalizedAfterSalesReason ?? '—'}</p>
-      </div>
+    {row.afterSaleStatus ? (
+      <p className="mt-2">
+        <StatusTag text={row.afterSaleStatus} tone="amber" />
+      </p>
+    ) : null}
+    {row.normalizedAfterSalesReason ? (
+      <p className="mt-1">
+        <StatusTag text={row.normalizedAfterSalesReason} tone="slate" />
+      </p>
     ) : null}
   </div>
 )

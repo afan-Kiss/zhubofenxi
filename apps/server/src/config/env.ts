@@ -60,6 +60,27 @@ export function getPort(): number {
   return Number(process.env.PORT ?? 4723)
 }
 
+/** 监听地址；生产 behind Nginx 建议 HOST=127.0.0.1 */
+export function getListenHost(): string {
+  const raw = process.env.HOST?.trim()
+  if (raw) return raw
+  return '0.0.0.0'
+}
+
+/** session=须登录；local=免登录本地看板（开发默认） */
+export function getAuthMode(): 'session' | 'local' {
+  const raw = process.env.AUTH_MODE?.trim().toLowerCase()
+  if (raw === 'session' || raw === 'local') return raw
+  if (process.env.NODE_ENV === 'production') return 'session'
+  return 'local'
+}
+
+export function isRegistrationEnabled(): boolean {
+  const raw = process.env.AUTH_ALLOW_REGISTER?.trim().toLowerCase()
+  if (raw === 'false' || raw === '0') return false
+  return true
+}
+
 const PLACEHOLDER_KEY = '请替换'
 
 export function assertCookieEncryptionKey(): void {

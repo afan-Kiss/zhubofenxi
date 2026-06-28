@@ -6,7 +6,10 @@ import {
   type OperationsPriceBandLabel,
 } from '../config/operations-price-band.config'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
+import { viewCountsAsPaidOrder } from './business-metrics.service'
+import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
 import { safeDivide, safeRatioPercent } from './daily-report-order.util'
+import { computeReturnOrderRateRatio } from './operations-after-sale-order.util'
 
 export interface OperationsPriceBandRow {
   bandLabel: OperationsPriceBandLabel
@@ -20,13 +23,13 @@ export interface OperationsPriceBandRow {
 }
 
 function isProductReturnOrder(v: AnalyzedOrderView): boolean {
-  return v.productRefundAmountCent > 0 && !v.isFreightRefundOnly
+  return viewCountsAsRefundOrder(v)
 }
 
 export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): OperationsPriceBandRow[] {
   const deduped = dedupeViewsByMetricOrderNo(views)
   type Bucket = {
-    orderKeys: Set<string>
+    paidOrderKeys: Set<string>
     amountCent: number
     buyers: Set<string>
     returnOrderKeys: Set<string>
@@ -34,7 +37,7 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
   const buckets = new Map<OperationsPriceBandLabel, Bucket>()
   for (const band of OPERATIONS_PRICE_BANDS) {
     buckets.set(band.label, {
-      orderKeys: new Set<string>(),
+      paidOrderKeys: new Set<string>(),
       amountCent: 0,
       buyers: new Set<string>(),
       returnOrderKeys: new Set<string>(),
@@ -45,27 +48,27 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
   for (const view of deduped) {
     const orderKey = resolveMetricOrderNo(view) || view.orderId
     if (!orderKey) continue
-    if (view.includedInGmv && view.effectiveGmvCent > 0) {
-      const label = resolvePriceBandLabelFromCent(view.paymentBaseCent || view.effectiveGmvCent)
-      const bucket = buckets.get(label)!
-      bucket.orderKeys.add(orderKey)
+    const label = resolvePriceBandLabelFromCent(view.paymentBaseCent || view.effectiveGmvCent)
+    const bucket = buckets.get(label)!
+    if (viewCountsAsPaidOrder(view)) {
+      bucket.paidOrderKeys.add(orderKey)
       bucket.amountCent += view.effectiveGmvCent
       totalAmountCent += view.effectiveGmvCent
       const buyerKey = view.buyerKey || view.buyerId
       if (buyerKey) bucket.buyers.add(buyerKey)
     }
     if (isProductReturnOrder(view)) {
-      const label = resolvePriceBandLabelFromCent(view.paymentBaseCent || view.effectiveGmvCent)
-      buckets.get(label)!.returnOrderKeys.add(orderKey)
+      bucket.returnOrderKeys.add(orderKey)
     }
   }
 
   return OPERATIONS_PRICE_BANDS.map((band) => {
     const bucket = buckets.get(band.label)!
-    const orderCount = bucket.orderKeys.size
+    const orderCount = bucket.paidOrderKeys.size
     const amountYuan = Math.round(centToYuan(bucket.amountCent))
-    const returnOrderCount = bucket.returnOrderKeys.size
-    const denom = orderCount + returnOrderCount
+    const returnOrderCount = [...bucket.returnOrderKeys].filter((key) =>
+      bucket.paidOrderKeys.has(key),
+    ).length
     return {
       bandLabel: band.label,
       orderCount,
@@ -74,7 +77,7 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
       amountSharePercent: safeRatioPercent(bucket.amountCent, totalAmountCent),
       avgOrderAmountYuan: Math.round(safeDivide(amountYuan, orderCount) ?? 0) || null,
       returnOrderCount,
-      returnRate: denom > 0 ? Math.round((returnOrderCount / denom) * 100) : null,
+      returnRate: computeReturnOrderRateRatio(orderCount, returnOrderCount),
     }
   }).filter((row) => row.orderCount > 0 || row.returnOrderCount > 0)
 }

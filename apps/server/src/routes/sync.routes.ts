@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { getClientIp } from '../middleware/audit.middleware'
-import { attachLocalViewer } from '../middleware/local-viewer.middleware'
+import { attachRequestUser } from '../middleware/local-viewer.middleware'
+import { requireAuth } from '../middleware/auth.middleware'
 import { requireMaintenanceTools } from '../middleware/maintenance.middleware'
 import {
   getApiSyncSettings,
@@ -30,6 +31,8 @@ import { validateSyncRangeInput, normalizeSyncPreset } from '../utils/sync-range
 import { sendFail, sendOk } from '../utils/response'
 
 export const syncRouter = Router()
+
+syncRouter.use(attachRequestUser, requireAuth)
 
 type SyncDetailMode = 'none' | 'smart' | 'all'
 
@@ -102,7 +105,7 @@ const auditCtx = (req: import('express').Request) => ({
   userAgent: req.headers['user-agent'] ?? undefined,
 })
 
-syncRouter.get('/status', attachLocalViewer, async (_req, res) => {
+syncRouter.get('/status', async (_req, res) => {
     try {
       const payload = await getSyncStatusPayload()
       const autoSync = await getBusinessSyncStatus()
@@ -161,7 +164,7 @@ syncRouter.get('/status', attachLocalViewer, async (_req, res) => {
     }
 })
 
-syncRouter.get('/history', requireMaintenanceTools, attachLocalViewer, async (req, res) => {
+syncRouter.get('/history', requireMaintenanceTools, async (req, res) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1)
     const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20))
@@ -172,7 +175,7 @@ syncRouter.get('/history', requireMaintenanceTools, attachLocalViewer, async (re
   }
 })
 
-syncRouter.get('/jobs/:id', requireMaintenanceTools, attachLocalViewer, async (req, res) => {
+syncRouter.get('/jobs/:id', requireMaintenanceTools, async (req, res) => {
   try {
     const detail = await getXhsSyncJobDetail(req.params.id)
     if (!detail) {
@@ -196,7 +199,7 @@ syncRouter.get('/jobs/:id', requireMaintenanceTools, attachLocalViewer, async (r
   }
 })
 
-syncRouter.get('/settings', attachLocalViewer, async (_req, res) => {
+syncRouter.get('/settings', async (_req, res) => {
   try {
     const s = await getApiSyncSettings()
     const { getApiSyncPresets } = await import('../services/system-setting.service')
@@ -215,7 +218,7 @@ syncRouter.get('/settings', attachLocalViewer, async (_req, res) => {
   }
 })
 
-syncRouter.post('/settings', requireMaintenanceTools, attachLocalViewer, async (req, res) => {
+syncRouter.post('/settings', requireMaintenanceTools, async (req, res) => {
   try {
     const body = req.body ?? {}
     const patch: Partial<ApiSyncSettings> = {}
@@ -274,7 +277,7 @@ syncRouter.post('/settings', requireMaintenanceTools, attachLocalViewer, async (
   }
 })
 
-syncRouter.post('/run', requireMaintenanceTools, attachLocalViewer, async (req, res) => {
+syncRouter.post('/run', requireMaintenanceTools, async (req, res) => {
   try {
     const triggerSource = req.body?.triggerSource ? String(req.body.triggerSource) : ''
 
@@ -386,7 +389,6 @@ syncRouter.post('/run', requireMaintenanceTools, attachLocalViewer, async (req, 
 syncRouter.post(
   '/after-sales-workbench',
   requireMaintenanceTools,
-  attachLocalViewer,
   async (req, res) => {
     try {
       const orderNo = req.body?.orderNo ? String(req.body.orderNo).trim() : ''

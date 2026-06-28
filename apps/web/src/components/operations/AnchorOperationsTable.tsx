@@ -6,7 +6,6 @@ import {
   formatIntegerMoney,
   formatOrderCount,
   formatPeopleCount,
-  formatPercent,
   formatRatePercent,
   formatStayDurationSeconds,
 } from './operationsReportFormatters'
@@ -47,7 +46,7 @@ export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
               <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.returnOrderCount)}</td>
-              <td className="px-3 py-2">{formatPercent(row.returnOrderRate)}</td>
+              <td className="px-3 py-2">{formatRatePercent(row.returnOrderRate)}</td>
               <td className="px-3 py-2">{formatDuration(row.liveDurationMinutes)}</td>
               <td className="px-3 py-2">{formatHourly(row.hourlyAmountYuan)}</td>
               <td className="px-3 py-2">{formatPeopleCount(row.viewSessionCount)}</td>

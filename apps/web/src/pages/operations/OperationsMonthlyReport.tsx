@@ -1,5 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useEffect } from 'react'
 import { apiRequest } from '../../lib/api'
+import { useOperationsReportFetch } from '../../hooks/useOperationsReportFetch'
+import { OperationsReportLoadShell } from '../../components/operations/OperationsReportLoadShell'
 import { AnchorRankingTable } from '../../components/operations/AnchorRankingTable'
 import { ProductRankingTable } from '../../components/operations/ProductRankingTable'
 import { PriceBandRankingTable } from '../../components/operations/PriceBandRankingTable'
@@ -27,9 +29,17 @@ import {
 import type { OperationsBiDrillContextProps, OperationsBiDrillRequest } from './operationsBiDrillTypes'
 import { OperationsCoreMetrics, CollapsibleWarnings } from '../../components/operations/charts/OperationsCoreMetrics'
 import { MonthlyReportCharts } from '../../components/operations/charts/MonthlyReportCharts'
+import { FOLLOWER_DRILL_UNAVAILABLE_MESSAGE } from '../../lib/operations-follower-drill'
 
 interface Props {
   month: string
+  onLoadingChange?: (loading: boolean) => void
+}
+
+type MonthlyLoadResult = {
+  report: MonthlyOperationsReportPayload
+  cacheMeta: WithOperationsReportCacheMeta<MonthlyOperationsReportPayload>['cacheMeta']
+  cacheWarning: string | null
 }
 
 const LEVEL_CLASS = {
@@ -39,41 +49,40 @@ const LEVEL_CLASS = {
   info: 'border-slate-200 bg-white text-slate-800',
 } as const
 
-export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [report, setReport] = useState<MonthlyOperationsReportPayload | null>(null)
-  const [cacheMeta, setCacheMeta] = useState<
-    WithOperationsReportCacheMeta<MonthlyOperationsReportPayload>['cacheMeta']
-  >(undefined)
-  const [cacheWarning, setCacheWarning] = useState<string | null>(null)
-
-  const loadReport = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
+export const OperationsMonthlyReport: React.FC<Props> = ({ month, onLoadingChange }) => {
+  const {
+    data: loaded,
+    loading,
+    refreshing,
+    error,
+    load,
+  } = useOperationsReportFetch<MonthlyLoadResult>(
+    async (signal) => {
       const qs = new URLSearchParams({ month, preset: 'custom' })
       const data = await apiRequest<WithOperationsReportCacheMeta<MonthlyOperationsReportPayload>>(
         `/api/board/operations-monthly-report?${qs}`,
+        { signal },
       )
       const { cacheMeta: meta, cacheWarning: warning, ...payload } = data
-      setReport(payload)
-      setCacheMeta(meta)
-      setCacheWarning(warning ?? null)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载运营月报失败')
-      setReport(null)
-    } finally {
-      setLoading(false)
-    }
-  }, [month])
+      return { report: payload, cacheMeta: meta, cacheWarning: warning ?? null }
+    },
+    [month],
+  )
+
+  const report = loaded?.report ?? null
+  const cacheMeta = loaded?.cacheMeta
+  const cacheWarning = loaded?.cacheWarning ?? null
 
   useEffect(() => {
-    void loadReport()
-  }, [loadReport])
+    onLoadingChange?.(loading)
+  }, [loading, onLoadingChange])
 
   if (loading && !report) {
-    return <p className="text-sm text-slate-500">加载运营月报…</p>
+    return (
+      <OperationsReportLoadShell loading={loading} refreshing={false}>
+        <p className="py-6 text-sm text-slate-500">加载运营月报…</p>
+      </OperationsReportLoadShell>
+    )
   }
 
   if (error && !report) {
@@ -82,7 +91,7 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
         <p className="text-sm text-red-600">{error}</p>
         <button
           type="button"
-          onClick={() => void loadReport()}
+          onClick={() => void load()}
           className="mt-2 rounded-full border border-slate-200 px-3 py-1 text-sm"
         >
           重试
@@ -109,6 +118,7 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
   }
 
   return (
+    <OperationsReportLoadShell loading={loading} refreshing={refreshing}>
     <div className="space-y-6 overflow-x-hidden">
       <div>
         <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
@@ -135,6 +145,17 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
               label={PLAIN.productReturnRate}
               value={formatRatePercent(s.productReturnRate)}
               drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
+              footer={
+                s.productReturnRateAbnormal ? (
+                  <p className="mt-1 text-xs text-amber-700">
+                    退货单率超过 100%，请核对口径：应为「退款/退货订单数 ÷ 成交订单数」。
+                  </p>
+                ) : s.productReturnOrderCount > 0 ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {s.productReturnOrderCount} 单退货 / {s.soldOrderCount} 单成交
+                  </p>
+                ) : null
+              }
             />
             <OperationsMetricDrillCard
               label={PLAIN.dealRate}
@@ -144,6 +165,15 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
                   : PLAIN.dealRateMissing
               }
               drillRequest={{ ...drillBase, target: 'summary_deal_conversion' }}
+              footer={
+                s.dealConversionNumerator != null && s.dealConversionDenominator != null ? (
+                  <p className="mt-1 text-xs text-slate-500">
+                    {formatPeopleCount(s.dealConversionNumerator)} 成交人数 ÷{' '}
+                    {formatPeopleCount(s.dealConversionDenominator)}{' '}
+                    {s.dealConversionDenominatorLabel ?? '进房人数'}
+                  </p>
+                ) : null
+              }
             />
           </>
         }
@@ -167,7 +197,11 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
               value={formatPeopleCount(s.dealUserCount)}
               drillRequest={{ ...drillBase, target: 'summary_buyer_count' }}
             />
-            <MetricCard label="新增粉丝" value={formatPeopleCount(s.newFollowerCount)} />
+            <OperationsMetricDrillCard
+              label="新增粉丝"
+              value={formatPeopleCount(s.newFollowerCount)}
+              drillUnavailableMessage={FOLLOWER_DRILL_UNAVAILABLE_MESSAGE}
+            />
             <MetricCard label={PLAIN.followerRate} value={formatRatePercent(s.followerConversionRate)} />
           </>
         }
@@ -347,7 +381,7 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
           rangeStartDate={report.range.startDate}
           rangeEndDate={report.range.endDate}
           scope="custom"
-          onRefresh={loadReport}
+          onRefresh={load}
         />
       </section>
 
@@ -412,6 +446,7 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month }) => {
         />
       </section>
     </div>
+    </OperationsReportLoadShell>
   )
 }
 

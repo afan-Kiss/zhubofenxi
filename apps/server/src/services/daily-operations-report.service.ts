@@ -50,6 +50,7 @@ import {
 } from './operations-business-insights.service'
 import { attachBusinessInsightActions } from './operations-business-insight-action.service'
 import type { BusinessInsightsPayload } from './operations-business-insights.types'
+import { computeReturnOrderRateRatio, computeOperationsRefundMetricsFromViews } from './operations-after-sale-order.util'
 import { prisma } from '../lib/prisma'
 
 export interface DailyOperationsAnchorRow {
@@ -64,6 +65,7 @@ export interface DailyOperationsAnchorRow {
   invalidOrderCount: number
   returnOrderCount: number
   returnOrderRate: number | null
+  paidOrderCount: number
   avgOrderAmountYuan: number | null
   hourlyAmountYuan: number | null
   amountRatio: number | null
@@ -83,6 +85,7 @@ export interface DailyOperationsSummary {
   invalidOrderCount: number
   returnOrderCount: number
   returnOrderRate: number | null
+  paidOrderCount: number
   dealUserCount: number | null
   dealConversionRate: number | null
   joinUserCount: number | null
@@ -187,17 +190,6 @@ function isProductReturnOrder(v: AnalyzedOrderView): boolean {
   return v.productRefundAmountCent > 0 && !v.isFreightRefundOnly
 }
 
-function countReturnOrders(views: AnalyzedOrderView[]): number {
-  const deduped = dedupeViewsByMetricOrderNo(views)
-  const keys = new Set<string>()
-  for (const v of deduped) {
-    if (!isProductReturnOrder(v)) continue
-    const key = resolveMetricOrderNo(v) || v.orderId
-    if (key) keys.add(key)
-  }
-  return keys.size
-}
-
 function buildAnchorRow(params: {
   config: AnchorConfig
   anchorId: string
@@ -208,6 +200,7 @@ function buildAnchorRow(params: {
   soldOrderCount: number
   invalidOrderCount: number
   returnOrderCount: number
+  paidOrderCount: number
   sessions: AnchorLiveSessionBrief[]
   totalValidAmountYuan: number
 }): DailyOperationsAnchorRow {
@@ -220,7 +213,10 @@ function buildAnchorRow(params: {
       resolveSessionLabel(params.config, params.anchorId),
       params.shopName,
     )
-  const returnDenom = params.soldOrderCount + params.returnOrderCount
+  const returnOrderRate = computeReturnOrderRateRatio(
+    params.paidOrderCount,
+    params.returnOrderCount,
+  )
   return {
     anchorName: params.anchorName,
     sessionLabel,
@@ -232,8 +228,8 @@ function buildAnchorRow(params: {
     soldOrderCount: params.soldOrderCount,
     invalidOrderCount: params.invalidOrderCount,
     returnOrderCount: params.returnOrderCount,
-    returnOrderRate:
-      returnDenom > 0 ? Math.round((params.returnOrderCount / returnDenom) * 100) : null,
+    returnOrderRate,
+    paidOrderCount: params.paidOrderCount,
     avgOrderAmountYuan: roundYuan(safeDivide(params.validAmountYuan, params.soldOrderCount)),
     hourlyAmountYuan: roundYuan(
       liveHours != null ? safeDivide(params.validAmountYuan, liveHours) : null,
@@ -287,7 +283,10 @@ export async function buildDailyOperationsReport(params: {
     throw new Error('运营日报仅支持单日范围')
   }
 
-  const scoped = await getBoardScopedViewsForRange(params)
+  // 单日日报必须按 custom + 当天日期取数；preset=thisWeek/thisMonth 会误拉整段周期汇总
+  const dayParams = { ...params, preset: 'custom' as const }
+
+  const scoped = await getBoardScopedViewsForRange(dayParams)
   const config = getAnchorConfigSync()
   const remappedAll = remapViewsForAnchorPerformance(
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
@@ -316,12 +315,12 @@ export async function buildDailyOperationsReport(params: {
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
     const { soldOrderCount, invalidOrderCount } = countDailyReportOrders(performanceViews)
     const invalidFromAll = countDailyReportOrders(anchorAllViews).invalidOrderCount
-    const returnOrderCount = countReturnOrders(performanceViews)
+    const anchorRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViews)
     const fixedDisplay = useShopSessionRules
       ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]
       : undefined
     const sessions = await resolveAnchorLiveSessionsForRange({
-      preset: params.preset,
+      preset: dayParams.preset,
       startDate: params.startDate,
       endDate: params.endDate,
       anchorId: anchor.anchorId,
@@ -350,7 +349,8 @@ export async function buildDailyOperationsReport(params: {
         validAmountYuan,
         soldOrderCount,
         invalidOrderCount: invalidFromAll,
-        returnOrderCount,
+        returnOrderCount: anchorRefundMetrics.refundOrderCount,
+        paidOrderCount: anchorRefundMetrics.paidOrderCount,
         sessions,
         totalValidAmountYuan: 0,
       }),
@@ -364,16 +364,15 @@ export async function buildDailyOperationsReport(params: {
 
   const soldOrderCount = anchorRows.reduce((sum, row) => sum + row.soldOrderCount, 0)
   const invalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)
-  const returnOrderCount = countReturnOrders(performanceViewsAll)
-  const returnDenom = soldOrderCount + returnOrderCount
+  const summaryRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViewsAll)
 
   const totalLiveDurationMinutes = await sumUniqueLiveDurationMinutesForRange({
-    preset: params.preset,
+    preset: dayParams.preset,
     startDate: params.startDate,
     endDate: params.endDate,
   })
   const liveRoomNewFollowers = await sumNewFollowersByLiveAccountForRange({
-    preset: params.preset,
+    preset: dayParams.preset,
     startDate: params.startDate,
     endDate: params.endDate,
   })
@@ -387,7 +386,7 @@ export async function buildDailyOperationsReport(params: {
     await Promise.all(
       reportAnchors.map((anchor) =>
         resolveAnchorLiveSessionsForRange({
-          preset: params.preset,
+          preset: dayParams.preset,
           startDate: params.startDate,
           endDate: params.endDate,
           anchorId: anchor.anchorId,
@@ -476,9 +475,9 @@ export async function buildDailyOperationsReport(params: {
       validAmountYuan,
       soldOrderCount,
       invalidOrderCount,
-      returnOrderCount,
-      returnOrderRate:
-        returnDenom > 0 ? Math.round((returnOrderCount / returnDenom) * 100) : null,
+      returnOrderCount: summaryRefundMetrics.refundOrderCount,
+      returnOrderRate: summaryRefundMetrics.rate,
+      paidOrderCount: summaryRefundMetrics.paidOrderCount,
       dealUserCount: summaryTraffic.dealUserCount,
       dealConversionRate: summaryTraffic.dealConversionRate,
       joinUserCount: summaryTraffic.joinUserCount,

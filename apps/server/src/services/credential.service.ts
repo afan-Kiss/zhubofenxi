@@ -79,17 +79,29 @@ export async function getDecryptedCookie(platformName = DEFAULT_PLATFORM): Promi
   const row = await prisma.platformCredential.findUnique({
     where: { platformName },
   })
-  if (!row?.cookieEncrypted) {
-    const fallback = await prisma.platformCredential.findFirst({
-      where: { NOT: { cookieEncrypted: '' } },
-      orderBy: { createdAt: 'asc' },
-    })
-    if (fallback?.cookieEncrypted) {
-      return decryptText(fallback.cookieEncrypted)
-    }
-    throw new Error('尚未配置平台 Cookie，请先在系统设置保存')
+  if (row?.cookieEncrypted) {
+    const { resolveLiveAccountCookie } = await import('./qianfan-cookie-resolver.service')
+    const resolved = await resolveLiveAccountCookie(
+      row.id,
+      row.displayName?.trim() || row.platformName,
+    )
+    if (resolved) return resolved
+    return decryptText(row.cookieEncrypted)
   }
-  return decryptText(row.cookieEncrypted)
+  const fallback = await prisma.platformCredential.findFirst({
+    where: { NOT: { cookieEncrypted: '' } },
+    orderBy: { createdAt: 'asc' },
+  })
+  if (fallback?.cookieEncrypted) {
+    const { resolveLiveAccountCookie } = await import('./qianfan-cookie-resolver.service')
+    const resolved = await resolveLiveAccountCookie(
+      fallback.id,
+      fallback.displayName?.trim() || fallback.platformName,
+    )
+    if (resolved) return resolved
+    return decryptText(fallback.cookieEncrypted)
+  }
+  throw new Error('尚未配置平台 Cookie，请先在系统设置保存')
 }
 
 export async function testCredentialDecrypt(platformName = DEFAULT_PLATFORM): Promise<{

@@ -216,6 +216,10 @@ export async function getLiveAccountById(id: string) {
 
 export async function getDecryptedCookieByAccountId(accountId: string): Promise<string> {
   const row = await prisma.platformCredential.findUnique({ where: { id: accountId } })
+  const displayName = row?.displayName?.trim() || row?.platformName
+  const { resolveLiveAccountCookie } = await import('./qianfan-cookie-resolver.service')
+  const resolved = await resolveLiveAccountCookie(accountId, displayName)
+  if (resolved) return resolved
   if (!row?.cookieEncrypted?.trim()) {
     throw new Error('尚未配置该直播号 Cookie')
   }

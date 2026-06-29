@@ -395,6 +395,23 @@ export async function getBusinessSyncStatus(): Promise<{
 
   }
 
+  qianfanCookie: {
+    at: string
+    controlOk: number
+    envFallback: number
+    sqliteFallback: number
+    missing: number
+    staleShops: string[]
+    shops: Array<{
+      shopName: string
+      source: string
+      updatedAt: string | null
+      cookieHash: string | null
+      staleWarning: string | null
+      failureReason: string | null
+    }>
+  } | null
+
 }> {
 
   const [lastSuccessJob, lastFailedJob, lastAnyJob, runningBizJob, buyerCache] = await Promise.all([
@@ -536,6 +553,9 @@ export async function getBusinessSyncStatus(): Promise<{
 
 
 
+  const { getLastCookieBootstrapSummary } = await import('./qianfan-cookie-resolver.service')
+  const cookieSummary = getLastCookieBootstrapSummary()
+
   return {
 
     businessSync: {
@@ -577,6 +597,25 @@ export async function getBusinessSyncStatus(): Promise<{
       cacheVersion: buyerCacheVersion ?? BUYER_RANKING_CACHE_VERSION,
 
     },
+
+    qianfanCookie: cookieSummary
+      ? {
+          at: cookieSummary.at,
+          controlOk: cookieSummary.controlOk,
+          envFallback: cookieSummary.envFallback,
+          sqliteFallback: cookieSummary.sqliteFallback,
+          missing: cookieSummary.missing,
+          staleShops: cookieSummary.staleShops,
+          shops: cookieSummary.shops.map((x) => ({
+            shopName: x.shopName,
+            source: x.source,
+            updatedAt: x.updatedAt ?? null,
+            cookieHash: x.cookieHash ? String(x.cookieHash).slice(0, 8) : null,
+            staleWarning: x.staleWarning ?? null,
+            failureReason: x.failureReason ?? null,
+          })),
+        }
+      : null,
 
   }
 

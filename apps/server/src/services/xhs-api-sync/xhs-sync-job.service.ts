@@ -338,6 +338,8 @@ export async function executeXhsSyncJob(
   try {
     await progress.setStep('idle', 2, '正在检查 Cookie 和签名')
     try {
+      const { bootstrapQianfanCookiesForSync } = await import('../qianfan-cookie-resolver.service')
+      await bootstrapQianfanCookiesForSync()
       await getDecryptedCookie()
     } catch {
       throw new Error('尚未配置平台 Cookie，请先在系统设置保存')

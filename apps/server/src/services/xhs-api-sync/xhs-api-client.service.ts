@@ -130,99 +130,143 @@ export async function requestXhsApi<T = unknown>(
 
   return enqueueXhsRequest(async () => {
     const started = Date.now()
-    try {
-      const cookie = params.liveAccountId
-        ? await getDecryptedCookieByAccountId(params.liveAccountId)
-        : await getDecryptedCookie()
-      const accountName = params.liveAccountName ?? '默认账号'
-      const data = await requestXhsJson<T>({
-        method: def.method,
-        url,
-        body: params.body,
-        cookie,
-        referer: params.refererOverride ?? def.referer,
-        needSign: def.needSign,
-        audit: params.context
-          ? { ...params.context, module: 'xhs_export' }
-          : undefined,
-        apiKey: params.apiKey,
-        signLogContext: params.liveAccountId
-          ? { tag: 'xhs-sign', accountName, liveAccountId: params.liveAccountId }
-          : undefined,
-        cmdLog: params.cmdLog
-          ? {
-              accountName,
-              liveAccountId: params.liveAccountId,
-              accountIndex: params.accountIndex,
-              accountTotal: params.accountTotal,
-              apiLabel: params.cmdLog.apiLabel,
-              pageNo: params.cmdLog.pageNo,
-              dateRange: params.cmdLog.dateRange,
-            }
-          : params.liveAccountName
+    const accountName = params.liveAccountName ?? '默认账号'
+
+    async function resolveCookie(): Promise<string | null> {
+      if (params.liveAccountId) {
+        return getDecryptedCookieByAccountId(params.liveAccountId)
+      }
+      try {
+        return await getDecryptedCookie()
+      } catch {
+        return null
+      }
+    }
+
+    async function executeOnce(cookie: string): Promise<XhsApiRequestResult<T>> {
+      try {
+        const data = await requestXhsJson<T>({
+          method: def.method,
+          url,
+          body: params.body,
+          cookie,
+          referer: params.refererOverride ?? def.referer,
+          needSign: def.needSign,
+          audit: params.context ? { ...params.context, module: 'xhs_export' } : undefined,
+          apiKey: params.apiKey,
+          signLogContext: params.liveAccountId
+            ? { tag: 'xhs-sign', accountName, liveAccountId: params.liveAccountId }
+            : undefined,
+          cmdLog: params.cmdLog
             ? {
                 accountName,
                 liveAccountId: params.liveAccountId,
                 accountIndex: params.accountIndex,
                 accountTotal: params.accountTotal,
-                apiLabel: params.apiKey,
+                apiLabel: params.cmdLog.apiLabel,
+                pageNo: params.cmdLog.pageNo,
+                dateRange: params.cmdLog.dateRange,
               }
-            : undefined,
-      })
-      const rawSummary = buildRawSummary(data)
-      const durationMs = Date.now() - started
-      await logApiRequest(
-        'api_request_success',
-        params.apiKey,
-        def,
-        rawSummary,
-        params.context,
-        undefined,
-        durationMs,
-      )
-      return { ok: true, data, rawSummary, errorMessage: null, authError: null }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '请求失败'
-      const durationMs = Date.now() - started
-      await logApiRequest(
-        'api_request_failed',
-        params.apiKey,
-        def,
-        null,
-        params.context,
-        message,
-        durationMs,
-      )
-      if (err instanceof XhsAuthError) {
-        return {
-          ok: false,
-          data: null,
-          rawSummary: null,
-          errorMessage: message,
-          httpStatus: err.httpStatus,
-          authError: {
-            kind: err.kind,
-            cookieStatus: err.cookieStatus,
-            apiKey: params.apiKey,
-            stopRound: err.stopRound,
-          },
+            : params.liveAccountName
+              ? {
+                  accountName,
+                  liveAccountId: params.liveAccountId,
+                  accountIndex: params.accountIndex,
+                  accountTotal: params.accountTotal,
+                  apiLabel: params.apiKey,
+                }
+              : undefined,
+        })
+        const rawSummary = buildRawSummary(data)
+        const durationMs = Date.now() - started
+        await logApiRequest(
+          'api_request_success',
+          params.apiKey,
+          def,
+          rawSummary,
+          params.context,
+          undefined,
+          durationMs,
+        )
+        return { ok: true, data, rawSummary, errorMessage: null, authError: null }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '请求失败'
+        const durationMs = Date.now() - started
+        await logApiRequest(
+          'api_request_failed',
+          params.apiKey,
+          def,
+          null,
+          params.context,
+          message,
+          durationMs,
+        )
+        if (err instanceof XhsAuthError) {
+          return {
+            ok: false,
+            data: null,
+            rawSummary: null,
+            errorMessage: message,
+            httpStatus: err.httpStatus,
+            authError: {
+              kind: err.kind,
+              cookieStatus: err.cookieStatus,
+              apiKey: params.apiKey,
+              stopRound: err.stopRound,
+            },
+          }
         }
-      }
-      const classified = classifyXhsErrorMessage(message)
-      if (classified.expired || classified.suspected) {
-        return {
-          ok: false,
-          data: null,
-          rawSummary: null,
-          errorMessage: message,
-          authError: {
-            kind: classified.errorCode ?? 'auth_expired',
-            cookieStatus: classified.cookieStatus ?? 'invalid',
-            apiKey: params.apiKey,
-          },
+        const classified = classifyXhsErrorMessage(message)
+        if (classified.expired || classified.suspected) {
+          return {
+            ok: false,
+            data: null,
+            rawSummary: null,
+            errorMessage: message,
+            authError: {
+              kind: classified.errorCode ?? 'auth_expired',
+              cookieStatus: classified.cookieStatus ?? 'invalid',
+              apiKey: params.apiKey,
+            },
+          }
         }
+        return { ok: false, data: null, rawSummary: null, errorMessage: message, authError: null }
       }
-      return { ok: false, data: null, rawSummary: null, errorMessage: message, authError: null }
     }
+
+    let cookie = await resolveCookie()
+    if (!cookie) {
+      return {
+        ok: false,
+        data: null,
+        rawSummary: null,
+        errorMessage: '尚未配置 Cookie',
+        authError: null,
+      }
+    }
+
+    let result = await executeOnce(cookie)
+
+    if (result.authError && params.liveAccountId && accountName) {
+      const {
+        refreshShopCookieFromControl,
+        resolveLocalFallbackCookie,
+      } = await import('../qianfan-cookie-resolver.service')
+
+      const refreshed = await refreshShopCookieFromControl(accountName)
+      if (refreshed && refreshed !== cookie) {
+        cookie = refreshed
+        result = await executeOnce(cookie)
+      }
+
+      if (result.authError) {
+        const localFallback = await resolveLocalFallbackCookie(params.liveAccountId, accountName)
+        if (localFallback && localFallback !== cookie) {
+          result = await executeOnce(localFallback)
+        }
+      }
+    }
+
+    return result
   })
 }

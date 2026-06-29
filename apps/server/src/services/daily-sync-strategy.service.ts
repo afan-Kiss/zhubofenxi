@@ -181,6 +181,8 @@ export async function executeDailyStrategySync(
 
   try {
     await progress.setStep('idle', 2, '正在检查 Cookie 和签名')
+    const { bootstrapQianfanCookiesForSync } = await import('./qianfan-cookie-resolver.service')
+    await bootstrapQianfanCookiesForSync()
     await getDecryptedCookie()
     const signStatus = await getXhsSignStatus()
     if (!signStatus.signerModuleOk) warnings.push('签名模块未就绪')

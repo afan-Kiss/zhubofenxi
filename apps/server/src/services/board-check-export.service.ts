@@ -166,7 +166,7 @@ export async function buildBoardCheckExportBuffer(params: {
     ['统计函数版本', BUSINESS_METRICS_VERSION],
     ['金额公式版本', AMOUNT_FORMULA_VERSION],
     ['GMV字段', GMV_PAYMENT_FIELD_NOTE],
-    ['有效成交额', '各单 effectiveGmvCent 合计'],
+    ['有效成交额', '有效成交订单池内 effectiveGmvCent 合计（已完成/已签收且无在途售后/未退款）'],
     ['实际签收金额', '有效签收订单 actualSignAmountCent 合计（max(支付金额−有效成功退款,0)）'],
     ['退款金额', 'productRefundAmountCent 合计（仅有效成功售后）'],
     ['品退判断', 'strictQualityRefund：最终有效成功售后原因为商品问题'],

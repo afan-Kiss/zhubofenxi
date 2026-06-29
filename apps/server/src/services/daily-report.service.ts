@@ -1,7 +1,6 @@
 import type { AnchorConfig } from '../types/analysis'
 import type { UserRole } from '../types/roles'
 import { getAnchorConfigSync } from './anchor.service'
-import { aggregateAnchorLeaderboard } from './board-metrics.service'
 import {
   filterViewsByAnchorSpec,
   getAnchorPerformanceViews,
@@ -30,6 +29,7 @@ import {
   safeDivide,
   safeRatioPercent,
 } from './daily-report-order.util'
+import { sumValidRevenueFromViews } from './valid-revenue-order.service'
 
 export interface DailyReportAnchorRow {
   anchorName: string
@@ -214,15 +214,12 @@ export async function buildDailyReport(params: {
       anchor.anchorId,
       anchor.anchorName,
     )
-    const leaderboard = aggregateAnchorLeaderboard(performanceViews)
-    const stats = leaderboard.find(
-      (row) => row.anchorId === anchor.anchorId || row.anchorName === anchor.anchorName,
-    )
-    const shippedAmountYuan = Number(stats?.validSalesAmount ?? 0)
+    const validRevenue = sumValidRevenueFromViews(performanceViews)
+    const shippedAmountYuan = validRevenue.validAmountYuan
 
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
-    const { soldOrderCount, invalidOrderCount } = countDailyReportOrders(performanceViews)
-    const invalidFromAll = countDailyReportOrders(anchorAllViews).invalidOrderCount
+    const { soldOrderCount } = validRevenue
+    const { invalidOrderCount: invalidFromAll } = countDailyReportOrders(anchorAllViews)
     const fixedDisplay = useShopSessionRules
       ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]
       : undefined

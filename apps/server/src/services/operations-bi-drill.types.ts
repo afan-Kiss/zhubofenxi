@@ -108,6 +108,10 @@ export interface OperationsBiDrillOrderRow {
 
   qianfanDetailAvailable: boolean
   inclusionReason?: string | null
+  /** 是否计入有效成交（与运营报表同一口径） */
+  includedInValidRevenue?: boolean | null
+  /** 有效成交计入/排除说明 */
+  validRevenueReason?: string | null
 }
 
 export interface OperationsBiDrillPayload {

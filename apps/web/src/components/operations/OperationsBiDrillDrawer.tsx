@@ -189,17 +189,18 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                     <div className="max-h-[min(52vh,520px)] overflow-y-auto overflow-x-hidden">
                       <table className="w-full table-fixed border-collapse text-left text-xs">
                         <colgroup>
-                          <col className="w-[10%]" />
                           <col className="w-[9%]" />
-                          <col className="w-[11%]" />
-                          <col className="w-[7%]" />
-                          <col className="w-[7%]" />
-                          <col className="w-[16%]" />
-                          <col className="w-[8%]" />
-                          <col className="w-[8%]" />
                           <col className="w-[8%]" />
                           <col className="w-[10%]" />
-                          <col className="w-[6%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[14%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[7%]" />
+                          <col className="w-[8%]" />
+                          <col className="w-[9%]" />
+                          <col className="w-[7%]" />
                         </colgroup>
                         <thead className="sticky top-0 z-10 bg-slate-50 text-slate-600 shadow-[0_1px_0_#e2e8f0]">
                           <tr>
@@ -211,8 +212,9 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                             <th className="px-2 py-2 font-medium">商品</th>
                             <th className="px-2 py-2 text-right font-medium">成交金额</th>
                             <th className="px-2 py-2 text-right font-medium">退款金额</th>
+                            <th className="px-2 py-2 font-medium">有效成交</th>
+                            <th className="px-2 py-2 font-medium">计入说明</th>
                             <th className="px-2 py-2 font-medium">售后状态</th>
-                            <th className="px-2 py-2 font-medium">售后原因</th>
                             <th className="px-2 py-2 font-medium">操作</th>
                           </tr>
                         </thead>
@@ -248,15 +250,14 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                                   : '—'}
                               </td>
                               <td className="px-2 py-2">
+                                <ValidRevenueTag included={row.includedInValidRevenue} />
+                              </td>
+                              <td className="px-2 py-2 break-words text-slate-600">
+                                {displayDash(row.validRevenueReason)}
+                              </td>
+                              <td className="px-2 py-2">
                                 {row.afterSaleStatus ? (
                                   <StatusTag text={row.afterSaleStatus} tone="amber" />
-                                ) : (
-                                  '—'
-                                )}
-                              </td>
-                              <td className="px-2 py-2 break-words">
-                                {row.normalizedAfterSalesReason ? (
-                                  <StatusTag text={row.normalizedAfterSalesReason} tone="slate" />
                                 ) : (
                                   '—'
                                 )}
@@ -305,6 +306,15 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
         </div>
       </div>
     </OperationsViewportModal>
+  )
+}
+
+function ValidRevenueTag({ included }: { included?: boolean | null }) {
+  if (included == null) return <span className="text-slate-400">—</span>
+  return included ? (
+    <StatusTag text="计入" tone="rose" />
+  ) : (
+    <StatusTag text="不计入" tone="slate" />
   )
 }
 
@@ -357,6 +367,12 @@ const MobileOrderCard: React.FC<{
             退款 {formatIntegerMoney(row.productRefundAmountYuan ?? 0)}
           </p>
         ) : null}
+        <p className="mt-1 flex flex-wrap items-center gap-1 text-slate-600">
+          <ValidRevenueTag included={row.includedInValidRevenue} />
+          {row.validRevenueReason ? (
+            <span className="break-words">{row.validRevenueReason}</span>
+          ) : null}
+        </p>
       </div>
       <QianfanButton row={row} openingOrder={openingOrder} onOpen={onOpenQianfan} />
     </div>

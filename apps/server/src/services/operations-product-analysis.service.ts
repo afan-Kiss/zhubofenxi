@@ -17,7 +17,7 @@ import {
   resolveProductRole,
   type OperationsProductRole,
 } from '../config/operations-product-role.config'
-import { isDailyReportSoldOrder } from './daily-report-order.util'
+import { isValidRevenueOrder } from './valid-revenue-order.service'
 import { viewCountsAsPaidOrder } from './business-metrics.service'
 import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
 
@@ -124,7 +124,7 @@ export async function buildOperationsProductAnalysis(
       bucket.paidOrderKeys.add(orderKey)
     }
 
-    if (isDailyReportSoldOrder(view)) {
+    if (isValidRevenueOrder(view)) {
       bucket.soldCount += qty
       bucket.soldAmountCent += view.effectiveGmvCent
       bucket.soldOrderKeys.add(orderKey)

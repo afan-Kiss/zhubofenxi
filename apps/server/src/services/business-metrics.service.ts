@@ -11,14 +11,15 @@ import { getOfficialQualityPackageIdSet, getQualityBadCasesSync } from './qualit
 import { aggregateRefundAmountCentByOrderNo } from './order-refund-metrics.service'
 import { dedupeOrderCountByOrderNo } from './order-master-match.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
-/** 计入发货单金额的订单（与 validSalesAmount / 发货单金额 同一口径） */
+import { sumValidRevenueFromViews } from './valid-revenue-order.service'
+/** 计入发货单金额的订单（与 shippedOrderCount 同一口径，宽于有效成交池） */
 function countsAsShippedOrderView(v: AnalyzedOrderView): boolean {
   return v.includedInGmv === true && v.effectiveGmvCent > 0
 }
 
 /** 全站经营指标统一计算（看板 / 排行 / 钻取 / 导出共用） */
 
-export const BUSINESS_METRICS_VERSION = 'v10-order-master-match-2026-05'
+export const BUSINESS_METRICS_VERSION = 'v11-valid-revenue-pool-2026-06'
 
 
 
@@ -152,8 +153,6 @@ export function calculateBusinessMetrics(
 
   let totalGmvCent = 0
 
-  let validSalesCent = 0
-
   let actualSignedCent = 0
 
   let freightRefundCent = 0
@@ -166,8 +165,6 @@ export function calculateBusinessMetrics(
       totalGmvCent += v.paymentBaseCent
     }
 
-    validSalesCent += v.effectiveGmvCent
-
     if (v.isEffectiveSigned) {
       actualSignedCent += v.actualSignAmountCent ?? v.actualSignedAmountCent
     }
@@ -179,6 +176,9 @@ export function calculateBusinessMetrics(
       if (no) shippedOrderNos.add(no)
     }
   }
+
+  const validRevenue = sumValidRevenueFromViews(views)
+  const validSalesCent = validRevenue.validAmountCent
 
   const { totalCent: refundCent, byOrderNo: refundByOrderNo } =
     aggregateRefundAmountCentByOrderNo(views)

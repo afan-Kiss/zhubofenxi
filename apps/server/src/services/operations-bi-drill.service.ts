@@ -6,7 +6,7 @@ import {
   getAnchorPerformanceViews,
 } from './board-scoped-views.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
-import { isDailyReportSoldOrder } from './daily-report-order.util'
+import { isValidRevenueOrder, resolveValidRevenueAmountCent } from './valid-revenue-order.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { getLocalViewerCacheIdentity } from './operations-report-cache.service'
 import {
@@ -196,7 +196,7 @@ function filterViewsForTarget(
       }
     }
 
-    if (mode === 'sold') return isDailyReportSoldOrder(view)
+    if (mode === 'sold') return isValidRevenueOrder(view)
     if (mode === 'return') return isProductReturnOrder(view)
     if (mode === 'after_sale') return isActualAfterSaleOrder(view)
     return Boolean(resolveMetricOrderNo(view) || view.paymentBaseCent > 0)
@@ -431,15 +431,15 @@ export async function buildOperationsBiDrill(
     rowsAll.sort((a, b) => String(b.payTime ?? '').localeCompare(String(a.payTime ?? '')))
   }
 
-  const soldCount = filtered.filter((v) => isDailyReportSoldOrder(v)).length
+  const soldCount = filtered.filter((v) => isValidRevenueOrder(v)).length
   const returnCount = filtered.filter((v) => isActualAfterSaleOrder(v)).length
   const validAmountYuan = filtered.reduce(
-    (sum, v) => sum + (isDailyReportSoldOrder(v) ? Math.round(v.effectiveGmvCent / 100) : 0),
+    (sum, v) => sum + Math.round(resolveValidRevenueAmountCent(v) / 100),
     0,
   )
   const buyers = new Set<string>()
   for (const v of filtered) {
-    if (!isDailyReportSoldOrder(v)) continue
+    if (!isValidRevenueOrder(v)) continue
     const key = v.buyerKey || v.buyerId
     if (key) buyers.add(key)
   }

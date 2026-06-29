@@ -1,21 +1,35 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
+import {
+  isValidRevenueOrder,
+  resolveAfterSaleStatusText,
+  resolveValidRevenueRefundAmountCent,
+} from './valid-revenue-order.service'
 
 const CLOSED_KEYWORDS = ['已关闭', '交易关闭']
+const EXCLUDED_AFTER_SALE_FOR_INVALID_RE =
+  /售后完成|退款成功|退款完成|已退款|退货退款成功|售后处理中|待商家收货|待买家退货|退款中|退货退款中|部分退款|仅退款|退货退款|售后成功|售后中|退货完成|已退货/
 
-/** 关闭/退货单：已关闭 或 售后完成（仅提醒，不计入真实卖出） */
+function normalizeOrderStatus(view: AnalyzedOrderView): string {
+  return (view.orderStatusText ?? '').trim()
+}
+
+/** 关闭/退货单：已关闭，或存在需提醒的售后/退款状态（不计入有效成交） */
 export function isDailyReportInvalidOrder(v: AnalyzedOrderView): boolean {
-  const orderStatus = (v.orderStatusText ?? '').trim()
-  const afterSale = (v.afterSaleStatusText ?? '').trim()
+  const orderStatus = normalizeOrderStatus(v)
   if (CLOSED_KEYWORDS.some((k) => orderStatus.includes(k))) return true
-  if (afterSale.includes('售后完成')) return true
+
+  const afterSale = resolveAfterSaleStatusText(v)
+  if (afterSale && EXCLUDED_AFTER_SALE_FOR_INVALID_RE.test(afterSale)) return true
+
+  if (resolveValidRevenueRefundAmountCent(v) > 0 && !isValidRevenueOrder(v)) return true
+
   return false
 }
 
-/** 真实卖出：非关闭/退货单，且有效发货销售额 > 0（performance views 已排除低价刷单） */
+/** 有效成交订单（与运营报表 / 日报 / 下钻同一口径） */
 export function isDailyReportSoldOrder(v: AnalyzedOrderView): boolean {
-  if (isDailyReportInvalidOrder(v)) return false
-  return v.includedInGmv === true && v.effectiveGmvCent > 0
+  return isValidRevenueOrder(v)
 }
 
 export function countDailyReportOrders(views: AnalyzedOrderView[]): {

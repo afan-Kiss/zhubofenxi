@@ -8,6 +8,7 @@ import {
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { viewCountsAsPaidOrder } from './business-metrics.service'
 import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
+import { isValidRevenueOrder, resolveValidRevenueAmountCent } from './valid-revenue-order.service'
 import { safeDivide, safeRatioPercent } from './daily-report-order.util'
 import { computeReturnOrderRateRatio } from './operations-after-sale-order.util'
 
@@ -29,6 +30,7 @@ function isProductReturnOrder(v: AnalyzedOrderView): boolean {
 export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): OperationsPriceBandRow[] {
   const deduped = dedupeViewsByMetricOrderNo(views)
   type Bucket = {
+    validRevenueOrderKeys: Set<string>
     paidOrderKeys: Set<string>
     amountCent: number
     buyers: Set<string>
@@ -37,6 +39,7 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
   const buckets = new Map<OperationsPriceBandLabel, Bucket>()
   for (const band of OPERATIONS_PRICE_BANDS) {
     buckets.set(band.label, {
+      validRevenueOrderKeys: new Set<string>(),
       paidOrderKeys: new Set<string>(),
       amountCent: 0,
       buyers: new Set<string>(),
@@ -52,8 +55,12 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
     const bucket = buckets.get(label)!
     if (viewCountsAsPaidOrder(view)) {
       bucket.paidOrderKeys.add(orderKey)
-      bucket.amountCent += view.effectiveGmvCent
-      totalAmountCent += view.effectiveGmvCent
+    }
+    if (isValidRevenueOrder(view)) {
+      bucket.validRevenueOrderKeys.add(orderKey)
+      const amountCent = resolveValidRevenueAmountCent(view)
+      bucket.amountCent += amountCent
+      totalAmountCent += amountCent
       const buyerKey = view.buyerKey || view.buyerId
       if (buyerKey) bucket.buyers.add(buyerKey)
     }
@@ -64,7 +71,7 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
 
   return OPERATIONS_PRICE_BANDS.map((band) => {
     const bucket = buckets.get(band.label)!
-    const orderCount = bucket.paidOrderKeys.size
+    const orderCount = bucket.validRevenueOrderKeys.size
     const amountYuan = Math.round(centToYuan(bucket.amountCent))
     const returnOrderCount = [...bucket.returnOrderKeys].filter((key) =>
       bucket.paidOrderKeys.has(key),

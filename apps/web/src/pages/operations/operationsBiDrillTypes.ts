@@ -86,6 +86,8 @@ export interface OperationsBiDrillOrderRow {
   buyerNickname?: string | null
   buyerDisplayName?: string | null
   inclusionReason?: string | null
+  includedInValidRevenue?: boolean | null
+  validRevenueReason?: string | null
   qianfanDetailAvailable: boolean
 }
 

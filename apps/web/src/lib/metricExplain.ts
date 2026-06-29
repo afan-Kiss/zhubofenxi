@@ -22,7 +22,7 @@ export const METRIC_EXPLAIN: Record<BoardMetricExplainKey, string> = {
   totalGmv:
     '统计本期有支付时间的订单实付金额。已支付后退款/取消的订单仍计入支付金额，退款另行统计。',
   validSalesAmount:
-    '统计本期已支付订单的有效成交金额，已扣除当期有效成功退款，不含运费补偿类售后。',
+    '与运营报表同一口径：仅统计已完成/已签收、无在途售后且未成功退款的订单成交金额；先筛订单池再求和，不是支付减退款。',
   actualSignedAmount:
     '统计本期已签收/已完成订单中，无售后、售后已取消，或成功商品退款不超过 ¥20.00 的净签收金额。纯运费补偿不计入退款。',
   returnAmount:

@@ -19,6 +19,10 @@ import {
   formatAfterSalesReasonDisplay,
 } from './operations-after-sale-order.util'
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
+import {
+  explainValidRevenueOrder,
+  resolveValidRevenueAmountCent,
+} from './valid-revenue-order.service'
 import type { OperationsBiDrillOrderRow } from './operations-bi-drill.types'
 
 function maskBuyerLabel(raw: string): string {
@@ -61,6 +65,7 @@ export function mapViewToOperationsBiDrillRow(
   const orderNo = displayNo || withRaw.orderId || withRaw.packageId || '—'
   const buyerNickname = pickBuyerNicknameFromView(withRaw) || null
   const afterSaleStatus = formatAfterSaleStatusDisplay(withRaw)
+  const validRevenueExplain = explainValidRevenueOrder(withRaw)
 
   return {
     orderId: withRaw.orderId || withRaw.packageId || orderNo,
@@ -78,7 +83,7 @@ export function mapViewToOperationsBiDrillRow(
     barType,
     quantity: pickQuantityFromRaw(raw),
     paymentAmountYuan: Math.round(centToYuan(withRaw.paymentBaseCent || 0)),
-    validAmountYuan: Math.round(centToYuan(withRaw.effectiveGmvCent || 0)),
+    validAmountYuan: Math.round(centToYuan(resolveValidRevenueAmountCent(withRaw) || 0)),
     includedInGmv: withRaw.includedInGmv ?? null,
     isLowPriceExcluded: brush.isLowPriceBrushOrder ?? null,
     orderStatusText: withRaw.orderStatusText ?? null,
@@ -94,6 +99,8 @@ export function mapViewToOperationsBiDrillRow(
     buyerMasked: !buyerNickname && Boolean(buyerCode),
     qianfanDetailAvailable: Boolean(orderNo && orderNo !== '—'),
     inclusionReason: inclusionReason ?? null,
+    includedInValidRevenue: validRevenueExplain.valid,
+    validRevenueReason: validRevenueExplain.reason,
   }
 }
 

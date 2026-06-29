@@ -56,8 +56,10 @@ const METRIC_DEFS: Record<
   },
   effectiveGmv: {
     title: '有效成交额',
-    formula: '有效成交额 = 支付金额 − 已取消/已关闭支付订单金额',
-    description: '本期已支付且未取消/关闭的成交额合计。',
+    formula:
+      '有效成交额 = 已完成/已签收且无在途售后、未成功退款的订单成交金额合计（与运营报表有效成交金额同一口径）',
+    description:
+      '先筛有效成交订单池，再对池内订单成交金额求和；不是支付金额减退款。售后处理中、已退款、未知售后状态暂不计入。',
     valueKey: 'effectiveGmv',
   },
   actualSignedAmount: {

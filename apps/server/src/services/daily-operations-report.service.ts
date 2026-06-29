@@ -1,6 +1,5 @@
 import type { UserRole } from '../types/roles'
 import { getAnchorConfigSync } from './anchor.service'
-import { aggregateAnchorLeaderboard } from './board-metrics.service'
 import {
   filterViewsByAnchorSpec,
   getAnchorPerformanceViews,
@@ -28,6 +27,7 @@ import {
   safeDivide,
   safeRatioPercent,
 } from './daily-report-order.util'
+import { sumValidRevenueFromViews } from './valid-revenue-order.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { aggregateAfterSalesReasons } from './after-sales-reason-normalize.service'
 import { buildOperationsPriceBandAnalysis } from './operations-price-band.service'
@@ -307,14 +307,11 @@ export async function buildDailyOperationsReport(params: {
       anchor.anchorId,
       anchor.anchorName,
     )
-    const leaderboard = aggregateAnchorLeaderboard(performanceViews)
-    const stats = leaderboard.find(
-      (row) => row.anchorId === anchor.anchorId || row.anchorName === anchor.anchorName,
-    )
-    const validAmountYuan = Number(stats?.validSalesAmount ?? 0)
+    const validRevenue = sumValidRevenueFromViews(performanceViews)
+    const validAmountYuan = validRevenue.validAmountYuan
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
-    const { soldOrderCount, invalidOrderCount } = countDailyReportOrders(performanceViews)
-    const invalidFromAll = countDailyReportOrders(anchorAllViews).invalidOrderCount
+    const { soldOrderCount } = validRevenue
+    const { invalidOrderCount: invalidFromAll } = countDailyReportOrders(anchorAllViews)
     const anchorRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViews)
     const fixedDisplay = useShopSessionRules
       ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]

@@ -35,5 +35,6 @@
     "cookieMode": "control",
     "favorite": true,
     "notes": "已接入总控 Cookie；云端 PM2 zhubo-analysis"
-  }
+  },
+  "riskLevel": "high"
 }

@@ -1,0 +1,39 @@
+{
+  "manifestVersion": 1,
+  "name": "主播分析软件",
+  "code": "zhubo-analysis",
+  "category": "主播分析",
+  "locationType": "mixed",
+  "gitRemote": "https://github.com/afan-Kiss/zhubofenxi.git",
+  "localPath": "E:\\我的软件源码\\主播分析软件",
+  "desktopStartCommand": "npm run dev",
+  "localWebUrl": "http://127.0.0.1:5173",
+  "localHealthUrl": "http://127.0.0.1:4723/api/health",
+  "publicUrl": "http://8.137.126.18/",
+  "healthType": "http",
+  "ports": [
+    4723,
+    5173
+  ],
+  "services": [
+    {
+      "name": "server",
+      "command": "npm run dev:server",
+      "port": 4723,
+      "healthUrl": "http://127.0.0.1:4723/api/health"
+    },
+    {
+      "name": "web",
+      "command": "npm run dev:web",
+      "port": 5173,
+      "webUrl": "http://127.0.0.1:5173"
+    }
+  ],
+  "control": {
+    "enabled": true,
+    "showInDesktop": true,
+    "cookieMode": "control",
+    "favorite": true,
+    "notes": "已接入总控 Cookie；云端 PM2 zhubo-analysis"
+  }
+}

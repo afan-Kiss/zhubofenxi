@@ -5,6 +5,7 @@ import { BoardStatRangeNote } from '../../components/board/BoardStatRangeNote'
 import { AnimatedStatValue } from '../../components/board/AnimatedStatValue'
 import { AnchorOrderDrawer } from '../../components/board/AnchorOrderDrawer'
 import { AnchorLeaderboardPanel } from '../../components/board/AnchorLeaderboardPanel'
+import { AnchorPocketSummaryPanel } from '../../components/board/AnchorPocketSummaryPanel'
 import { MetricStatLabel } from '../../components/board/MetricStatLabel'
 import { BoardSyncStatusHeader } from '../../components/board/BoardSyncStatusHeader'
 import { DataLastUpdateBanner } from '../../components/board/DataLastUpdateBanner'
@@ -317,6 +318,9 @@ export const AnchorPerformanceTab: React.FC = () => {
               />
             </MetricGridTransition>
           </div>
+          {startDate && endDate ? (
+            <AnchorPocketSummaryPanel preset={preset} startDate={startDate} endDate={endDate} />
+          ) : null}
         </>
       ) : null}
 

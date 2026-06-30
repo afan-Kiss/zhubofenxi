@@ -1,7 +1,13 @@
 import { prisma } from '../../lib/prisma'
 import type { DateRangePreset, DateRangeResolved } from '../../utils/date-range'
 import { resolveDateRange } from '../../utils/date-range'
+import {
+  listEnabledLiveAccountsWithCookie,
+  markCookieCheckResult,
+  markLiveAccountSyncSuccess,
+} from '../live-account.service'
 import { getDecryptedCookie } from '../credential.service'
+import type { CookieHealthStatus } from '../../utils/xhs-auth.util'
 import { getXhsSignStatus } from '../xhs-sign-status.service'
 import { writeOperationLog } from '../audit.service'
 import type { AuditAction } from '../../types/audit'
@@ -371,22 +377,91 @@ export async function executeXhsSyncJob(
     const settings = await getApiSyncSettings()
     const ctx = auditContext(userId, audit)
 
+    const accounts = await listEnabledLiveAccountsWithCookie()
+    const syncTargets =
+      accounts.length > 0
+        ? accounts.map((a) => ({ id: a.id, name: a.name }))
+        : [{ id: undefined as string | undefined, name: '默认直播号' }]
+
     await progress.setStep('syncing_order_list', 10)
-    const orderList = await syncOrderList({
-      syncJobId: jobId,
-      startDate: range.startDate,
-      endDate: range.endDate,
-      context: ctx,
-      progress,
-    })
-    bumpRequests(orderList.requestCount)
+    let orderList = {
+      itemCount: 0,
+      requestCount: 0,
+      warnings: [] as string[],
+      apiRowCount: 0,
+      authFailed: false,
+    }
+    let liveList = {
+      itemCount: 0,
+      requestCount: 0,
+      warnings: [] as string[],
+      authFailed: false,
+    }
+
+    for (let i = 0; i < syncTargets.length; i++) {
+      const account = syncTargets[i]!
+      const accountIndex = i + 1
+      const accountTotal = syncTargets.length
+      const accountLabel = account.name || account.id || '默认'
+
+      const orderPart = await syncOrderList({
+        syncJobId: jobId,
+        startDate: range.startDate,
+        endDate: range.endDate,
+        context: ctx,
+        progress,
+        liveAccountId: account.id,
+        liveAccountName: account.name,
+        accountIndex,
+        accountTotal,
+      })
+      bumpRequests(orderPart.requestCount)
+      orderList.warnings.push(...orderPart.warnings.map((w) => `「${accountLabel}」${w}`))
+      orderList.itemCount += orderPart.itemCount
+      orderList.apiRowCount =
+        (orderList.apiRowCount ?? 0) + (orderPart.apiRowCount ?? orderPart.itemCount)
+      orderList.requestCount += orderPart.requestCount
+      if (orderPart.authFailed) {
+        orderList.authFailed = true
+        if (account.id) {
+          await markCookieCheckResult(account.id, {
+            status: 'invalid' as CookieHealthStatus,
+            errorCode: 'auth_expired',
+            errorMessage: orderPart.warnings.at(-1) ?? 'Cookie 已失效',
+            failedApi: 'order_list',
+            affectedBusinessSync: false,
+          })
+        }
+      } else if (account.id) {
+        await markLiveAccountSyncSuccess(account.id)
+      }
+
+      const livePart = await syncLiveSessionList({
+        syncJobId: jobId,
+        startDate: range.startDate,
+        endDate: range.endDate,
+        context: ctx,
+        progress,
+        liveAccountId: account.id,
+        liveAccountName: account.name,
+        accountIndex,
+        accountTotal,
+      })
+      bumpRequests(livePart.requestCount)
+      liveList.warnings.push(...livePart.warnings.map((w) => `「${accountLabel}」${w}`))
+      liveList.itemCount += livePart.itemCount
+      liveList.requestCount += livePart.requestCount
+    }
+
     warnings.push(...orderList.warnings)
+    warnings.push(...liveList.warnings)
     await updateStep(jobId, 'syncing_order_list', 25, {
       orderCount: orderList.itemCount,
     })
     if (orderList.itemCount > 0) {
       await logSync('api_sync_order_list_success', '订单列表同步完成', jobId, {
         itemCount: orderList.itemCount,
+        accountCount: syncTargets.length,
       }, userId, audit)
     }
 
@@ -394,15 +469,6 @@ export async function executeXhsSyncJob(
     void settings.syncOrderDetailEnabled
 
     await progress.setStep('syncing_live_list', 30)
-    const liveList = await syncLiveSessionList({
-      syncJobId: jobId,
-      startDate: range.startDate,
-      endDate: range.endDate,
-      context: ctx,
-      progress,
-    })
-    bumpRequests(liveList.requestCount)
-    warnings.push(...liveList.warnings)
     await updateStep(jobId, 'syncing_live_list', 45, {
       liveSessionCount: liveList.itemCount,
     })

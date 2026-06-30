@@ -29,6 +29,7 @@ import { executeBoardLocalQuery } from '../services/board-local-query.service'
 import { getBusinessSyncStatus } from '../services/business-sync-scheduler.service'
 import { validateSyncRangeInput } from '../utils/sync-range-validation'
 import { logInfo } from '../utils/server-log'
+import { buildAnchorPocketSummary } from '../services/anchor-pocket-revenue.service'
 
 export const boardRouter = Router()
 
@@ -175,6 +176,27 @@ boardRouter.post('/export-reconciliation', async (_req, res) => {
     '该导出接口已废弃，请使用「导出全部已同步数据核对包」（POST /api/board/export-all-synced-check）',
     410,
   )
+})
+
+boardRouter.get('/anchor-pocket-summary', async (req, res) => {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    if (!startDate || !endDate) {
+      sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    const data = await buildAnchorPocketSummary({
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      startDate,
+      endDate,
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取主播实际到账失败', 500)
+  }
 })
 
 boardRouter.get('/anchor-drill', async (req, res) => {

@@ -24,6 +24,7 @@ import { analyticsRouter } from './routes/analytics.routes'
 import { boardRouter } from './routes/board.routes'
 import { debugRouter } from './routes/debug.routes'
 import { qualityBadCasesRouter } from './routes/quality-bad-cases.routes'
+import { goodReviewsRouter } from './routes/good-reviews.routes'
 import { appRouter } from './routes/app.routes'
 import { mountMaintenanceRouter } from './middleware/maintenance-route-gate.middleware'
 
@@ -70,6 +71,7 @@ export function createApp() {
   app.use('/api/analytics', analyticsRouter)
   app.use('/api/board', boardRouter)
   app.use('/api/quality-bad-cases', qualityBadCasesRouter)
+  app.use('/api/good-reviews', goodReviewsRouter)
   mountMaintenanceRouter(app, '/api/debug', debugRouter, '调试')
 
   app.use('/api', (_req, res) => {

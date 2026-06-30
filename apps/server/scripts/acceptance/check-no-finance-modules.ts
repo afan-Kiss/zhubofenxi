@@ -16,6 +16,7 @@ const ALLOWED_PRIMARY_ROUTES = new Set([
   '/anchors',
   '/buyers',
   '/operations-report',
+  '/good-reviews',
   '/settings',
 ])
 

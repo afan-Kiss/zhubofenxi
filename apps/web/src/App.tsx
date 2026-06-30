@@ -6,6 +6,7 @@ import { AnchorPerformanceTab } from './pages/board/AnchorPerformanceTab'
 import { BuyerRankingTab } from './pages/board/BuyerRankingTab'
 import { SettingsTab } from './pages/board/SettingsTab'
 import { OperationsReportPage } from './pages/operations/OperationsReportPage'
+import { GoodReviewsPage } from './pages/good-reviews/GoodReviewsPage'
 import { LoginPage } from './pages/auth/LoginPage'
 import { RegisterPage } from './pages/auth/RegisterPage'
 import { RequireAuth } from './components/auth/RequireAuth'
@@ -31,6 +32,7 @@ const App: React.FC = () => {
                 <Route path="anchors/:anchorId" element={<Navigate to="/anchors" replace />} />
                 <Route path="buyers" element={<BuyerRankingTab />} />
                 <Route path="operations-report" element={<OperationsReportPage />} />
+                <Route path="good-reviews" element={<GoodReviewsPage />} />
                 <Route path="orders" element={<Navigate to="/" replace />} />
                 <Route path="billing" element={<Navigate to="/" replace />} />
                 <Route path="settings" element={<SettingsTab />} />

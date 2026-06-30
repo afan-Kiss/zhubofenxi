@@ -24,6 +24,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     anchors: true,
     buyers: true,
     operations_report: true,
+    good_reviews: true,
     settings: true,
   })
   const [allowRegister, setAllowRegister] = useState(true)

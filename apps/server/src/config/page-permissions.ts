@@ -6,6 +6,7 @@ export const PAGE_PERMISSION_KEYS = [
   'anchors',
   'buyers',
   'operations_report',
+  'good_reviews',
   'settings',
 ] as const
 
@@ -16,6 +17,7 @@ export const PAGE_PERMISSION_LABELS: Record<PagePermissionKey, string> = {
   anchors: '主播业绩',
   buyers: '买家排行',
   operations_report: '运营报表',
+  good_reviews: '好评中心',
   settings: '系统设置',
 }
 
@@ -26,6 +28,7 @@ const ALL_TRUE: Record<PagePermissionKey, boolean> = {
   anchors: true,
   buyers: true,
   operations_report: true,
+  good_reviews: true,
   settings: true,
 }
 
@@ -36,6 +39,7 @@ export const DEFAULT_ROLE_PAGE_PERMISSIONS: RolePagePermissions = {
     anchors: true,
     buyers: true,
     operations_report: true,
+    good_reviews: true,
     settings: false,
   },
   staff: {
@@ -43,6 +47,7 @@ export const DEFAULT_ROLE_PAGE_PERMISSIONS: RolePagePermissions = {
     anchors: true,
     buyers: true,
     operations_report: false,
+    good_reviews: true,
     settings: false,
   },
   local_viewer: { ...ALL_TRUE },

@@ -639,3 +639,69 @@ model OperationsBusinessInsightAction {
   @@unique([insightId, rangeStartDate, rangeEndDate, scope])
   @@index([rangeStartDate, rangeEndDate, scope])
 }
+
+/// 好评中心：店铺评分与统计快照（按 shopKey 缓存）
+model GoodReviewShopSnapshot {
+  id                      String    @id @default(cuid())
+  shopKey                 String    @unique
+  shopName                String
+  shopScore               Float?
+  totalReviewCount        Int       @default(0)
+  goodReviewCount         Int       @default(0)
+  mediumReviewCount       Int       @default(0)
+  badReviewCount          Int       @default(0)
+  withImageCount          Int       @default(0)
+  withTextCount           Int       @default(0)
+  unrepliedCount          Int       @default(0)
+  repliedCount            Int       @default(0)
+  pendingInteractionCount Int       @default(0)
+  pendingBadReviewCount   Int       @default(0)
+  scoreRawJson            String?
+  countDetailRawJson      String?
+  overviewRawJson         String?
+  syncedAt                DateTime?
+  updatedAt               DateTime  @updatedAt
+  createdAt               DateTime  @default(now())
+}
+
+/// 好评中心：单条评价缓存
+model GoodReview {
+  id               String    @id @default(cuid())
+  shopKey          String
+  dedupeKey        String
+  reviewId         String?
+  orderId          String?
+  itemId           String?
+  skuId            String?
+  itemName         String?
+  itemImage        String?
+  itemPriceCent    Int?
+  itemQuantity     Int?
+  productScore     Float?
+  serviceScore     Float?
+  logisticsScore   Float?
+  reviewText       String?
+  reviewImagesJson String    @default("[]")
+  reviewTagsJson   String    @default("[]")
+  isAnonymous      Boolean   @default(false)
+  likeCount        Int       @default(0)
+  replyCount       Int       @default(0)
+  reviewTime       DateTime?
+  reviewTimeText   String?
+  rawJson          String?
+  syncedAt         DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+
+  @@unique([shopKey, dedupeKey])
+  @@index([shopKey])
+  @@index([reviewTime])
+  @@index([reviewId])
+}
+
+/// 好评中心：全局同步元数据
+model GoodReviewSyncMeta {
+  id           String    @id @default("default")
+  lastSyncedAt DateTime?
+  updatedAt    DateTime  @updatedAt
+}

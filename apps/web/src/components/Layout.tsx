@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Menu, Settings, Users, UserCircle, X, FileText, LogOut } from 'lucide-react'
+import { LayoutDashboard, Menu, Settings, Users, UserCircle, X, FileText, LogOut, ThumbsUp } from 'lucide-react'
 import { PageRequestStatusBar } from './board/PageRequestStatusBar'
 import { CookieHealthWatcher } from './board/CookieHealthWatcher'
 import { BoardLiveQueryProvider } from '../providers/BoardLiveQueryProvider'
@@ -43,6 +43,12 @@ const ALL_NAV: Array<{
     label: (<><FileText size={14} /> 运营报表</>),
     dataTestId: 'tab-operations-report',
     permission: 'operations_report',
+  },
+  {
+    to: '/good-reviews',
+    label: (<><ThumbsUp size={14} /> 好评中心</>),
+    dataTestId: 'tab-good-reviews',
+    permission: 'good_reviews',
   },
   {
     to: '/settings',

@@ -198,6 +198,11 @@ export function getMaxDownloadBytes(): number {
   return Math.floor(safe * 1024 * 1024)
 }
 
+/** 四店 Cookie 批量上传接口专用 Token（勿提交 Git） */
+export function getShopCookieUploadToken(): string {
+  return String(process.env.SHOP_COOKIE_UPLOAD_TOKEN || '').trim()
+}
+
 /** 日志用：截断 URL，避免打印过长或敏感查询参数 */
 export function truncateUrlForLog(url: string, max = 80): string {
   if (url.length <= max) return url

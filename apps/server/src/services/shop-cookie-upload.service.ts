@@ -23,7 +23,18 @@ export interface ShopCookieUploadItemResult {
   accountId?: string
   cookiePreview?: string | null
   cookieStatus?: string
+  status?: string
   error?: string
+  cookieFieldUsed?: string | null
+  receivedCookieLength?: number
+  receivedCookieKeyCount?: number
+  receivedContainsA1?: boolean
+  savedContainsA1?: boolean
+  normalizedShopKey?: string
+  savedAccountId?: string | null
+  savedAt?: string | null
+  skipped?: boolean
+  skipReason?: string
 }
 
 export interface ShopCookieUploadResult {
@@ -57,6 +68,57 @@ function maskCookiePreview(cookie: string): string {
   return `${trimmed.slice(0, 8)}…${trimmed.slice(-8)}`
 }
 
+function extractCookieKeys(cookie: string): string[] {
+  const keys: string[] = []
+  for (const seg of cookie.split(';')) {
+    const piece = seg.trim()
+    if (!piece) continue
+    const eq = piece.indexOf('=')
+    if (eq <= 0) continue
+    keys.push(piece.slice(0, eq).trim())
+  }
+  return [...new Set(keys)].sort()
+}
+
+function cookieContainsA1(cookie: string): boolean {
+  return /(?:^|;\s*)a1=[^;]+/i.test(cookie.trim())
+}
+
+function isGarbageCookieString(cookie: string): boolean {
+  const trimmed = cookie.trim()
+  if (!trimmed) return true
+  if (trimmed === '[object Object]') return true
+  if (trimmed === '已保存') return true
+  return false
+}
+
+/** 从上传项中按优先级提取 Cookie 字符串 */
+export function extractCookieFromShopEntry(raw: unknown): {
+  cookie: string
+  fieldUsed: string | null
+} {
+  if (typeof raw === 'string') {
+    const cookie = raw.trim()
+    return { cookie, fieldUsed: cookie ? 'string' : null }
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { cookie: '', fieldUsed: null }
+  }
+  const obj = raw as Record<string, unknown>
+  const priorities: Array<[string, unknown]> = [
+    ['cookie', obj.cookie],
+    ['cookieHeader', obj.cookieHeader],
+    ['rawCookie', obj.rawCookie],
+    ['cookies', obj.cookies],
+  ]
+  for (const [field, value] of priorities) {
+    if (typeof value === 'string' && value.trim()) {
+      return { cookie: value.trim(), fieldUsed: field }
+    }
+  }
+  return { cookie: '', fieldUsed: null }
+}
+
 function buildCookieReason(row: {
   cookieEncrypted: string | null
   cookieStatus: string
@@ -85,10 +147,17 @@ function buildCookieReason(row: {
   if (st === 'invalid') {
     const code = row.cookieLastErrorCode?.trim()
     const msg = row.cookieLastErrorMessage?.trim()
+    if (code === 'cookie_missing_a1' || msg?.includes('缺少 a1')) {
+      return {
+        status: 'invalid',
+        reason: '服务器已收到 Cookie，但这份 Cookie 不完整，缺少 a1，无法同步订单。',
+        canSyncOrders: false,
+      }
+    }
     if (code === '401' || code === '403' || msg?.includes('401') || msg?.includes('403')) {
       return {
         status: 'invalid',
-        reason: msg || '已收到 Cookie，但平台接口返回 401/403',
+        reason: msg || 'Cookie 已收到，但平台接口返回未登录，需要重新登录后提交。',
         canSyncOrders: false,
       }
     }
@@ -142,27 +211,36 @@ async function ensureAccountForShop(
   return row.id
 }
 
-function normalizeUploadPayload(raw: unknown): Array<{ shopKey: GoodReviewShopKey; cookie: string }> {
-  const items: Array<{ shopKey: GoodReviewShopKey; cookie: string }> = []
+function normalizeUploadPayload(raw: unknown): Array<{
+  shopKey: GoodReviewShopKey
+  cookie: string
+  fieldUsed: string | null
+}> {
+  const items: Array<{ shopKey: GoodReviewShopKey; cookie: string; fieldUsed: string | null }> = []
 
   if (!raw || typeof raw !== 'object') return items
   const body = raw as Record<string, unknown>
 
-  if (typeof body.shop === 'string' && body.cookie != null) {
-    const key = resolveGoodReviewShopKey(body.shop)
-    const cookie = String(body.cookie).trim()
-    if (key && cookie) items.push({ shopKey: key, cookie })
+  if (body.shop != null) {
+    const key = resolveGoodReviewShopKey(String(body.shop))
+    const extracted = extractCookieFromShopEntry({
+      cookie: body.cookie,
+      cookieHeader: body.cookieHeader,
+      rawCookie: body.rawCookie,
+      cookies: body.cookies,
+    })
+    if (key && extracted.cookie) items.push({ shopKey: key, ...extracted })
     return items
   }
 
   const shops = body.shops
   if (!shops || typeof shops !== 'object' || Array.isArray(shops)) return items
 
-  for (const [rawKey, rawCookie] of Object.entries(shops as Record<string, unknown>)) {
+  for (const [rawKey, rawEntry] of Object.entries(shops as Record<string, unknown>)) {
     const key = resolveGoodReviewShopKey(rawKey)
-    const cookie = String(rawCookie ?? '').trim()
-    if (!key || !cookie) continue
-    items.push({ shopKey: key, cookie })
+    const extracted = extractCookieFromShopEntry(rawEntry)
+    if (!key || !extracted.cookie) continue
+    items.push({ shopKey: key, cookie: extracted.cookie, fieldUsed: extracted.fieldUsed })
   }
   return items
 }
@@ -184,6 +262,53 @@ export async function uploadShopCookies(params: {
     seen.add(item.shopKey)
 
     const shopName = getGoodReviewShopName(item.shopKey)
+    const receivedCookieLength = item.cookie.length
+    const receivedCookieKeyCount = extractCookieKeys(item.cookie).length
+    const receivedContainsA1 = cookieContainsA1(item.cookie)
+    const baseDiag = {
+      shopKey: item.shopKey,
+      shopName,
+      normalizedShopKey: item.shopKey,
+      cookieFieldUsed: item.fieldUsed,
+      receivedCookieLength,
+      receivedCookieKeyCount,
+      receivedContainsA1,
+    }
+
+    if (isGarbageCookieString(item.cookie)) {
+      logInfo(
+        'Cookie上传诊断',
+        `${shopName} 收到无效 Cookie 字符串 field=${item.fieldUsed ?? '-'} len=${receivedCookieLength} containsA1=${receivedContainsA1}`,
+      )
+      results.push({
+        ...baseDiag,
+        success: false,
+        skipped: true,
+        skipReason: 'invalid_cookie_string',
+        savedContainsA1: false,
+        error: '收到的 Cookie 不是有效字符串（可能 payload 字段解析错误）',
+        status: 'rejected',
+      })
+      continue
+    }
+
+    if (!receivedContainsA1) {
+      logInfo(
+        'Cookie上传诊断',
+        `${shopName} 收到 Cookie 缺少 a1，跳过落库 field=${item.fieldUsed ?? '-'} keys=${receivedCookieKeyCount}`,
+      )
+      results.push({
+        ...baseDiag,
+        success: false,
+        skipped: true,
+        skipReason: 'missing_a1',
+        savedContainsA1: false,
+        error: '收到的 Cookie 缺少 a1，未覆盖已有记录',
+        status: 'rejected',
+      })
+      continue
+    }
+
     try {
       let accountId = await findAccountIdForShop(item.shopKey)
       if (!accountId) {
@@ -194,21 +319,39 @@ export async function uploadShopCookies(params: {
       }
 
       const row = await prisma.platformCredential.findUnique({ where: { id: accountId } })
+      let savedContainsA1 = false
+      if (row?.cookieEncrypted?.trim()) {
+        try {
+          savedContainsA1 = cookieContainsA1(decryptText(row.cookieEncrypted))
+        } catch {
+          savedContainsA1 = cookieContainsA1(row.cookieEncrypted)
+        }
+      }
+
+      logInfo(
+        'Cookie上传诊断',
+        `${shopName} field=${item.fieldUsed ?? '-'} receivedA1=${receivedContainsA1} savedA1=${savedContainsA1} len=${receivedCookieLength} accountId=${accountId}`,
+      )
+
       results.push({
-        shopKey: item.shopKey,
-        shopName,
+        ...baseDiag,
         success: true,
         accountId,
+        savedAccountId: accountId,
+        savedAt: row?.updatedAt?.toISOString() ?? new Date().toISOString(),
+        savedContainsA1,
         cookiePreview: row?.cookieEncrypted ? maskCookiePreview(item.cookie) : null,
         cookieStatus: row?.cookieStatus ?? 'unknown',
+        status: row?.cookieStatus ?? 'uploaded',
       })
       logInfo('Cookie上传', `${shopName} 已落库，状态=${row?.cookieStatus ?? 'unknown'}`)
     } catch (err) {
       results.push({
-        shopKey: item.shopKey,
-        shopName,
+        ...baseDiag,
         success: false,
+        savedContainsA1: false,
         error: err instanceof Error ? err.message : String(err),
+        status: 'failed',
       })
     }
   }

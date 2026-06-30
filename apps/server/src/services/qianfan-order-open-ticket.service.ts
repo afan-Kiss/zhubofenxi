@@ -79,10 +79,30 @@ function buildConfiguredDetailUrl(orderId: string): string | null {
 function extractTicketFromResponse(data: unknown): string {
   if (!data || typeof data !== 'object') return ''
   const obj = data as Record<string, unknown>
-  const nested = obj.data as Record<string, unknown> | undefined
-  const direct = nested?.ticket ?? obj.ticket ?? nested?.st ?? ''
-  const s = String(direct || '').trim()
-  return s.startsWith('ST-') ? s : ''
+  const nested = obj.data
+  const nestedRec =
+    nested && typeof nested === 'object' && !Array.isArray(nested)
+      ? (nested as Record<string, unknown>)
+      : undefined
+  const deepNested =
+    nestedRec?.data && typeof nestedRec.data === 'object' && !Array.isArray(nestedRec.data)
+      ? (nestedRec.data as Record<string, unknown>)
+      : undefined
+
+  const candidates = [
+    nestedRec?.ticket,
+    nestedRec?.st,
+    nestedRec?.serviceTicket,
+    deepNested?.ticket,
+    deepNested?.st,
+    obj.ticket,
+    obj.st,
+  ]
+  for (const direct of candidates) {
+    const s = String(direct ?? '').trim()
+    if (s.startsWith('ST-') || s.startsWith('AT-')) return s
+  }
+  return ''
 }
 
 async function postServiceTicket(
@@ -134,6 +154,9 @@ async function fetchTicketWithCookie(cookie: string, serviceUrl: string): Promis
   const sid = String(parseCookieMap(cookie)['customer-sso-sid'] || '').trim()
   const bodies: Record<string, unknown>[] = [
     { service: ARK_ROOT, type: 'at' },
+    { service: ARK_ROOT, type: 'st', sid, source: '' },
+    { service: serviceUrl, type: 'st', sid, source: '' },
+    { service: serviceUrl, type: 'at', sid, source: '' },
     { service: enc, type: 'at', sid, source: '' },
     { service: enc, type: 'st', sid, source: '' },
     { service: enc, type: 'sso', sid, source: '' },
@@ -141,6 +164,11 @@ async function fetchTicketWithCookie(cookie: string, serviceUrl: string): Promis
   const auth = extractAuthorizationFromCookie(cookie)
   const headerVariants = [
     {},
+    {
+      origin: 'https://customer.xiaohongshu.com',
+      referer: 'https://customer.xiaohongshu.com/',
+      authorization: auth,
+    },
     {
       origin: 'https://ark.xiaohongshu.com',
       referer: 'https://ark.xiaohongshu.com/app-order/order/query',
@@ -203,6 +231,33 @@ async function resolveCookieForOrder(orderNo: string): Promise<{
   }
 }
 
+async function resolveCookiesForOrderOpen(
+  orderNo: string,
+  shopKeyOrName?: string,
+): Promise<{ cookies: string[]; packageId: string }> {
+  const trimmed = String(orderNo || '').trim()
+  const packageId = normalizePackageId(trimmed) || trimmed
+  const cookies: string[] = []
+  const pushCookie = (value: string | null | undefined) => {
+    const text = String(value || '').trim()
+    if (!text || cookies.includes(text)) return
+    cookies.push(text)
+  }
+
+  if (shopKeyOrName) {
+    const shopResolved = await resolveCookieForShopStrict(shopKeyOrName)
+    pushCookie(shopResolved?.cookie)
+  }
+
+  const orderResolved = await resolveCookieForOrder(trimmed)
+  pushCookie(orderResolved.cookie)
+
+  return {
+    cookies,
+    packageId: orderResolved.packageId || packageId,
+  }
+}
+
 export class QianfanOrderOpenTicketError extends Error {
   constructor(message: string) {
     super(message)
@@ -210,7 +265,10 @@ export class QianfanOrderOpenTicketError extends Error {
   }
 }
 
-export async function createQianfanOrderOpenTicket(orderNo: string): Promise<{
+export async function createQianfanOrderOpenTicket(
+  orderNo: string,
+  options?: { shop?: string },
+): Promise<{
   ticket: string
   expiresInSeconds: number
   openUrl: string
@@ -220,8 +278,8 @@ export async function createQianfanOrderOpenTicket(orderNo: string): Promise<{
     throw new QianfanOrderOpenTicketError('请提供订单号')
   }
 
-  const { cookie, packageId } = await resolveCookieForOrder(trimmed)
-  if (!cookie) {
+  const { cookies, packageId } = await resolveCookiesForOrderOpen(trimmed, options?.shop)
+  if (!cookies.length) {
     throw new QianfanOrderOpenTicketError(
       '平台登录信息过期了，请到系统设置重新粘贴 Cookie。',
     )
@@ -233,7 +291,11 @@ export async function createQianfanOrderOpenTicket(orderNo: string): Promise<{
     throw new QianfanOrderOpenTicketError('还没有配置订单详情地址，暂时不能跳千帆。')
   }
 
-  const ticketValue = await fetchTicketWithCookie(cookie, serviceUrl)
+  let ticketValue = ''
+  for (const cookie of cookies) {
+    ticketValue = await fetchTicketWithCookie(cookie, serviceUrl)
+    if (ticketValue) break
+  }
   if (!ticketValue) {
     throw new QianfanOrderOpenTicketError(
       '暂时换不到千帆详情入口，请确认该店铺 Cookie 有效后再试。',
@@ -359,36 +421,27 @@ export async function buildGoodReviewArkOrderDetail(params: {
     throw new QianfanOrderOpenTicketError('还没有配置订单详情地址，暂时不能跳千帆。')
   }
 
-  const resolved = await resolveCookieForShopStrict(shopKey)
-  if (!resolved) {
-    return {
-      ok: false,
-      url: serviceUrl,
-      serviceUrl,
-      shop: shopKey,
-      hasTicket: false,
-      error: `未找到店铺「${getGoodReviewShopName(shopKey)}」的 Cookie 配置`,
-    }
-  }
-
-  const ticketValue = await fetchTicketWithCookie(resolved.cookie, serviceUrl)
-  if (ticketValue) {
+  try {
+    const ticket = await createQianfanOrderOpenTicket(params.orderId, { shop: params.shop })
     return {
       ok: true,
-      url: buildArkUrlWithTicket(serviceUrl, ticketValue),
+      url: ticket.openUrl,
       serviceUrl,
       shop: shopKey,
       hasTicket: true,
     }
-  }
-
-  return {
-    ok: false,
-    url: serviceUrl,
-    serviceUrl,
-    shop: shopKey,
-    hasTicket: false,
-    error: '未能换到 ST ticket',
+  } catch (err) {
+    if (err instanceof QianfanOrderOpenTicketError) {
+      return {
+        ok: false,
+        url: serviceUrl,
+        serviceUrl,
+        shop: shopKey,
+        hasTicket: false,
+        error: err.message,
+      }
+    }
+    throw err
   }
 }
 

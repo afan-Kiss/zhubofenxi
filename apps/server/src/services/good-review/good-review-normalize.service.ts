@@ -51,17 +51,52 @@ export function normalizeReviewImageUrl(url: string | null | undefined): string 
   return text
 }
 
+function extractImageUrlFromValue(item: unknown): string | null {
+  if (item == null) return null
+  if (typeof item === 'string') return normalizeReviewImageUrl(item)
+  const rec = asRecord(item)
+  if (!rec) return null
+  return normalizeReviewImageUrl(
+    pickString(rec, [
+      'link',
+      'url',
+      'imageUrl',
+      'picUrl',
+      'src',
+      'image_url',
+      'pic_url',
+      'imageLink',
+      'image_link',
+      'cover',
+      'path',
+    ]),
+  )
+}
+
+function pickImageUrlArray(obj: Record<string, unknown>, keys: string[]): string[] {
+  for (const key of keys) {
+    const val = obj[key]
+    if (!Array.isArray(val)) continue
+    const urls: string[] = []
+    for (const item of val) {
+      const url = extractImageUrlFromValue(item)
+      if (url) urls.push(url)
+    }
+    if (urls.length) return urls
+  }
+  return []
+}
+
 function pickImages(obj: Record<string, unknown>): string[] {
-  const direct = pickStringArray(obj, ['reviewImages', 'images', 'imageList', 'picList', 'pics'])
-  if (direct.length) return direct.map((u) => normalizeReviewImageUrl(u)).filter(Boolean) as string[]
+  const fromArrays = pickImageUrlArray(obj, ['reviewImages', 'images', 'imageList', 'picList', 'pics'])
+  if (fromArrays.length) return fromArrays
 
   const content = asRecord(obj.content)
   const contentImages = content?.images
   if (Array.isArray(contentImages)) {
     const urls: string[] = []
     for (const item of contentImages) {
-      const rec = asRecord(item)
-      const url = normalizeReviewImageUrl(pickString(rec ?? {}, ['link', 'url', 'imageUrl', 'picUrl']))
+      const url = extractImageUrlFromValue(item)
       if (url) urls.push(url)
     }
     if (urls.length) return urls
@@ -71,9 +106,7 @@ function pickImages(obj: Record<string, unknown>): string[] {
   if (Array.isArray(imageInfo)) {
     const urls: string[] = []
     for (const item of imageInfo) {
-      const rec = asRecord(item)
-      if (!rec) continue
-      const url = normalizeReviewImageUrl(pickString(rec, ['url', 'imageUrl', 'picUrl', 'src', 'link']))
+      const url = extractImageUrlFromValue(item)
       if (url) urls.push(url)
     }
     if (urls.length) return urls
@@ -187,7 +220,7 @@ export function normalizeGoodReviewRow(
     logisticsScore:
       pickNumber(reviewData ?? raw, ['logistics_score', 'logisticsScore', 'deliveryScore']) ?? null,
     reviewText,
-    reviewImages: pickImages({ ...(content ?? {}), ...raw }),
+    reviewImages: pickImages({ ...(content ?? {}), ...(reviewData ?? {}), ...raw }),
     reviewTags: pickStringArray(reviewData ?? raw, ['tags', 'reviewTags', 'review_tags', 'labelList']),
     isAnonymous: pickBool(reviewData ?? raw, ['anonymous', 'isAnonymous', 'is_anonymous']),
     likeCount:

@@ -208,7 +208,7 @@ export async function buildDailyReport(params: {
 
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   for (const anchor of reportAnchors) {
-    const performanceViews = getAnchorPerformanceViews(
+    const performanceViews = await getAnchorPerformanceViews(
       scoped.views,
       scoped.rawByMatch,
       anchor.anchorId,

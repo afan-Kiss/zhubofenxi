@@ -123,7 +123,7 @@ export async function buildAnchorDrill(params: {
     username: params.username,
   })
 
-  const performanceScoped = getAnchorPerformanceViews(
+  const performanceScoped = await getAnchorPerformanceViews(
     scoped.views,
     scoped.rawByMatch,
     anchorQuery.anchorId,

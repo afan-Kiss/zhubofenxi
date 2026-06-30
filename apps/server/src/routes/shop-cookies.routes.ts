@@ -1,9 +1,6 @@
 import { Router } from 'express'
 import { attachRequestUser } from '../middleware/local-viewer.middleware'
-import {
-  requireShopCookieStatusAuth,
-  requireShopCookieUploadAuth,
-} from '../middleware/shop-cookie-upload.middleware'
+import { allowShopCookieAccess } from '../middleware/shop-cookie-upload.middleware'
 import {
   getShopCookieStatusPayload,
   uploadShopCookies,
@@ -15,7 +12,7 @@ export const shopCookiesRouter = Router()
 shopCookiesRouter.use(attachRequestUser)
 
 /** 查看四店 Cookie 配置状态（不返回明文） */
-shopCookiesRouter.get('/status', requireShopCookieStatusAuth, async (_req, res, next) => {
+shopCookiesRouter.get('/status', allowShopCookieAccess, async (_req, res, next) => {
   try {
     const payload = await getShopCookieStatusPayload()
     sendOk(res, payload)
@@ -24,9 +21,13 @@ shopCookiesRouter.get('/status', requireShopCookieStatusAuth, async (_req, res, 
   }
 })
 
-const uploadHandler = async (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+const uploadHandler = async (
+  req: import('express').Request,
+  res: import('express').Response,
+  next: import('express').NextFunction,
+) => {
   try {
-    const updatedBy = req.user?.id ?? 'shop-cookie-upload-token'
+    const updatedBy = req.user?.id ?? 'shop-cookie-upload'
     const result = await uploadShopCookies({
       body: req.body,
       updatedBy,
@@ -38,5 +39,5 @@ const uploadHandler = async (req: import('express').Request, res: import('expres
   }
 }
 
-shopCookiesRouter.post('/update', requireShopCookieUploadAuth, uploadHandler)
-shopCookiesRouter.post('/', requireShopCookieUploadAuth, uploadHandler)
+shopCookiesRouter.post('/update', allowShopCookieAccess, uploadHandler)
+shopCookiesRouter.post('/', allowShopCookieAccess, uploadHandler)

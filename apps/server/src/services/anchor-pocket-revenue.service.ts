@@ -7,6 +7,7 @@ import {
   isReportDateOnOrAfterXiaoBaiCutoff,
 } from './anchor-performance-attribution.service'
 import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
+import { listUnconfirmedScheduleDatesInRange } from './anchor-schedule-confirm.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { getBoardScopedViewsForRange } from './board-scoped-views.service'
@@ -284,6 +285,18 @@ export async function buildAnchorPocketSummary(params: {
       type: 'after_sales_pending',
       message: `有 ${afterSalesPendingCount} 笔订单售后数据未确认，实际到账可能偏高`,
       count: afterSalesPendingCount,
+    })
+  }
+
+  const unconfirmedDates = await listUnconfirmedScheduleDatesInRange(
+    scoped.startDate,
+    scoped.endDate,
+  )
+  if (unconfirmedDates.length > 0) {
+    warnings.push({
+      type: 'schedule_unconfirmed',
+      message: `有 ${unconfirmedDates.length} 天排班未确认，主播归属可能不准，请先确认排班`,
+      count: unconfirmedDates.length,
     })
   }
 

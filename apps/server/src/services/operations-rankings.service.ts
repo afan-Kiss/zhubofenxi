@@ -270,7 +270,7 @@ export async function getOperationsRankings(params: {
     role: params.role,
     username: params.username,
   })
-  const performanceViews = getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
   const products = await buildOperationsProductAnalysis(performanceViews, scoped.rawByMatch)
   const priceBandRows = buildOperationsPriceBandAnalysis(performanceViews)
   const afterSalesRows = aggregateAfterSalesReasons(

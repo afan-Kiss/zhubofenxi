@@ -292,7 +292,7 @@ export async function buildDailyOperationsReport(params: {
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)
-  const performanceViewsAll = getAnchorPerformanceViews(
+  const performanceViewsAll = await getAnchorPerformanceViews(
     scoped.views,
     scoped.rawByMatch,
   )
@@ -301,7 +301,7 @@ export async function buildDailyOperationsReport(params: {
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
 
   for (const anchor of reportAnchors) {
-    const performanceViews = getAnchorPerformanceViews(
+    const performanceViews = await getAnchorPerformanceViews(
       scoped.views,
       scoped.rawByMatch,
       anchor.anchorId,
@@ -510,7 +510,7 @@ export async function buildOperationsAfterSalesDetail(params: {
   category?: string
 }) {
   const scoped = await getBoardScopedViewsForRange(params)
-  const performanceViews = getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
   const items = buildAfterSalesItemsFromViews(performanceViews)
   const filtered = params.category
     ? aggregateAfterSalesReasons(items).filter((r) => r.category === params.category)
@@ -527,7 +527,7 @@ export async function buildOperationsProductDetailReport(params: {
   username?: string
 }) {
   const scoped = await getBoardScopedViewsForRange(params)
-  const performanceViews = getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
   const products = await buildOperationsProductAnalysis(performanceViews, scoped.rawByMatch)
   return {
     startDate: params.startDate,

@@ -417,7 +417,7 @@ export async function buildOperationsBiDrill(
     role: viewer.role,
     username: viewer.username,
   })
-  const performanceViews = getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
   const filtered = filterViewsForTarget(performanceViews, scoped.rawByMatch, input, mode)
 
   const inclusionReason = TARGET_LABELS[effectiveTarget]

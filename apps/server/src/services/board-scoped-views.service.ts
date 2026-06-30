@@ -7,7 +7,7 @@ import {
   attachRawByMatchToViews,
   filterViewsForAnchorPerformance,
 } from './low-price-brush-order.service'
-import { remapViewsForAnchorPerformance } from './anchor-performance-attribution.service'
+import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { filterViewsForStaffScope } from './staff-anchor-scope.service'
 
@@ -78,16 +78,16 @@ export function filterViewsByAnchorSpec(
   return views.filter((v) => viewBelongsToAnchor(v, { anchorId: id, anchorName: name }))
 }
 
-/** 主播业绩汇总 / anchor-drill 使用的 views（含低价过滤 + raw） */
-export function getAnchorPerformanceViews(
+/** 主播业绩汇总 / anchor-drill 使用的 views（含低价过滤 + raw + 排班覆盖层） */
+export async function getAnchorPerformanceViews(
   scopedViews: AnalyzedOrderView[],
   rawByMatch: Map<string, Record<string, unknown>>,
   anchorId?: string,
   anchorName?: string,
-): AnalyzedOrderView[] {
+): Promise<AnalyzedOrderView[]> {
   const normalized = normalizeAnchorDrillQuery({ anchorId, anchorName })
   const withRaw = attachRawByMatchToViews(scopedViews, rawByMatch)
-  const remapped = remapViewsForAnchorPerformance(withRaw)
+  const remapped = await remapViewsWithScheduleOverlay(withRaw)
   const base =
     normalized.anchorId || normalized.anchorName
       ? filterViewsByAnchorSpec(remapped, normalized.anchorId, normalized.anchorName)

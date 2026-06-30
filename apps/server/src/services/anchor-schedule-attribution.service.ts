@@ -6,12 +6,14 @@ import {
   resolveAnchorForPerformanceAttribution,
 } from './anchor-performance-attribution.service'
 import { getEffectiveSchedulesForDate } from './anchor-daily-schedule.service'
+import { isDateScheduleConfirmed } from './anchor-schedule-confirm.service'
 import { isPayTimeInSchedule, scheduleDateFromPayMs } from '../utils/anchor-schedule-time.util'
 import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
 
 export type ScheduleAttributionSource =
   | 'manual_schedule'
   | 'default_schedule'
+  | 'template_virtual'
   | 'legacy_rule'
   | 'unmatched'
 
@@ -20,12 +22,15 @@ export interface ScheduleAttributionResult {
   anchorName: string
   attributionSource: ScheduleAttributionSource
   attributionExplain: string
+  scheduleConfirmed: boolean
 }
 
 const scheduleCacheByDate = new Map<string, Awaited<ReturnType<typeof getEffectiveSchedulesForDate>>>()
+const confirmCacheByDate = new Map<string, boolean>()
 
 export function clearScheduleAttributionCache(): void {
   scheduleCacheByDate.clear()
+  confirmCacheByDate.clear()
 }
 
 async function loadSchedules(dateKey: string) {
@@ -33,6 +38,15 @@ async function loadSchedules(dateKey: string) {
   if (!cached) {
     cached = await getEffectiveSchedulesForDate(dateKey)
     scheduleCacheByDate.set(dateKey, cached)
+  }
+  return cached
+}
+
+async function loadDateConfirmed(dateKey: string): Promise<boolean> {
+  let cached = confirmCacheByDate.get(dateKey)
+  if (cached === undefined) {
+    cached = await isDateScheduleConfirmed(dateKey)
+    confirmCacheByDate.set(dateKey, cached)
   }
   return cached
 }
@@ -85,6 +99,11 @@ function formatHmRange(startAt: Date, endAt: Date): string {
   return `${start}-${end}`
 }
 
+function prefixUnconfirmed(explain: string, dateKey: string, confirmed: boolean): string {
+  if (confirmed) return explain
+  return explain.replace(/^命中 /, `命中未确认排班：${dateKey} `)
+}
+
 export async function resolveAnchorWithScheduleOverlay(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
 ): Promise<ScheduleAttributionResult> {
@@ -95,42 +114,50 @@ export async function resolveAnchorWithScheduleOverlay(
       anchorName: '未归属',
       attributionSource: 'unmatched',
       attributionExplain: '订单无支付时间，无法按排班归属',
+      scheduleConfirmed: false,
     }
   }
 
   const dateKey = scheduleDateFromPayMs(payMs)
   const buckets = await loadSchedules(dateKey)
+  const dateConfirmed = await loadDateConfirmed(dateKey)
 
   const manualHit = matchScheduleRow(view, payMs, buckets.manual)
   if (manualHit) {
     const anchorName = manualHit.anchorName
+    const explain = `命中 ${dateKey} 手动排班：${manualHit.liveRoomName} ${formatHmRange(manualHit.startAt, manualHit.endAt)} ${anchorName}`
     return {
       anchorId: resolveAnchorId(anchorName),
       anchorName,
       attributionSource: 'manual_schedule',
-      attributionExplain: `命中 ${dateKey} 手动排班：${manualHit.liveRoomName} ${formatHmRange(manualHit.startAt, manualHit.endAt)} ${anchorName}`,
+      attributionExplain: prefixUnconfirmed(explain, dateKey, dateConfirmed),
+      scheduleConfirmed: dateConfirmed,
     }
   }
 
   const generatedHit = matchScheduleRow(view, payMs, buckets.generated)
   if (generatedHit) {
     const anchorName = generatedHit.anchorName
+    const explain = `命中 ${dateKey} 默认排班：${generatedHit.liveRoomName} ${formatHmRange(generatedHit.startAt, generatedHit.endAt)} ${anchorName}`
     return {
       anchorId: resolveAnchorId(anchorName),
       anchorName,
       attributionSource: 'default_schedule',
-      attributionExplain: `命中 ${dateKey} 默认排班：${generatedHit.liveRoomName} ${formatHmRange(generatedHit.startAt, generatedHit.endAt)} ${anchorName}`,
+      attributionExplain: prefixUnconfirmed(explain, dateKey, dateConfirmed),
+      scheduleConfirmed: dateConfirmed,
     }
   }
 
   const virtualHit = matchScheduleRow(view, payMs, buckets.virtual)
   if (virtualHit) {
     const anchorName = virtualHit.anchorName
+    const explain = `命中默认排班模板：${virtualHit.liveRoomName} ${formatHmRange(virtualHit.startAt, virtualHit.endAt)} ${anchorName}`
     return {
       anchorId: resolveAnchorId(anchorName),
       anchorName,
-      attributionSource: 'default_schedule',
-      attributionExplain: `命中默认排班模板：${virtualHit.liveRoomName} ${formatHmRange(virtualHit.startAt, virtualHit.endAt)} ${anchorName}`,
+      attributionSource: 'template_virtual',
+      attributionExplain: prefixUnconfirmed(explain, dateKey, false),
+      scheduleConfirmed: false,
     }
   }
 
@@ -144,13 +171,24 @@ export async function resolveAnchorWithScheduleOverlay(
       legacy.anchorName === '未归属'
         ? '没有命中当天排班、默认排班和旧规则'
         : `沿用系统默认归属规则：${legacy.anchorName}`,
+    scheduleConfirmed: dateConfirmed,
   }
 }
 
 export async function remapViewsWithScheduleOverlay(
   views: (AnalyzedOrderView & { raw?: Record<string, unknown> })[],
-): Promise<(AnalyzedOrderView & { scheduleAttributionExplain?: string })[]> {
-  const out: (AnalyzedOrderView & { scheduleAttributionExplain?: string })[] = []
+): Promise<
+  (AnalyzedOrderView & {
+    scheduleAttributionExplain?: string
+    scheduleAttributionSource?: ScheduleAttributionSource
+    scheduleConfirmed?: boolean
+  })[]
+> {
+  const out: (AnalyzedOrderView & {
+    scheduleAttributionExplain?: string
+    scheduleAttributionSource?: ScheduleAttributionSource
+    scheduleConfirmed?: boolean
+  })[] = []
   for (const view of views) {
     const resolved = await resolveAnchorWithScheduleOverlay(view)
     out.push({
@@ -158,6 +196,8 @@ export async function remapViewsWithScheduleOverlay(
       anchorId: resolved.anchorId,
       anchorName: resolved.anchorName,
       scheduleAttributionExplain: resolved.attributionExplain,
+      scheduleAttributionSource: resolved.attributionSource,
+      scheduleConfirmed: resolved.scheduleConfirmed,
     })
   }
   return out

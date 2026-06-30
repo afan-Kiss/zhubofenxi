@@ -7,6 +7,7 @@ import {
   xiaobaiWarningForDate,
 } from './anchor-schedule-template.service'
 import { invalidateBusinessBoardCacheForDate } from './anchor-schedule-cache.service'
+import { confirmDailySchedules } from './anchor-schedule-confirm.service'
 
 export type DailyScheduleSource = 'manual' | 'generated_default'
 
@@ -23,6 +24,8 @@ export interface DailyScheduleDto {
   source: DailyScheduleSource
   enabled: boolean
   locked: boolean
+  confirmed: boolean
+  confirmedAt: string | null
   note: string | null
   conflict?: boolean
 }
@@ -38,6 +41,8 @@ function rowToDto(row: {
   source: string
   enabled: boolean
   locked: boolean
+  confirmed: boolean
+  confirmedAt: Date | null
   note: string | null
 }): DailyScheduleDto {
   const startTime = row.startAt.toLocaleTimeString('zh-CN', {
@@ -73,6 +78,8 @@ function rowToDto(row: {
     source: row.source as DailyScheduleSource,
     enabled: row.enabled,
     locked: row.locked,
+    confirmed: row.confirmed,
+    confirmedAt: row.confirmedAt?.toISOString() ?? null,
     note: row.note,
   }
 }
@@ -102,6 +109,8 @@ export async function listDailySchedulesForDate(dateKey: string): Promise<{
           id: v.id,
           startAt: v.startAt,
           endAt: v.endAt,
+          confirmed: false,
+          confirmedAt: null,
           note: v.note ?? null,
         }),
       ),
@@ -187,6 +196,7 @@ export async function generateDefaultSchedulesForDate(params: {
       source: 'generated_default',
       enabled: true,
       locked: false,
+      confirmed: false,
       note: t.note,
       createdBy: params.createdBy ?? null,
     }
@@ -228,6 +238,7 @@ export async function saveDailySchedules(params: {
     note?: string
   }>
   createdBy?: string
+  confirm?: boolean
 }): Promise<{ date: string; schedules: DailyScheduleDto[]; warnings: string[] }> {
   const validation = validateScheduleDraft(params.date, params.schedules)
   if (!validation.ok) {
@@ -280,6 +291,7 @@ export async function saveDailySchedules(params: {
         source: 'manual',
         enabled: true,
         locked: false,
+        confirmed: false,
         note: s.note?.trim() || null,
         createdBy: params.createdBy ?? null,
       },
@@ -287,6 +299,13 @@ export async function saveDailySchedules(params: {
   }
 
   await invalidateBusinessBoardCacheForDate(params.date)
+  if (params.confirm) {
+    await confirmDailySchedules({
+      date: params.date,
+      confirmedBy: params.createdBy,
+      confirmNote: '保存并确认',
+    })
+  }
   const result = await listDailySchedulesForDate(params.date)
   result.warnings.push(...validation.warnings)
   return result
@@ -338,6 +357,7 @@ export async function copyDailySchedules(params: {
         source: 'manual',
         enabled: row.enabled,
         locked: false,
+        confirmed: false,
         note: row.note ? `复制自 ${params.fromDate}：${row.note}` : `复制自 ${params.fromDate}`,
         createdBy: params.createdBy ?? null,
       },

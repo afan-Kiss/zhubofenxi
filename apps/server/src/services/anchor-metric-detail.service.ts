@@ -89,7 +89,7 @@ export async function buildAnchorMetricDetail(params: {
     role: params.role,
     username: params.username,
   })
-  const performanceViews = getAnchorPerformanceViews(views, rawByMatch)
+  const performanceViews = await getAnchorPerformanceViews(views, rawByMatch)
   const anchorViews = filterAnchorViews(performanceViews, anchor)
   const paidViews = anchorViews.filter((v) => viewCountsAsPaidOrder(v))
   const metricSets = buildOrderMetricSets(

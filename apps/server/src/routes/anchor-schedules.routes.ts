@@ -8,6 +8,10 @@ import {
   saveDailySchedules,
   validateDailySchedulesBody,
 } from '../services/anchor-daily-schedule.service'
+import {
+  confirmDailySchedules,
+  getScheduleConfirmStatus,
+} from '../services/anchor-schedule-confirm.service'
 import { recalculateAnchorDataForDate } from '../services/anchor-schedule-cache.service'
 import { sendFail, sendOk } from '../utils/response'
 
@@ -97,9 +101,43 @@ anchorSchedulesRouter.post('/', async (req, res, next) => {
       date,
       schedules,
       createdBy: req.user?.username,
+      confirm: Boolean(body.confirm),
     })
     sendOk(res, { ok: true, ...data })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '保存排班失败', 400)
+  }
+})
+
+anchorSchedulesRouter.post('/confirm', async (req, res, next) => {
+  try {
+    const date = String(req.body?.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date', 400)
+      return
+    }
+    const result = await confirmDailySchedules({
+      date,
+      confirmedBy: req.user?.username,
+      confirmNote: req.body?.confirmNote ? String(req.body.confirmNote) : undefined,
+    })
+    const schedules = await listDailySchedulesForDate(date)
+    sendOk(res, { ok: true, ...result, ...schedules })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '确认排班失败', 400)
+  }
+})
+
+anchorSchedulesRouter.get('/confirm-status', async (req, res, next) => {
+  try {
+    const date = String(req.query.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date', 400)
+      return
+    }
+    const status = await getScheduleConfirmStatus(date)
+    sendOk(res, status)
+  } catch (err) {
+    next(err)
   }
 })

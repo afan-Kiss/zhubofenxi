@@ -368,7 +368,7 @@ export async function executeBoardLocalQuery(params: {
 
   const performanceBaseViews =
     anchorId?.trim() || anchorName?.trim() ? views : scopedAllViews
-  const performanceViews = getAnchorPerformanceViews(
+  const performanceViews = await getAnchorPerformanceViews(
     performanceBaseViews,
     rawByMatch,
     anchorId,

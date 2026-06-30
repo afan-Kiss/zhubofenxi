@@ -22,9 +22,25 @@ interface ScheduleResponse {
     ScheduleRow & {
       startAt: string
       endAt: string
+      confirmed?: boolean
     }
   >
   warnings: string[]
+}
+
+interface ConfirmStatus {
+  date: string
+  hasSchedule: boolean
+  confirmed: boolean
+  confirmedAt: string | null
+  confirmedBy: string | null
+}
+
+const todayKey = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+const yesterdayKey = () => {
+  const d = new Date(`${todayKey()}T12:00:00+08:00`)
+  d.setDate(d.getDate() - 1)
+  return d.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
 }
 
 const SHOP_OPTIONS = ['XY祥钰珠宝', '和田雅玉', '拾玉居和田玉', '祥钰珠宝']
@@ -37,6 +53,9 @@ export const AnchorSchedulePage: React.FC = () => {
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [confirmStatus, setConfirmStatus] = useState<ConfirmStatus | null>(null)
+  const [todayStatus, setTodayStatus] = useState<ConfirmStatus | null>(null)
+  const [yesterdayStatus, setYesterdayStatus] = useState<ConfirmStatus | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -56,6 +75,8 @@ export const AnchorSchedulePage: React.FC = () => {
         })),
       )
       setWarnings(data.warnings ?? [])
+      const cs = await apiRequest<ConfirmStatus>(`/anchor-schedules/confirm-status?date=${encodeURIComponent(date)}`)
+      setConfirmStatus(cs)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载排班失败')
     } finally {
@@ -66,6 +87,21 @@ export const AnchorSchedulePage: React.FC = () => {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const [t, y] = await Promise.all([
+          apiRequest<ConfirmStatus>(`/anchor-schedules/confirm-status?date=${todayKey()}`),
+          apiRequest<ConfirmStatus>(`/anchor-schedules/confirm-status?date=${yesterdayKey()}`),
+        ])
+        setTodayStatus(t)
+        setYesterdayStatus(y)
+      } catch {
+        // ignore
+      }
+    })()
+  }, [date, message])
 
   const handleGenerateDefault = async () => {
     setSaving(true)
@@ -147,14 +183,14 @@ export const AnchorSchedulePage: React.FC = () => {
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = async (confirm = false) => {
     setSaving(true)
     setError(null)
     setMessage(null)
     try {
       const data = await apiRequest<ScheduleResponse>('/anchor-schedules', {
         method: 'POST',
-        body: JSON.stringify({ date, schedules: rows }),
+        body: JSON.stringify({ date, schedules: rows, confirm }),
       })
       setRows(
         data.schedules.map((s) => ({
@@ -169,13 +205,30 @@ export const AnchorSchedulePage: React.FC = () => {
         })),
       )
       setWarnings(data.warnings ?? [])
-      setMessage('排班已保存，当天主播数据将按新排班计算')
+      setMessage(confirm ? '排班已保存并确认' : '排班已保存，当天主播数据将按新排班计算')
       await apiRequest('/board/anchor-pocket-summary/recalculate', {
         method: 'POST',
         body: JSON.stringify({ date }),
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleConfirm = async (targetDate: string) => {
+    setSaving(true)
+    setError(null)
+    try {
+      await apiRequest('/anchor-schedules/confirm', {
+        method: 'POST',
+        body: JSON.stringify({ date: targetDate }),
+      })
+      if (targetDate === date) await load()
+      setMessage(`${targetDate} 排班已确认`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '确认失败')
     } finally {
       setSaving(false)
     }
@@ -219,6 +272,20 @@ export const AnchorSchedulePage: React.FC = () => {
             className="rounded border border-slate-300 px-2 py-1"
           />
         </label>
+      </div>
+
+      <div className="flex flex-wrap gap-4 text-sm">
+        <span className="rounded border border-slate-200 px-2 py-1">
+          今日排班：{todayStatus?.confirmed ? '已确认' : '未确认'}
+        </span>
+        <span className="rounded border border-slate-200 px-2 py-1">
+          昨日排班：{yesterdayStatus?.confirmed ? '已确认' : '未确认'}
+        </span>
+        {confirmStatus ? (
+          <span className="rounded border border-slate-200 px-2 py-1">
+            当前日期：{confirmStatus.confirmed ? '已确认' : '未确认'}
+          </span>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -266,12 +333,36 @@ export const AnchorSchedulePage: React.FC = () => {
         </button>
         <button
           type="button"
-          onClick={() => void handleSave()}
+          onClick={() => void handleConfirm(todayKey())}
+          disabled={saving}
+          className="inline-flex items-center gap-1 rounded bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 hover:bg-emerald-100"
+        >
+          确认今日排班
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleConfirm(yesterdayKey())}
+          disabled={saving}
+          className="inline-flex items-center gap-1 rounded bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 hover:bg-emerald-100"
+        >
+          确认昨日排班
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSave(false)}
           disabled={saving || loading}
           className="inline-flex items-center gap-1 rounded bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-700 disabled:opacity-50"
         >
           <Save size={14} />
           保存当天排班
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSave(true)}
+          disabled={saving || loading}
+          className="inline-flex items-center gap-1 rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-800 disabled:opacity-50"
+        >
+          保存并确认
         </button>
       </div>
 

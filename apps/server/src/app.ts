@@ -27,6 +27,7 @@ import { qualityBadCasesRouter } from './routes/quality-bad-cases.routes'
 import { goodReviewsRouter } from './routes/good-reviews.routes'
 import { shopCookiesRouter } from './routes/shop-cookies.routes'
 import { anchorSchedulesRouter } from './routes/anchor-schedules.routes'
+import { exportRouter } from './routes/export.routes'
 import { appRouter } from './routes/app.routes'
 import { mountMaintenanceRouter } from './middleware/maintenance-route-gate.middleware'
 
@@ -76,6 +77,7 @@ export function createApp() {
   app.use('/api/good-reviews', goodReviewsRouter)
   app.use('/api/shop-cookies', shopCookiesRouter)
   app.use('/api/anchor-schedules', anchorSchedulesRouter)
+  app.use('/api/export', exportRouter)
   mountMaintenanceRouter(app, '/api/debug', debugRouter, '调试')
 
   app.use('/api', (_req, res) => {

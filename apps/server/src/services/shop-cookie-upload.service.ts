@@ -73,7 +73,7 @@ function buildCookieReason(row: {
     return { status: 'valid', reason: 'Cookie 已验证有效，可同步订单', canSyncOrders: true }
   }
   if (st === 'unknown') {
-    return { status: 'uploaded', reason: '已收到 Cookie，待验证', canSyncOrders: false }
+    return { status: 'uploaded', reason: '已收到 Cookie，待验证', canSyncOrders: true }
   }
   if (st === 'suspected') {
     return {
@@ -234,6 +234,7 @@ export async function getShopCookieStatus(): Promise<ShopCookieStatusItem[]> {
 export async function getShopCookieStatusPayload(): Promise<{
   ok: true
   serverTokenConfigured: boolean
+  tokenRequired: false
   shops: ShopCookieStatusItem[]
   shopsByKey: Record<string, ShopCookieStatusItem>
   checkedAt: string
@@ -292,6 +293,7 @@ export async function getShopCookieStatusPayload(): Promise<{
   return {
     ok: true,
     serverTokenConfigured: Boolean(getShopCookieUploadToken()),
+    tokenRequired: false,
     shops,
     shopsByKey,
     checkedAt: new Date().toISOString(),

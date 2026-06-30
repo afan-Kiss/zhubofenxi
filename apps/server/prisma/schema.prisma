@@ -727,21 +727,26 @@ model AnchorScheduleTemplate {
 
 /// 每日主播排班（手动覆盖或生成的默认排班）
 model AnchorDailySchedule {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   scheduleDate String
   anchorName   String
   shopName     String
   liveRoomName String
   startAt      DateTime
   endAt        DateTime
-  source       String   @default("manual")
-  enabled      Boolean  @default(true)
-  locked       Boolean  @default(false)
+  source       String    @default("manual")
+  enabled      Boolean   @default(true)
+  locked       Boolean   @default(false)
+  confirmed    Boolean   @default(false)
+  confirmedAt  DateTime?
+  confirmedBy  String?
+  confirmNote  String?
   note         String?
   createdBy    String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   @@index([scheduleDate])
   @@index([scheduleDate, enabled])
+  @@index([scheduleDate, confirmed])
 }

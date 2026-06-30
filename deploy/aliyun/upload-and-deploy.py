@@ -37,8 +37,6 @@ SKIP_PATH_PARTS = {".venv", "__pycache__", "apps/server/dist", "apps/web/dist"}
 
 
 def load_ssh_pass() -> str:
-    if os.environ.get("SSH_PASS", "").strip():
-        return os.environ["SSH_PASS"].strip()
     for env_path in [
         ROOT / "secrets" / "deploy.env",
         Path(r"e:\我的软件源码\总控台") / ".env",
@@ -51,6 +49,8 @@ def load_ssh_pass() -> str:
                 val = line.split("=", 1)[1].strip().strip('"').strip("'")
                 if val:
                     return val
+    if os.environ.get("SSH_PASS", "").strip():
+        return os.environ["SSH_PASS"].strip()
     return ""
 
 

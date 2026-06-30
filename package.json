@@ -31,6 +31,7 @@
     "verify:anchor-schedules": "tsx apps/server/scripts/verify-anchor-schedules.ts",
     "verify:anchor-export": "tsx apps/server/scripts/verify-anchor-export.ts",
     "verify:anchor-schedule-effective": "tsx apps/server/scripts/verify-anchor-schedule-effective.ts",
+    "verify:custom-date-range": "tsx apps/server/scripts/verify-custom-date-range.ts",
     "verify:shop-cookie-upload": "tsx apps/server/scripts/verify-shop-cookie-upload.ts",
     "verify:shop-cookie-simple-upload": "tsx apps/server/scripts/verify-shop-cookie-simple-upload.ts",
     "accept:operations-report": "tsx apps/server/scripts/operations-report-acceptance.ts",

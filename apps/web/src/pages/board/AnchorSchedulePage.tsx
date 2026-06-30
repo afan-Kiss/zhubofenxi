@@ -2,6 +2,11 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Calendar, Copy, Plus, RefreshCw, Save, Wand2 } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
+import { invalidateBoardLiveQueryCache } from '../../lib/board-live-query-cache'
+
+function afterScheduleMutation(): void {
+  invalidateBoardLiveQueryCache('anchor-schedule')
+}
 
 interface ScheduleRow {
   id?: string
@@ -126,6 +131,7 @@ export const AnchorSchedulePage: React.FC = () => {
       )
       setWarnings(data.warnings ?? [])
       setMessage('已生成当天默认排班')
+      afterScheduleMutation()
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败')
     } finally {
@@ -158,6 +164,7 @@ export const AnchorSchedulePage: React.FC = () => {
       )
       setWarnings(data.warnings ?? [])
       setMessage(`已从 ${fromKey} 复制排班`)
+      afterScheduleMutation()
     } catch (e) {
       setError(e instanceof Error ? e.message : '复制失败')
     } finally {
@@ -210,6 +217,7 @@ export const AnchorSchedulePage: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({ date }),
       })
+      afterScheduleMutation()
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败')
     } finally {
@@ -227,6 +235,7 @@ export const AnchorSchedulePage: React.FC = () => {
       })
       if (targetDate === date) await load()
       setMessage(`${targetDate} 排班已确认`)
+      afterScheduleMutation()
     } catch (e) {
       setError(e instanceof Error ? e.message : '确认失败')
     } finally {

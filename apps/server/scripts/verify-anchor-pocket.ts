@@ -10,6 +10,8 @@ import {
 import { LOW_PRICE_BRUSH_THRESHOLD_CENT } from '../src/services/low-price-brush-order.service'
 import { dedupeViewsByMetricOrderNo } from '../src/services/calc-refund-rate.service'
 import { centToYuan } from '../src/utils/money'
+import { lookupWorkbenchRefund } from '../src/utils/live-account-cache-key.util'
+import { mergeWorkbenchRefundMaps } from '../src/services/xhs-after-sales-workbench.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -177,6 +179,82 @@ function runUnitTests(): string[] {
     sessionName: '早场',
   })
   assert(pendingWarn?.afterSalesDataPending === true, '售后缺失应标记 pending', issues)
+
+  const shopA = 'shop-a-id'
+  const shopB = 'shop-b-id'
+  const sharedNo = 'PSHARED001'
+  const wbMap = mergeWorkbenchRefundMaps(
+    new Map([
+      [
+        `${shopA}::${sharedNo}`,
+        {
+          liveAccountId: shopA,
+          orderNo: sharedNo,
+          fetchStatus: 'success' as const,
+          officialRefundAmountCent: 1000,
+          successReturnCount: 1,
+        },
+      ],
+      [
+        `${shopB}::${sharedNo}`,
+        {
+          liveAccountId: shopB,
+          orderNo: sharedNo,
+          fetchStatus: 'success' as const,
+          officialRefundAmountCent: 2500,
+          successReturnCount: 1,
+        },
+      ],
+    ]),
+  )
+  assert(
+    lookupWorkbenchRefund(wbMap, shopA, sharedNo)?.officialRefundAmountCent === 1000,
+    '店铺A应匹配1000分退款',
+    issues,
+  )
+  assert(
+    lookupWorkbenchRefund(wbMap, shopB, sharedNo)?.officialRefundAmountCent === 2500,
+    '店铺B应匹配2500分退款',
+    issues,
+  )
+  assert(
+    wbMap.get(sharedNo) === undefined,
+    '不能仅用 orderNo 查 workbench',
+    issues,
+  )
+
+  const lineA = classifyAnchorPocketOrder({
+    view: makeView({
+      liveAccountId: shopA,
+      displayOrderNo: sharedNo,
+      officialOrderNo: sharedNo,
+      paymentBaseCent: 10000,
+      productRefundAmountCent: 0,
+      orderStatusText: '已完成',
+      afterSaleStatusText: '无售后',
+    }),
+    shopName: '祥钰珠宝',
+    sessionName: '早场',
+    workbench: lookupWorkbenchRefund(wbMap, shopA, sharedNo),
+  })
+  const lineB = classifyAnchorPocketOrder({
+    view: makeView({
+      liveAccountId: shopB,
+      displayOrderNo: sharedNo,
+      officialOrderNo: sharedNo,
+      paymentBaseCent: 10000,
+      productRefundAmountCent: 0,
+      orderStatusText: '已完成',
+      afterSaleStatusText: '无售后',
+    }),
+    shopName: 'XY祥钰珠宝',
+    sessionName: '早场',
+    workbench: lookupWorkbenchRefund(wbMap, shopB, sharedNo),
+  })
+  assert((lineA?.refundFinishedAmountCent ?? 0) === 1000, '店铺A到账应扣1000', issues)
+  assert((lineB?.refundFinishedAmountCent ?? 0) === 2500, '店铺B到账应扣2500', issues)
+  assert((lineA?.actualPocketAmountCent ?? 0) === 9000, '店铺A实际到账9000', issues)
+  assert((lineB?.actualPocketAmountCent ?? 0) === 7500, '店铺B实际到账7500', issues)
 
   return issues
 }

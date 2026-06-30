@@ -93,6 +93,7 @@ export const AnchorAuditExportPanel: React.FC<Props> = ({ startDate, endDate }) 
           <h3 className="text-sm font-semibold text-slate-900">导出核算数据</h3>
           <p className="mt-0.5 text-xs text-slate-500">
             导出的数据包含订单、售后、主播归属、排班和实际到账，用来人工复核。默认从系统最早订单开始导出。
+            实际到账按订单支付日期归属并扣累计退款；经营总览退款按退款发生日期统计，两数可能不同。
           </p>
         </div>
       </div>

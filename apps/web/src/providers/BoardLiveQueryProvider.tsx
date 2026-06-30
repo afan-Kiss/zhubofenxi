@@ -10,6 +10,7 @@ import React, {
 import type { BoardRangePreset } from '../lib/board-range'
 import type { BoardResolvedRange } from '../lib/board-live-query'
 import { buildBoardRangeKey, resolveBoardRangeDates } from '../lib/board-range'
+import { BOARD_LIVE_QUERY_INVALIDATE_EVENT } from '../lib/board-live-query-cache'
 import {
   fetchBoardLocalData,
   fetchBoardSyncMeta,
@@ -231,6 +232,14 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   useEffect(() => {
     void refreshSyncMeta()
   }, [refreshSyncMeta])
+
+  useEffect(() => {
+    const onInvalidate = () => {
+      void loadLocal()
+    }
+    window.addEventListener(BOARD_LIVE_QUERY_INVALIDATE_EVENT, onInvalidate)
+    return () => window.removeEventListener(BOARD_LIVE_QUERY_INVALIDATE_EVENT, onInvalidate)
+  }, [loadLocal])
 
   useEffect(() => {
     const onCleared = () => {

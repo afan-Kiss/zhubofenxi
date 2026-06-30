@@ -6,6 +6,8 @@ import ExcelJS from 'exceljs'
 import {
   buildAnchorAuditExcelBuffer,
   buildAnchorAuditExportPayload,
+  countAnchorAuditExportOrders,
+  getAnchorAuditExportMeta,
   getEarliestOrderDateKey,
 } from '../src/services/anchor-audit-export.service'
 import { buildAnchorPocketSummary } from '../src/services/anchor-pocket-revenue.service'
@@ -61,6 +63,19 @@ async function run(): Promise<void> {
       issues,
     )
   }
+
+  const meta = await getAnchorAuditExportMeta({ startDate, endDate: today })
+  const countByHelper = await countAnchorAuditExportOrders({ startDate, endDate: today })
+  assert(
+    meta.orderCountInRange === payload.normalizedOrders.length,
+    `meta 订单数 ${meta.orderCountInRange} 应等于导出明细 ${payload.normalizedOrders.length}`,
+    issues,
+  )
+  assert(
+    countByHelper === payload.normalizedOrders.length,
+    `countAnchorAuditExportOrders ${countByHelper} 应与导出明细一致`,
+    issues,
+  )
 
   if (issues.length) {
     console.error('verify:anchor-export FAILED')

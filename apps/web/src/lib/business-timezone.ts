@@ -38,9 +38,27 @@ export function endOfMonthKeyShanghai(year: number, month: number): string {
   return formatDateKeyShanghai(new Date(lastDayMs))
 }
 
+/** 上海日历日星期几：1=周一 … 7=周日 */
+export function weekdayIsoShanghai(dateKey: string): number {
+  const ms = Date.parse(`${dateKey}T12:00:00+08:00`)
+  const dayName = new Intl.DateTimeFormat('en-US', {
+    timeZone: BUSINESS_TIMEZONE,
+    weekday: 'long',
+  }).format(new Date(ms))
+  const map: Record<string, number> = {
+    Monday: 1,
+    Tuesday: 2,
+    Wednesday: 3,
+    Thursday: 4,
+    Friday: 5,
+    Saturday: 6,
+    Sunday: 7,
+  }
+  return map[dayName] ?? 1
+}
+
 export function thisWeekStartKeyShanghai(now: Date = new Date()): string {
   const todayKey = formatDateKeyShanghai(now)
-  const day = new Date(Date.parse(`${todayKey}T00:00:00+08:00`)).getUTCDay()
-  const diff = day === 0 ? 6 : day - 1
-  return addDaysShanghai(todayKey, -diff)
+  const daysSinceMonday = weekdayIsoShanghai(todayKey) - 1
+  return addDaysShanghai(todayKey, -daysSinceMonday)
 }

@@ -32,6 +32,7 @@ import { ANCHOR_SESSION_DISPLAY_FROM_0613 } from './anchor-performance-attributi
 import { listUnconfirmedScheduleDatesInRange } from './anchor-schedule-confirm.service'
 import { getShopCookieStatusPayload } from './shop-cookie-upload.service'
 import { parseViewPayTimeMs } from './anchor-performance-attribution.service'
+import { lookupWorkbenchRefund } from '../utils/live-account-cache-key.util'
 
 function styleHeader(sheet: ExcelJS.Worksheet, cols: number): void {
   sheet.getRow(1).font = { bold: true }
@@ -59,6 +60,19 @@ export async function getEarliestOrderDateKey(): Promise<string | null> {
   return formatDateKeyShanghai(agg._min.orderTime)
 }
 
+export async function countAnchorAuditExportOrders(params: {
+  startDate: string
+  endDate: string
+  role?: import('../types/roles').UserRole
+  username?: string
+}): Promise<number> {
+  const scoped = await getBoardScopedViewsForRange({ ...params, preset: 'custom' })
+  const withRaw = attachRawByMatchToViews(scoped.views, scoped.rawByMatch)
+  const remapped = await remapViewsWithScheduleOverlay(withRaw)
+  const deduped = dedupeViewsByMetricOrderNo(remapped)
+  return deduped.length
+}
+
 export async function getAnchorAuditExportMeta(params?: {
   startDate?: string
   endDate?: string
@@ -75,20 +89,14 @@ export async function getAnchorAuditExportMeta(params?: {
   const startDate = params?.startDate ?? earliest ?? today
   const endDate = params?.endDate ?? today
 
-  const orderCount = await prisma.xhsRawOrder.count({
-    where: {
-      orderTime: {
-        gte: new Date(`${startDate}T00:00:00+08:00`),
-        lt: new Date(`${endDate}T23:59:59+08:00`),
-      },
-    },
-  })
-
-  const pocket = await buildAnchorPocketSummary({
-    startDate,
-    endDate,
-    preset: 'custom',
-  })
+  const [orderCount, pocket] = await Promise.all([
+    countAnchorAuditExportOrders({ startDate, endDate }),
+    buildAnchorPocketSummary({
+      startDate,
+      endDate,
+      preset: 'custom',
+    }),
+  ])
   const afterSalesPendingCount =
     pocket.dataQualityWarnings.find((w) => w.type === 'after_sales_pending')?.count ?? 0
 
@@ -126,7 +134,7 @@ export async function buildAnchorAuditExportPayload(params: {
   const bundle = await buildRawAnalyzeBundle(scoped.range)
   const fromDb = await loadWorkbenchRefundMapFromDb(queries)
   const fromMem = bundle ? getWorkbenchRefundMapForOrders(queries) : new Map()
-  const workbenchByOrderNo = mergeWorkbenchRefundMaps(fromDb, fromMem)
+  const workbenchByAccountOrder = mergeWorkbenchRefundMaps(fromDb, fromMem)
 
   const pocketSummary = await buildAnchorPocketSummary(params)
   const unconfirmedDates = await listUnconfirmedScheduleDatesInRange(
@@ -157,7 +165,11 @@ export async function buildAnchorAuditExportPayload(params: {
 
   for (const view of deduped) {
     const orderNo = resolveMetricOrderNo(view) || view.displayOrderNo || view.orderId
-    const workbench = orderNo ? workbenchByOrderNo.get(orderNo) : undefined
+    const workbench = lookupWorkbenchRefund(
+      workbenchByAccountOrder,
+      view.liveAccountId,
+      orderNo,
+    )
     const meta = ANCHOR_SESSION_DISPLAY_FROM_0613[view.anchorName ?? ''] ?? {
       shopName: view.liveAccountName ?? '—',
       sessionLabel: '—',

@@ -23,9 +23,10 @@ import {
   mergeWorkbenchRefundMaps,
 } from './xhs-after-sales-workbench.service'
 import { buildRawAnalyzeBundle } from './xhs-api-sync/xhs-analysis-from-raw.service'
+import { lookupWorkbenchRefund } from '../utils/live-account-cache-key.util'
 
 export const ANCHOR_POCKET_CALIBER_NOTE =
-  '29元以下按刷单剔除；已退款单独扣除；售后处理中和未签收不算实际到账；资金流水只做校验。'
+  '29元以下按刷单剔除；已退款单独扣除；售后处理中和未签收不算实际到账；资金流水只做校验。实际到账按订单支付日期归属并扣累计退款；经营总览退款按退款发生日期统计，两数可能不同。'
 
 export interface AnchorPocketDataQualityWarning {
   type: string
@@ -259,14 +260,22 @@ export async function buildAnchorPocketSummary(params: {
   const bundle = await buildRawAnalyzeBundle(scoped.range)
   const fromDb = await loadWorkbenchRefundMapFromDb(queries)
   const fromMem = bundle ? getWorkbenchRefundMapForOrders(queries) : new Map()
-  const workbenchByOrderNo = mergeWorkbenchRefundMaps(fromDb, fromMem)
+  const workbenchByAccountOrder = mergeWorkbenchRefundMaps(fromDb, fromMem)
 
   const aggMap = new Map<string, AnchorAgg>()
   let afterSalesPendingCount = 0
+  let workbenchKeyFallbackCount = 0
 
   for (const view of deduped) {
     const orderNo = resolveMetricOrderNo(view)
-    const workbench = orderNo ? workbenchByOrderNo.get(orderNo) : undefined
+    if (orderNo && !view.liveAccountId?.trim()) {
+      workbenchKeyFallbackCount += 1
+    }
+    const workbench = lookupWorkbenchRefund(
+      workbenchByAccountOrder,
+      view.liveAccountId,
+      orderNo,
+    )
     const meta = resolveAnchorDisplayMeta(view.anchorName, view.liveAccountName)
     const line = classifyAnchorPocketOrder({
       view,
@@ -285,6 +294,13 @@ export async function buildAnchorPocketSummary(params: {
       type: 'after_sales_pending',
       message: `有 ${afterSalesPendingCount} 笔订单售后数据未确认，实际到账可能偏高`,
       count: afterSalesPendingCount,
+    })
+  }
+  if (workbenchKeyFallbackCount > 0) {
+    warnings.push({
+      type: 'workbench_key_fallback',
+      message: `有 ${workbenchKeyFallbackCount} 笔订单缺少直播号标识，售后匹配使用默认键，请核对退款是否准确`,
+      count: workbenchKeyFallbackCount,
     })
   }
 

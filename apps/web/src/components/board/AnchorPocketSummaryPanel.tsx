@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { apiRequest } from '../../lib/api'
+import { BOARD_LIVE_QUERY_INVALIDATE_EVENT } from '../../lib/board-live-query-cache'
 
 export interface AnchorPocketRow {
   anchorName: string
@@ -45,6 +46,13 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<PocketSummary | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  useEffect(() => {
+    const bump = () => setRefreshKey((k) => k + 1)
+    window.addEventListener(BOARD_LIVE_QUERY_INVALIDATE_EVENT, bump)
+    return () => window.removeEventListener(BOARD_LIVE_QUERY_INVALIDATE_EVENT, bump)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -71,7 +79,7 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
     return () => {
       cancelled = true
     }
-  }, [preset, startDate, endDate])
+  }, [preset, startDate, endDate, refreshKey])
 
   if (loading) {
     return (

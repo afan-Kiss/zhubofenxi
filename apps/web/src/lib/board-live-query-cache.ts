@@ -4,6 +4,9 @@ import type { BoardRangePreset } from './board-range'
 export const LIVE_QUERY_CACHE_TTL_MS = 30 * 60 * 1000
 const STORAGE_KEY = 'board-live-query-cache-v1'
 
+/** 排班变更后广播，经营看板 / 主播业绩应重新拉取 */
+export const BOARD_LIVE_QUERY_INVALIDATE_EVENT = 'board-live-query-invalidate'
+
 export type LiveQueryPageScope = 'overview' | 'anchors'
 
 export interface LiveQueryCacheEntry {
@@ -40,6 +43,24 @@ function writeAll(map: Record<string, LiveQueryCacheEntry>) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(map))
   } catch {
     /* quota */
+  }
+}
+
+export function clearBoardLiveQueryCache(): void {
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 清 localStorage 并通知各页面重新请求后端 */
+export function invalidateBoardLiveQueryCache(reason?: string): void {
+  clearBoardLiveQueryCache()
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(BOARD_LIVE_QUERY_INVALIDATE_EVENT, { detail: { reason } }),
+    )
   }
 }
 

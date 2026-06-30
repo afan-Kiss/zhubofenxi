@@ -23,6 +23,17 @@ export type LiveAccountOrderQuery = {
   orderNo: string
 }
 
+/** 从售后 workbench 合并 map 中按直播号+订单号查找（键格式 liveAccountId::orderNo） */
+export function lookupWorkbenchRefund<T>(
+  map: Map<string, T>,
+  liveAccountId: string | undefined | null,
+  orderNo: string | undefined | null,
+): T | undefined {
+  const no = orderNo?.trim()
+  if (!no) return undefined
+  return map.get(liveAccountOrderKey(liveAccountId, no))
+}
+
 export function buildLiveAccountOrderQueries(
   orders: Array<{
     liveAccountId?: string | null

@@ -2,7 +2,10 @@
  * 好评买家晒图 URL 提取验收
  * 用法: npm run verify:good-review-images
  */
-import { normalizeGoodReviewRow } from '../src/services/good-review/good-review-normalize.service'
+import {
+  normalizeGoodReviewRow,
+  resolveReviewImages,
+} from '../src/services/good-review/good-review-normalize.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -70,6 +73,26 @@ function run(): void {
   assert(
     reviewDataLevel?.reviewImages[0] === 'https://qimg.xiaohongshu.com/rd.jpg',
     `review_data.images 提取失败: ${reviewDataLevel?.reviewImages[0]}`,
+    issues,
+  )
+
+  const repaired = resolveReviewImages(
+    '["[object Object]","[object Object]"]',
+    JSON.stringify({
+      review_data: {
+        content: {
+          images: [
+            { link: 'https://qimg.xiaohongshu.com/comment/a.jpg' },
+            { link: 'https://qimg.xiaohongshu.com/comment/b.jpg' },
+          ],
+        },
+      },
+    }),
+  )
+  assert(
+    repaired.join(',') ===
+      'https://qimg.xiaohongshu.com/comment/a.jpg,https://qimg.xiaohongshu.com/comment/b.jpg',
+    `损坏缓存应从 rawJson 修复: ${repaired.join('|')}`,
     issues,
   )
 

@@ -3,7 +3,7 @@ import {
   type GoodReviewShopDefinition,
 } from '../../config/good-review-shops.constants'
 import { syncGoodReviewsForShop } from './good-review-shop-sync.service'
-import { touchGoodReviewSyncMeta } from './good-review-store.service'
+import { repairCorruptedGoodReviewImages, touchGoodReviewSyncMeta } from './good-review-store.service'
 import type { GoodReviewSyncResult } from './good-review.types'
 
 export async function syncGoodReviews(params?: { shop?: string }): Promise<GoodReviewSyncResult> {
@@ -33,6 +33,7 @@ export async function syncGoodReviews(params?: { shop?: string }): Promise<GoodR
 
   if (successShopCount > 0) {
     await touchGoodReviewSyncMeta(finishedAt)
+    await repairCorruptedGoodReviewImages()
   }
 
   return {

@@ -116,6 +116,52 @@ function pickImages(obj: Record<string, unknown>): string[] {
   return single ? [single] : []
 }
 
+export function isPlausibleReviewImageUrl(url: string | null | undefined): boolean {
+  const normalized = normalizeReviewImageUrl(url)
+  if (!normalized) return false
+  if (normalized.includes('[object Object]')) return false
+  try {
+    return Boolean(new URL(normalized).hostname)
+  } catch {
+    return false
+  }
+}
+
+export function extractReviewImagesFromRawPayload(raw: unknown): string[] {
+  const rec = asRecord(raw)
+  if (!rec) return []
+  const reviewData = asRecord(rec.review_data) ?? asRecord(rec.reviewData)
+  const content = asRecord(reviewData?.content) ?? reviewData
+  return pickImages({ ...(content ?? {}), ...(reviewData ?? {}), ...rec }).filter(isPlausibleReviewImageUrl)
+}
+
+export function resolveReviewImages(
+  storedImagesJson: string | null | undefined,
+  rawJson: string | null | undefined,
+): string[] {
+  let cached: string[] = []
+  if (storedImagesJson) {
+    try {
+      const parsed = JSON.parse(storedImagesJson) as unknown
+      if (Array.isArray(parsed)) {
+        cached = parsed
+          .map((item) => extractImageUrlFromValue(item))
+          .filter((url): url is string => isPlausibleReviewImageUrl(url))
+      }
+    } catch {
+      cached = []
+    }
+  }
+  if (cached.length) return cached
+
+  if (!rawJson) return []
+  try {
+    return extractReviewImagesFromRawPayload(JSON.parse(rawJson))
+  } catch {
+    return []
+  }
+}
+
 function parseReviewTime(raw: Record<string, unknown>): { date: Date | null; text: string | null } {
   const text = pickString(raw, [
     'createTime',

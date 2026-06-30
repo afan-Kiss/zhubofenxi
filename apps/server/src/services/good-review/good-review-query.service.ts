@@ -1,7 +1,11 @@
 import { prisma } from '../../lib/prisma'
 import { GOOD_REVIEW_SHOPS } from '../../config/good-review-shops.constants'
 import { getGoodReviewLastSyncedAt } from './good-review-store.service'
-import { normalizeReviewImageUrl } from './good-review-normalize.service'
+import {
+  isPlausibleReviewImageUrl,
+  normalizeReviewImageUrl,
+  resolveReviewImages,
+} from './good-review-normalize.service'
 import type {
   GoodReviewItemView,
   GoodReviewPagePayload,
@@ -69,6 +73,7 @@ function rowToReviewView(row: {
   reviewText: string | null
   reviewImagesJson: string
   reviewTagsJson: string
+  rawJson: string | null
   isAnonymous: boolean
   likeCount: number
   replyCount: number
@@ -84,16 +89,16 @@ function rowToReviewView(row: {
     itemId: row.itemId,
     skuId: row.skuId,
     itemName: row.itemName,
-    itemImage: normalizeReviewImageUrl(row.itemImage),
+    itemImage: isPlausibleReviewImageUrl(row.itemImage)
+      ? normalizeReviewImageUrl(row.itemImage)
+      : null,
     itemPriceCent: row.itemPriceCent,
     itemQuantity: row.itemQuantity,
     productScore: row.productScore,
     serviceScore: row.serviceScore,
     logisticsScore: row.logisticsScore,
     reviewText: row.reviewText,
-    reviewImages: parseJsonArray(row.reviewImagesJson)
-      .map((u) => normalizeReviewImageUrl(u))
-      .filter((u): u is string => Boolean(u)),
+    reviewImages: resolveReviewImages(row.reviewImagesJson, row.rawJson),
     reviewTags: parseJsonArray(row.reviewTagsJson),
     isAnonymous: row.isAnonymous,
     likeCount: row.likeCount,

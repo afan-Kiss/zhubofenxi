@@ -33,6 +33,7 @@
     "verify:anchor-schedule-effective": "tsx apps/server/scripts/verify-anchor-schedule-effective.ts",
     "verify:good-review-images": "tsx apps/server/scripts/verify-good-review-images.ts",
     "repair:good-review-images": "tsx apps/server/scripts/repair-good-review-images.ts",
+    "verify:qianfan-order-ticket": "tsx apps/server/scripts/verify-qianfan-order-ticket.ts",
     "verify:custom-date-range": "tsx apps/server/scripts/verify-custom-date-range.ts",
     "verify:shop-cookie-upload": "tsx apps/server/scripts/verify-shop-cookie-upload.ts",
     "verify:shop-cookie-simple-upload": "tsx apps/server/scripts/verify-shop-cookie-simple-upload.ts",

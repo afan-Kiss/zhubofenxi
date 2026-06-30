@@ -138,22 +138,22 @@ goodReviewsRouter.get('/ark-order-detail', async (req, res, next) => {
       return
     }
 
-    if (result.hasTicket) {
-      res.redirect(302, result.url)
+    if (!result.finalOpenUrl) {
+      const shopKey = resolveGoodReviewShopKey(shop)!
+      res
+        .status(400)
+        .setHeader('Content-Type', 'text/html; charset=utf-8')
+        .send(
+          htmlGoodReviewArkOrderFallbackPage({
+            serviceUrl: result.serviceUrl,
+            shopName: getGoodReviewShopName(shopKey),
+            message: result.error || '无法打开订单详情',
+          }),
+        )
       return
     }
 
-    const shopKey = resolveGoodReviewShopKey(shop)!
-    res
-      .status(200)
-      .setHeader('Content-Type', 'text/html; charset=utf-8')
-      .send(
-        htmlGoodReviewArkOrderFallbackPage({
-          serviceUrl: result.serviceUrl,
-          shopName: getGoodReviewShopName(shopKey),
-          message: result.error,
-        }),
-      )
+    res.redirect(302, result.finalOpenUrl)
   } catch (err) {
     if (err instanceof QianfanOrderOpenTicketError) {
       const format = String(req.query.format ?? '').trim().toLowerCase()

@@ -1,14 +1,24 @@
 /**
- * 排班生效验收（归属服务 + 边界）
+ * 排班生效验收（归属服务 + 边界 + 模板补齐重叠）
  * 用法: npm run verify:anchor-schedule-effective
  */
 import type { AnalyzedOrderView } from '../src/types/analysis'
-import { buildScheduleBounds, isPayTimeInSchedule } from '../src/utils/anchor-schedule-time.util'
+import {
+  buildScheduleBounds,
+  filterVirtualSchedulesAgainstOccupied,
+  isPayTimeInSchedule,
+  scheduleIntervalsOverlap,
+} from '../src/utils/anchor-schedule-time.util'
 import {
   clearScheduleAttributionCache,
   resolveAnchorWithScheduleOverlay,
 } from '../src/services/anchor-schedule-attribution.service'
 import { listUnconfirmedScheduleDatesInRange } from '../src/services/anchor-schedule-confirm.service'
+import {
+  buildVirtualSchedulesFromTemplates,
+  DEFAULT_SCHEDULE_TEMPLATE_SEEDS,
+  templateAppliesOnDate,
+} from '../src/services/anchor-schedule-template.service'
 import { formatDateKeyShanghai } from '../src/utils/business-timezone'
 import { addDaysShanghai } from '../src/utils/business-timezone'
 
@@ -107,6 +117,97 @@ async function run(): Promise<void> {
   assert(isPayTimeInSchedule(pay0630_175959, htDayStart, htDayEnd), '6/30 17:59:59 和田雅玉 -> 白天', issues)
   assert(isPayTimeInSchedule(pay0630_180000, htNightStart, htNightEnd), '6/30 18:00 和田雅玉 -> 晚场', issues)
   assert(isPayTimeInSchedule(pay0630_180000, fyStart, fyEnd), '6/30 18:00 拾玉居 -> 飞云晚场', issues)
+
+  const date0630 = '2026-06-30'
+  const templates0630 = DEFAULT_SCHEDULE_TEMPLATE_SEEDS.filter((t) => templateAppliesOnDate(t, date0630))
+  const virtual0630 = buildVirtualSchedulesFromTemplates(
+    date0630,
+    templates0630.map((t, i) => ({
+      id: `t${i}`,
+      anchorName: t.anchorName,
+      shopName: t.shopName,
+      liveRoomName: t.liveRoomName,
+      startTime: t.startTime,
+      endTime: t.endTime,
+      effectiveFrom: t.effectiveFrom,
+      effectiveTo: t.effectiveTo,
+      enabled: true,
+      sortOrder: t.sortOrder,
+      note: t.note ?? null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    })),
+  )
+
+  const normalVirtual = filterVirtualSchedulesAgainstOccupied(virtual0630, [])
+  assert(normalVirtual.kept.length === 6, `6/30 无人工排班时应补齐 6 条模板，实际=${normalVirtual.kept.length}`, issues)
+
+  const splitOccupied = [
+    {
+      shopName: 'XY祥钰珠宝',
+      liveRoomName: 'XY祥钰珠宝',
+      ...buildScheduleBounds(date0630, '00:00', '12:00'),
+    },
+    {
+      shopName: 'XY祥钰珠宝',
+      liveRoomName: 'XY祥钰珠宝',
+      ...buildScheduleBounds(date0630, '12:00', '14:30'),
+    },
+  ]
+  const afterSplit = filterVirtualSchedulesAgainstOccupied(virtual0630, splitOccupied)
+  assert(
+    !afterSplit.kept.some(
+      (v) =>
+        v.shopName === 'XY祥钰珠宝' &&
+        v.anchorName === '子杰' &&
+        v.startAt.getTime() === buildScheduleBounds(date0630, '00:00', '14:30').startAt.getTime() &&
+        v.endAt.getTime() === buildScheduleBounds(date0630, '00:00', '14:30').endAt.getTime(),
+    ),
+    '人工拆分后不应再补 XY 00:00-14:30 子杰模板',
+    issues,
+  )
+  assert(
+    afterSplit.kept.some((v) => v.shopName === '祥钰珠宝'),
+    'XY 人工排班不应影响祥钰珠宝模板补齐',
+    issues,
+  )
+  assert(
+    afterSplit.kept.some((v) => v.shopName === '和田雅玉'),
+    'XY 人工排班不应影响和田雅玉模板补齐',
+    issues,
+  )
+  assert(
+    afterSplit.kept.some((v) => v.shopName === '拾玉居和田玉'),
+    'XY 人工排班不应影响拾玉居模板补齐',
+    issues,
+  )
+
+  const boundaryOccupied = [
+    {
+      shopName: 'XY祥钰珠宝',
+      liveRoomName: 'XY祥钰珠宝',
+      ...buildScheduleBounds(date0630, '00:00', '14:30'),
+    },
+  ]
+  const afterBoundary = filterVirtualSchedulesAgainstOccupied(virtual0630, boundaryOccupied)
+  assert(
+    afterBoundary.kept.some(
+      (v) =>
+        v.shopName === 'XY祥钰珠宝' &&
+        v.anchorName === '小白' &&
+        v.startAt.getTime() === buildScheduleBounds(date0630, '14:30', '18:00').startAt.getTime(),
+    ),
+    '00:00-14:30 与 14:30-18:00 边界相邻不算重叠，小白模板应保留',
+    issues,
+  )
+
+  const { startAt: bA, endAt: bB } = buildScheduleBounds(date0630, '00:00', '14:30')
+  const { startAt: bC, endAt: bD } = buildScheduleBounds(date0630, '14:30', '18:00')
+  assert(
+    !scheduleIntervalsOverlap(bA, bB, bC, bD),
+    '14:30 边界左闭右开：相邻时段不算重叠',
+    issues,
+  )
 
   clearScheduleAttributionCache()
   const view = makeView({

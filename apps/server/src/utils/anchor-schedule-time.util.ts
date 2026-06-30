@@ -89,10 +89,40 @@ function sameShop(a: IntervalLike, b: IntervalLike): boolean {
   return aKey === bKey
 }
 
-function intervalsOverlap(a: IntervalLike, b: IntervalLike): boolean {
+export function scheduleIntervalsOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
+  return aStart.getTime() < bEnd.getTime() && bStart.getTime() < aEnd.getTime()
+}
+
+export interface ScheduleOverlapInterval {
+  shopName: string
+  liveRoomName: string
+  startAt: Date
+  endAt: Date
+}
+
+export function scheduleIntervalsOverlapSameRoom(
+  a: ScheduleOverlapInterval,
+  b: ScheduleOverlapInterval,
+): boolean {
   return (
-    a.startAt.getTime() < b.endAt.getTime() && b.startAt.getTime() < a.endAt.getTime()
+    a.shopName === b.shopName &&
+    a.liveRoomName === b.liveRoomName &&
+    scheduleIntervalsOverlap(a.startAt, a.endAt, b.startAt, b.endAt)
   )
+}
+
+export function filterVirtualSchedulesAgainstOccupied<T extends ScheduleOverlapInterval>(
+  virtualRows: T[],
+  occupiedRows: ScheduleOverlapInterval[],
+): { kept: T[]; skipped: T[] } {
+  const kept: T[] = []
+  const skipped: T[] = []
+  for (const v of virtualRows) {
+    const overlaps = occupiedRows.some((row) => scheduleIntervalsOverlapSameRoom(row, v))
+    if (overlaps) skipped.push(v)
+    else kept.push(v)
+  }
+  return { kept, skipped }
 }
 
 function formatHmFromDate(d: Date): string {
@@ -122,7 +152,7 @@ export function detectScheduleConflicts(rows: IntervalLike[]): ScheduleConflict[
     for (let j = i + 1; j < enabled.length; j++) {
       const a = enabled[i]!
       const b = enabled[j]!
-      if (!intervalsOverlap(a, b)) continue
+      if (!scheduleIntervalsOverlap(a.startAt, a.endAt, b.startAt, b.endAt)) continue
 
       if (sameShop(a, b)) {
         conflicts.push({

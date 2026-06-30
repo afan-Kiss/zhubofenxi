@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma'
-import { buildScheduleBounds, detectScheduleConflicts } from '../utils/anchor-schedule-time.util'
+import { buildScheduleBounds, detectScheduleConflicts, filterVirtualSchedulesAgainstOccupied } from '../utils/anchor-schedule-time.util'
 import {
   buildVirtualSchedulesFromTemplates,
   listActiveTemplatesForDate,
@@ -137,8 +137,18 @@ function hmFromDate(d: Date, scheduleDate: string): string {
   })
 }
 
-function scheduleSlotKey(shopName: string, liveRoomName: string, startTime: string, endTime: string): string {
-  return `${shopName}|${liveRoomName}|${startTime}|${endTime}`
+function occupiedIntervalFromDbRow(row: {
+  shopName: string
+  liveRoomName: string
+  startAt: Date
+  endAt: Date
+}) {
+  return {
+    shopName: row.shopName,
+    liveRoomName: row.liveRoomName,
+    startAt: row.startAt,
+    endAt: row.endAt,
+  }
 }
 
 function dbRowToEffective(
@@ -187,24 +197,19 @@ export async function getEffectiveScheduleTableForDate(dateKey: string): Promise
 
   const manualRows = dbRows.filter((r) => r.source === 'manual' || r.locked)
   const generatedRows = dbRows.filter((r) => r.source === 'generated_default' && !r.locked)
-
-  const covered = new Set<string>()
-  for (const row of [...manualRows, ...generatedRows]) {
-    covered.add(
-      scheduleSlotKey(
-        row.shopName,
-        row.liveRoomName,
-        hmFromDate(row.startAt, dateKey),
-        hmFromDate(row.endAt, dateKey),
-      ),
-    )
-  }
+  const occupiedRows = [...manualRows, ...generatedRows].map(occupiedIntervalFromDbRow)
 
   const templates = await listActiveTemplatesForDate(dateKey)
-  const virtualRows = buildVirtualSchedulesFromTemplates(dateKey, templates).filter((v) => {
-    const key = scheduleSlotKey(v.shopName, v.liveRoomName, hmFromDate(v.startAt, dateKey), hmFromDate(v.endAt, dateKey))
-    return !covered.has(key)
-  })
+  const allVirtual = buildVirtualSchedulesFromTemplates(dateKey, templates)
+  const { kept: virtualRows, skipped: skippedVirtual } = filterVirtualSchedulesAgainstOccupied(
+    allVirtual,
+    occupiedRows,
+  )
+  for (const v of skippedVirtual) {
+    warnings.push(
+      `${v.liveRoomName} ${hmFromDate(v.startAt, dateKey)}-${hmFromDate(v.endAt, dateKey)} 模板已被当天人工/默认排班覆盖，未重复补齐。`,
+    )
+  }
 
   const effectiveRows: EffectiveScheduleRow[] = [
     ...manualRows.map((r) => dbRowToEffective(r, 'manual', dateConfirmed)),

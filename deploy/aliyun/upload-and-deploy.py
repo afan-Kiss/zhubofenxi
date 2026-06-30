@@ -188,9 +188,10 @@ def main() -> None:
             sftp_put(client, zip_path, "/tmp/zhubo-upload/zhubo-analysis.zip")
             sftp_put(client, env_path, "/tmp/zhubo-upload/server.env")
 
-            db = ROOT / "apps/server/data/app.db"
-            if db.exists():
-                sftp_put(client, db, "/tmp/zhubo-upload/app.db")
+            if os.environ.get("DEPLOY_UPLOAD_LOCAL_DB", "0") == "1":
+                db = ROOT / "apps/server/data/app.db"
+                if db.exists():
+                    sftp_put(client, db, "/tmp/zhubo-upload/app.db")
 
         run(
             client,

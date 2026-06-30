@@ -89,6 +89,25 @@ async function run(): Promise<void> {
   assert(isPayTimeInSchedule(pay1429, zjStart, zjEnd), '14:29 归子杰', issues)
   assert(!isPayTimeInSchedule(pay1800, xbStart, xbEnd), '18:00 左闭右开不命中小白', issues)
 
+  const pay0630_142959 = Date.parse('2026-06-30T14:29:59+08:00')
+  const pay0630_143000 = Date.parse('2026-06-30T14:30:00+08:00')
+  const pay0630_175959 = Date.parse('2026-06-30T17:59:59+08:00')
+  const pay0630_180000 = Date.parse('2026-06-30T18:00:00+08:00')
+  const { startAt: xyZjStart, endAt: xyZjEnd } = buildScheduleBounds('2026-06-30', '00:00', '14:30')
+  const { startAt: xyXbStart, endAt: xyXbEnd } = buildScheduleBounds('2026-06-30', '14:30', '18:00')
+  const { startAt: htDayStart, endAt: htDayEnd } = buildScheduleBounds('2026-06-30', '00:00', '18:00')
+  const { startAt: htNightStart, endAt: htNightEnd } = buildScheduleBounds('2026-06-30', '18:00', '24:00')
+  const { startAt: fyStart, endAt: fyEnd } = buildScheduleBounds('2026-06-30', '18:00', '24:00')
+
+  assert(isPayTimeInSchedule(pay0630_142959, xyZjStart, xyZjEnd), '6/30 14:29:59 XY -> 子杰时段', issues)
+  assert(!isPayTimeInSchedule(pay0630_143000, xyZjStart, xyZjEnd), '6/30 14:30:00 不归子杰', issues)
+  assert(isPayTimeInSchedule(pay0630_143000, xyXbStart, xyXbEnd), '6/30 14:30:00 XY -> 小白时段', issues)
+  assert(isPayTimeInSchedule(pay0630_175959, xyXbStart, xyXbEnd), '6/30 17:59:59 XY -> 小白', issues)
+  assert(!isPayTimeInSchedule(pay0630_180000, xyXbStart, xyXbEnd), '6/30 18:00 XY 不归小白', issues)
+  assert(isPayTimeInSchedule(pay0630_175959, htDayStart, htDayEnd), '6/30 17:59:59 和田雅玉 -> 白天', issues)
+  assert(isPayTimeInSchedule(pay0630_180000, htNightStart, htNightEnd), '6/30 18:00 和田雅玉 -> 晚场', issues)
+  assert(isPayTimeInSchedule(pay0630_180000, fyStart, fyEnd), '6/30 18:00 拾玉居 -> 飞云晚场', issues)
+
   clearScheduleAttributionCache()
   const view = makeView({
     orderTimeText: '2026-06-20 15:00:00',

@@ -36,7 +36,7 @@ function ruleToMinuteIntervals(startTime: string, endTime: string): [number, num
 function isMinuteInRule(minutes: number, rule: TimeRule): boolean {
   if (!rule.enabled) return false
   const intervals = ruleToMinuteIntervals(rule.startTime, rule.endTime)
-  return intervals.some(([s, e]) => minutes >= s && minutes <= e)
+  return intervals.some(([s, e]) => minutes >= s && minutes < e)
 }
 
 export function matchTimeRule(

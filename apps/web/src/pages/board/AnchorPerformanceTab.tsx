@@ -24,6 +24,7 @@ import {
 import { showLongPeriodRates } from '../../lib/board-rate-display'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
 import { DailyReportPreviewButton } from '../../components/board/DailyReportPreviewButton'
+import { AnchorEffectiveSchedulePanel } from '../../components/board/AnchorEffectiveSchedulePanel'
 import { useDataFreshness } from '../../hooks/useDataFreshness'
 
 export const AnchorPerformanceTab: React.FC = () => {
@@ -331,9 +332,10 @@ export const AnchorPerformanceTab: React.FC = () => {
               />
             </MetricGridTransition>
           </div>
-          {startDate && endDate ? (
-            <>
-              <AnchorPocketSummaryPanel preset={preset} startDate={startDate} endDate={endDate} />
+      {startDate && endDate ? (
+        <>
+          <AnchorEffectiveSchedulePanel startDate={startDate} endDate={endDate} />
+          <AnchorPocketSummaryPanel preset={preset} startDate={startDate} endDate={endDate} />
               <AnchorAuditExportPanel startDate={startDate} endDate={endDate} />
             </>
           ) : null}

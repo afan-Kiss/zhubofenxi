@@ -14,8 +14,48 @@ import {
   htmlGoodReviewArkOrderFallbackPage,
   QianfanOrderOpenTicketError,
 } from '../services/qianfan-order-open-ticket.service'
+import {
+  closeGoodReviewImageSession,
+  proxyGoodReviewImage,
+  touchGoodReviewImageSession,
+} from '../services/good-review/good-review-image-proxy.service'
+import fs from 'node:fs'
 
 export const goodReviewsRouter = Router()
+
+goodReviewsRouter.get('/image-proxy', attachRequestUser, async (req, res, next) => {
+  try {
+    const rawUrl = String(req.query.url ?? '').trim()
+    const sessionId = String(req.query.sessionId ?? '').trim() || undefined
+    if (!rawUrl) {
+      sendFail(res, '请提供 url 参数', 400)
+      return
+    }
+    let decoded = rawUrl
+    try {
+      decoded = decodeURIComponent(rawUrl)
+    } catch {
+      decoded = rawUrl
+    }
+    const result = await proxyGoodReviewImage({ rawUrl: decoded, sessionId })
+    if (!result.ok) {
+      sendFail(res, result.message, 404)
+      return
+    }
+    if (sessionId) touchGoodReviewImageSession(sessionId, decoded)
+    res.setHeader('Content-Type', result.contentType)
+    res.setHeader('Cache-Control', 'private, max-age=1800')
+    fs.createReadStream(result.file).pipe(res)
+  } catch (err) {
+    next(err)
+  }
+})
+
+goodReviewsRouter.post('/image-session/close', (req, res) => {
+  const sessionId = String(req.body?.sessionId ?? '').trim()
+  if (sessionId) closeGoodReviewImageSession(sessionId)
+  sendOk(res, { ok: true })
+})
 
 goodReviewsRouter.use(attachRequestUser, requireAuth)
 

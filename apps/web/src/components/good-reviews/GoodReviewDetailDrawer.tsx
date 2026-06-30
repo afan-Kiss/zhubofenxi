@@ -6,6 +6,7 @@ import {
   type GoodReviewItemView,
 } from '../../lib/good-reviews'
 import { GoodReviewOrderRow } from './GoodReviewOrderRow'
+import { GoodReviewImage } from './GoodReviewImage'
 
 interface Props {
   open: boolean
@@ -36,8 +37,8 @@ export const GoodReviewDetailDrawer: React.FC<Props> = ({
       <div className="space-y-4">
         <div className="flex gap-3">
           {review.itemImage ? (
-            <img
-              src={review.itemImage}
+            <GoodReviewImage
+              rawUrl={review.itemImage}
               alt={review.itemName ?? '商品图'}
               className="h-20 w-20 shrink-0 rounded-xl object-cover"
             />
@@ -64,11 +65,12 @@ export const GoodReviewDetailDrawer: React.FC<Props> = ({
         {review.reviewImages.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {review.reviewImages.map((url) => (
-              <img
+              <GoodReviewImage
                 key={url}
-                src={url}
+                rawUrl={url}
                 alt="买家晒图"
                 className="h-24 w-24 rounded-xl object-cover"
+                onClick={() => window.open(`/api/good-reviews/image-proxy?url=${encodeURIComponent(url)}`, '_blank')}
               />
             ))}
           </div>

@@ -200,7 +200,7 @@ export function buildVirtualSchedulesFromTemplates(
       liveRoomName: t.liveRoomName,
       startAt,
       endAt,
-      source: 'generated_default' as const,
+      source: 'virtual_template' as const,
       enabled: true,
       locked: false,
       note: t.note,

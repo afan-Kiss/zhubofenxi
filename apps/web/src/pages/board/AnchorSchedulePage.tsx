@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ArrowLeft, Calendar, Copy, Plus, RefreshCw, Save, Wand2 } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
 import { invalidateBoardLiveQueryCache } from '../../lib/board-live-query-cache'
+import { useBoardLiveQuery } from '../../providers/BoardLiveQueryProvider'
 
 function afterScheduleMutation(): void {
   invalidateBoardLiveQueryCache('anchor-schedule')
@@ -31,6 +32,14 @@ interface ScheduleResponse {
     }
   >
   warnings: string[]
+  effectiveTable?: {
+    date: string
+    confirmed: boolean
+    sourceSummary: { manualCount: number; generatedCount: number; virtualCount: number }
+    rows: Array<ScheduleRow & { rowId: string; source: string }>
+    warnings: string[]
+  }
+  shouldRefreshPerformance?: boolean
 }
 
 interface ConfirmStatus {
@@ -51,6 +60,7 @@ const yesterdayKey = () => {
 const SHOP_OPTIONS = ['XY祥钰珠宝', '和田雅玉', '拾玉居和田玉', '祥钰珠宝']
 
 export const AnchorSchedulePage: React.FC = () => {
+  const { reload } = useBoardLiveQuery()
   const [date, setDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }))
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [warnings, setWarnings] = useState<string[]>([])
@@ -61,25 +71,39 @@ export const AnchorSchedulePage: React.FC = () => {
   const [confirmStatus, setConfirmStatus] = useState<ConfirmStatus | null>(null)
   const [todayStatus, setTodayStatus] = useState<ConfirmStatus | null>(null)
   const [yesterdayStatus, setYesterdayStatus] = useState<ConfirmStatus | null>(null)
+  const [effectiveSummary, setEffectiveSummary] = useState<string | null>(null)
+
+  const applyScheduleResponse = (data: ScheduleResponse) => {
+    setRows(
+      data.schedules.map((s) => ({
+        anchorName: s.anchorName,
+        shopName: s.shopName,
+        liveRoomName: s.liveRoomName,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        source: s.source,
+        enabled: s.enabled,
+        note: s.note,
+      })),
+    )
+    setWarnings(data.warnings ?? [])
+    if (data.effectiveTable) {
+      const t = data.effectiveTable
+      setEffectiveSummary(
+        `生效排班 ${t.rows.length} 条（人工 ${t.sourceSummary.manualCount} / 默认 ${t.sourceSummary.generatedCount} / 模板补齐 ${t.sourceSummary.virtualCount}）· ${t.confirmed ? '已确认' : '未确认'}`,
+      )
+    }
+    if (data.shouldRefreshPerformance) {
+      void reload()
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const data = await apiRequest<ScheduleResponse>(`/anchor-schedules?date=${encodeURIComponent(date)}`)
-      setRows(
-        data.schedules.map((s) => ({
-          anchorName: s.anchorName,
-          shopName: s.shopName,
-          liveRoomName: s.liveRoomName,
-          startTime: s.startTime,
-          endTime: s.endTime,
-          source: s.source,
-          enabled: s.enabled,
-          note: s.note,
-        })),
-      )
-      setWarnings(data.warnings ?? [])
+      applyScheduleResponse(data)
       const cs = await apiRequest<ConfirmStatus>(`/anchor-schedules/confirm-status?date=${encodeURIComponent(date)}`)
       setConfirmStatus(cs)
     } catch (e) {
@@ -117,19 +141,7 @@ export const AnchorSchedulePage: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({ date, overwrite: false }),
       })
-      setRows(
-        data.schedules.map((s) => ({
-          anchorName: s.anchorName,
-          shopName: s.shopName,
-          liveRoomName: s.liveRoomName,
-          startTime: s.startTime,
-          endTime: s.endTime,
-          source: s.source,
-          enabled: s.enabled,
-          note: s.note,
-        })),
-      )
-      setWarnings(data.warnings ?? [])
+      applyScheduleResponse(data)
       setMessage('已生成当天默认排班')
       afterScheduleMutation()
     } catch (e) {
@@ -150,19 +162,7 @@ export const AnchorSchedulePage: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({ fromDate: fromKey, toDate: date }),
       })
-      setRows(
-        data.schedules.map((s) => ({
-          anchorName: s.anchorName,
-          shopName: s.shopName,
-          liveRoomName: s.liveRoomName,
-          startTime: s.startTime,
-          endTime: s.endTime,
-          source: s.source,
-          enabled: s.enabled,
-          note: s.note,
-        })),
-      )
-      setWarnings(data.warnings ?? [])
+      applyScheduleResponse(data)
       setMessage(`已从 ${fromKey} 复制排班`)
       afterScheduleMutation()
     } catch (e) {
@@ -199,20 +199,12 @@ export const AnchorSchedulePage: React.FC = () => {
         method: 'POST',
         body: JSON.stringify({ date, schedules: rows, confirm }),
       })
-      setRows(
-        data.schedules.map((s) => ({
-          anchorName: s.anchorName,
-          shopName: s.shopName,
-          liveRoomName: s.liveRoomName,
-          startTime: s.startTime,
-          endTime: s.endTime,
-          source: s.source,
-          enabled: s.enabled,
-          note: s.note,
-        })),
+      applyScheduleResponse(data)
+      setMessage(
+        confirm
+          ? '排班已保存并确认，系统已按新排班重新计算当天业绩。'
+          : '排班已保存，系统已按新排班重新计算当天业绩。',
       )
-      setWarnings(data.warnings ?? [])
-      setMessage(confirm ? '排班已保存并确认' : '排班已保存，当天主播数据将按新排班计算')
       await apiRequest('/board/anchor-pocket-summary/recalculate', {
         method: 'POST',
         body: JSON.stringify({ date }),
@@ -375,7 +367,14 @@ export const AnchorSchedulePage: React.FC = () => {
         </button>
       </div>
 
-      {message ? <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{message}</div> : null}
+      {effectiveSummary ? (
+        <div className="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+          下面这张表就是系统计算当天主播业绩时使用的排班。{effectiveSummary}。你修改并保存后，当天业绩会重新计算。
+        </div>
+      ) : null}
+      {message ? (
+        <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{message}</div>
+      ) : null}
       {error ? <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">{error}</div> : null}
       {warnings.length > 0 ? (
         <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -444,7 +443,13 @@ export const AnchorSchedulePage: React.FC = () => {
                   />
                   {row.endTime === '24:00' ? <span className="ml-1 text-xs text-slate-500">24:00</span> : null}
                 </td>
-                <td className="px-3 py-2 text-slate-500">{row.source === 'manual' ? '手动' : '默认'}</td>
+                <td className="px-3 py-2 text-slate-500">
+                  {row.source === 'manual'
+                    ? '人工排班'
+                    : row.source === 'virtual_template'
+                      ? '系统模板补齐'
+                      : '默认排班'}
+                </td>
                 <td className="px-3 py-2">
                   <input
                     value={row.note ?? ''}

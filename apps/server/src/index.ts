@@ -93,6 +93,11 @@ async function main() {
   await listenHttp(app, webMounted)
 
   startDeferredBootTasks()
+
+  const { startGoodReviewImageCacheCleanupTimer } = await import(
+    './services/good-review/good-review-image-proxy.service'
+  )
+  startGoodReviewImageCacheCleanupTimer()
 }
 
 main().catch((err) => {

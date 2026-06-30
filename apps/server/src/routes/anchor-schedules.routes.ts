@@ -7,6 +7,7 @@ import {
   listDailySchedulesForDate,
   saveDailySchedules,
   validateDailySchedulesBody,
+  buildScheduleMutationResult,
 } from '../services/anchor-daily-schedule.service'
 import {
   confirmDailySchedules,
@@ -46,7 +47,7 @@ anchorSchedulesRouter.post('/generate-default', async (req, res, next) => {
       overwrite: Boolean(body.overwrite),
       createdBy: req.user?.username,
     })
-    sendOk(res, { ok: true, ...data })
+    sendOk(res, { ok: true, ...data, ...buildScheduleMutationResult(date) })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '生成默认排班失败', 400)
   }
@@ -66,7 +67,7 @@ anchorSchedulesRouter.post('/copy', async (req, res, next) => {
       toDate,
       createdBy: req.user?.username,
     })
-    sendOk(res, { ok: true, ...data })
+    sendOk(res, { ok: true, ...data, ...buildScheduleMutationResult(toDate) })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '复制排班失败', 400)
   }
@@ -103,7 +104,8 @@ anchorSchedulesRouter.post('/', async (req, res, next) => {
       createdBy: req.user?.username,
       confirm: Boolean(body.confirm),
     })
-    sendOk(res, { ok: true, ...data })
+    await recalculateAnchorDataForDate(date)
+    sendOk(res, { ok: true, ...data, ...buildScheduleMutationResult(date) })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '保存排班失败', 400)
   }
@@ -122,7 +124,8 @@ anchorSchedulesRouter.post('/confirm', async (req, res, next) => {
       confirmNote: req.body?.confirmNote ? String(req.body.confirmNote) : undefined,
     })
     const schedules = await listDailySchedulesForDate(date)
-    sendOk(res, { ok: true, ...result, ...schedules })
+    await recalculateAnchorDataForDate(date)
+    sendOk(res, { ok: true, ...result, ...schedules, ...buildScheduleMutationResult(date) })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '确认排班失败', 400)
   }

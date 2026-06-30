@@ -12,6 +12,11 @@ import {
 } from '../../lib/good-reviews'
 import { GoodReviewOrderRow } from '../../components/good-reviews/GoodReviewOrderRow'
 import { GoodReviewDetailDrawer } from '../../components/good-reviews/GoodReviewDetailDrawer'
+import {
+  GoodReviewImage,
+  closeGoodReviewImageSessionBeacon,
+  ensureGoodReviewImageSession,
+} from '../../components/good-reviews/GoodReviewImage'
 
 const SHOP_TAB_ORDER = ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu']
 
@@ -47,8 +52,8 @@ function ReviewCard({
     >
       <div className="flex gap-3">
         {review.itemImage ? (
-          <img
-            src={review.itemImage}
+          <GoodReviewImage
+            rawUrl={review.itemImage}
             alt={review.itemName ?? '商品图'}
             className="h-16 w-16 shrink-0 rounded-xl object-cover"
           />
@@ -76,9 +81,9 @@ function ReviewCard({
           {review.reviewImages.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-2">
               {review.reviewImages.slice(0, 4).map((url) => (
-                <img
+                <GoodReviewImage
                   key={url}
-                  src={url}
+                  rawUrl={url}
                   alt="买家晒图"
                   className="h-16 w-16 rounded-lg object-cover"
                 />
@@ -115,6 +120,16 @@ export const GoodReviewsPage: React.FC = () => {
   )
   const [error, setError] = useState('')
   const [detailReview, setDetailReview] = useState<GoodReviewItemView | null>(null)
+
+  useEffect(() => {
+    ensureGoodReviewImageSession()
+    const onClose = () => closeGoodReviewImageSessionBeacon()
+    window.addEventListener('pagehide', onClose)
+    return () => {
+      window.removeEventListener('pagehide', onClose)
+      onClose()
+    }
+  }, [])
 
   const shopNameByKey = useMemo(() => {
     const map = new Map<string, string>()

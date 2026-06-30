@@ -8,8 +8,44 @@ import {
 } from './anchor-schedule-template.service'
 import { invalidateBusinessBoardCacheForDate } from './anchor-schedule-cache.service'
 import { confirmDailySchedules } from './anchor-schedule-confirm.service'
+import { isDateScheduleConfirmed } from './anchor-schedule-confirm.service'
 
-export type DailyScheduleSource = 'manual' | 'generated_default'
+export type DailyScheduleSource = 'manual' | 'generated_default' | 'virtual_template'
+
+export type EffectiveScheduleSource = 'manual' | 'generated_default' | 'virtual_template'
+
+export interface EffectiveScheduleRow {
+  rowId: string
+  source: EffectiveScheduleSource
+  anchorName: string
+  shopName: string
+  liveRoomName: string
+  startTime: string
+  endTime: string
+  startAt: string
+  endAt: string
+  enabled: boolean
+  confirmed: boolean
+  note?: string
+}
+
+export interface EffectiveScheduleTable {
+  date: string
+  confirmed: boolean
+  sourceSummary: {
+    manualCount: number
+    generatedCount: number
+    virtualCount: number
+  }
+  rows: EffectiveScheduleRow[]
+  warnings: string[]
+}
+
+export interface ScheduleMutationResult {
+  changed: boolean
+  affectedDate: string
+  shouldRefreshPerformance: boolean
+}
 
 export interface DailyScheduleDto {
   id: string
@@ -75,7 +111,11 @@ function rowToDto(row: {
     endAt: row.endAt.toISOString(),
     startTime,
     endTime,
-    source: row.source as DailyScheduleSource,
+    source: (row.source === 'virtual_template'
+      ? 'virtual_template'
+      : row.source === 'manual'
+        ? 'manual'
+        : 'generated_default') as DailyScheduleSource,
     enabled: row.enabled,
     locked: row.locked,
     confirmed: row.confirmed,
@@ -84,75 +124,214 @@ function rowToDto(row: {
   }
 }
 
-export async function listDailySchedulesForDate(dateKey: string): Promise<{
-  date: string
-  schedules: DailyScheduleDto[]
-  warnings: string[]
-}> {
+function hmFromDate(d: Date, scheduleDate: string): string {
+  const endDateKey = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+  const isMidnightEnd =
+    d.getHours() === 0 && d.getMinutes() === 0 && endDateKey > scheduleDate
+  if (isMidnightEnd) return '24:00'
+  return d.toLocaleTimeString('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
+function scheduleSlotKey(shopName: string, liveRoomName: string, startTime: string, endTime: string): string {
+  return `${shopName}|${liveRoomName}|${startTime}|${endTime}`
+}
+
+function dbRowToEffective(
+  row: {
+    id: string
+    scheduleDate: string
+    anchorName: string
+    shopName: string
+    liveRoomName: string
+    startAt: Date
+    endAt: Date
+    source: string
+    enabled: boolean
+    confirmed: boolean
+    note: string | null
+  },
+  source: EffectiveScheduleSource,
+  dateConfirmed: boolean,
+): EffectiveScheduleRow {
+  return {
+    rowId: row.id,
+    source,
+    anchorName: row.anchorName,
+    shopName: row.shopName,
+    liveRoomName: row.liveRoomName,
+    startTime: hmFromDate(row.startAt, row.scheduleDate),
+    endTime: hmFromDate(row.endAt, row.scheduleDate),
+    startAt: row.startAt.toISOString(),
+    endAt: row.endAt.toISOString(),
+    enabled: row.enabled,
+    confirmed: dateConfirmed,
+    note: row.note ?? undefined,
+  }
+}
+
+export async function getEffectiveScheduleTableForDate(dateKey: string): Promise<EffectiveScheduleTable> {
   const warnings: string[] = []
   const xb = xiaobaiWarningForDate(dateKey)
   if (xb) warnings.push(xb)
 
-  const rows = await prisma.anchorDailySchedule.findMany({
-    where: { scheduleDate: dateKey },
-    orderBy: [{ startAt: 'asc' }, { anchorName: 'asc' }],
+  const dateConfirmed = await isDateScheduleConfirmed(dateKey)
+  const dbRows = await prisma.anchorDailySchedule.findMany({
+    where: { scheduleDate: dateKey, enabled: true },
+    orderBy: { startAt: 'asc' },
   })
 
-  if (rows.length === 0) {
-    const templates = await listActiveTemplatesForDate(dateKey)
-    const virtual = buildVirtualSchedulesFromTemplates(dateKey, templates)
-    return {
-      date: dateKey,
-      schedules: virtual.map((v) =>
-        rowToDto({
-          ...v,
-          id: v.id,
-          startAt: v.startAt,
-          endAt: v.endAt,
-          confirmed: false,
-          confirmedAt: null,
-          note: v.note ?? null,
-        }),
+  const manualRows = dbRows.filter((r) => r.source === 'manual' || r.locked)
+  const generatedRows = dbRows.filter((r) => r.source === 'generated_default' && !r.locked)
+
+  const covered = new Set<string>()
+  for (const row of [...manualRows, ...generatedRows]) {
+    covered.add(
+      scheduleSlotKey(
+        row.shopName,
+        row.liveRoomName,
+        hmFromDate(row.startAt, dateKey),
+        hmFromDate(row.endAt, dateKey),
       ),
-      warnings,
-    }
+    )
   }
 
-  const dtos = rows.map(rowToDto)
+  const templates = await listActiveTemplatesForDate(dateKey)
+  const virtualRows = buildVirtualSchedulesFromTemplates(dateKey, templates).filter((v) => {
+    const key = scheduleSlotKey(v.shopName, v.liveRoomName, hmFromDate(v.startAt, dateKey), hmFromDate(v.endAt, dateKey))
+    return !covered.has(key)
+  })
+
+  const effectiveRows: EffectiveScheduleRow[] = [
+    ...manualRows.map((r) => dbRowToEffective(r, 'manual', dateConfirmed)),
+    ...generatedRows.map((r) => dbRowToEffective(r, 'generated_default', dateConfirmed)),
+    ...virtualRows.map((v) => ({
+      rowId: v.id,
+      source: 'virtual_template' as const,
+      anchorName: v.anchorName,
+      shopName: v.shopName,
+      liveRoomName: v.liveRoomName,
+      startTime: hmFromDate(v.startAt, dateKey),
+      endTime: hmFromDate(v.endAt, dateKey),
+      startAt: v.startAt.toISOString(),
+      endAt: v.endAt.toISOString(),
+      enabled: true,
+      confirmed: dateConfirmed,
+      note: v.note ?? '系统模板补齐',
+    })),
+  ].sort((a, b) => a.startAt.localeCompare(b.startAt))
+
   const conflicts = detectScheduleConflicts(
-    rows.filter((r) => r.enabled).map((r) => ({
+    effectiveRows.map((r) => ({
       anchorName: r.anchorName,
       shopName: r.shopName,
       liveRoomName: r.liveRoomName,
-      startAt: r.startAt,
-      endAt: r.endAt,
+      startAt: new Date(r.startAt),
+      endAt: new Date(r.endAt),
     })),
   )
   for (const c of conflicts) warnings.push(c.message)
 
-  return { date: dateKey, schedules: dtos, warnings }
+  return {
+    date: dateKey,
+    confirmed: dateConfirmed,
+    sourceSummary: {
+      manualCount: effectiveRows.filter((r) => r.source === 'manual').length,
+      generatedCount: effectiveRows.filter((r) => r.source === 'generated_default').length,
+      virtualCount: effectiveRows.filter((r) => r.source === 'virtual_template').length,
+    },
+    rows: effectiveRows,
+    warnings,
+  }
+}
+
+export async function getEffectiveScheduleTablesForRange(
+  startDate: string,
+  endDate: string,
+): Promise<EffectiveScheduleTable[]> {
+  const out: EffectiveScheduleTable[] = []
+  let cursor = startDate
+  while (cursor <= endDate) {
+    out.push(await getEffectiveScheduleTableForDate(cursor))
+    const next = new Date(`${cursor}T12:00:00+08:00`)
+    next.setDate(next.getDate() + 1)
+    cursor = next.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+  }
+  return out
+}
+
+function effectiveRowToDto(row: EffectiveScheduleRow, dateKey: string): DailyScheduleDto {
+  return {
+    id: row.rowId,
+    scheduleDate: dateKey,
+    anchorName: row.anchorName,
+    shopName: row.shopName,
+    liveRoomName: row.liveRoomName,
+    startAt: row.startAt,
+    endAt: row.endAt,
+    startTime: row.startTime,
+    endTime: row.endTime,
+    source: row.source,
+    enabled: row.enabled,
+    locked: row.source === 'manual',
+    confirmed: row.confirmed,
+    confirmedAt: null,
+    note: row.note ?? null,
+  }
+}
+
+export function buildScheduleMutationResult(dateKey: string): ScheduleMutationResult {
+  return {
+    changed: true,
+    affectedDate: dateKey,
+    shouldRefreshPerformance: true,
+  }
+}
+
+export async function listDailySchedulesForDate(dateKey: string): Promise<{
+  date: string
+  schedules: DailyScheduleDto[]
+  warnings: string[]
+  effectiveTable: EffectiveScheduleTable
+}> {
+  const table = await getEffectiveScheduleTableForDate(dateKey)
+  return {
+    date: dateKey,
+    schedules: table.rows.map((r) => effectiveRowToDto(r, dateKey)),
+    warnings: table.warnings,
+    effectiveTable: table,
+  }
 }
 
 export async function getEffectiveSchedulesForDate(dateKey: string) {
-  const rows = await prisma.anchorDailySchedule.findMany({
-    where: { scheduleDate: dateKey, enabled: true },
-    orderBy: { startAt: 'asc' },
+  const table = await getEffectiveScheduleTableForDate(dateKey)
+  const toRow = (r: EffectiveScheduleRow) => ({
+    id: r.rowId,
+    scheduleDate: dateKey,
+    anchorName: r.anchorName,
+    shopName: r.shopName,
+    liveRoomName: r.liveRoomName,
+    startAt: new Date(r.startAt),
+    endAt: new Date(r.endAt),
+    source: r.source,
+    enabled: true,
+    locked: r.source === 'manual',
+    confirmed: r.confirmed,
+    confirmedAt: null,
+    note: r.note ?? null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    createdBy: null,
   })
-  if (rows.length > 0) {
-    const manual = rows.filter((r) => r.source === 'manual' || r.locked)
-    const generated = rows.filter((r) => r.source === 'generated_default' && !r.locked)
-    return { manual, generated, virtual: [] as typeof rows }
-  }
-  const templates = await listActiveTemplatesForDate(dateKey)
-  const virtual = buildVirtualSchedulesFromTemplates(dateKey, templates)
   return {
-    manual: [] as typeof rows,
-    generated: [] as typeof rows,
-    virtual: virtual.map((v) => ({
-      ...v,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    })),
+    manual: table.rows.filter((r) => r.source === 'manual').map(toRow),
+    generated: table.rows.filter((r) => r.source === 'generated_default').map(toRow),
+    virtual: table.rows.filter((r) => r.source === 'virtual_template').map(toRow),
+    table,
   }
 }
 

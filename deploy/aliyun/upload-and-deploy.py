@@ -36,13 +36,32 @@ SKIP_FILE_SUFFIX = {".db-journal", ".log", ".zip"}
 SKIP_PATH_PARTS = {".venv", "__pycache__", "apps/server/dist", "apps/web/dist"}
 
 
+def load_ssh_pass() -> str:
+    if os.environ.get("SSH_PASS", "").strip():
+        return os.environ["SSH_PASS"].strip()
+    for env_path in [
+        ROOT / "secrets" / "deploy.env",
+        Path(r"e:\我的软件源码\总控台") / ".env",
+        ROOT / ".env",
+    ]:
+        if not env_path.exists():
+            continue
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("SSH_PASS="):
+                val = line.split("=", 1)[1].strip().strip('"').strip("'")
+                if val:
+                    return val
+    return ""
+
+
 def connect() -> paramiko.SSHClient:
-    if not PASSWORD:
+    password = load_ssh_pass()
+    if not password:
         print("Missing SSH_PASS", file=sys.stderr)
         sys.exit(1)
     c = paramiko.SSHClient()
     c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-    c.connect(HOST, username=USER, password=PASSWORD, timeout=60)
+    c.connect(HOST, username=USER, password=password, timeout=60)
     return c
 
 

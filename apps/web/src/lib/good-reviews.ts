@@ -104,3 +104,15 @@ export function formatMoneyFromCent(cent: number | null | undefined): string | n
     maximumFractionDigits: 2,
   })}`
 }
+
+export function buildGoodReviewArkOrderDetailUrl(orderId: string, shopKey: string): string {
+  const params = new URLSearchParams({
+    orderId,
+    shop: shopKey,
+  })
+  return `/api/good-reviews/ark-order-detail?${params.toString()}`
+}
+
+export function openGoodReviewArkOrderDetail(orderId: string, shopKey: string): void {
+  window.open(buildGoodReviewArkOrderDetailUrl(orderId, shopKey), '_blank', 'noopener,noreferrer')
+}

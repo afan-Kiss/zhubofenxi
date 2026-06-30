@@ -10,6 +10,8 @@ import {
   type GoodReviewShopView,
   type GoodReviewSyncResult,
 } from '../../lib/good-reviews'
+import { GoodReviewOrderRow } from '../../components/good-reviews/GoodReviewOrderRow'
+import { GoodReviewDetailDrawer } from '../../components/good-reviews/GoodReviewDetailDrawer'
 
 const SHOP_TAB_ORDER = ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu']
 
@@ -22,11 +24,27 @@ function StatCard({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-function ReviewCard({ review }: { review: GoodReviewItemView }) {
+function ReviewCard({
+  review,
+  shopName,
+  onOpen,
+}: {
+  review: GoodReviewItemView
+  shopName?: string | null
+  onOpen: (review: GoodReviewItemView) => void
+}) {
   const price = formatMoneyFromCent(review.itemPriceCent)
   const timeLabel = review.reviewTimeText ?? formatLocalDateTime(review.reviewTime)
   return (
-    <article className="rounded-2xl border border-slate-100 bg-white p-3 shadow-sm">
+    <article
+      className="cursor-pointer rounded-2xl border border-slate-100 bg-white p-3 shadow-sm transition hover:border-rose-100 hover:shadow-md"
+      onClick={() => onOpen(review)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') onOpen(review)
+      }}
+      role="button"
+      tabIndex={0}
+    >
       <div className="flex gap-3">
         {review.itemImage ? (
           <img
@@ -44,6 +62,7 @@ function ReviewCard({ review }: { review: GoodReviewItemView }) {
             {review.itemName ?? '未命名商品'}
           </div>
           <div className="mt-0.5 flex flex-wrap gap-2 text-[11px] text-slate-500">
+            {shopName ? <span>{shopName}</span> : null}
             {price ? <span>{price}</span> : null}
             {review.productScore != null ? <span>商品 {review.productScore} 分</span> : null}
             {review.serviceScore != null ? <span>服务 {review.serviceScore} 分</span> : null}
@@ -66,6 +85,13 @@ function ReviewCard({ review }: { review: GoodReviewItemView }) {
               ))}
             </div>
           ) : null}
+          <div
+            className="mt-2"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <GoodReviewOrderRow orderId={review.orderId} shopKey={review.shopKey} compact />
+          </div>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
             {timeLabel ? <span>{timeLabel}</span> : null}
             <span>点赞 {review.likeCount}</span>
@@ -88,6 +114,15 @@ export const GoodReviewsPage: React.FC = () => {
     null,
   )
   const [error, setError] = useState('')
+  const [detailReview, setDetailReview] = useState<GoodReviewItemView | null>(null)
+
+  const shopNameByKey = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const shop of payload?.shops ?? []) {
+      map.set(shop.shopKey, shop.shopName)
+    }
+    return map
+  }, [payload?.shops])
 
   const loadLocal = useCallback(async (shopKey?: string) => {
     const shop = shopKey ?? activeShop
@@ -273,7 +308,14 @@ export const GoodReviewsPage: React.FC = () => {
 
           <div className="space-y-3">
             {(payload?.reviews ?? []).length > 0 ? (
-              payload!.reviews.map((review) => <ReviewCard key={review.id} review={review} />)
+              payload!.reviews.map((review) => (
+                <ReviewCard
+                  key={review.id}
+                  review={review}
+                  shopName={shopNameByKey.get(review.shopKey)}
+                  onOpen={setDetailReview}
+                />
+              ))
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-10 text-center text-sm text-slate-500">
                 当前店铺还没有本地好评数据，可点击右上角「立即同步全部店铺好评」获取最新内容。
@@ -282,6 +324,13 @@ export const GoodReviewsPage: React.FC = () => {
           </div>
         </>
       ) : null}
+
+      <GoodReviewDetailDrawer
+        open={detailReview !== null}
+        review={detailReview}
+        shopName={detailReview ? shopNameByKey.get(detailReview.shopKey) : null}
+        onClose={() => setDetailReview(null)}
+      />
     </div>
   )
 }

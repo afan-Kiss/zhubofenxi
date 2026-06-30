@@ -17,10 +17,10 @@ export const QIANFAN_SHOP_ENV_KEYS: Record<QianfanShopName, string> = {
 }
 
 const ALIAS_RULES: Array<{ shop: QianfanShopName; patterns: RegExp[] }> = [
-  { shop: 'XY祥钰珠宝', patterns: [/XY\s*祥钰/i, /XY祥钰珠宝/i] },
+  { shop: 'XY祥钰珠宝', patterns: [/XY\s*祥钰/i, /XY祥钰珠宝/i, /xy祥钰珠宝/i] },
   { shop: '拾玉居和田玉', patterns: [/拾玉居/i] },
-  { shop: '和田雅玉', patterns: [/和田雅玉/i] },
-  { shop: '祥钰珠宝', patterns: [/^祥钰珠宝$/i, /(?<!XY)祥钰(?!珠宝)/i] },
+  { shop: '和田雅玉', patterns: [/和田雅玉/i, /禾田雅玉/i] },
+  { shop: '祥钰珠宝', patterns: [/^祥钰珠宝$/i, /^香玉$/i, /(?<!XY)祥钰(?!珠宝)/i] },
 ]
 
 export function normalizeShopLabel(raw: string): string {

@@ -42,9 +42,30 @@ function pickStringArray(obj: Record<string, unknown>, keys: string[]): string[]
   return []
 }
 
+export function normalizeReviewImageUrl(url: string | null | undefined): string | null {
+  if (url == null) return null
+  const text = String(url).trim()
+  if (!text) return null
+  if (text.startsWith('//')) return `https:${text}`
+  if (text.startsWith('http://') || text.startsWith('https://')) return text
+  return text
+}
+
 function pickImages(obj: Record<string, unknown>): string[] {
   const direct = pickStringArray(obj, ['reviewImages', 'images', 'imageList', 'picList', 'pics'])
-  if (direct.length) return direct
+  if (direct.length) return direct.map((u) => normalizeReviewImageUrl(u)).filter(Boolean) as string[]
+
+  const content = asRecord(obj.content)
+  const contentImages = content?.images
+  if (Array.isArray(contentImages)) {
+    const urls: string[] = []
+    for (const item of contentImages) {
+      const rec = asRecord(item)
+      const url = normalizeReviewImageUrl(pickString(rec ?? {}, ['link', 'url', 'imageUrl', 'picUrl']))
+      if (url) urls.push(url)
+    }
+    if (urls.length) return urls
+  }
 
   const imageInfo = obj.imageInfo ?? obj.image_info ?? obj.reviewImageInfo
   if (Array.isArray(imageInfo)) {
@@ -52,13 +73,13 @@ function pickImages(obj: Record<string, unknown>): string[] {
     for (const item of imageInfo) {
       const rec = asRecord(item)
       if (!rec) continue
-      const url = pickString(rec, ['url', 'imageUrl', 'picUrl', 'src'])
+      const url = normalizeReviewImageUrl(pickString(rec, ['url', 'imageUrl', 'picUrl', 'src', 'link']))
       if (url) urls.push(url)
     }
     if (urls.length) return urls
   }
 
-  const single = pickString(obj, ['imageUrl', 'picUrl', 'cover'])
+  const single = normalizeReviewImageUrl(pickString(obj, ['imageUrl', 'picUrl', 'cover', 'image_link']))
   return single ? [single] : []
 }
 
@@ -104,50 +125,78 @@ export function normalizeGoodReviewRow(
   shopKey: string,
   raw: Record<string, unknown>,
 ): import('./good-review.types').NormalizedGoodReview | null {
-  const reviewId = pickString(raw, ['reviewId', 'review_id', 'id', 'commentId', 'comment_id'])
-  const orderId = pickString(raw, ['orderId', 'order_id', 'packageId', 'package_id', 'orderNo'])
-  const { date, text } = parseReviewTime(raw)
-  const dedupeKey = buildGoodReviewDedupeKey(shopKey, reviewId, orderId, text)
+  const skuInfo = asRecord(raw.sku_info) ?? asRecord(raw.skuInfo)
+  const reviewData = asRecord(raw.review_data) ?? asRecord(raw.reviewData)
+  const content = asRecord(reviewData?.content) ?? reviewData
+  const interaction = asRecord(raw.interation_info) ?? asRecord(raw.interaction_info)
 
-  const item = asRecord(raw.itemInfo) ?? asRecord(raw.item_info) ?? asRecord(raw.goodsInfo) ?? raw
+  const flat = reviewData ? { ...raw, ...reviewData, content } : raw
+  const item = skuInfo ?? asRecord(raw.itemInfo) ?? asRecord(raw.item_info) ?? asRecord(raw.goodsInfo) ?? flat
   const sku = asRecord(raw.skuInfo) ?? asRecord(raw.sku_info) ?? item
 
-  const reviewText = pickString(raw, [
-    'content',
-    'reviewContent',
-    'review_content',
-    'commentContent',
-    'comment_content',
-    'text',
-  ])
+  const reviewId =
+    pickString(reviewData ?? raw, ['review_id', 'reviewId', 'id', 'commentId', 'comment_id']) ??
+    pickString(raw, ['reviewId', 'review_id', 'id'])
+  const orderId =
+    pickString(skuInfo ?? raw, ['order_id', 'orderId', 'packageId', 'package_id', 'orderNo']) ??
+    pickString(raw, ['orderId', 'order_id', 'packageId'])
+  const { date, text } = parseReviewTime({
+    ...(reviewData ?? {}),
+    ...raw,
+    create_time: pickString(reviewData ?? raw, ['create_time', 'createTime']),
+    createTime: pickString(reviewData ?? raw, ['create_time', 'createTime']),
+  })
+  const dedupeKey = buildGoodReviewDedupeKey(shopKey, reviewId, orderId, text)
 
-  const priceYuan = pickNumber(item, ['price', 'salePrice', 'itemPrice', 'payPrice'])
+  const reviewText =
+    pickString(content ?? reviewData ?? raw, [
+      'text',
+      'content',
+      'reviewContent',
+      'review_content',
+      'commentContent',
+    ]) ?? null
+
+  const priceRaw =
+    pickNumber(skuInfo ?? item, ['price', 'salePrice', 'itemPrice', 'payPrice']) ??
+    pickNumber(raw, ['price'])
   const priceCent =
-    pickNumber(item, ['priceCent', 'price_cent']) ??
-    (priceYuan != null ? Math.round(priceYuan * 100) : null)
+    pickNumber(skuInfo ?? item, ['priceCent', 'price_cent']) ??
+    (priceRaw != null ? Math.round(priceRaw * 100) : null)
+
+  const itemImage = normalizeReviewImageUrl(
+    pickString(skuInfo ?? item, ['image_link', 'imageLink', 'itemImage', 'item_image', 'image', 'cover', 'picUrl']),
+  )
 
   return {
     shopKey,
     dedupeKey,
     reviewId,
     orderId,
-    itemId: pickString(item, ['itemId', 'item_id', 'goodsId', 'goods_id', 'productId']),
-    skuId: pickString(sku, ['skuId', 'sku_id']),
-    itemName: pickString(item, ['itemName', 'item_name', 'goodsName', 'goods_name', 'name', 'title']),
-    itemImage: pickString(item, ['itemImage', 'item_image', 'image', 'cover', 'picUrl']),
+    itemId: pickString(skuInfo ?? item, ['item_id', 'itemId', 'goodsId', 'goods_id', 'productId']),
+    skuId: pickString(skuInfo ?? sku, ['sku_id', 'skuId']),
+    itemName: pickString(skuInfo ?? item, ['name', 'itemName', 'item_name', 'goodsName', 'goods_name', 'title']),
+    itemImage,
     itemPriceCent: priceCent,
-    itemQuantity: pickNumber(raw, ['quantity', 'itemQuantity', 'item_quantity', 'buyCount']),
-    productScore: pickNumber(raw, ['productScore', 'product_score', 'goodsScore', 'score', 'itemScore']),
-    serviceScore: pickNumber(raw, ['serviceScore', 'service_score', 'sellerScore']),
-    logisticsScore: pickNumber(raw, ['logisticsScore', 'logistics_score', 'deliveryScore']),
+    itemQuantity:
+      pickNumber(skuInfo ?? raw, ['quantity', 'itemQuantity', 'item_quantity', 'buyCount']) ?? null,
+    productScore:
+      pickNumber(reviewData ?? raw, ['sku_score', 'skuScore', 'productScore', 'product_score', 'goodsScore', 'score']) ??
+      null,
+    serviceScore: pickNumber(reviewData ?? raw, ['service_score', 'serviceScore', 'sellerScore']) ?? null,
+    logisticsScore:
+      pickNumber(reviewData ?? raw, ['logistics_score', 'logisticsScore', 'deliveryScore']) ?? null,
     reviewText,
-    reviewImages: pickImages(raw),
-    reviewTags: pickStringArray(raw, ['tags', 'reviewTags', 'review_tags', 'labelList']),
-    isAnonymous: pickBool(raw, ['anonymous', 'isAnonymous', 'is_anonymous']),
-    likeCount: pickNumber(raw, ['likeCount', 'like_count', 'thumbUpCount']) ?? 0,
-    replyCount: pickNumber(raw, ['replyCount', 'reply_count', 'commentReplyCount']) ?? 0,
+    reviewImages: pickImages({ ...(content ?? {}), ...raw }),
+    reviewTags: pickStringArray(reviewData ?? raw, ['tags', 'reviewTags', 'review_tags', 'labelList']),
+    isAnonymous: pickBool(reviewData ?? raw, ['anonymous', 'isAnonymous', 'is_anonymous']),
+    likeCount:
+      pickNumber(interaction ?? raw, ['like_num', 'likeNum', 'likeCount', 'like_count', 'thumbUpCount']) ?? 0,
+    replyCount:
+      pickNumber(interaction ?? raw, ['reply_num', 'replyNum', 'replyCount', 'reply_count', 'commentReplyCount']) ??
+      0,
     reviewTime: date,
-    reviewTimeText: text,
+    reviewTimeText: text ?? pickString(reviewData ?? raw, ['create_time', 'createTime']),
     raw,
   }
 }
@@ -157,6 +206,8 @@ export function extractReviewList(payload: unknown): Record<string, unknown>[] {
   if (!root) return []
   const data = asRecord(root.data) ?? root
   const candidates = [
+    data.review_info_list,
+    data.reviewInfoList,
     data.reviewList,
     data.reviews,
     data.list,
@@ -173,6 +224,30 @@ export function extractReviewList(payload: unknown): Record<string, unknown>[] {
   return []
 }
 
+export function parseReviewManagerEnvelope(payload: unknown): {
+  success: boolean
+  total: number | null
+  platformCode: number | string | null
+  platformMsg: string | null
+  listCount: number
+} {
+  const root = asRecord(payload)
+  const data = asRecord(root?.data)
+  const list = extractReviewList(payload)
+  return {
+    success: root?.success === true && data != null,
+    total: pickNumber(data ?? {}, ['total', 'totalCount', 'total_count', 'count']),
+    platformCode:
+      root?.code == null
+        ? null
+        : typeof root.code === 'number' || typeof root.code === 'string'
+          ? root.code
+          : String(root.code),
+    platformMsg: pickString(root ?? {}, ['msg', 'message']),
+    listCount: list.length,
+  }
+}
+
 export function extractReviewTotal(payload: unknown): number | null {
   const root = asRecord(payload)
   if (!root) return null
@@ -183,6 +258,16 @@ export function extractReviewTotal(payload: unknown): number | null {
   )
 }
 
+function pickOverviewMetric(data: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const block = asRecord(data[key])
+    if (!block) continue
+    const value = pickNumber(block, ['current_data_value', 'currentDataValue', 'value', 'count'])
+    if (value != null) return value
+  }
+  return pickNumber(data, keys)
+}
+
 export function parseShopScore(payload: unknown): {
   shopScore: number | null
   raw: Record<string, unknown> | null
@@ -190,7 +275,9 @@ export function parseShopScore(payload: unknown): {
   const root = asRecord(payload)
   if (!root) return { shopScore: null, raw: null }
   const data = asRecord(root.data) ?? root
+  const scoreDto = asRecord(data.shop_score_dto) ?? asRecord(data.shopScoreDto)
   const shopScore =
+    pickNumber(scoreDto ?? {}, ['score', 'shopScore', 'shop_score']) ??
     pickNumber(data, ['shopScore', 'shop_score', 'score', 'totalScore', 'sellerScore']) ??
     pickNumber(root, ['shopScore', 'score'])
   return { shopScore, raw: data }
@@ -201,18 +288,51 @@ export function parseReviewCountDetail(payload: unknown): Partial<
 > {
   const root = asRecord(payload)
   const data = asRecord(root?.data) ?? root ?? {}
+  const level =
+    asRecord(data.review_level_count_detail) ?? asRecord(data.reviewLevelCountDetail) ?? data
+  const content =
+    asRecord(data.review_content_count_detail) ?? asRecord(data.reviewContentCountDetail) ?? data
+  const reply =
+    asRecord(data.review_reply_count_detail) ?? asRecord(data.reviewReplyCountDetail) ?? data
+
+  const goodReviewCount =
+    pickNumber(level, ['good_review_count', 'goodReviewCount', 'goodCount', 'positiveCount']) ?? 0
+  const mediumReviewCount =
+    pickNumber(level, ['middle_review_count', 'mediumReviewCount', 'mediumCount', 'neutralCount']) ??
+    0
+  const badReviewCount =
+    pickNumber(level, ['bad_review_count', 'badReviewCount', 'badCount', 'negativeCount']) ?? 0
+  const totalFromLevel = goodReviewCount + mediumReviewCount + badReviewCount
+
   return {
-    totalReviewCount: pickNumber(data, ['totalCount', 'total', 'allCount', 'reviewTotal']) ?? 0,
-    goodReviewCount:
-      pickNumber(data, ['goodCount', 'goodReviewCount', 'positiveCount', 'scoreGoodCount']) ?? 0,
-    mediumReviewCount:
-      pickNumber(data, ['mediumCount', 'middleCount', 'neutralCount', 'scoreMediumCount']) ?? 0,
-    badReviewCount:
-      pickNumber(data, ['badCount', 'badReviewCount', 'negativeCount', 'scoreBadCount']) ?? 0,
-    withImageCount: pickNumber(data, ['withImageCount', 'hasImageCount', 'picCount']) ?? 0,
-    withTextCount: pickNumber(data, ['withTextCount', 'hasTextCount', 'textCount']) ?? 0,
-    unrepliedCount: pickNumber(data, ['unrepliedCount', 'noReplyCount', 'waitReplyCount']) ?? 0,
-    repliedCount: pickNumber(data, ['repliedCount', 'replyCount', 'hasReplyCount']) ?? 0,
+    totalReviewCount:
+      pickNumber(data, ['totalCount', 'total', 'allCount', 'reviewTotal']) ??
+      (totalFromLevel > 0 ? totalFromLevel : 0),
+    goodReviewCount,
+    mediumReviewCount,
+    badReviewCount,
+    withImageCount:
+      pickNumber(content, [
+        'has_image_review_count',
+        'hasImageReviewCount',
+        'withImageCount',
+        'hasImageCount',
+        'picCount',
+      ]) ?? 0,
+    withTextCount:
+      pickNumber(content, [
+        'has_text_review_count',
+        'hasTextReviewCount',
+        'withTextCount',
+        'hasTextCount',
+        'textCount',
+      ]) ?? 0,
+    unrepliedCount:
+      pickNumber(reply, ['un_reply_review_count', 'unReplyReviewCount', 'unrepliedCount', 'noReplyCount']) ??
+      0,
+    repliedCount:
+      pickNumber(reply, ['replied_review_count', 'repliedReviewCount', 'repliedCount', 'replyCount']) ??
+      0,
     countDetailRaw: data,
   }
 }
@@ -224,15 +344,20 @@ export function parseReviewOverview(payload: unknown): Partial<
   const data = asRecord(root?.data) ?? root ?? {}
   return {
     pendingInteractionCount:
-      pickNumber(data, [
+      pickOverviewMetric(data, [
+        'pending_interactive_positive_review',
         'pendingInteractionCount',
         'waitInteractionCount',
         'pendingGoodReviewCount',
         'waitReplyGoodCount',
       ]) ?? 0,
     pendingBadReviewCount:
-      pickNumber(data, ['pendingBadReviewCount', 'waitHandleBadCount', 'badReviewPendingCount']) ??
-      0,
+      pickOverviewMetric(data, [
+        'pending_negative_review',
+        'pendingBadReviewCount',
+        'waitHandleBadCount',
+        'badReviewPendingCount',
+      ]) ?? 0,
     overviewRaw: data,
   }
 }

@@ -178,8 +178,13 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
           endDate,
           anchorName,
           orderCount: statNum(stats, 'orderCount'),
+          payAmountYuan: statNum(stats, 'gmv') || statNum(stats, 'totalGmv'),
+          signedOrderCount:
+            statNum(stats, 'actualSignedCount') ||
+            statNum(stats, 'signedOrderCount') ||
+            statNum(stats, 'signedCount'),
+          signedAmountYuan: statNum(stats, 'actualSignedAmount'),
           refundOrderCount: statNum(stats, 'returnCount') || statNum(stats, 'refundOrderCount'),
-          shippedOrderAmountYuan: shippedOrderAmount,
           formatMoney,
         })
       : ''

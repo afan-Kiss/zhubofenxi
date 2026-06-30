@@ -5,12 +5,16 @@ import {
   isDateOnOrAfter,
   type ScheduleConflict,
 } from '../utils/anchor-schedule-time.util'
+import {
+  ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE,
+  ANCHOR_XIAOBAI_SCHEDULE_START_DATE,
+} from '../config/anchor-schedule.constants'
 import { XIAOBAI_ANCHOR_CUTOFF_MS, SHOP_SESSION_ANCHOR_CUTOFF_MS } from './anchor-performance-attribution.service'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import { addDaysShanghai } from '../utils/business-timezone'
 
-export const XIAOBAI_SCHEDULE_START_DATE = '2026-06-18'
-export const SHOP_SESSION_SCHEDULE_START_DATE = '2026-06-13'
+export const XIAOBAI_SCHEDULE_START_DATE = ANCHOR_XIAOBAI_SCHEDULE_START_DATE
+export const SHOP_SESSION_SCHEDULE_START_DATE = ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE
 
 export interface ScheduleTemplateSeed {
   anchorName: string
@@ -60,6 +64,17 @@ export const DEFAULT_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
   },
   {
     anchorName: '子杰',
+    shopName: '祥钰珠宝',
+    liveRoomName: '祥钰珠宝',
+    startTime: '00:00',
+    endTime: '18:00',
+    effectiveFrom: SHOP_SESSION_SCHEDULE_START_DATE,
+    effectiveTo: null,
+    sortOrder: 12,
+    note: '早场·祥钰珠宝',
+  },
+  {
+    anchorName: '子杰',
     shopName: 'XY祥钰珠宝',
     liveRoomName: 'XY祥钰珠宝',
     startTime: '00:00',
@@ -99,10 +114,37 @@ export function templateAppliesOnDate(template: ScheduleTemplateSeed, dateKey: s
   return true
 }
 
+function templateSeedKey(seed: ScheduleTemplateSeed): string {
+  return [
+    seed.anchorName,
+    seed.shopName,
+    seed.startTime,
+    seed.endTime,
+    seed.effectiveFrom ?? '',
+    seed.effectiveTo ?? '',
+  ].join('|')
+}
+
 export async function ensureScheduleTemplatesSeeded(): Promise<void> {
-  const count = await prisma.anchorScheduleTemplate.count()
-  if (count > 0) return
+  const existing = await prisma.anchorScheduleTemplate.findMany()
+  const existingKeys = new Set(
+    existing.map((row) =>
+      templateSeedKey({
+        anchorName: row.anchorName,
+        shopName: row.shopName,
+        liveRoomName: row.liveRoomName,
+        startTime: row.startTime,
+        endTime: row.endTime,
+        effectiveFrom: row.effectiveFrom,
+        effectiveTo: row.effectiveTo,
+        sortOrder: row.sortOrder,
+      }),
+    ),
+  )
+
   for (const seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
+    const key = templateSeedKey(seed)
+    if (existingKeys.has(key)) continue
     await prisma.anchorScheduleTemplate.create({
       data: {
         anchorName: seed.anchorName,
@@ -117,6 +159,7 @@ export async function ensureScheduleTemplatesSeeded(): Promise<void> {
         note: seed.note ?? null,
       },
     })
+    existingKeys.add(key)
   }
 }
 

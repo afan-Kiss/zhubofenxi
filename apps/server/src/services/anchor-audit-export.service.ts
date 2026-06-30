@@ -113,6 +113,7 @@ export async function getAnchorAuditExportMeta(params?: {
 const SOURCE_LABEL: Record<ScheduleAttributionSource, string> = {
   manual_schedule: '手动排班',
   default_schedule: '默认排班',
+  saved_time_rule: '时段规则',
   template_virtual: '模板虚拟',
   legacy_rule: '旧规则',
   unmatched: '未归属',

@@ -168,9 +168,7 @@ export async function generateDefaultSchedulesForDate(params: {
   if (xb) warnings.push(xb)
 
   const existing = await prisma.anchorDailySchedule.findMany({ where: { scheduleDate: date } })
-  const protectedIds = new Set(
-    existing.filter((r) => r.locked || r.source === 'manual').map((r) => r.id),
-  )
+  const hasManualOrLocked = existing.some((r) => r.source === 'manual' || r.locked)
 
   if (overwrite) {
     await prisma.anchorDailySchedule.deleteMany({
@@ -180,11 +178,39 @@ export async function generateDefaultSchedulesForDate(params: {
         source: 'generated_default',
       },
     })
-  } else if (existing.some((r) => r.source === 'generated_default' || r.source === 'manual')) {
+  }
+
+  const refreshedExisting = overwrite
+    ? await prisma.anchorDailySchedule.findMany({ where: { scheduleDate: date } })
+    : existing
+
+  const templateKey = (anchorName: string, shopName: string, startTime: string) =>
+    `${anchorName}|${shopName}|${startTime}`
+
+  const coveredKeys = new Set(
+    refreshedExisting.map((r) => {
+      const startTime = r.startAt.toLocaleTimeString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })
+      return templateKey(r.anchorName, r.shopName, startTime)
+    }),
+  )
+
+  const templatesToCreate = templates.filter((t) => {
+    if (hasManualOrLocked && !overwrite) {
+      // 有人工/锁定排班时仍补缺失的默认 slot，但不删已有
+    }
+    return !coveredKeys.has(templateKey(t.anchorName, t.shopName, t.startTime))
+  })
+
+  if (templatesToCreate.length === 0 && refreshedExisting.length > 0) {
     return listDailySchedulesForDate(date)
   }
 
-  const toCreate = templates.map((t) => {
+  const toCreate = templatesToCreate.map((t) => {
     const { startAt, endAt } = buildScheduleBounds(date, t.startTime, t.endTime)
     return {
       scheduleDate: date,
@@ -204,13 +230,30 @@ export async function generateDefaultSchedulesForDate(params: {
 
   const validation = validateScheduleDraft(
     date,
-    toCreate.map((c) => ({
+    [...refreshedExisting.map((r) => ({
+      anchorName: r.anchorName,
+      shopName: r.shopName,
+      liveRoomName: r.liveRoomName,
+      startTime: r.startAt.toLocaleTimeString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }),
+      endTime: r.endAt.toLocaleTimeString('zh-CN', {
+        timeZone: 'Asia/Shanghai',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }),
+      enabled: r.enabled,
+    })), ...toCreate.map((c) => ({
       anchorName: c.anchorName,
       shopName: c.shopName,
       liveRoomName: c.liveRoomName,
-      startTime: templates.find((t) => t.anchorName === c.anchorName)?.startTime ?? '00:00',
-      endTime: templates.find((t) => t.anchorName === c.anchorName)?.endTime ?? '24:00',
-    })),
+      startTime: templatesToCreate.find((t) => t.anchorName === c.anchorName && t.shopName === c.shopName)?.startTime ?? '00:00',
+      endTime: templatesToCreate.find((t) => t.anchorName === c.anchorName && t.shopName === c.shopName)?.endTime ?? '24:00',
+    }))],
   )
   if (!validation.ok) {
     throw new Error(validation.conflicts.map((c) => c.message).join('；'))
@@ -220,7 +263,6 @@ export async function generateDefaultSchedulesForDate(params: {
   if (toCreate.length) {
     await prisma.anchorDailySchedule.createMany({ data: toCreate })
   }
-  void protectedIds
 
   await invalidateBusinessBoardCacheForDate(date)
   return listDailySchedulesForDate(date)

@@ -10,12 +10,16 @@ import {
 import {
   extractReviewList,
   extractReviewTotal,
+  parseReviewManagerEnvelope,
 } from './good-review-normalize.service'
 import type { NormalizedGoodReview } from './good-review.types'
 import { normalizeGoodReviewRow } from './good-review-normalize.service'
 
 const REVIEW_PAGE_SIZE = 20
 const MAX_REVIEW_PAGES = 100
+
+/** HAR：review_manager / review_list_count_detail 使用 source: 0 */
+const REVIEW_API_SOURCE = 0
 
 async function resolveAccountIdForShop(shopName: string): Promise<string | undefined> {
   const rows = await prisma.platformCredential.findMany({
@@ -29,7 +33,7 @@ async function resolveAccountIdForShop(shopName: string): Promise<string | undef
       return row.id
     }
   }
-  return rows[0]?.id
+  return undefined
 }
 
 async function postGoodReviewApi<T>(
@@ -65,13 +69,13 @@ async function postGoodReviewApi<T>(
 }
 
 export async function fetchShopScore(shop: GoodReviewShopDefinition): Promise<unknown> {
-  return postGoodReviewApi<unknown>(GOOD_REVIEW_API.shopScore, undefined, shop, 'GET')
+  return postGoodReviewApi<unknown>(GOOD_REVIEW_API.shopScore, { source: 'PC' }, shop, 'POST')
 }
 
 export async function fetchReviewCountDetail(shop: GoodReviewShopDefinition): Promise<unknown> {
   return postGoodReviewApi<unknown>(
     GOOD_REVIEW_API.reviewCountDetail,
-    { reviewLevel: 0, replyStatus: -1 },
+    { source: REVIEW_API_SOURCE },
     shop,
   )
 }
@@ -82,49 +86,63 @@ export async function fetchReviewOverview(shop: GoodReviewShopDefinition): Promi
 
 export async function fetchReviewManagerPage(
   shop: GoodReviewShopDefinition,
-  pageNo: number,
-): Promise<{ payload: unknown; items: NormalizedGoodReview[]; total: number | null }> {
-  const payload = await postGoodReviewApi<unknown>(
-    GOOD_REVIEW_API.reviewManager,
-    {
-      pageNo,
-      pageSize: REVIEW_PAGE_SIZE,
-      reviewLevel: 1,
-      replyStatus: -1,
-    },
-    shop,
-  )
+  page: number,
+): Promise<{
+  payload: unknown
+  items: NormalizedGoodReview[]
+  total: number | null
+  envelope: ReturnType<typeof parseReviewManagerEnvelope>
+}> {
+  const payload = await postGoodReviewApi<unknown>(GOOD_REVIEW_API.reviewManager, {
+    source: REVIEW_API_SOURCE,
+    page,
+    page_size: REVIEW_PAGE_SIZE,
+  }, shop)
+
+  const envelope = parseReviewManagerEnvelope(payload)
   const rows = extractReviewList(payload)
   const items: NormalizedGoodReview[] = []
   for (const row of rows) {
     const normalized = normalizeGoodReviewRow(shop.shopKey, row)
     if (normalized) items.push(normalized)
   }
-  return { payload, items, total: extractReviewTotal(payload) }
+  return {
+    payload,
+    items,
+    total: envelope.total ?? extractReviewTotal(payload),
+    envelope,
+  }
 }
 
 export async function fetchAllGoodReviews(shop: GoodReviewShopDefinition): Promise<{
   reviews: NormalizedGoodReview[]
   totalReviewCount: number | null
+  managerEnvelope: ReturnType<typeof parseReviewManagerEnvelope> | null
 }> {
   const all: NormalizedGoodReview[] = []
   const seen = new Set<string>()
   let total: number | null = null
+  let lastEnvelope: ReturnType<typeof parseReviewManagerEnvelope> | null = null
 
-  for (let pageNo = 1; pageNo <= MAX_REVIEW_PAGES; pageNo++) {
-    const page = await fetchReviewManagerPage(shop, pageNo)
-    if (total == null && page.total != null) total = page.total
-    if (page.items.length === 0) break
+  for (let page = 1; page <= MAX_REVIEW_PAGES; page++) {
+    const pageResult = await fetchReviewManagerPage(shop, page)
+    lastEnvelope = pageResult.envelope
+    if (total == null && pageResult.total != null) total = pageResult.total
+    if (pageResult.items.length === 0) break
 
-    for (const item of page.items) {
+    for (const item of pageResult.items) {
       if (seen.has(item.dedupeKey)) continue
       seen.add(item.dedupeKey)
       all.push(item)
     }
 
-    if (page.items.length < REVIEW_PAGE_SIZE) break
+    if (pageResult.items.length < REVIEW_PAGE_SIZE) break
     if (total != null && all.length >= total) break
   }
 
-  return { reviews: all, totalReviewCount: total ?? all.length }
+  return {
+    reviews: all,
+    totalReviewCount: total ?? all.length,
+    managerEnvelope: lastEnvelope,
+  }
 }

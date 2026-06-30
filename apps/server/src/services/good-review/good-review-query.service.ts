@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma'
 import { GOOD_REVIEW_SHOPS } from '../../config/good-review-shops.constants'
 import { getGoodReviewLastSyncedAt } from './good-review-store.service'
+import { normalizeReviewImageUrl } from './good-review-normalize.service'
 import type {
   GoodReviewItemView,
   GoodReviewPagePayload,
@@ -83,14 +84,16 @@ function rowToReviewView(row: {
     itemId: row.itemId,
     skuId: row.skuId,
     itemName: row.itemName,
-    itemImage: row.itemImage,
+    itemImage: normalizeReviewImageUrl(row.itemImage),
     itemPriceCent: row.itemPriceCent,
     itemQuantity: row.itemQuantity,
     productScore: row.productScore,
     serviceScore: row.serviceScore,
     logisticsScore: row.logisticsScore,
     reviewText: row.reviewText,
-    reviewImages: parseJsonArray(row.reviewImagesJson),
+    reviewImages: parseJsonArray(row.reviewImagesJson)
+      .map((u) => normalizeReviewImageUrl(u))
+      .filter((u): u is string => Boolean(u)),
     reviewTags: parseJsonArray(row.reviewTagsJson),
     isAnonymous: row.isAnonymous,
     likeCount: row.likeCount,

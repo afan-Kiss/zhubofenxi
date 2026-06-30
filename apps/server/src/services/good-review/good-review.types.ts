@@ -15,6 +15,14 @@ export interface GoodReviewSyncShopResult {
   totalReviewCount?: number
   latestReviewTime?: string
   error?: string
+  shopScoreSuccess?: boolean
+  countSuccess?: boolean
+  overviewSuccess?: boolean
+  managerSuccess?: boolean
+  managerSyncedCount?: number
+  managerError?: string
+  platformCode?: number | string
+  platformMsg?: string
 }
 
 export interface GoodReviewSyncResult {

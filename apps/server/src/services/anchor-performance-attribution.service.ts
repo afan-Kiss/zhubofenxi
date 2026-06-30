@@ -33,9 +33,9 @@ export const ANCHOR_SESSION_DISPLAY_FROM_0613: Record<
   string,
   { sessionLabel: string; shopName: string }
 > = {
-  子杰: { sessionLabel: '早场·xy祥钰珠宝', shopName: 'xy祥钰珠宝' },
+  子杰: { sessionLabel: '早场·XY祥钰珠宝', shopName: 'XY祥钰珠宝' },
   小红: { sessionLabel: '早场·和田雅玉', shopName: '和田雅玉' },
-  飞云: { sessionLabel: '晚场·拾玉居', shopName: '拾玉居' },
+  飞云: { sessionLabel: '晚场·拾玉居和田玉', shopName: '拾玉居和田玉' },
   小艺: { sessionLabel: '晚场·和田雅玉', shopName: '和田雅玉' },
   小白: { sessionLabel: '午场·XY祥钰珠宝 14:30-18:00', shopName: 'XY祥钰珠宝' },
 }

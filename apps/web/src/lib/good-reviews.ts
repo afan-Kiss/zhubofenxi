@@ -55,6 +55,14 @@ export interface GoodReviewSyncShopResult {
   totalReviewCount?: number
   latestReviewTime?: string
   error?: string
+  shopScoreSuccess?: boolean
+  countSuccess?: boolean
+  overviewSuccess?: boolean
+  managerSuccess?: boolean
+  managerSyncedCount?: number
+  managerError?: string
+  platformCode?: number | string
+  platformMsg?: string
 }
 
 export interface GoodReviewSyncResult {
@@ -71,16 +79,36 @@ export function formatGoodReviewSyncMessage(result: GoodReviewSyncResult): {
   tone: 'success' | 'warning' | 'error'
   text: string
 } {
+  const detailLines = result.shops
+    .filter((s) => s.error || s.managerError)
+    .map((s) => {
+      const parts: string[] = []
+      if (s.managerSuccess === false && s.managerError) {
+        parts.push(`${s.shopName}明细失败：${s.managerError}`)
+      } else if (s.error) {
+        parts.push(`${s.shopName}：${s.error}`)
+      }
+      return parts.join(' ')
+    })
+    .filter(Boolean)
+
   if (result.successShopCount === result.totalShopCount && result.totalShopCount > 0) {
+    const allManagerOk = result.shops.every((s) => s.managerSuccess !== false)
+    if (allManagerOk) {
+      return {
+        tone: 'success',
+        text: `同步完成：${result.totalShopCount} 个店铺已更新`,
+      }
+    }
     return {
-      tone: 'success',
-      text: `同步完成：${result.totalShopCount} 个店铺已更新`,
+      tone: 'warning',
+      text: `统计已同步，部分店铺明细未拉全。${detailLines.join('；')}`,
     }
   }
   if (result.successShopCount > 0) {
     return {
       tone: 'warning',
-      text: `同步完成：成功 ${result.successShopCount} 个店铺，失败 ${result.failedShopCount} 个店铺，可先查看已成功店铺数据`,
+      text: `同步完成：成功 ${result.successShopCount} 个店铺，失败 ${result.failedShopCount} 个。${detailLines.join('；')}`,
     }
   }
   return {

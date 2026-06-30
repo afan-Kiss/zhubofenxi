@@ -1,0 +1,27 @@
+import { Router } from 'express'
+import { attachRequestUser } from '../middleware/local-viewer.middleware'
+import { requireAuth } from '../middleware/auth.middleware'
+import { sendFail, sendOk } from '../utils/response'
+import { buildOrderAttributionDebug } from '../services/order-attribution-debug.service'
+
+export const anchorPerformanceRouter = Router()
+
+anchorPerformanceRouter.use(attachRequestUser, requireAuth)
+
+anchorPerformanceRouter.get('/order-attribution-debug', async (req, res) => {
+  try {
+    const orderNo = String(req.query.orderNo ?? '').trim()
+    if (!orderNo) {
+      sendFail(res, '请提供 orderNo', 400)
+      return
+    }
+    const data = await buildOrderAttributionDebug(orderNo)
+    if (!data.ok) {
+      sendFail(res, data.attributionExplain || '未找到订单', 404)
+      return
+    }
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '归属调试失败', 500)
+  }
+})

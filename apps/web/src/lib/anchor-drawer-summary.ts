@@ -6,17 +6,8 @@ function formatDrawerDateLabel(startDate: string, endDate: string): string {
     if (!m) return iso
     return `${Number(m[2])}.${Number(m[3])}`
   }
-  if (startDate.trim() === endDate.trim()) return `${part(startDate)}日`
-  return `${part(startDate)}~${part(endDate)}日`
-}
-
-function countZh(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return String(n)
-  if (n === 0) return '零'
-  if (n === 1) return '一'
-  if (n === 2) return '两'
-  if (n <= 10) return ['', '一', '两', '三', '四', '五', '六', '七', '八', '九', '十'][n]!
-  return String(n)
+  if (startDate.trim() === endDate.trim()) return `${part(startDate)}`
+  return `${part(startDate)}~${part(endDate)}`
 }
 
 export function buildAnchorDrawerSummaryText(params: {
@@ -24,20 +15,32 @@ export function buildAnchorDrawerSummaryText(params: {
   endDate: string
   anchorName: string
   orderCount: number
-  refundOrderCount: number
-  shippedOrderAmountYuan: number
+  payAmountYuan: number
+  signedOrderCount: number
+  signedAmountYuan: number
+  refundOrderCount?: number
   formatMoney: (n: number) => string
 }): string {
   const dateLabel = formatDrawerDateLabel(params.startDate, params.endDate)
   const name = params.anchorName.trim() || '主播'
-  const deal = Math.max(0, Math.floor(params.orderCount))
-  const refund = Math.max(0, Math.floor(params.refundOrderCount))
-  const amount = params.formatMoney(params.shippedOrderAmountYuan)
-  let text = `${dateLabel}${name}成交${countZh(deal)}单`
-  if (refund > 0) {
-    text += `，退货${countZh(refund)}单`
+  const paidCount = Math.max(0, Math.floor(params.orderCount))
+  const signedCount = Math.max(0, Math.floor(params.signedOrderCount))
+  const payAmount = params.formatMoney(params.payAmountYuan)
+  const signedAmount = params.formatMoney(params.signedAmountYuan)
+
+  if (paidCount <= 0) {
+    return `${dateLabel} ${name}当前范围内暂无支付订单。`
   }
-  text += `，发货单金额：${amount}`
+
+  if (signedCount <= 0 && params.signedAmountYuan <= 0) {
+    return `${dateLabel} ${name}支付成交 ${paidCount} 单，支付金额 ${payAmount}；当前未签收，实际签收金额 ${signedAmount}。`
+  }
+
+  let text = `${dateLabel} ${name}支付成交 ${paidCount} 单，支付金额 ${payAmount}；实际签收 ${signedCount} 单，实际签收金额 ${signedAmount}。`
+  const refund = Math.max(0, Math.floor(params.refundOrderCount ?? 0))
+  if (refund > 0) {
+    text += ` 另有退款 ${refund} 单。`
+  }
   return text
 }
 

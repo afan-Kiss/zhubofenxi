@@ -705,3 +705,43 @@ model GoodReviewSyncMeta {
   lastSyncedAt DateTime?
   updatedAt    DateTime  @updatedAt
 }
+
+/// 主播默认排班模板（种子配置，可被运营扩展）
+model AnchorScheduleTemplate {
+  id            String   @id @default(cuid())
+  anchorName    String
+  shopName      String
+  liveRoomName  String
+  startTime     String
+  endTime       String
+  effectiveFrom String?
+  effectiveTo   String?
+  enabled       Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  note          String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([enabled, sortOrder])
+}
+
+/// 每日主播排班（手动覆盖或生成的默认排班）
+model AnchorDailySchedule {
+  id           String   @id @default(cuid())
+  scheduleDate String
+  anchorName   String
+  shopName     String
+  liveRoomName String
+  startAt      DateTime
+  endAt        DateTime
+  source       String   @default("manual")
+  enabled      Boolean  @default(true)
+  locked       Boolean  @default(false)
+  note         String?
+  createdBy    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([scheduleDate])
+  @@index([scheduleDate, enabled])
+}

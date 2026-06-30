@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { OverviewTab } from './pages/board/OverviewTab'
 import { AnchorPerformanceTab } from './pages/board/AnchorPerformanceTab'
+import { AnchorSchedulePage } from './pages/board/AnchorSchedulePage'
 import { BuyerRankingTab } from './pages/board/BuyerRankingTab'
 import { SettingsTab } from './pages/board/SettingsTab'
 import { OperationsReportPage } from './pages/operations/OperationsReportPage'
@@ -29,6 +30,7 @@ const App: React.FC = () => {
               <Route element={<Layout />}>
                 <Route index element={<OverviewTab />} />
                 <Route path="anchors" element={<AnchorPerformanceTab />} />
+                <Route path="anchor-schedules" element={<AnchorSchedulePage />} />
                 <Route path="anchors/:anchorId" element={<Navigate to="/anchors" replace />} />
                 <Route path="buyers" element={<BuyerRankingTab />} />
                 <Route path="operations-report" element={<OperationsReportPage />} />

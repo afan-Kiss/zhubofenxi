@@ -63,16 +63,41 @@ export function cookieStatusTone(status: CookieHealthStatus): string {
 
 export function buildCookieBannerMessage(payload: CookieHealthPayload | null): string | null {
   if (!payload) return null
-  const invalid = payload.accounts.filter((a) => a.enabled && a.cookieStatus === 'invalid')
-  const suspected = payload.accounts.filter((a) => a.enabled && a.cookieStatus === 'suspected')
+
+  const enabled = payload.accounts.filter((a) => a.enabled)
+  const missing = enabled.filter((a) => !a.hasCookie)
+  const unknown = enabled.filter((a) => a.hasCookie && a.cookieStatus === 'unknown')
+  const invalid = enabled.filter((a) => a.cookieStatus === 'invalid')
+  const suspected = enabled.filter((a) => a.cookieStatus === 'suspected')
+
+  if (missing.length === 1) {
+    return `直播号「${missing[0]!.name}」未收到 Cookie，请到系统设置更新或由机器人上传。`
+  }
+  if (missing.length > 1) {
+    return `有 ${missing.length} 个直播号未收到 Cookie，部分数据可能未更新。`
+  }
+  if (unknown.length === 1) {
+    return `直播号「${unknown[0]!.name}」已收到 Cookie，待验证，可稍后在系统设置测试。`
+  }
+  if (unknown.length > 1) {
+    return `有 ${unknown.length} 个直播号 Cookie 待验证。`
+  }
   if (invalid.length === 1) {
-    return `直播号「${invalid[0]!.name}」Cookie 已失效，请到系统设置更新 Cookie。`
+    const acc = invalid[0]!
+    const detail = acc.cookieLastErrorMessage?.trim()
+    if (detail) {
+      return `直播号「${acc.name}」${detail}`
+    }
+    return `直播号「${acc.name}」Cookie 验证失败，请到系统设置更新 Cookie。`
   }
   if (invalid.length > 1) {
-    return `有 ${invalid.length} 个直播号 Cookie 异常，部分数据可能未更新，请到系统设置查看。`
+    return `有 ${invalid.length} 个直播号 Cookie 验证失败，请到系统设置查看具体原因。`
   }
   if (suspected.length === 1) {
-    return `有 1 个直播号 Cookie 疑似异常，建议测试 Cookie 状态。`
+    const acc = suspected[0]!
+    return acc.cookieLastErrorMessage?.trim()
+      ? `直播号「${acc.name}」${acc.cookieLastErrorMessage}`
+      : `直播号「${acc.name}」Cookie 疑似异常，建议测试 Cookie 状态。`
   }
   if (suspected.length > 1) {
     return `有 ${suspected.length} 个直播号 Cookie 疑似异常，建议测试 Cookie 状态。`

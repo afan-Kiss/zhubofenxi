@@ -5,8 +5,8 @@ import {
   ANCHOR_SESSION_DISPLAY_FROM_0613,
   isReportDateOnOrAfterShopSessionCutoff,
   isReportDateOnOrAfterXiaoBaiCutoff,
-  remapViewsForAnchorPerformance,
 } from './anchor-performance-attribution.service'
+import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { getBoardScopedViewsForRange } from './board-scoped-views.service'
@@ -250,7 +250,7 @@ export async function buildAnchorPocketSummary(params: {
 }): Promise<AnchorPocketSummaryPayload> {
   const scoped = await getBoardScopedViewsForRange(params)
   const withRaw = attachRawByMatchToViews(scoped.views, scoped.rawByMatch)
-  const remapped = remapViewsForAnchorPerformance(withRaw)
+  const remapped = await remapViewsWithScheduleOverlay(withRaw)
   const deduped = dedupeViewsByMetricOrderNo(remapped)
 
   await bootstrapWorkbenchCache()

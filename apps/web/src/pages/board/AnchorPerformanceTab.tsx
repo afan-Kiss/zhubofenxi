@@ -1,4 +1,6 @@
 import React, { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { CalendarDays } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { RangeBar } from '../../components/board/RangeBar'
 import { BoardStatRangeNote } from '../../components/board/BoardStatRangeNote'
@@ -148,21 +150,31 @@ export const AnchorPerformanceTab: React.FC = () => {
     <div className="space-y-4" data-testid="anchor-performance-page">
       <BoardLiveQueryAutoRefresh />
       <CookieHealthBanner cookieHealth={cookieHealth} />
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900">主播业绩</h2>
-        <p className="mt-0.5 text-sm text-slate-500">
-          基于后台自动同步的本地订单 · 6.13 起按直播号与早晚场归属主播
-        </p>
-        <BoardSyncStatusHeader
-          syncMeta={syncMeta}
-          hasDisplayData={hasPerformanceData || Boolean(displaySummary)}
-          totalRawOrders={totalRawOrders}
-        />
-        <DataLastUpdateBanner
-          freshness={dataFreshness}
-          loading={dataFreshnessLoading}
-        />
-        <OfficialQualitySyncNote qualityFeedback={qualityFeedback} showLastUpdated={false} />
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">主播业绩</h2>
+          <p className="mt-0.5 text-sm text-slate-500">
+            基于后台自动同步的本地订单 · 6.13 起按直播号与早晚场归属主播
+          </p>
+          <BoardSyncStatusHeader
+            syncMeta={syncMeta}
+            hasDisplayData={hasPerformanceData || Boolean(displaySummary)}
+            totalRawOrders={totalRawOrders}
+          />
+          <DataLastUpdateBanner
+            freshness={dataFreshness}
+            loading={dataFreshnessLoading}
+          />
+          <OfficialQualitySyncNote qualityFeedback={qualityFeedback} showLastUpdated={false} />
+        </div>
+        <Link
+          to="/anchor-schedules"
+          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+          data-testid="anchor-schedule-entry"
+        >
+          <CalendarDays size={16} />
+          设置今日排班
+        </Link>
       </div>
       <RangeBar
         preset={preset}

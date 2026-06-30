@@ -222,7 +222,7 @@ function pickLiveAccountFromRaw(raw: Record<string, unknown> | undefined): strin
   return ''
 }
 
-function parseViewPayTimeMs(view: AnalyzedOrderView & { raw?: Record<string, unknown> }): number | null {
+export function parseViewPayTimeMs(view: AnalyzedOrderView & { raw?: Record<string, unknown> }): number | null {
   const raw = view.raw
   if (raw) {
     for (const k of ['payTime', 'pay_time', 'paymentTime', 'payment_time', 'paidTime', 'paid_time']) {

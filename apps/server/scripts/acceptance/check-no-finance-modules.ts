@@ -14,6 +14,7 @@ import {
 const ALLOWED_PRIMARY_ROUTES = new Set([
   '/',
   '/anchors',
+  '/anchor-schedules',
   '/buyers',
   '/operations-report',
   '/good-reviews',

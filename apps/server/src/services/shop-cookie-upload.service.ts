@@ -1,5 +1,6 @@
 import { prisma } from '../lib/prisma'
-import { decryptText } from '../utils/crypto'
+import { decryptText, encryptText } from '../utils/crypto'
+import { getShopCookieUploadToken } from '../config/env'
 import { resolveCanonicalShopName } from '../config/qianfan-shops.constants'
 import {
   GOOD_REVIEW_SHOPS,
@@ -8,11 +9,12 @@ import {
   type GoodReviewShopKey,
 } from '../config/good-review-shops.constants'
 import {
-  createLiveAccount,
+  persistLiveAccountCookieOnly,
   refreshLiveAccountRowMapperContext,
-  updateLiveAccountCookie,
+  testLiveAccountCookie,
 } from './live-account.service'
 import { clearSessionCookieCache } from './qianfan-cookie-resolver.service'
+import { logInfo } from '../utils/server-log'
 
 export interface ShopCookieUploadItemResult {
   shopKey: string
@@ -35,11 +37,17 @@ export interface ShopCookieUploadResult {
 export interface ShopCookieStatusItem {
   shopKey: string
   shopName: string
+  liveRoomName: string
   accountId: string | null
   accountDisplayName: string | null
   hasCookie: boolean
   cookiePreview: string | null
   cookieStatus: string
+  status: string
+  reason: string
+  lastUploadAt: string | null
+  lastValidateAt: string | null
+  canSyncOrders: boolean
   cookieUpdatedAt: string | null
 }
 
@@ -47,6 +55,50 @@ function maskCookiePreview(cookie: string): string {
   const trimmed = cookie.trim()
   if (trimmed.length <= 16) return '已保存'
   return `${trimmed.slice(0, 8)}…${trimmed.slice(-8)}`
+}
+
+function buildCookieReason(row: {
+  cookieEncrypted: string | null
+  cookieStatus: string
+  cookieLastCheckedAt: Date | null
+  cookieLastErrorMessage: string | null
+  cookieLastErrorCode: string | null
+  updatedAt: Date
+} | null): { status: string; reason: string; canSyncOrders: boolean } {
+  if (!row?.cookieEncrypted?.trim()) {
+    return { status: 'missing', reason: '未收到该店铺 Cookie', canSyncOrders: false }
+  }
+  const st = row.cookieStatus || 'unknown'
+  if (st === 'valid') {
+    return { status: 'valid', reason: 'Cookie 已验证有效，可同步订单', canSyncOrders: true }
+  }
+  if (st === 'unknown') {
+    return { status: 'uploaded', reason: '已收到 Cookie，待验证', canSyncOrders: false }
+  }
+  if (st === 'suspected') {
+    return {
+      status: 'suspected',
+      reason: row.cookieLastErrorMessage?.trim() || '已收到 Cookie，但平台接口疑似异常',
+      canSyncOrders: false,
+    }
+  }
+  if (st === 'invalid') {
+    const code = row.cookieLastErrorCode?.trim()
+    const msg = row.cookieLastErrorMessage?.trim()
+    if (code === '401' || code === '403' || msg?.includes('401') || msg?.includes('403')) {
+      return {
+        status: 'invalid',
+        reason: msg || '已收到 Cookie，但平台接口返回 401/403',
+        canSyncOrders: false,
+      }
+    }
+    return {
+      status: 'invalid',
+      reason: msg || '已收到 Cookie，但验证失败',
+      canSyncOrders: false,
+    }
+  }
+  return { status: st, reason: 'Cookie 状态待确认', canSyncOrders: false }
 }
 
 async function findAccountIdForShop(shopKey: GoodReviewShopKey): Promise<string | null> {
@@ -76,13 +128,18 @@ async function ensureAccountForShop(
   if (existingId) return existingId
 
   const shopName = getGoodReviewShopName(shopKey)
-  const created = await createLiveAccount({
-    name: shopName,
-    cookie,
-    enabled: true,
-    updatedBy,
+  const row = await prisma.platformCredential.create({
+    data: {
+      platformName: shopKey,
+      displayName: shopName,
+      cookieEncrypted: encryptText(cookie),
+      enabled: true,
+      updatedBy,
+      cookieStatus: 'unknown',
+    },
   })
-  return created.account.id
+  void testLiveAccountCookie(row.id).catch(() => undefined)
+  return row.id
 }
 
 function normalizeUploadPayload(raw: unknown): Array<{ shopKey: GoodReviewShopKey; cookie: string }> {
@@ -132,7 +189,8 @@ export async function uploadShopCookies(params: {
       if (!accountId) {
         accountId = await ensureAccountForShop(item.shopKey, item.cookie, params.updatedBy)
       } else {
-        await updateLiveAccountCookie(accountId, item.cookie, params.updatedBy)
+        await persistLiveAccountCookieOnly(accountId, item.cookie, params.updatedBy)
+        void testLiveAccountCookie(accountId).catch(() => undefined)
       }
 
       const row = await prisma.platformCredential.findUnique({ where: { id: accountId } })
@@ -144,6 +202,7 @@ export async function uploadShopCookies(params: {
         cookiePreview: row?.cookieEncrypted ? maskCookiePreview(item.cookie) : null,
         cookieStatus: row?.cookieStatus ?? 'unknown',
       })
+      logInfo('Cookie上传', `${shopName} 已落库，状态=${row?.cookieStatus ?? 'unknown'}`)
     } catch (err) {
       results.push({
         shopKey: item.shopKey,
@@ -168,6 +227,17 @@ export async function uploadShopCookies(params: {
 }
 
 export async function getShopCookieStatus(): Promise<ShopCookieStatusItem[]> {
+  const payload = await getShopCookieStatusPayload()
+  return payload.shops
+}
+
+export async function getShopCookieStatusPayload(): Promise<{
+  ok: true
+  serverTokenConfigured: boolean
+  shops: ShopCookieStatusItem[]
+  shopsByKey: Record<string, ShopCookieStatusItem>
+  checkedAt: string
+}> {
   const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
   const accountByShop = new Map<GoodReviewShopKey, (typeof rows)[number]>()
 
@@ -181,7 +251,7 @@ export async function getShopCookieStatus(): Promise<ShopCookieStatusItem[]> {
     }
   }
 
-  return GOOD_REVIEW_SHOPS.map((def) => {
+  const shops = GOOD_REVIEW_SHOPS.map((def) => {
     const row = accountByShop.get(def.shopKey)
     const hasCookie = Boolean(row?.cookieEncrypted?.trim())
     let cookiePreview: string | null = null
@@ -197,15 +267,33 @@ export async function getShopCookieStatus(): Promise<ShopCookieStatusItem[]> {
         }
       }
     }
+    const derived = buildCookieReason(row ?? null)
     return {
       shopKey: def.shopKey,
       shopName: def.shopName,
+      liveRoomName: def.shopName,
       accountId: row?.id ?? null,
       accountDisplayName: row?.displayName?.trim() || row?.platformName || null,
       hasCookie,
       cookiePreview,
       cookieStatus: row?.cookieStatus ?? 'unknown',
+      status: derived.status,
+      reason: derived.reason,
+      lastUploadAt: hasCookie ? row!.updatedAt.toISOString() : null,
+      lastValidateAt: row?.cookieLastCheckedAt?.toISOString() ?? null,
+      canSyncOrders: derived.canSyncOrders,
       cookieUpdatedAt: hasCookie ? row!.updatedAt.toISOString() : null,
     }
   })
+
+  const shopsByKey: Record<string, ShopCookieStatusItem> = {}
+  for (const s of shops) shopsByKey[s.shopKey] = s
+
+  return {
+    ok: true,
+    serverTokenConfigured: Boolean(getShopCookieUploadToken()),
+    shops,
+    shopsByKey,
+    checkedAt: new Date().toISOString(),
+  }
 }

@@ -30,6 +30,7 @@ import { getBusinessSyncStatus } from '../services/business-sync-scheduler.servi
 import { validateSyncRangeInput } from '../utils/sync-range-validation'
 import { logInfo } from '../utils/server-log'
 import { buildAnchorPocketSummary } from '../services/anchor-pocket-revenue.service'
+import { recalculateAnchorDataForDate } from '../services/anchor-schedule-cache.service'
 
 export const boardRouter = Router()
 
@@ -196,6 +197,20 @@ boardRouter.get('/anchor-pocket-summary', async (req, res) => {
     sendOk(res, data)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '获取主播实际到账失败', 500)
+  }
+})
+
+boardRouter.post('/anchor-pocket-summary/recalculate', async (req, res) => {
+  try {
+    const date = String(req.body?.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date', 400)
+      return
+    }
+    await recalculateAnchorDataForDate(date)
+    sendOk(res, { ok: true, date, message: '已刷新该日期的主播归属缓存' })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '重算失败', 500)
   }
 })
 

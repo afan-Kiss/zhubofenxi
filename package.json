@@ -28,6 +28,8 @@
     "accept:after-sales-pending": "tsx apps/server/scripts/after-sales-pending-state-acceptance.ts",
     "accept:anchor-metrics-fix": "tsx apps/server/scripts/anchor-metrics-fix-acceptance.ts",
     "verify:anchor-pocket": "tsx apps/server/scripts/verify-anchor-pocket.ts",
+    "verify:anchor-schedules": "tsx apps/server/scripts/verify-anchor-schedules.ts",
+    "verify:shop-cookie-upload": "tsx apps/server/scripts/verify-shop-cookie-upload.ts",
     "accept:operations-report": "tsx apps/server/scripts/operations-report-acceptance.ts",
     "accept:operations-report-smoke": "tsx apps/server/scripts/operations-report-smoke.ts",
     "accept:operations-report-gray-check": "tsx apps/server/scripts/operations-report-gray-check.ts",

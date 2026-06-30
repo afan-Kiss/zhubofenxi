@@ -1,0 +1,105 @@
+import { Router } from 'express'
+import { attachRequestUser } from '../middleware/local-viewer.middleware'
+import { requireAuth } from '../middleware/auth.middleware'
+import {
+  copyDailySchedules,
+  generateDefaultSchedulesForDate,
+  listDailySchedulesForDate,
+  saveDailySchedules,
+  validateDailySchedulesBody,
+} from '../services/anchor-daily-schedule.service'
+import { recalculateAnchorDataForDate } from '../services/anchor-schedule-cache.service'
+import { sendFail, sendOk } from '../utils/response'
+
+export const anchorSchedulesRouter = Router()
+
+anchorSchedulesRouter.use(attachRequestUser, requireAuth)
+
+anchorSchedulesRouter.get('/', async (req, res, next) => {
+  try {
+    const date = String(req.query.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date 参数', 400)
+      return
+    }
+    const data = await listDailySchedulesForDate(date)
+    sendOk(res, { ok: true, ...data })
+  } catch (err) {
+    next(err)
+  }
+})
+
+anchorSchedulesRouter.post('/generate-default', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const date = String(body.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date', 400)
+      return
+    }
+    const data = await generateDefaultSchedulesForDate({
+      date,
+      overwrite: Boolean(body.overwrite),
+      createdBy: req.user?.username,
+    })
+    sendOk(res, { ok: true, ...data })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '生成默认排班失败', 400)
+  }
+})
+
+anchorSchedulesRouter.post('/copy', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const fromDate = String(body.fromDate ?? '').trim()
+    const toDate = String(body.toDate ?? '').trim()
+    if (!fromDate || !toDate) {
+      sendFail(res, '请提供 fromDate 与 toDate', 400)
+      return
+    }
+    const data = await copyDailySchedules({
+      fromDate,
+      toDate,
+      createdBy: req.user?.username,
+    })
+    sendOk(res, { ok: true, ...data })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '复制排班失败', 400)
+  }
+})
+
+anchorSchedulesRouter.post('/validate', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const date = String(body.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date', 400)
+      return
+    }
+    const schedules = Array.isArray(body.schedules) ? body.schedules : []
+    const result = await validateDailySchedulesBody({ date, schedules })
+    sendOk(res, result)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '校验失败', 400)
+  }
+})
+
+anchorSchedulesRouter.post('/', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const date = String(body.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date', 400)
+      return
+    }
+    const schedules = Array.isArray(body.schedules) ? body.schedules : []
+    const data = await saveDailySchedules({
+      date,
+      schedules,
+      createdBy: req.user?.username,
+    })
+    sendOk(res, { ok: true, ...data })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '保存排班失败', 400)
+  }
+})

@@ -285,6 +285,26 @@ export async function updateLiveAccountCookie(
   return { account: toPublicView(refreshed!, { includeCookie: true }), testResult }
 }
 
+/** 仅保存 Cookie，不立即做平台验证（机器人上传链路用） */
+export async function persistLiveAccountCookieOnly(
+  id: string,
+  cookie: string,
+  updatedBy: string,
+): Promise<LiveAccountPublicView> {
+  const trimmed = cookie.trim()
+  if (!trimmed) throw new Error('Cookie 不能为空')
+  const row = await prisma.platformCredential.update({
+    where: { id },
+    data: {
+      cookieEncrypted: encryptText(trimmed),
+      updatedBy,
+      cookieStatus: 'unknown',
+      affectedBusinessSync: false,
+    },
+  })
+  return toPublicView(row, { includeCookie: false })
+}
+
 export async function updateLiveAccountMeta(
   id: string,
   input: { name?: string; enabled?: boolean },

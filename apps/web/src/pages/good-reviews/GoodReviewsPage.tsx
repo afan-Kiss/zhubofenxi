@@ -156,39 +156,39 @@ export const GoodReviewsPage: React.FC = () => {
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
-      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-        <div className="min-w-0">
+      <div className="space-y-2">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <h1 className="text-xl font-semibold text-slate-900">好评中心</h1>
-          <p className="mt-1 max-w-3xl text-sm text-slate-500">
-            查看四个店铺的评分、买家晒图和真实评价内容，用来判断店铺口碑，也方便挑选直播间能用的信任素材。
-          </p>
-          <p className="mt-2 text-sm text-slate-600">
-            {lastSyncedLabel
-              ? `最后同步：${lastSyncedLabel}`
-              : '还没有同步过，点击右上角按钮获取最新好评'}
-          </p>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleRefreshLocal()}
+              disabled={loading || refreshing || syncing}
+              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+              刷新页面数据
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSyncAll()}
+              disabled={loading || refreshing || syncing}
+              data-testid="good-reviews-sync-all"
+              className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-70"
+            >
+              {syncing ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
+              {syncing ? '正在同步四个店铺...' : '立即同步全部店铺好评'}
+            </button>
+          </div>
         </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void handleRefreshLocal()}
-            disabled={loading || refreshing || syncing}
-            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-            刷新页面数据
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleSyncAll()}
-            disabled={loading || refreshing || syncing}
-            data-testid="good-reviews-sync-all"
-            className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-70"
-          >
-            {syncing ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
-            {syncing ? '正在同步四个店铺...' : '立即同步全部店铺好评'}
-          </button>
-        </div>
+        <p className="max-w-3xl text-sm text-slate-500">
+          查看四个店铺的评分、买家晒图和真实评价内容，用来判断店铺口碑，也方便挑选直播间能用的信任素材。
+        </p>
+        <p className="text-sm text-slate-600">
+          {lastSyncedLabel
+            ? `最后同步：${lastSyncedLabel}`
+            : '还没有同步过，点击右上角按钮获取最新好评'}
+        </p>
       </div>
 
       {banner ? (

@@ -5,6 +5,7 @@ import { resolveDateRange } from '../utils/date-range'
 import { requestXhsApi } from './xhs-api-sync/xhs-api-client.service'
 import { buildOrderListBody } from './xhs-api-sync/xhs-order-sync.service'
 import { classifyXhsErrorMessage } from '../utils/xhs-auth.util'
+import { deriveCookieSyncState } from '../utils/cookie-sync-status.util'
 import { probeQualityBadcaseSignForAccount } from './quality-badcase-sign.service'
 
 const DEFAULT_PLATFORM = 'xiaohongshu'
@@ -29,6 +30,12 @@ export interface LiveAccountPublicView {
   cookieLastFailedApi: string | null
   affectedBusinessSync: boolean
   lastSyncSuccessAt: string | null
+  /** 是否可同步订单（与 shop-cookies/status 口径一致） */
+  canSyncOrders?: boolean
+  /** 面向用户的 Cookie 同步说明 */
+  syncReason?: string
+  statusLevel?: 'ok' | 'warning' | 'error'
+  cookieDisplayStatus?: string
 }
 
 export interface CookieHealthSummary {
@@ -37,6 +44,12 @@ export interface CookieHealthSummary {
   invalidCount: number
   suspectedCount: number
   unknownCount: number
+  canSyncCount: number
+  cannotSyncCount: number
+  missingCookieCount: number
+  missingA1Count: number
+  missingArkCount: number
+  expiredCount: number
 }
 
 function maskCookiePreview(cookie: string): string {
@@ -486,15 +499,63 @@ export async function getCookieHealthPayload(): Promise<{
   summary: CookieHealthSummary
 }> {
   const accounts = await listLiveAccountsPublic()
-  const enabled = accounts.filter((a) => a.enabled)
+  const { getShopCookieStatusPayload } = await import('./shop-cookie-upload.service')
+  const shopPayload = await getShopCookieStatusPayload()
+  const shopByAccountId = new Map(
+    shopPayload.shops.filter((s) => s.accountId).map((s) => [s.accountId!, s]),
+  )
+
+  const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
+  const rowById = new Map(rows.map((r) => [r.id, r]))
+
+  const enrichedAccounts = accounts.map((account) => {
+    const shop = shopByAccountId.get(account.id)
+    if (shop) {
+      return {
+        ...account,
+        canSyncOrders: shop.canSyncOrders,
+        syncReason: shop.reason,
+        statusLevel: shop.statusLevel,
+        cookieDisplayStatus: shop.status,
+      }
+    }
+    const row = rowById.get(account.id)
+    const derived = deriveCookieSyncState(
+      row
+        ? {
+            cookieEncrypted: row.cookieEncrypted,
+            cookieStatus: row.cookieStatus,
+            cookieLastCheckedAt: row.cookieLastCheckedAt,
+            cookieLastErrorMessage: row.cookieLastErrorMessage,
+            cookieLastErrorCode: row.cookieLastErrorCode,
+            updatedAt: row.updatedAt,
+          }
+        : null,
+    )
+    return {
+      ...account,
+      canSyncOrders: derived.canSyncOrders,
+      syncReason: derived.reason,
+      statusLevel: derived.statusLevel,
+      cookieDisplayStatus: derived.status,
+    }
+  })
+
+  const enabled = enrichedAccounts.filter((a) => a.enabled)
   const summary: CookieHealthSummary = {
     enabledCount: enabled.length,
     validCount: enabled.filter((a) => a.cookieStatus === 'valid').length,
     invalidCount: enabled.filter((a) => a.cookieStatus === 'invalid').length,
     suspectedCount: enabled.filter((a) => a.cookieStatus === 'suspected').length,
     unknownCount: enabled.filter((a) => a.cookieStatus === 'unknown').length,
+    canSyncCount: enabled.filter((a) => a.canSyncOrders === true).length,
+    cannotSyncCount: enabled.filter((a) => a.canSyncOrders === false).length,
+    missingCookieCount: shopPayload.summary.missingCookieCount,
+    missingA1Count: shopPayload.summary.missingA1Count,
+    missingArkCount: shopPayload.summary.missingArkCount,
+    expiredCount: shopPayload.summary.expiredCount,
   }
-  return { accounts, summary }
+  return { accounts: enrichedAccounts, summary }
 }
 
 export async function getLastAuthError(): Promise<{

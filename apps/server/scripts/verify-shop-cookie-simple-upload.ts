@@ -21,7 +21,8 @@ async function run(): Promise<void> {
   })
   assert(nextCalled, '无 Token 也应放行 Cookie 接口', issues)
 
-  const testCookie = 'test_cookie_field=abc123; session=test_session_value'
+  const testCookie =
+    'a1=verify1234567890123456789012345678; test_cookie_field=abc123; session=test_session_value'
   const result = await uploadShopCookies({
     body: { shops: { xyxiangyu: testCookie } },
     updatedBy: 'verify-script',

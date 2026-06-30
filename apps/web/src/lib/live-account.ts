@@ -1,4 +1,5 @@
 export type CookieHealthStatus = 'valid' | 'invalid' | 'suspected' | 'unknown'
+export type CookieStatusLevel = 'ok' | 'warning' | 'error'
 
 export interface LiveAccountPublic {
   id: string
@@ -19,6 +20,10 @@ export interface LiveAccountPublic {
   cookieLastFailedApi: string | null
   affectedBusinessSync: boolean
   lastSyncSuccessAt: string | null
+  canSyncOrders?: boolean
+  syncReason?: string
+  statusLevel?: CookieStatusLevel
+  cookieDisplayStatus?: string
 }
 
 export interface CookieHealthSummary {
@@ -27,6 +32,12 @@ export interface CookieHealthSummary {
   invalidCount: number
   suspectedCount: number
   unknownCount: number
+  canSyncCount?: number
+  cannotSyncCount?: number
+  missingCookieCount?: number
+  missingA1Count?: number
+  missingArkCount?: number
+  expiredCount?: number
 }
 
 export interface CookieHealthPayload {
@@ -40,7 +51,7 @@ export function cookieStatusLabel(status: CookieHealthStatus): string {
     case 'valid':
       return '正常'
     case 'invalid':
-      return '已失效'
+      return '暂不可同步'
     case 'suspected':
       return '疑似异常'
     default:
@@ -61,51 +72,58 @@ export function cookieStatusTone(status: CookieHealthStatus): string {
   }
 }
 
+export function accountCanSyncOrders(account: LiveAccountPublic): boolean {
+  if (account.canSyncOrders !== undefined) return account.canSyncOrders
+  if (!account.enabled || !account.hasCookie) return false
+  return account.cookieStatus === 'valid' || account.cookieStatus === 'unknown'
+}
+
+export function accountsNotSyncableForModal(payload: CookieHealthPayload | null): LiveAccountPublic[] {
+  if (!payload) return []
+  return payload.accounts.filter((a) => a.enabled && !accountCanSyncOrders(a))
+}
+
+/** @deprecated 使用 accountsNotSyncableForModal */
+export function invalidAccountsForModal(payload: CookieHealthPayload | null): LiveAccountPublic[] {
+  return accountsNotSyncableForModal(payload)
+}
+
+export function accountSyncReason(account: LiveAccountPublic): string {
+  if (account.syncReason?.trim()) return account.syncReason.trim()
+  if (!account.hasCookie) return '未收到 Cookie'
+  if (accountCanSyncOrders(account)) return '已收到 Cookie，可尝试同步'
+  const msg = account.cookieLastErrorMessage?.trim()
+  if (msg) return msg
+  return 'Cookie 暂不可同步，请到系统设置查看原因。'
+}
+
 export function buildCookieBannerMessage(payload: CookieHealthPayload | null): string | null {
   if (!payload) return null
 
   const enabled = payload.accounts.filter((a) => a.enabled)
-  const missing = enabled.filter((a) => !a.hasCookie)
-  const unknown = enabled.filter((a) => a.hasCookie && a.cookieStatus === 'unknown')
-  const invalid = enabled.filter((a) => a.cookieStatus === 'invalid')
-  const suspected = enabled.filter((a) => a.cookieStatus === 'suspected')
+  const notSyncable = enabled.filter((a) => !accountCanSyncOrders(a))
+  const syncable = enabled.filter((a) => accountCanSyncOrders(a))
+  const missing = notSyncable.filter((a) => !a.hasCookie)
 
-  if (missing.length === 1) {
-    return `直播号「${missing[0]!.name}」未收到 Cookie，请到系统设置更新或由机器人上传。`
-  }
-  if (missing.length > 1) {
-    return `有 ${missing.length} 个直播号未收到 Cookie，部分数据可能未更新。`
-  }
-  if (unknown.length === 1) {
-    return `直播号「${unknown[0]!.name}」已收到 Cookie，待验证，可稍后在系统设置测试。`
-  }
-  if (unknown.length > 1) {
-    return `有 ${unknown.length} 个直播号 Cookie 待验证。`
-  }
-  if (invalid.length === 1) {
-    const acc = invalid[0]!
-    const detail = acc.cookieLastErrorMessage?.trim()
-    if (detail) {
-      return `直播号「${acc.name}」${detail}`
-    }
-    return `直播号「${acc.name}」Cookie 验证失败，请到系统设置更新 Cookie。`
-  }
-  if (invalid.length > 1) {
-    return `有 ${invalid.length} 个直播号 Cookie 验证失败，请到系统设置查看具体原因。`
-  }
-  if (suspected.length === 1) {
-    const acc = suspected[0]!
-    return acc.cookieLastErrorMessage?.trim()
-      ? `直播号「${acc.name}」${acc.cookieLastErrorMessage}`
-      : `直播号「${acc.name}」Cookie 疑似异常，建议测试 Cookie 状态。`
-  }
-  if (suspected.length > 1) {
-    return `有 ${suspected.length} 个直播号 Cookie 疑似异常，建议测试 Cookie 状态。`
-  }
-  return null
-}
+  if (notSyncable.length === 0) return null
 
-export function invalidAccountsForModal(payload: CookieHealthPayload | null): LiveAccountPublic[] {
-  if (!payload) return []
-  return payload.accounts.filter((a) => a.enabled && a.cookieStatus === 'invalid')
+  if (notSyncable.length === 1 && syncable.length === 0) {
+    const acc = notSyncable[0]!
+    return `直播号「${acc.name}」${accountSyncReason(acc)}`
+  }
+
+  if (notSyncable.length === 1 && syncable.length > 0) {
+    const acc = notSyncable[0]!
+    return `直播号「${acc.name}」${accountSyncReason(acc)}（其余 ${syncable.length} 个可同步）`
+  }
+
+  if (syncable.length > 0) {
+    return `${notSyncable.length} 个直播号 Cookie 暂不可同步，${syncable.length} 个可同步。`
+  }
+
+  if (missing.length === enabled.length) {
+    return `${missing.length} 个直播号未收到 Cookie，请到系统设置更新或由机器人上传。`
+  }
+
+  return `${notSyncable.length} 个直播号 Cookie 暂不可同步，点击查看原因。`
 }

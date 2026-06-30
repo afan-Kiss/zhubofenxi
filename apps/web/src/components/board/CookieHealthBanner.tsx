@@ -11,12 +11,13 @@ export const CookieHealthBanner: React.FC<Props> = ({ cookieHealth, className = 
   const message = buildCookieBannerMessage(cookieHealth)
   if (!message) return null
 
-  const hasInvalid = (cookieHealth?.summary.invalidCount ?? 0) > 0
+  const cannotSync = cookieHealth?.summary.cannotSyncCount ?? 0
+  const hasError = cannotSync > 0
 
   return (
     <div
       className={`rounded-lg border px-3 py-2 text-sm ${
-        hasInvalid
+        hasError
           ? 'border-rose-200 bg-rose-50 text-rose-900'
           : 'border-amber-200 bg-amber-50 text-amber-900'
       } ${className}`}

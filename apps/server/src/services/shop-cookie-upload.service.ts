@@ -15,6 +15,11 @@ import {
 } from './live-account.service'
 import { clearSessionCookieCache } from './qianfan-cookie-resolver.service'
 import { logInfo } from '../utils/server-log'
+import {
+  buildShopCookieSummary,
+  deriveCookieSyncState,
+  type ShopCookieStatusSummary,
+} from '../utils/cookie-sync-status.util'
 
 export interface ShopCookieUploadItemResult {
   shopKey: string
@@ -60,6 +65,7 @@ export interface ShopCookieStatusItem {
   lastValidateAt: string | null
   canSyncOrders: boolean
   cookieUpdatedAt: string | null
+  statusLevel: 'ok' | 'warning' | 'error'
 }
 
 function maskCookiePreview(cookie: string): string {
@@ -126,48 +132,8 @@ function buildCookieReason(row: {
   cookieLastErrorMessage: string | null
   cookieLastErrorCode: string | null
   updatedAt: Date
-} | null): { status: string; reason: string; canSyncOrders: boolean } {
-  if (!row?.cookieEncrypted?.trim()) {
-    return { status: 'missing', reason: '未收到该店铺 Cookie', canSyncOrders: false }
-  }
-  const st = row.cookieStatus || 'unknown'
-  if (st === 'valid') {
-    return { status: 'valid', reason: 'Cookie 已验证有效，可同步订单', canSyncOrders: true }
-  }
-  if (st === 'unknown') {
-    return { status: 'uploaded', reason: '已收到 Cookie，待验证', canSyncOrders: true }
-  }
-  if (st === 'suspected') {
-    return {
-      status: 'suspected',
-      reason: row.cookieLastErrorMessage?.trim() || '已收到 Cookie，但平台接口疑似异常',
-      canSyncOrders: false,
-    }
-  }
-  if (st === 'invalid') {
-    const code = row.cookieLastErrorCode?.trim()
-    const msg = row.cookieLastErrorMessage?.trim()
-    if (code === 'cookie_missing_a1' || msg?.includes('缺少 a1')) {
-      return {
-        status: 'invalid',
-        reason: '服务器已收到 Cookie，但这份 Cookie 不完整，缺少 a1，无法同步订单。',
-        canSyncOrders: false,
-      }
-    }
-    if (code === '401' || code === '403' || msg?.includes('401') || msg?.includes('403')) {
-      return {
-        status: 'invalid',
-        reason: msg || 'Cookie 已收到，但平台接口返回未登录，需要重新登录后提交。',
-        canSyncOrders: false,
-      }
-    }
-    return {
-      status: 'invalid',
-      reason: msg || '已收到 Cookie，但验证失败',
-      canSyncOrders: false,
-    }
-  }
-  return { status: st, reason: 'Cookie 状态待确认', canSyncOrders: false }
+} | null): ReturnType<typeof deriveCookieSyncState> {
+  return deriveCookieSyncState(row)
 }
 
 async function findAccountIdForShop(shopKey: GoodReviewShopKey): Promise<string | null> {
@@ -380,6 +346,7 @@ export async function getShopCookieStatusPayload(): Promise<{
   tokenRequired: false
   shops: ShopCookieStatusItem[]
   shopsByKey: Record<string, ShopCookieStatusItem>
+  summary: ShopCookieStatusSummary
   checkedAt: string
 }> {
   const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
@@ -427,8 +394,21 @@ export async function getShopCookieStatusPayload(): Promise<{
       lastValidateAt: row?.cookieLastCheckedAt?.toISOString() ?? null,
       canSyncOrders: derived.canSyncOrders,
       cookieUpdatedAt: hasCookie ? row!.updatedAt.toISOString() : null,
+      statusLevel: derived.statusLevel,
     }
   })
+
+  const summary = buildShopCookieSummary(
+    shops.map((s) => ({
+      hasCookie: s.hasCookie,
+      canSyncOrders: s.canSyncOrders,
+      reason: s.reason,
+      status: s.status,
+      cookieLastErrorCode: accountByShop.get(
+        s.shopKey as GoodReviewShopKey,
+      )?.cookieLastErrorCode,
+    })),
+  )
 
   const shopsByKey: Record<string, ShopCookieStatusItem> = {}
   for (const s of shops) shopsByKey[s.shopKey] = s
@@ -439,6 +419,7 @@ export async function getShopCookieStatusPayload(): Promise<{
     tokenRequired: false,
     shops,
     shopsByKey,
+    summary,
     checkedAt: new Date().toISOString(),
   }
 }

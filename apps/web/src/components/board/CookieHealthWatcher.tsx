@@ -1,18 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { fetchBoardSyncMeta } from '../../lib/board-live-query'
 import {
-  invalidAccountsForModal,
+  accountCanSyncOrders,
+  accountsNotSyncableForModal,
   type CookieHealthPayload,
 } from '../../lib/live-account'
 import { CookieExpiredModal } from './CookieExpiredModal'
 
 const STORAGE_KEY = 'cookie-expired-modal-shown'
-
-function failureKeys(payload: CookieHealthPayload): string[] {
-  return invalidAccountsForModal(payload).map(
-    (a) => `${a.id}:${a.cookieLastFailedAt ?? 'unknown'}`,
-  )
-}
 
 function readShownKeys(): Set<string> {
   try {
@@ -29,6 +24,10 @@ function writeShownKeys(keys: Set<string>): void {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify([...keys]))
 }
 
+function failureKey(account: CookieHealthPayload['accounts'][number]): string {
+  return `${account.id}:${account.cookieLastFailedAt ?? account.syncReason ?? 'unknown'}`
+}
+
 export const CookieHealthWatcher: React.FC = () => {
   const [modalAccounts, setModalAccounts] = useState<CookieHealthPayload['accounts']>([])
   const [open, setOpen] = useState(false)
@@ -40,23 +39,20 @@ export const CookieHealthWatcher: React.FC = () => {
       const payload = (meta as { cookieHealth?: CookieHealthPayload }).cookieHealth ?? null
       if (!payload) return
 
-      const invalid = invalidAccountsForModal(payload)
-      const fresh = invalid.filter((a) => {
-        const key = `${a.id}:${a.cookieLastFailedAt ?? 'unknown'}`
-        return !shownRef.current.has(key)
-      })
+      const notSyncable = accountsNotSyncableForModal(payload)
+      const fresh = notSyncable.filter((a) => !shownRef.current.has(failureKey(a)))
 
       if (fresh.length > 0) {
         setModalAccounts(fresh)
         setOpen(true)
         for (const a of fresh) {
-          shownRef.current.add(`${a.id}:${a.cookieLastFailedAt ?? 'unknown'}`)
+          shownRef.current.add(failureKey(a))
         }
         writeShownKeys(shownRef.current)
       }
 
       for (const a of payload.accounts) {
-        if (a.cookieStatus === 'valid') {
+        if (accountCanSyncOrders(a)) {
           for (const key of [...shownRef.current]) {
             if (key.startsWith(`${a.id}:`)) shownRef.current.delete(key)
           }

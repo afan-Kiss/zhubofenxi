@@ -1,6 +1,6 @@
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { LiveAccountPublic } from '../../lib/live-account'
+import { accountSyncReason, type LiveAccountPublic } from '../../lib/live-account'
 import { ViewportModal } from '../ui/ViewportModal'
 
 interface Props {
@@ -24,19 +24,22 @@ export const CookieExpiredModal: React.FC<Props> = ({ open, accounts, onDismiss 
       panelClassName="w-full max-w-md overflow-visible p-5"
     >
       <h3 id="cookie-expired-title" className="text-base font-semibold text-slate-900">
-        直播号 Cookie 已失效
+        {single ? '直播号 Cookie 暂不可同步' : `${accounts.length} 个直播号 Cookie 暂不可同步`}
       </h3>
       <div className="mt-3 space-y-2 text-sm text-slate-700">
         {single ? (
           <p>
-            直播号「{accounts[0]!.name}」Cookie 已失效，该直播号本轮数据未能更新。当前页面仍展示最近一次成功同步的数据，请到系统设置更新 Cookie 后重新同步。
+            直播号「{accounts[0]!.name}」{accountSyncReason(accounts[0]!)}。当前页面仍展示最近一次成功同步的数据，请到系统设置更新 Cookie 后重新同步。
           </p>
         ) : (
           <>
-            <p>以下直播号 Cookie 已失效，本轮数据未能更新：</p>
-            <ul className="list-disc space-y-1 pl-5">
+            <p>以下直播号 Cookie 暂不可同步，本轮数据可能未更新：</p>
+            <ul className="list-disc space-y-2 pl-5">
               {accounts.map((a) => (
-                <li key={a.id}>{a.name}</li>
+                <li key={a.id}>
+                  <span className="font-medium text-slate-900">{a.name}</span>
+                  <span className="mt-0.5 block text-slate-600">{accountSyncReason(a)}</span>
+                </li>
               ))}
             </ul>
             <p>当前页面仍展示最近一次成功同步的数据，请到系统设置更新 Cookie 后重新同步。</p>

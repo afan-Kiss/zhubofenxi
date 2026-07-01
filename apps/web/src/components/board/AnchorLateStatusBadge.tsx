@@ -11,7 +11,7 @@ export const AnchorLateStatusBadge: React.FC<Props> = ({ row, className = '' }) 
   if (late.isLate) {
     return (
       <span
-        className={`rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-semibold text-red-700 ${className}`}
+        className={`rounded-full bg-red-100 px-2.5 py-1 text-xs font-semibold text-red-700 ${className}`}
       >
         {late.label || `迟播 ${late.lateMinutes ?? ''} 分钟`}
       </span>
@@ -19,14 +19,14 @@ export const AnchorLateStatusBadge: React.FC<Props> = ({ row, className = '' }) 
   }
   if (!late.hasSchedule && late.hasActualStartTime) {
     return (
-      <span className={`rounded-full bg-slate-100 px-2.5 py-1 text-[11px] text-slate-600 ${className}`}>
+      <span className={`rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600 ${className}`}>
         未排班
       </span>
     )
   }
   if (late.hasSchedule && !late.hasActualStartTime) {
     return (
-      <span className={`rounded-full bg-amber-50 px-2.5 py-1 text-[11px] text-amber-800 ${className}`}>
+      <span className={`rounded-full bg-amber-50 px-2.5 py-1 text-xs text-amber-800 ${className}`}>
         未读取开播时间
       </span>
     )

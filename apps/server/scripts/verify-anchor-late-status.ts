@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import {
   calculateAnchorLateStatus,
   matchManualSchedule,
+  pickEarliestValidSession,
   type AnchorLateStatus,
 } from '../src/utils/anchor-schedule-late.util'
 import type { EffectiveScheduleRow } from '../src/services/anchor-daily-schedule.service'
@@ -73,5 +74,65 @@ runCase('no-actual', calculateAnchorLateStatus(scheduleA, null, null), {
   isLate: false,
   label: '未读取开播时间',
 })
+
+const twoShiftRows: EffectiveScheduleRow[] = [
+  row({
+    rowId: 'c-morning',
+    anchorName: '主播C',
+    startTime: '10:00',
+    endTime: '12:00',
+    startAt: '2026-06-30T10:00:00+08:00',
+    endAt: '2026-06-30T12:00:00+08:00',
+  }),
+  row({
+    rowId: 'c-afternoon',
+    anchorName: '主播C',
+    startTime: '14:00',
+    endTime: '18:00',
+    startAt: '2026-06-30T14:00:00+08:00',
+    endAt: '2026-06-30T18:00:00+08:00',
+  }),
+]
+
+function matchTwoShiftsInStableOrder(
+  actualStarts: Array<{ iso: string; expectRowId: string }>,
+): void {
+  const usedIds = new Set<string>()
+  const sorted = [...actualStarts].sort(
+    (a, b) => Date.parse(a.iso) - Date.parse(b.iso),
+  )
+  for (const { iso, expectRowId } of sorted) {
+    const matched = matchManualSchedule(
+      twoShiftRows,
+      '主播C',
+      'XY祥钰珠宝',
+      Date.parse(iso),
+      usedIds,
+    )
+    assert.ok(matched, `two-shift: expected match for ${iso}`)
+    assert.equal(matched!.rowId, expectRowId, `two-shift row for ${iso}`)
+    usedIds.add(matched!.rowId)
+  }
+  assert.equal(usedIds.size, 2, 'two-shift: each schedule used once')
+}
+
+matchTwoShiftsInStableOrder([
+  { iso: '2026-06-30T10:05:00+08:00', expectRowId: 'c-morning' },
+  { iso: '2026-06-30T14:12:00+08:00', expectRowId: 'c-afternoon' },
+])
+
+matchTwoShiftsInStableOrder([
+  { iso: '2026-06-30T14:12:00+08:00', expectRowId: 'c-afternoon' },
+  { iso: '2026-06-30T10:05:00+08:00', expectRowId: 'c-morning' },
+])
+
+const sessions = [
+  { liveId: '2', liveName: 'XY', startTime: '2026-06-30T14:00:00+08:00', endTime: '—', durationMinutes: 60, durationText: '1小时' },
+  { liveId: '1', liveName: 'XY', startTime: '2026-06-30T10:00:00+08:00', endTime: '—', durationMinutes: 60, durationText: '1小时' },
+] as const
+const earliest = pickEarliestValidSession([...sessions])
+assert.equal(earliest?.startTime, '2026-06-30T10:00:00+08:00', 'earliest-session')
+console.log('[verify-anchor-late] PASS two-shift-stable')
+console.log('[verify-anchor-late] PASS earliest-session')
 
 console.log('[verify-anchor-late] ALL PASS')

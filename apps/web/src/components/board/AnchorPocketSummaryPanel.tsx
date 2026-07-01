@@ -3,6 +3,7 @@ import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { apiRequest } from '../../lib/api'
 import { BOARD_LIVE_QUERY_INVALIDATE_EVENT } from '../../lib/board-live-query-cache'
 import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
+import { AnchorLateMultiDayNote } from './AnchorLateMultiDayNote'
 import { formatLateTimingLine, readLateStatus, type AnchorLateStatusView } from '../../lib/anchor-late-status'
 
 export interface AnchorPocketRow extends AnchorLateStatusView {
@@ -113,6 +114,7 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
         {caliber?.settlementNote ? (
           <p className="mt-1 text-xs text-slate-400">{caliber.settlementNote}</p>
         ) : null}
+        <AnchorLateMultiDayNote startDate={startDate} endDate={endDate} className="mt-2" />
       </div>
 
       {summary?.dataQualityWarnings?.length ? (
@@ -126,7 +128,7 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
       <div className="overflow-x-auto">
         <table className="min-w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs text-slate-500">
+            <tr className="border-b border-slate-100 bg-slate-50 text-left text-[12px] text-slate-500">
               <th className="px-3 py-2 font-medium">主播</th>
               <th className="px-3 py-2 font-medium">店铺</th>
               <th className="px-3 py-2 font-medium">场次</th>

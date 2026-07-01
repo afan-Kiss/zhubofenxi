@@ -54,3 +54,7 @@ export function lateCardBorderClass(isLate?: boolean): string {
 export function lateTextClass(isLate?: boolean): string {
   return isLate ? 'font-medium text-red-600' : 'text-slate-500'
 }
+
+export function isMultiDayLateRange(startDate: string, endDate: string): boolean {
+  return startDate.trim() !== endDate.trim()
+}

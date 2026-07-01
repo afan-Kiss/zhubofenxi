@@ -33,9 +33,9 @@ interface Props {
 function MetricCell({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (
     <div className="rounded-xl bg-rose-50/40 px-2.5 py-2">
-      <p className="text-xs text-slate-500">{label}</p>
+      <p className="text-[12px] leading-snug text-slate-500">{label}</p>
       <p
-        className={`mt-0.5 text-sm font-semibold tabular-nums ${
+        className={`mt-0.5 text-base font-semibold tabular-nums ${
           danger ? 'text-rose-600' : 'text-slate-900'
         }`}
       >
@@ -98,10 +98,10 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
           >
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-xs text-slate-500">主播</p>
+                <p className="text-[12px] text-slate-500">主播</p>
                 <p className="text-lg font-semibold text-rose-800">{name}</p>
                 {timingLine ? (
-                  <p className={`mt-1 text-xs ${late.isLate ? 'font-medium text-red-600' : 'text-slate-500'}`}>
+                  <p className={`mt-1 text-[12px] ${late.isLate ? 'font-medium text-red-600' : 'text-slate-500'}`}>
                     {timingLine}
                   </p>
                 ) : null}
@@ -145,17 +145,17 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 退款率 {formatRate(refundRate)}
               </span>
               {showRates && (
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600">
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-medium text-slate-600">
                   退货率 {formatRate(returnRate)}
                 </span>
               )}
               {showRates && (
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600">
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-medium text-slate-600">
                   品退率 {formatRate(qualityRate)}
                 </span>
               )}
               {showRates && (
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-medium text-slate-600">
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-medium text-slate-600">
                   签收率 {formatRate(signRate)}
                 </span>
               )}

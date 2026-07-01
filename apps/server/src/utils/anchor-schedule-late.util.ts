@@ -185,14 +185,24 @@ export function calculateAnchorLateStatus(
 function earliestSessionStart(sessions: AnchorLiveSessionBrief[]): {
   startAt: string
   startMs: number
+  session: AnchorLiveSessionBrief
 } | null {
-  if (sessions.length === 0) return null
-  const earliest = sessions.reduce((min, s) => (s.startTime < min.startTime ? s : min), sessions[0]!)
-  if (!earliest.startTime || earliest.startTime === '—') return null
+  const valid = sessions.filter((s) => s.startTime && s.startTime !== '—')
+  if (valid.length === 0) return null
+  const earliest = valid.reduce((min, s) => (s.startTime < min.startTime ? s : min), valid[0]!)
   const startMs = new Date(earliest.startTime).getTime()
   if (!Number.isFinite(startMs)) return null
-  return { startAt: earliest.startTime, startMs }
+  return { startAt: earliest.startTime, startMs, session: earliest }
 }
+
+/** 取最早有效开播场次（忽略无 startTime 或占位符） */
+export function pickEarliestValidSession(
+  sessions: AnchorLiveSessionBrief[],
+): AnchorLiveSessionBrief | null {
+  return earliestSessionStart(sessions)?.session ?? null
+}
+
+export { earliestSessionStart }
 
 export function resolveAnchorLateStatusFromSessions(
   scheduleRows: EffectiveScheduleRow[],

@@ -17,6 +17,7 @@ import { anchorCardTestId } from '../../lib/anchor-test-id'
 import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
 import { MobileAnchorLeaderboardCards } from './MobileAnchorLeaderboardCards'
 import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
+import { AnchorLateMultiDayNote } from './AnchorLateMultiDayNote'
 import { formatLateTimingLine, readLateStatus } from '../../lib/anchor-late-status'
 
 interface Props {
@@ -24,6 +25,8 @@ interface Props {
   emptyText?: string
   onRowClick?: (row: AnchorLeaderboardRow) => void
   showLongPeriodRates?: boolean
+  startDate?: string
+  endDate?: string
 }
 
 export const AnchorLeaderboardPanel: React.FC<Props> = ({
@@ -31,6 +34,8 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   emptyText = '暂无数据',
   onRowClick,
   showLongPeriodRates: showRates = true,
+  startDate = '',
+  endDate = '',
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
@@ -45,6 +50,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
 
   return (
     <div>
+      <AnchorLateMultiDayNote startDate={startDate} endDate={endDate} className="mb-2 px-1 md:px-4" />
       <div className="mb-3 flex items-center justify-end px-1 md:px-4">
         <ListViewToggle mode={viewMode} onChange={setViewMode} />
       </div>
@@ -58,7 +64,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
       />
 
       <div className={`${tableWrapClass} overflow-x-auto md:px-0`}>
-        <table className="w-full min-w-[1280px] text-left text-xs">
+        <table className="w-full min-w-[1280px] text-left text-[13px]">
           <thead className="bg-rose-50/40 text-slate-500">
             <tr>
               <th className="py-2.5 pl-4 pr-2">主播</th>
@@ -107,7 +113,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                           <AnchorLateStatusBadge row={late} />
                         </div>
                         {timingLine ? (
-                          <span className={`text-xs ${late.isLate ? 'text-red-600' : 'text-slate-500'}`}>
+                          <span className={`text-[12px] ${late.isLate ? 'text-red-600' : 'text-slate-500'}`}>
                             {timingLine}
                           </span>
                         ) : null}

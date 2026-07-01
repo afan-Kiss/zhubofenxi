@@ -319,6 +319,8 @@ export const AnchorPerformanceTab: React.FC = () => {
               <AnchorLeaderboardPanel
                 rows={anchors}
                 showLongPeriodRates={showRates}
+                startDate={startDate}
+                endDate={endDate}
                 emptyText="当前范围暂无已同步数据"
                 onRowClick={(a) => {
                   const name = String(a.anchorName)

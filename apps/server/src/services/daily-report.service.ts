@@ -31,10 +31,14 @@ import {
   sumDailyReportShippedFromViews,
 } from './daily-report-order.util'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
-import { attachAnchorScheduleLateFields } from '../utils/anchor-schedule-late.util'
-import type { AnchorLateStatusPayload } from '../utils/anchor-schedule-late.util'
+import {
+  attachAnchorScheduleLateFields,
+  buildActualLivePeriodText,
+  resolveFallbackSessionDisplay,
+  type AnchorAttendanceStatusPayload,
+} from '../utils/anchor-attendance-status.util'
 
-export interface DailyReportAnchorRow extends AnchorLateStatusPayload {
+export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -92,14 +96,7 @@ function resolveSessionLabel(config: AnchorConfig, anchorId: string): string {
 }
 
 function buildLivePeriodText(sessions: AnchorLiveSessionBrief[]): string {
-  if (sessions.length === 0) return '—'
-  if (sessions.length === 1) {
-    const s = sessions[0]!
-    return `${s.startTime.slice(11, 16)}~${s.endTime.slice(11, 16)}`
-  }
-  const first = sessions[0]!
-  const last = sessions[sessions.length - 1]!
-  return `${first.startTime.slice(11, 16)}~${last.endTime.slice(11, 16)}`
+  return buildActualLivePeriodText(sessions)
 }
 
 function pickShopNameFromRaw(raw: Record<string, unknown> | undefined): string {
@@ -153,21 +150,23 @@ function buildAnchorRow(params: {
   invalidOrderCount: number
   sessions: AnchorLiveSessionBrief[]
   totalShippedAmountYuan: number
-  scheduleLate: AnchorLateStatusPayload
+  scheduleAttendance: AnchorAttendanceStatusPayload
 }): DailyReportAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
   const traffic = aggregateAnchorLiveSessionTraffic(params.sessions)
+  const fallback = resolveFallbackSessionDisplay({
+    fallbackSessionLabel: params.sessionLabel,
+    fallbackShopName: params.shopName,
+    timeRuleSessionLabel: resolveSessionLabel(params.config, params.anchorId),
+  })
   const sessionLabel =
-    params.sessionLabel ??
-    formatSessionLabelWithShop(
-      resolveSessionLabel(params.config, params.anchorId),
-      params.shopName,
-    )
+    params.scheduleAttendance.displaySessionLabel ||
+    params.sessionLabel ||
+    fallback.displaySessionLabel
+  const shopName = params.scheduleAttendance.shopName || params.shopName || fallback.shopName
   return {
     anchorName: params.anchorName,
-    sessionLabel,
-    shopName: params.shopName,
     livePeriodText: buildLivePeriodText(params.sessions),
     liveDurationText: formatLiveDurationMinutes(liveDurationMinutes),
     liveDurationMinutes,
@@ -192,7 +191,9 @@ function buildAnchorRow(params: {
     dealUserCount: traffic.dealUserCount,
     dealConversionRate: traffic.dealConversionRate,
     newFollowerRate: traffic.newFollowerRate,
-    ...params.scheduleLate,
+    ...params.scheduleAttendance,
+    sessionLabel,
+    shopName,
   }
 }
 
@@ -249,8 +250,18 @@ export async function buildDailyReport(params: {
     // 6.13 起固定场次主播：与主播业绩一致，无数据也保留空行（含 6.18 起的小白）
     if (!hasData && !useShopSessionRules) continue
 
-    const shopName =
+    const shopNameHint =
       fixedDisplay?.shopName ?? resolveAnchorShopName(anchorAllViews, sessions)
+
+    const scheduleAttendance = attachAnchorScheduleLateFields(
+      scheduleTable.rows,
+      anchor.anchorName,
+      shopNameHint,
+      sessions,
+      usedScheduleRowIds,
+    )
+
+    const shopName = scheduleAttendance.shopName || shopNameHint
 
     anchorRows.push(
       buildAnchorRow({
@@ -258,19 +269,15 @@ export async function buildDailyReport(params: {
         anchorId: anchor.anchorId,
         anchorName: anchor.anchorName,
         shopName,
-        sessionLabel: fixedDisplay?.sessionLabel,
+        sessionLabel: scheduleAttendance.hasSchedule
+          ? scheduleAttendance.displaySessionLabel
+          : fixedDisplay?.sessionLabel,
         shippedAmountYuan,
         soldOrderCount,
         invalidOrderCount: invalidFromAll,
         sessions,
         totalShippedAmountYuan: 0,
-        scheduleLate: attachAnchorScheduleLateFields(
-          scheduleTable.rows,
-          anchor.anchorName,
-          shopName,
-          sessions,
-          usedScheduleRowIds,
-        ),
+        scheduleAttendance,
       }),
     )
   }

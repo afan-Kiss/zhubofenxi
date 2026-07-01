@@ -102,7 +102,13 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     data-testid={anchorCardTestId(String(a.anchorName))}
                     style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
                     className={`board-list-row-enter border-t transition hover:bg-rose-50/40 ${
-                      late.isLate ? 'border-red-100 bg-red-50/30' : 'border-rose-50/80'
+                      late.isLate || late.isEarlyLeave
+                        ? late.isLate && late.isEarlyLeave
+                          ? 'border-orange-100 bg-orange-50/30'
+                          : late.isLate
+                            ? 'border-red-100 bg-red-50/30'
+                            : 'border-amber-100 bg-amber-50/30'
+                        : 'border-rose-50/80'
                     } ${onRowClick ? 'cursor-pointer' : ''}`}
                     onClick={onRowClick ? () => onRowClick(a) : undefined}
                   >
@@ -113,7 +119,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                           <AnchorLateStatusBadge row={late} />
                         </div>
                         {timingLine ? (
-                          <span className={`text-[12px] ${late.isLate ? 'text-red-600' : 'text-slate-500'}`}>
+                          <span className={`text-[12px] ${late.isLate || late.isEarlyLeave ? 'text-red-600' : 'text-slate-500'}`}>
                             {timingLine}
                           </span>
                         ) : null}

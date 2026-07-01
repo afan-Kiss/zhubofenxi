@@ -70,7 +70,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
           return (
           <div
             key={row.anchorName}
-            className={`mb-2 rounded-xl border p-3 text-xs ${lateCardBorderClass(late.isLate)}`}
+            className={`mb-2 rounded-xl border p-3 text-xs ${lateCardBorderClass(late.isLate, late.isEarlyLeave)}`}
           >
             <p className="text-sm font-semibold">
               {row.anchorName} · {row.sessionLabel}

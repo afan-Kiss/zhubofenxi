@@ -90,7 +90,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 : undefined
             }
             className={`board-list-row-enter rounded-2xl border p-4 shadow-sm ${
-              lateCardBorderClass(late.isLate)
+              lateCardBorderClass(late.isLate, late.isEarlyLeave)
             } shadow-rose-100/40 ${
               onSelect ? 'cursor-pointer transition active:scale-[0.99] hover:shadow-md' : ''
             }`}
@@ -101,7 +101,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 <p className="text-[12px] text-slate-500">主播</p>
                 <p className="text-lg font-semibold text-rose-800">{name}</p>
                 {timingLine ? (
-                  <p className={`mt-1 text-[12px] ${late.isLate ? 'font-medium text-red-600' : 'text-slate-500'}`}>
+                  <p className={`mt-1 text-[12px] ${late.isLate || late.isEarlyLeave ? 'font-medium text-red-600' : 'text-slate-500'}`}>
                     {timingLine}
                   </p>
                 ) : null}

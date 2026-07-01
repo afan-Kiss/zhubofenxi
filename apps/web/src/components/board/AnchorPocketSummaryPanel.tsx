@@ -158,7 +158,13 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
                 <tr
                   key={row.anchorName}
                   className={`border-b hover:bg-slate-50/80 ${
-                    late.isLate ? 'border-red-100 bg-red-50/30' : 'border-slate-50'
+                    late.isLate || late.isEarlyLeave
+                      ? late.isLate && late.isEarlyLeave
+                        ? 'border-orange-100 bg-orange-50/30'
+                        : late.isLate
+                          ? 'border-red-100 bg-red-50/30'
+                          : 'border-amber-100 bg-amber-50/30'
+                      : 'border-slate-50'
                   }`}
                   title={
                     row.detail
@@ -174,7 +180,7 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
                   </td>
                   <td className="px-3 py-2 text-slate-600">{row.shopName}</td>
                   <td className="px-3 py-2 text-slate-600">{row.sessionName}</td>
-                  <td className={`px-3 py-2 text-xs ${late.isLate ? 'font-medium text-red-600' : 'text-slate-600'}`}>
+                  <td className={`px-3 py-2 text-xs ${late.isLate || late.isEarlyLeave ? 'font-medium text-red-600' : 'text-slate-600'}`}>
                     {timingLine ?? '—'}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatMoney(row.performanceAmount)}</td>

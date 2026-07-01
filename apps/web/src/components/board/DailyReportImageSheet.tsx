@@ -91,13 +91,13 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
       : row.livePeriodText)
 
   return (
-    <div className={`rounded-2xl border p-4 shadow-sm ${lateCardBorderClass(late.isLate)}`}>
+    <div className={`rounded-2xl border p-4 shadow-sm ${lateCardBorderClass(late.isLate, late.isEarlyLeave)}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-base font-semibold text-slate-900">
             {row.anchorName}｜{row.sessionLabel}
           </p>
-          <p className={`mt-1 text-[13px] ${late.isLate ? 'font-medium text-red-600' : 'text-slate-500'}`}>
+          <p className={`mt-1 text-[13px] ${late.isLate || late.isEarlyLeave ? 'font-medium text-red-600' : 'text-slate-500'}`}>
             {timingLine}｜{row.liveDurationText}
           </p>
         </div>

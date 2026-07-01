@@ -1,47 +1,49 @@
 import type { AnchorLiveSessionBrief } from './anchor-live-sessions.service'
-import { ANCHOR_SESSION_DISPLAY_FROM_0613 } from './anchor-performance-attribution.service'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import { resolveAnchorLiveSessionsForRange } from './anchor-live-sessions.service'
 import {
-  matchManualSchedule,
-  calculateAnchorLateStatus,
   earliestSessionStart,
-  toLateStatusPayload,
-  type AnchorLateStatusPayload,
-} from '../utils/anchor-schedule-late.util'
-
-function resolveShopNameForAnchor(anchorName: string, liveName?: string | null): string {
-  const fixed = ANCHOR_SESSION_DISPLAY_FROM_0613[anchorName]
-  if (fixed?.shopName) return fixed.shopName
-  return (liveName ?? '').trim()
-}
+  resolveAnchorAttendanceFromSessions,
+  toAttendanceStatusPayload,
+  type AnchorAttendanceStatusPayload,
+} from '../utils/anchor-attendance-status.util'
 
 export function isSingleDayRange(startDate: string, endDate: string): boolean {
   return startDate.trim() === endDate.trim()
 }
 
-const EMPTY_LATE_PAYLOAD = toLateStatusPayload({
+const EMPTY_ATTENDANCE_PAYLOAD = toAttendanceStatusPayload({
   hasSchedule: false,
   hasActualStartTime: false,
+  hasActualEndTime: false,
   isLate: false,
   lateMinutes: 0,
+  isEarlyLeave: false,
+  earlyLeaveMinutes: 0,
   scheduledStartAt: null,
   scheduledEndAt: null,
   scheduledPeriodText: null,
   actualStartAt: null,
   actualStartText: null,
+  actualEndAt: null,
+  actualEndText: null,
+  sessionLabel: '',
+  shopName: '',
+  displaySessionLabel: '',
   label: '',
   reason: '',
+  attendanceLabel: '',
+  attendanceReason: '',
 })
 
-type LateMatchSortKey = {
+type MatchSortKey = {
   anchorName: string
   actualStartMs: number | null
   shopName: string
   sessionName: string
 }
 
-function compareLateMatchOrder(a: LateMatchSortKey, b: LateMatchSortKey): number {
+function compareMatchOrder(a: MatchSortKey, b: MatchSortKey): number {
   const nameCmp = a.anchorName.localeCompare(b.anchorName, 'zh-CN')
   if (nameCmp !== 0) return nameCmp
 
@@ -55,24 +57,24 @@ function compareLateMatchOrder(a: LateMatchSortKey, b: LateMatchSortKey): number
   return a.sessionName.localeCompare(b.sessionName, 'zh-CN')
 }
 
-function resolveLatePayload(
+function resolveShopHintFromSessions(anchorName: string, sessions: AnchorLiveSessionBrief[]): string {
+  const actual = earliestSessionStart(sessions)
+  return (actual?.session.liveName ?? '').trim()
+}
+
+function resolveAttendancePayload(
   scheduleRows: Awaited<ReturnType<typeof getEffectiveScheduleTableForDate>>['rows'],
   anchorName: string,
   shopName: string,
   sessions: AnchorLiveSessionBrief[],
   usedRowIds: Set<string>,
-): AnchorLateStatusPayload {
-  const actual = earliestSessionStart(sessions)
-  const scheduleRow = matchManualSchedule(
+): AnchorAttendanceStatusPayload {
+  return resolveAnchorAttendanceFromSessions(
     scheduleRows,
     anchorName,
     shopName,
-    actual?.startMs ?? null,
+    sessions,
     usedRowIds,
-  )
-  if (scheduleRow) usedRowIds.add(scheduleRow.rowId)
-  return toLateStatusPayload(
-    calculateAnchorLateStatus(scheduleRow, actual?.startMs ?? null, actual?.startAt ?? null),
   )
 }
 
@@ -111,7 +113,8 @@ export async function enrichAnchorLeaderboardWithLateStatus(
         anchorOrders: [],
       })
       const actual = earliestSessionStart(sessions)
-      const shopName = resolveShopNameForAnchor(anchorName, actual?.session.liveName)
+      const shopName =
+        String(row.shopName ?? '').trim() || resolveShopHintFromSessions(anchorName, sessions)
 
       return {
         index,
@@ -126,42 +129,59 @@ export async function enrichAnchorLeaderboardWithLateStatus(
   )
 
   const usedRowIds = new Set<string>()
-  const lateByIndex = new Map<number, AnchorLateStatusPayload>()
+  const attendanceByIndex = new Map<number, AnchorAttendanceStatusPayload>()
 
   const matchable = prefetched.filter((item) => item.anchorName && item.anchorName !== '未归属')
   const sorted = [...matchable].sort((a, b) =>
-    compareLateMatchOrder({
-      anchorName: a.anchorName,
-      actualStartMs: a.actualStartMs,
-      shopName: a.shopName,
-      sessionName: a.sessionName,
-    }, {
-      anchorName: b.anchorName,
-      actualStartMs: b.actualStartMs,
-      shopName: b.shopName,
-      sessionName: b.sessionName,
-    }),
+    compareMatchOrder(
+      {
+        anchorName: a.anchorName,
+        actualStartMs: a.actualStartMs,
+        shopName: a.shopName,
+        sessionName: a.sessionName,
+      },
+      {
+        anchorName: b.anchorName,
+        actualStartMs: b.actualStartMs,
+        shopName: b.shopName,
+        sessionName: b.sessionName,
+      },
+    ),
   )
 
   for (const item of sorted) {
-    lateByIndex.set(
+    attendanceByIndex.set(
       item.index,
-      resolveLatePayload(scheduleTable.rows, item.anchorName, item.shopName, item.sessions, usedRowIds),
+      resolveAttendancePayload(
+        scheduleTable.rows,
+        item.anchorName,
+        item.shopName,
+        item.sessions,
+        usedRowIds,
+      ),
     )
   }
 
   return rows.map((row, index) => {
-    const late = lateByIndex.get(index)
-    return late ? { ...row, ...late } : row
+    const attendance = attendanceByIndex.get(index)
+    if (!attendance) return row
+    return {
+      ...row,
+      ...attendance,
+      sessionLabel: attendance.displaySessionLabel || row.sessionLabel,
+      shopName: attendance.shopName || row.shopName,
+    }
   })
 }
 
 export async function enrichPocketRowsWithLateStatus(
   rows: Array<{ anchorName: string; shopName: string; sessionName: string }>,
   params: { startDate: string; endDate: string; preset?: string },
-): Promise<Array<AnchorLateStatusPayload & { anchorName: string; shopName: string; sessionName: string }>> {
+): Promise<
+  Array<AnchorAttendanceStatusPayload & { anchorName: string; shopName: string; sessionName: string }>
+> {
   if (!isSingleDayRange(params.startDate, params.endDate)) {
-    return rows.map((row) => ({ ...row, ...EMPTY_LATE_PAYLOAD }))
+    return rows.map((row) => ({ ...row, ...EMPTY_ATTENDANCE_PAYLOAD }))
   }
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
@@ -187,7 +207,7 @@ export async function enrichPocketRowsWithLateStatus(
       })
       const actual = earliestSessionStart(sessions)
       const shopName =
-        row.shopName?.trim() || resolveShopNameForAnchor(row.anchorName, actual?.session.liveName)
+        row.shopName?.trim() || resolveShopHintFromSessions(row.anchorName, sessions)
 
       return {
         index,
@@ -202,30 +222,45 @@ export async function enrichPocketRowsWithLateStatus(
   )
 
   const usedRowIds = new Set<string>()
-  const lateByIndex = new Map<number, AnchorLateStatusPayload>()
+  const attendanceByIndex = new Map<number, AnchorAttendanceStatusPayload>()
   const sorted = [...prefetched].sort((a, b) =>
-    compareLateMatchOrder({
-      anchorName: a.anchorName,
-      actualStartMs: a.actualStartMs,
-      shopName: a.shopName,
-      sessionName: a.sessionName,
-    }, {
-      anchorName: b.anchorName,
-      actualStartMs: b.actualStartMs,
-      shopName: b.shopName,
-      sessionName: b.sessionName,
-    }),
+    compareMatchOrder(
+      {
+        anchorName: a.anchorName,
+        actualStartMs: a.actualStartMs,
+        shopName: a.shopName,
+        sessionName: a.sessionName,
+      },
+      {
+        anchorName: b.anchorName,
+        actualStartMs: b.actualStartMs,
+        shopName: b.shopName,
+        sessionName: b.sessionName,
+      },
+    ),
   )
 
   for (const item of sorted) {
-    lateByIndex.set(
+    attendanceByIndex.set(
       item.index,
-      resolveLatePayload(scheduleTable.rows, item.anchorName, item.shopName, item.sessions, usedRowIds),
+      resolveAttendancePayload(
+        scheduleTable.rows,
+        item.anchorName,
+        item.shopName,
+        item.sessions,
+        usedRowIds,
+      ),
     )
   }
 
   return rows.map((row, index) => {
-    const late = lateByIndex.get(index) ?? EMPTY_LATE_PAYLOAD
-    return { ...row, ...late }
+    const attendance = attendanceByIndex.get(index) ?? EMPTY_ATTENDANCE_PAYLOAD
+    const sessionName = attendance.displaySessionLabel || row.sessionName
+    return {
+      ...row,
+      ...attendance,
+      shopName: attendance.shopName || row.shopName,
+      sessionName,
+    }
   })
 }

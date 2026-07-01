@@ -50,10 +50,18 @@ export function getDailyReportImagesDir(reportDate: string): string {
   return path.join(getDataDir(), 'daily-report-images', reportDate)
 }
 
-export function resolveDailyReportImageFilePath(storedPath: string): string {
-  const base = path.resolve(getDataDir(), 'daily-report-images')
-  const resolved = path.resolve(storedPath)
-  if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+function dailyReportImagesRoot(): string {
+  return path.join(getDataDir(), 'daily-report-images')
+}
+
+/** 支持相对路径（推荐）与历史绝对路径 */
+export function resolveDailyReportImageAbsPath(storedPath: string): string {
+  const root = path.resolve(dailyReportImagesRoot())
+  const normalized = storedPath.trim().replace(/\\/g, '/')
+  const resolved = path.isAbsolute(storedPath)
+    ? path.resolve(storedPath)
+    : path.resolve(root, normalized)
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
     throw new Error('无效的图片路径')
   }
   return resolved
@@ -94,6 +102,7 @@ export async function uploadDailyReportImage(params: {
   const fileName = `${id}${ext}`
   const absPath = path.join(dir, fileName)
   fs.writeFileSync(absPath, params.buffer)
+  const storedRelativePath = `${params.reportDate}/${fileName}`
 
   const maxSort = await prisma.dailyReportImage.aggregate({
     where: { reportDate: params.reportDate },
@@ -106,7 +115,7 @@ export async function uploadDailyReportImage(params: {
     data: {
       id,
       reportDate: params.reportDate,
-      filePath: absPath,
+      filePath: storedRelativePath,
       publicUrl,
       originalName: params.originalName.slice(0, 200),
       mimeType: mime,
@@ -123,7 +132,8 @@ export async function deleteDailyReportImage(id: string): Promise<void> {
   const row = await prisma.dailyReportImage.findUnique({ where: { id } })
   if (!row) throw new Error('图片不存在')
   try {
-    if (fs.existsSync(row.filePath)) fs.unlinkSync(row.filePath)
+    const absPath = resolveDailyReportImageAbsPath(row.filePath)
+    if (fs.existsSync(absPath)) fs.unlinkSync(absPath)
   } catch {
     // ignore missing file
   }
@@ -151,7 +161,7 @@ export async function getDailyReportImageFile(id: string): Promise<{
 }> {
   const row = await prisma.dailyReportImage.findUnique({ where: { id } })
   if (!row) throw new Error('图片不存在')
-  const absPath = resolveDailyReportImageFilePath(row.filePath)
+  const absPath = resolveDailyReportImageAbsPath(row.filePath)
   if (!fs.existsSync(absPath)) throw new Error('图片文件不存在')
   return { absPath, mimeType: row.mimeType, originalName: row.originalName }
 }

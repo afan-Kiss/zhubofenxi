@@ -141,7 +141,14 @@ def build_env_content() -> str:
 
     if not any(l.startswith("SESSION_SECRET=") and "请替换" not in l for l in lines):
         overrides["SESSION_SECRET"] = secrets.token_urlsafe(48)
-    if not any(l.startswith("COOKIE_ENCRYPTION_KEY=") and "请替换" not in l and len(l.split("=", 1)[-1]) >= 32 for l in lines if l.startswith("COOKIE_ENCRYPTION_KEY=")):
+    # 仅用于本地/首次安装模板；生产部署会从 preserve-server.env 恢复真实密钥
+    if not any(
+        l.startswith("COOKIE_ENCRYPTION_KEY=")
+        and "请替换" not in l
+        and len(l.split("=", 1)[-1].strip().strip('"').strip("'")) >= 32
+        for l in lines
+        if l.startswith("COOKIE_ENCRYPTION_KEY=")
+    ):
         overrides["COOKIE_ENCRYPTION_KEY"] = secrets.token_urlsafe(48)
 
     out: list[str] = []
@@ -188,16 +195,34 @@ def main() -> None:
             sftp_put(client, zip_path, "/tmp/zhubo-upload/zhubo-analysis.zip")
             sftp_put(client, env_path, "/tmp/zhubo-upload/server.env")
 
-            if os.environ.get("DEPLOY_UPLOAD_LOCAL_DB", "0") == "1":
+            upload_local_db = os.environ.get("DEPLOY_UPLOAD_LOCAL_DB", "0") == "1"
+            if upload_local_db:
                 db = ROOT / "apps/server/data/app.db"
                 if db.exists():
-                    sftp_put(client, db, "/tmp/zhubo-upload/app.db")
+                    sftp_put(client, db, "/tmp/zhubo-upload/app.db.local")
 
         run(
             client,
             f"""
 set -e
 DEPLOY_DIR={DEPLOY_DIR}
+PRESERVE_DB=/tmp/zhubo-upload/preserve-app.db
+PRESERVE_ENV=/tmp/zhubo-upload/preserve-server.env
+PRESERVE_REPORT_IMAGES=/tmp/zhubo-upload/preserve-daily-report-images
+rm -f /tmp/zhubo-upload/app.db /tmp/zhubo-upload/app.db.local "$PRESERVE_DB" "$PRESERVE_ENV"
+rm -rf "$PRESERVE_REPORT_IMAGES"
+if [ -f "$DEPLOY_DIR/apps/server/data/app.db" ]; then
+  cp -a "$DEPLOY_DIR/apps/server/data/app.db" "$PRESERVE_DB"
+  echo "Preserved production app.db before deploy"
+fi
+if [ -f "$DEPLOY_DIR/apps/server/.env" ]; then
+  cp -a "$DEPLOY_DIR/apps/server/.env" "$PRESERVE_ENV"
+  echo "Preserved production apps/server/.env before deploy"
+fi
+if [ -d "$DEPLOY_DIR/apps/server/data/daily-report-images" ]; then
+  cp -a "$DEPLOY_DIR/apps/server/data/daily-report-images" "$PRESERVE_REPORT_IMAGES"
+  echo "Preserved production daily-report-images before deploy"
+fi
 if [ -d "$DEPLOY_DIR" ] && [ "$(ls -A "$DEPLOY_DIR" 2>/dev/null | wc -l)" -gt 0 ]; then
   ts=$(date +%Y%m%d-%H%M%S)
   cp -a "$DEPLOY_DIR" "/www/wwwroot/zhubo-analysis-backup-$ts"
@@ -209,7 +234,63 @@ mkdir -p "$DEPLOY_DIR"
 unzip -q /tmp/zhubo-upload/zhubo-analysis.zip -d "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR/apps/server/data"
 cp /tmp/zhubo-upload/server.env "$DEPLOY_DIR/apps/server/.env"
-if [ -f /tmp/zhubo-upload/app.db ]; then cp /tmp/zhubo-upload/app.db "$DEPLOY_DIR/apps/server/data/app.db"; fi
+if [ -f "$PRESERVE_ENV" ]; then
+  python3 << 'PY'
+from pathlib import Path
+
+def load_env(path: Path):
+    out = {{}}
+    if not path.exists():
+        return out
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        out[k.strip()] = v.strip().strip('"').strip("'")
+    return out
+
+preserve_keys = [
+    "SESSION_SECRET",
+    "CONTROL_SERVICE_TOKEN",
+    "SHOP_COOKIE_UPLOAD_TOKEN",
+]
+target = Path("{DEPLOY_DIR}/apps/server/.env")
+merged = load_env(target)
+preserved = load_env(Path("/tmp/zhubo-upload/preserve-server.env"))
+for key in preserve_keys:
+    val = preserved.get(key, "").strip()
+    if val and "请替换" not in val:
+        merged[key] = val
+lines = target.read_text(encoding="utf-8").splitlines()
+out_lines = []
+seen = set()
+for line in lines:
+    if "=" in line and not line.strip().startswith("#"):
+        k = line.split("=", 1)[0].strip()
+        if k in merged:
+            out_lines.append(f"{{k}}={{merged[k]}}")
+            seen.add(k)
+            continue
+    out_lines.append(line)
+for key in preserve_keys:
+    if key in merged and key not in seen:
+        out_lines.append(f"{{key}}={{merged[key]}}")
+target.write_text("\\n".join(out_lines) + "\\n", encoding="utf-8")
+print("Restored production secrets in apps/server/.env:", ", ".join(k for k in preserve_keys if k in preserved))
+PY
+fi
+if [ -f /tmp/zhubo-upload/app.db.local ]; then
+  cp /tmp/zhubo-upload/app.db.local "$DEPLOY_DIR/apps/server/data/app.db"
+  echo "Restored app.db from explicit local upload (DEPLOY_UPLOAD_LOCAL_DB=1)"
+elif [ -f "$PRESERVE_DB" ]; then
+  cp -a "$PRESERVE_DB" "$DEPLOY_DIR/apps/server/data/app.db"
+  echo "Restored preserved production app.db after deploy"
+fi
+if [ -d "$PRESERVE_REPORT_IMAGES" ]; then
+  cp -a "$PRESERVE_REPORT_IMAGES" "$DEPLOY_DIR/apps/server/data/daily-report-images"
+  echo "Restored preserved daily-report-images after deploy"
+fi
 chmod +x "$DEPLOY_DIR"/deploy/aliyun/*.sh "$DEPLOY_DIR"/scripts/install-xhs-signer.sh 2>/dev/null || true
 """,
         )

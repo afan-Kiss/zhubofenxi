@@ -42,6 +42,7 @@ async function run(): Promise<void> {
   const file = await getDailyReportImageFile(uploaded.id)
   assert(fs.existsSync(file.absPath), '磁盘文件应存在', issues)
   assert(file.absPath.startsWith(getDailyReportImagesDir(reportDate)), '文件应在日期目录下', issues)
+  assert(file.absPath.includes(`${reportDate}${path.sep}`) || file.absPath.includes(`${reportDate}/`), '新上传应存日期子目录', issues)
 
   const dataRoot = path.join(getDataDir(), 'daily-report-images')
   assert(dataRoot.includes('data'), '图片目录应在 data 下', issues)

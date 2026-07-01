@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { API_PREFIX, apiRequest } from '../../lib/api'
+import { DailyReportImageThumb } from './DailyReportImageThumb'
+import { fetchDailyReportImageBlobUrl } from '../../lib/daily-report-image-url'
 
 export interface DailyReportImageItem {
   id: string
@@ -163,17 +165,16 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
           {images.map((img) => (
             <div key={img.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-2">
-              <button
-                type="button"
-                onClick={() => setPreviewUrl(img.publicUrl)}
-                className="block w-full overflow-hidden rounded-lg"
-              >
-                <img
-                  src={img.publicUrl}
-                  alt={img.originalName}
-                  className="aspect-square w-full object-cover"
-                />
-              </button>
+              <DailyReportImageThumb
+                publicUrl={img.publicUrl}
+                alt={img.originalName}
+                className="aspect-square w-full object-cover"
+                onClick={() => {
+                  void fetchDailyReportImageBlobUrl(img.publicUrl).then((url) => {
+                    if (url) setPreviewUrl(url)
+                  })
+                }}
+              />
               <p className="mt-1 truncate text-[10px] text-slate-500">
                 {new Date(img.createdAt).toLocaleString('zh-CN', { hour12: false })}
               </p>

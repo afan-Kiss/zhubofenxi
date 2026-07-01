@@ -11,6 +11,9 @@ import {
   type DailyReportImageItem,
 } from './DailyReportShipmentPhotos'
 import {
+  resolveDailyReportImageFetchUrl,
+} from '../../lib/daily-report-image-url'
+import {
   buildChatGptRawOrderPrompt,
   copyTextToClipboard,
   normalizeAiSuggestionText,
@@ -37,6 +40,25 @@ async function waitForSheetRef(
     await new Promise((resolve) => window.setTimeout(resolve, 40))
   }
   return ref.current
+}
+
+async function prefetchShipmentPhotoDataUrls(
+  photos: DailyReportImageItem[],
+): Promise<Record<string, string>> {
+  const out: Record<string, string> = {}
+  for (const photo of photos) {
+    const url = resolveDailyReportImageFetchUrl(photo.publicUrl)
+    try {
+      const res = await fetch(url, { credentials: 'include' })
+      if (!res.ok) continue
+      const blob = await res.blob()
+      if (!blob.size) continue
+      out[photo.id] = await blobToDataUrl(blob)
+    } catch {
+      // skip broken files
+    }
+  }
+  return out
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -118,6 +140,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   const [copyingRawData, setCopyingRawData] = useState(false)
   const [pendingCapture, setPendingCapture] = useState(false)
   const [shipmentPhotos, setShipmentPhotos] = useState<DailyReportImageItem[]>([])
+  const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
 
   const isSingleDay = startDate.trim() === endDate.trim() && Boolean(startDate.trim())
 
@@ -191,7 +214,10 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
         setLoading(false)
         return
       }
-      setShipmentPhotos(photoPayload.images ?? [])
+      const photos = photoPayload.images ?? []
+      const dataUrlMap = await prefetchShipmentPhotoDataUrls(photos)
+      setShipmentPhotos(photos)
+      setShipmentPhotoDataUrls(dataUrlMap)
       setReport(data)
       setAiSuggestionLines([])
       setImageDataUrl(null)
@@ -262,6 +288,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
                 id: p.id,
                 publicUrl: p.publicUrl,
                 caption: p.caption,
+                dataUrl: shipmentPhotoDataUrls[p.id] ?? null,
               }))}
             />
           </div>,
@@ -288,6 +315,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
           reportDate={startDate}
           onImagesChange={(images) => {
             setShipmentPhotos(images)
+            void prefetchShipmentPhotoDataUrls(images).then(setShipmentPhotoDataUrls)
           }}
         />
       </div>

@@ -265,6 +265,13 @@ export async function buildDailyReport(params: {
     row.amountRatio = safeRatioPercent(row.shippedAmountYuan, totalShippedAmountYuan)
   }
 
+  anchorRows.sort((a, b) => {
+    if (b.shippedAmountYuan !== a.shippedAmountYuan) {
+      return b.shippedAmountYuan - a.shippedAmountYuan
+    }
+    return a.anchorName.localeCompare(b.anchorName, 'zh-CN')
+  })
+
   const totalSoldOrderCount = anchorRows.reduce((sum, row) => sum + row.soldOrderCount, 0)
   const totalInvalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)
   const totalLiveDurationMinutes = await sumUniqueLiveDurationMinutesForRange({

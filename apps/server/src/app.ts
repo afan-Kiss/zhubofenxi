@@ -45,7 +45,15 @@ export function createApp() {
     }),
   )
 
-  app.use(compression({ threshold: 1024 }))
+  app.use(
+    compression({
+      threshold: 1024,
+      filter: (req, res) => {
+        if (/\/daily-report-images\/[^/]+\/file$/i.test(req.path)) return false
+        return compression.filter(req, res)
+      },
+    }),
+  )
   app.use(accessLogMiddleware)
   app.use(perfLogMiddleware)
 

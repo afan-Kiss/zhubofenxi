@@ -131,11 +131,15 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
   const hasAiSuggestions = aiSuggestionLines.length > 0
   const readyPhotos = shipmentPhotos.filter((photo) => photo.dataUrl).slice(0, 12)
   const extraPhotoCount = Math.max(0, shipmentPhotos.filter((photo) => photo.dataUrl).length - readyPhotos.length)
+  const photoGridCols = readyPhotos.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'
+  const photoCellHeight = readyPhotos.length <= 2 ? 'min-h-[480px]' : 'min-h-[360px]'
+  const sheetWidthClass = readyPhotos.length > 0 ? 'w-[960px]' : 'w-[700px]'
 
   return (
     <div
       ref={ref}
-      className="w-[700px] bg-white p-6 text-slate-900"
+      data-daily-report-sheet
+      className={`${sheetWidthClass} bg-white p-6 text-slate-900`}
       style={{ fontFamily: '"Microsoft YaHei", "微软雅黑", sans-serif' }}
     >
       <div className="text-center">
@@ -210,14 +214,21 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
       {readyPhotos.length > 0 ? (
         <div className="mt-5 rounded-2xl border border-slate-100 bg-white p-4">
           <p className="text-[14px] font-semibold text-slate-900">发货前照片</p>
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className={`mt-3 grid ${photoGridCols} gap-3`}>
             {readyPhotos.map((photo) => (
-                <div key={photo.id} className="overflow-hidden rounded-lg border border-slate-100 bg-slate-50">
-                  <img
-                    src={photo.dataUrl!}
-                    alt={photo.caption ?? '发货前照片'}
-                    className="aspect-square w-full object-contain"
-                  />
+                <div
+                  key={photo.id}
+                  data-shipment-photo-cell
+                  className={`flex flex-col overflow-hidden rounded-lg border border-slate-100 bg-slate-50 ${photoCellHeight}`}
+                >
+                  <div className="flex min-h-0 flex-1 items-center justify-center p-1">
+                    <img
+                      data-shipment-photo-img
+                      src={photo.dataUrl!}
+                      alt={photo.caption ?? '发货前照片'}
+                      className="max-h-full max-w-full object-contain"
+                    />
+                  </div>
                   {photo.caption ? (
                     <p className="truncate px-2 py-1 text-[11px] text-slate-600">{photo.caption}</p>
                   ) : null}

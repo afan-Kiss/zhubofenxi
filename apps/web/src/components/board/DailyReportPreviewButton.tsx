@@ -27,6 +27,69 @@ async function waitForNextPaint(): Promise<void> {
   })
 }
 
+async function waitForImagesReady(root: HTMLElement): Promise<void> {
+  const imgs = Array.from(root.querySelectorAll('img'))
+  await Promise.all(
+    imgs.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete) {
+            resolve()
+            return
+          }
+          img.onload = () => resolve()
+          img.onerror = () => resolve()
+        }),
+    ),
+  )
+  await Promise.all(imgs.map((img) => img.decode?.().catch(() => undefined) ?? Promise.resolve()))
+}
+
+const CAPTURE_SHEET_WIDTH_PX = 1080
+const CAPTURE_PHOTO_HEIGHT_PX = 520
+
+/** 截图前临时拉大画布与照片区域，避免 html-to-image 按小尺寸栅格化 */
+async function prepareCaptureLayout(root: HTMLElement): Promise<() => void> {
+  const restores: Array<() => void> = []
+  const sheet = root.querySelector('[data-daily-report-sheet]') as HTMLElement | null
+  if (sheet) {
+    const prev = sheet.style.cssText
+    sheet.style.width = `${CAPTURE_SHEET_WIDTH_PX}px`
+    sheet.style.maxWidth = `${CAPTURE_SHEET_WIDTH_PX}px`
+    restores.push(() => {
+      sheet.style.cssText = prev
+    })
+  }
+  for (const cell of Array.from(root.querySelectorAll('[data-shipment-photo-cell]'))) {
+    const el = cell as HTMLElement
+    const prev = el.style.cssText
+    el.style.minHeight = `${CAPTURE_PHOTO_HEIGHT_PX}px`
+    el.style.height = `${CAPTURE_PHOTO_HEIGHT_PX}px`
+    restores.push(() => {
+      el.style.cssText = prev
+    })
+  }
+  for (const img of Array.from(root.querySelectorAll('[data-shipment-photo-img]'))) {
+    const el = img as HTMLImageElement
+    await el.decode().catch(() => undefined)
+    const prev = el.style.cssText
+    const natural = el.naturalWidth
+    const targetWidth = natural > 0 ? Math.min(natural, CAPTURE_SHEET_WIDTH_PX - 48) : CAPTURE_SHEET_WIDTH_PX - 48
+    el.style.width = `${targetWidth}px`
+    el.style.height = 'auto'
+    el.style.maxWidth = '100%'
+    el.style.maxHeight = `${CAPTURE_PHOTO_HEIGHT_PX - 16}px`
+    el.style.objectFit = 'contain'
+    restores.push(() => {
+      el.style.cssText = prev
+    })
+  }
+  await waitForNextPaint()
+  return () => {
+    for (const restore of restores) restore()
+  }
+}
+
 async function waitForSheetRef(
   ref: React.RefObject<HTMLDivElement | null>,
   timeoutMs = 4000,
@@ -104,11 +167,14 @@ async function renderSheetToPng(node: HTMLElement): Promise<string> {
     backgroundColor: '#ffffff',
     skipFonts: true,
   } as const
-  try {
-    return await toPng(node, { ...baseOptions, pixelRatio: 2 })
-  } catch {
-    return await toPng(node, { ...baseOptions, pixelRatio: 1 })
+  for (const pixelRatio of [3, 2, 1]) {
+    try {
+      return await toPng(node, { ...baseOptions, pixelRatio })
+    } catch {
+      // try lower ratio on memory / canvas limits
+    }
   }
+  throw new Error('日报图片生成失败')
 }
 
 interface Props {
@@ -155,13 +221,16 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
 
   const captureImage = useCallback(async () => {
     const node = await waitForSheetRef(sheetRef)
-    await waitForNextPaint()
+    await waitForImagesReady(node)
     const restoreImages = await inlineSheetImages(node)
+    const restoreLayout = await prepareCaptureLayout(node)
     try {
       await waitForNextPaint()
+      await new Promise((resolve) => window.setTimeout(resolve, 160))
       const dataUrl = await renderSheetToPng(node)
       setImageDataUrl(dataUrl)
     } finally {
+      restoreLayout()
       restoreImages()
     }
   }, [])

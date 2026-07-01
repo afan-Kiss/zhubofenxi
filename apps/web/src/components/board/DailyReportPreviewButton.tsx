@@ -10,7 +10,7 @@ import {
   DailyReportShipmentPhotos,
   type DailyReportImageItem,
 } from './DailyReportShipmentPhotos'
-import { DailyReportImagePreview } from './DailyReportImagePreview'
+import { DailyReportZoomPanImage } from './DailyReportZoomPanImage'
 import {
   resolveDailyReportImageFetchUrl,
 } from '../../lib/daily-report-image-url'
@@ -201,7 +201,6 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   const [aiSuggestionLines, setAiSuggestionLines] = useState<string[]>([])
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
-  const [reportZoomOpen, setReportZoomOpen] = useState(false)
   const [aiInputOpen, setAiInputOpen] = useState(false)
   const [aiDraft, setAiDraft] = useState('')
   const [clipboardFallbackText, setClipboardFallbackText] = useState<string | null>(null)
@@ -398,13 +397,12 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
           open={previewOpen}
           onClose={closePreview}
           zIndexClass="z-[10000]"
-          panelClassName="max-h-[min(92dvh,calc(100dvh-2rem))] w-[min(760px,calc(100vw-1.5rem))] overflow-auto p-4"
+          panelClassName="flex max-h-[min(92dvh,calc(100dvh-2rem))] w-[min(760px,calc(100vw-1.5rem))] flex-col overflow-hidden p-4"
           backdropClassName="bg-black/55"
         >
-          <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+          <div className="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-base font-semibold text-slate-900">日报预览</p>
-              <p className="mt-1 text-xs text-slate-500">点击图片可滚轮缩放放大 · 右键可复制</p>
             </div>
             <button
               type="button"
@@ -415,7 +413,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
             </button>
           </div>
 
-          <div className="mb-3 flex flex-wrap gap-2">
+          <div className="mb-3 flex shrink-0 flex-wrap gap-2">
             <button
               type="button"
               disabled={copyingRawData}
@@ -435,31 +433,16 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
             ) : null}
           </div>
 
-          <button
-            type="button"
-            onClick={() => setReportZoomOpen(true)}
-            className="block w-full"
-          >
-            <img
-              src={imageDataUrl}
-              alt="主播日报"
-              className={`mx-auto block max-w-full cursor-zoom-in rounded-xl border border-slate-100 shadow-sm transition-opacity ${
-                capturing ? 'opacity-40' : 'opacity-100'
-              }`}
-            />
-          </button>
+          <DailyReportZoomPanImage
+            src={imageDataUrl}
+            alt="主播日报"
+            className={`min-h-0 flex-1 ${capturing ? 'opacity-40' : 'opacity-100'}`}
+          />
           {capturing ? (
-            <p className="mt-2 text-center text-xs text-slate-500">正在更新日报图片…</p>
+            <p className="mt-2 shrink-0 text-center text-xs text-slate-500">正在更新日报图片…</p>
           ) : null}
         </ViewportModal>
       ) : null}
-
-      <DailyReportImagePreview
-        open={reportZoomOpen && Boolean(imageDataUrl)}
-        src={imageDataUrl}
-        alt="主播日报"
-        onClose={() => setReportZoomOpen(false)}
-      />
 
       <ViewportModal
         open={aiInputOpen}

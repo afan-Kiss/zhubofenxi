@@ -272,6 +272,7 @@ export const AnchorSchedulePage: React.FC = () => {
   }
 
   const updateRow = (index: number, patch: Partial<ScheduleRow>) => {
+    setWarnings([])
     setRows((prev) =>
       prev.map((r, i) =>
         i === index
@@ -297,9 +298,11 @@ export const AnchorSchedulePage: React.FC = () => {
       return
     }
     setRows((prev) => prev.filter((_, i) => i !== index))
+    setWarnings([])
   }
 
   const addRow = () => {
+    setWarnings([])
     const last = rows[rows.length - 1]
     const shop = last?.shopName?.trim() || last?.liveRoomName?.trim() || DEFAULT_SHOP
     const startTime = last?.endTime === '24:00' ? '18:00' : last?.endTime?.trim() || '09:00'

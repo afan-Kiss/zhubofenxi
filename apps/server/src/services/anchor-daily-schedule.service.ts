@@ -206,8 +206,8 @@ export async function getEffectiveScheduleTableForDate(dateKey: string): Promise
     orderBy: { startAt: 'asc' },
   })
 
-  const manualRows = dbRows.filter((r) => r.source === 'manual' || r.locked)
-  const generatedRows = dbRows.filter((r) => r.source === 'generated_default' && !r.locked)
+  const manualRows = dbRows.filter((r) => r.source === 'manual')
+  const generatedRows = dbRows.filter((r) => r.source === 'generated_default')
   const hasManualDay = manualRows.length > 0
   const occupiedRows = [...manualRows, ...generatedRows].map(occupiedIntervalFromDbRow)
 
@@ -230,24 +230,28 @@ export async function getEffectiveScheduleTableForDate(dateKey: string): Promise
     }
   }
 
-  const effectiveRows: EffectiveScheduleRow[] = [
-    ...manualRows.map((r) => dbRowToEffective(r, 'manual', dateConfirmed)),
-    ...generatedRows.map((r) => dbRowToEffective(r, 'generated_default', dateConfirmed)),
-    ...virtualRows.map((v) => ({
-      rowId: v.id,
-      source: 'virtual_template' as const,
-      anchorName: v.anchorName,
-      shopName: v.shopName,
-      liveRoomName: v.liveRoomName,
-      startTime: hmFromDate(v.startAt, dateKey),
-      endTime: hmFromDate(v.endAt, dateKey),
-      startAt: v.startAt.toISOString(),
-      endAt: v.endAt.toISOString(),
-      enabled: true,
-      confirmed: dateConfirmed,
-      note: v.note ?? '系统模板补齐',
-    })),
-  ].sort((a, b) => a.startAt.localeCompare(b.startAt))
+  const effectiveRows: EffectiveScheduleRow[] = (
+    hasManualDay
+      ? manualRows.map((r) => dbRowToEffective(r, 'manual', dateConfirmed))
+      : [
+          ...manualRows.map((r) => dbRowToEffective(r, 'manual', dateConfirmed)),
+          ...generatedRows.map((r) => dbRowToEffective(r, 'generated_default', dateConfirmed)),
+          ...virtualRows.map((v) => ({
+            rowId: v.id,
+            source: 'virtual_template' as const,
+            anchorName: v.anchorName,
+            shopName: v.shopName,
+            liveRoomName: v.liveRoomName,
+            startTime: hmFromDate(v.startAt, dateKey),
+            endTime: hmFromDate(v.endAt, dateKey),
+            startAt: v.startAt.toISOString(),
+            endAt: v.endAt.toISOString(),
+            enabled: true,
+            confirmed: dateConfirmed,
+            note: v.note ?? '系统模板补齐',
+          })),
+        ]
+  ).sort((a, b) => a.startAt.localeCompare(b.startAt))
 
   const conflicts = detectScheduleConflicts(
     effectiveRows.map((r) => ({
@@ -510,24 +514,9 @@ export async function saveDailySchedules(params: {
     throw new ScheduleSaveError(validation.conflicts)
   }
 
-  await prisma.anchorDailySchedule.deleteMany({
-    where: { scheduleDate: params.date, locked: false },
-  })
-
-  const locked = await prisma.anchorDailySchedule.findMany({
-    where: { scheduleDate: params.date, locked: true },
-  })
-
   const draftEnabled = params.schedules.filter((s) => s.enabled !== false)
-  const allForConflict = [
-    ...locked.map((r) => ({
-      anchorName: r.anchorName,
-      shopName: r.shopName,
-      liveRoomName: r.liveRoomName,
-      startAt: r.startAt,
-      endAt: r.endAt,
-    })),
-    ...draftEnabled.map((s) => {
+  const draftConflicts = detectScheduleConflicts(
+    draftEnabled.map((s) => {
       const { startAt, endAt } = buildScheduleBounds(params.date, s.startTime, s.endTime)
       return {
         anchorName: s.anchorName.trim(),
@@ -537,11 +526,14 @@ export async function saveDailySchedules(params: {
         endAt,
       }
     }),
-  ]
-  const extraConflicts = detectScheduleConflicts(allForConflict)
-  if (extraConflicts.length) {
-    throw new ScheduleSaveError(extraConflicts)
+  )
+  if (draftConflicts.length) {
+    throw new ScheduleSaveError(draftConflicts)
   }
+
+  await prisma.anchorDailySchedule.deleteMany({
+    where: { scheduleDate: params.date },
+  })
 
   for (const s of draftEnabled) {
     const { startAt, endAt } = buildScheduleBounds(params.date, s.startTime, s.endTime)

@@ -216,6 +216,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
                   src={photo.publicUrl}
                   alt={photo.caption ?? '发货前照片'}
                   className="aspect-square w-full object-contain"
+                  crossOrigin="use-credentials"
                 />
                 {photo.caption ? (
                   <p className="truncate px-2 py-1 text-[11px] text-slate-600">{photo.caption}</p>

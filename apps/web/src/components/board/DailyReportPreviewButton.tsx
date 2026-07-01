@@ -18,6 +18,29 @@ import {
 } from './dailyReportFormatters'
 import { ViewportModal } from '../ui/ViewportModal'
 
+async function waitForNextPaint(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+  })
+}
+
+async function waitForSheetImages(root: HTMLElement): Promise<void> {
+  const imgs = Array.from(root.querySelectorAll('img'))
+  await Promise.all(
+    imgs.map(
+      (img) =>
+        new Promise<void>((resolve) => {
+          if (img.complete) {
+            resolve()
+            return
+          }
+          img.onload = () => resolve()
+          img.onerror = () => resolve()
+        }),
+    ),
+  )
+}
+
 interface Props {
   preset?: string
   startDate: string
@@ -32,6 +55,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   disabled = false,
 }) => {
   const sheetRef = useRef<HTMLDivElement>(null)
+  const captureTokenRef = useRef(0)
   const [loading, setLoading] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -60,30 +84,35 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
 
   const captureImage = useCallback(async () => {
     if (!sheetRef.current) throw new Error('日报图片生成失败，请重试')
+    await waitForSheetImages(sheetRef.current)
+    await waitForNextPaint()
     const dataUrl = await toPng(sheetRef.current, {
       cacheBust: true,
       pixelRatio: 2,
       backgroundColor: '#ffffff',
+      fetchRequestInit: { credentials: 'include' },
     })
     setImageDataUrl(dataUrl)
   }, [])
 
   useEffect(() => {
     if (!pendingCapture || !report) return
+    const token = ++captureTokenRef.current
     let cancelled = false
     void (async () => {
       setCapturing(true)
-      await new Promise((resolve) => window.setTimeout(resolve, 120))
-      if (cancelled) return
+      await waitForNextPaint()
+      await new Promise((resolve) => window.setTimeout(resolve, 200))
+      if (cancelled || token !== captureTokenRef.current) return
       try {
         await captureImage()
-        if (!cancelled) setPreviewOpen(true)
+        if (!cancelled && token === captureTokenRef.current) setPreviewOpen(true)
       } catch (e) {
-        if (!cancelled) {
+        if (!cancelled && token === captureTokenRef.current) {
           setError(e instanceof Error ? e.message : '日报图片生成失败，请重试')
         }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && token === captureTokenRef.current) {
           setPendingCapture(false)
           setCapturing(false)
           setLoading(false)
@@ -93,7 +122,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     return () => {
       cancelled = true
     }
-  }, [pendingCapture, report, aiSuggestionLines, shipmentPhotos, captureImage])
+  }, [pendingCapture, report, aiSuggestionLines, captureImage])
 
   const handleViewReport = async () => {
     if (loading || disabled || capturing) return
@@ -102,10 +131,22 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     try {
       const qs = new URLSearchParams({ startDate, endDate })
       if (preset) qs.set('preset', preset)
-      const data = await apiRequest<DailyReportPayload>(`/api/board/daily-report?${qs}`)
+      const [data, photoPayload] = await Promise.all([
+        apiRequest<DailyReportPayload>(`/board/daily-report?${qs}`),
+        apiRequest<{ images: DailyReportImageItem[] }>(
+          `/daily-report-images?date=${encodeURIComponent(startDate)}`,
+        ).catch(() => ({ images: [] as DailyReportImageItem[] })),
+      ])
+      if (!data?.summary || !Array.isArray(data?.anchors)) {
+        setError('日报数据不完整，请刷新后重试')
+        setLoading(false)
+        return
+      }
+      setShipmentPhotos(photoPayload.images ?? [])
       setReport(data)
       setAiSuggestionLines([])
       setImageDataUrl(null)
+      setPreviewOpen(false)
       setPendingCapture(true)
     } catch (e) {
       setError(e instanceof Error ? e.message : '加载日报失败')
@@ -127,7 +168,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
       const qs = new URLSearchParams({ startDate, endDate })
       if (preset) qs.set('preset', preset)
       const rawData = await apiRequest<DailyReportRawChatGptPayload>(
-        `/api/board/daily-report/raw-chatgpt-data?${qs}`,
+        `/board/daily-report/raw-chatgpt-data?${qs}`,
       )
       const prompt = buildChatGptRawOrderPrompt(rawData)
       const copied = await copyTextToClipboard(prompt)
@@ -163,7 +204,11 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   const sheetPortal =
     report && (pendingCapture || previewOpen)
       ? createPortal(
-          <div className="pointer-events-none fixed left-[-9999px] top-0 z-[-1]">
+          <div
+            aria-hidden
+            className="pointer-events-none fixed top-0 left-0"
+            style={{ transform: 'translateX(-10000px)' }}
+          >
             <DailyReportImageSheet
               ref={sheetRef}
               data={report}
@@ -194,7 +239,12 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
           {toast ? <p className="text-sm text-emerald-700">{toast}</p> : null}
         </div>
-        <DailyReportShipmentPhotos reportDate={startDate} onImagesChange={setShipmentPhotos} />
+        <DailyReportShipmentPhotos
+          reportDate={startDate}
+          onImagesChange={(images) => {
+            setShipmentPhotos(images)
+          }}
+        />
       </div>
 
       {sheetPortal}

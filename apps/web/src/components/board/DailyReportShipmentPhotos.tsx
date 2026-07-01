@@ -28,9 +28,14 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
   const [error, setError] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
 
+  const lastSyncedIdsRef = useRef('')
+
   const syncImages = useCallback(
     (next: DailyReportImageItem[]) => {
       setImages(next)
+      const ids = next.map((item) => item.id).join(',')
+      if (ids === lastSyncedIdsRef.current) return
+      lastSyncedIdsRef.current = ids
       onImagesChange?.(next)
     },
     [onImagesChange],
@@ -53,6 +58,7 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
   }, [reportDate, syncImages])
 
   useEffect(() => {
+    lastSyncedIdsRef.current = ''
     void loadImages()
   }, [loadImages])
 

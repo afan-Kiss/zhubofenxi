@@ -54,8 +54,9 @@ import { computeReturnOrderRateRatio, computeOperationsRefundMetricsFromViews } 
 import { prisma } from '../lib/prisma'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import { attachAnchorScheduleLateFields } from '../utils/anchor-schedule-late.util'
+import type { AnchorLateStatusPayload } from '../utils/anchor-schedule-late.util'
 
-export interface DailyOperationsAnchorRow {
+export interface DailyOperationsAnchorRow extends AnchorLateStatusPayload {
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -79,11 +80,6 @@ export interface DailyOperationsAnchorRow {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
-  scheduledPeriodText: string | null
-  actualStartText: string | null
-  isLate: boolean
-  lateMinutes: number | null
-  hasManualSchedule: boolean
 }
 
 export interface DailyOperationsSummary {
@@ -210,7 +206,7 @@ function buildAnchorRow(params: {
   paidOrderCount: number
   sessions: AnchorLiveSessionBrief[]
   totalValidAmountYuan: number
-  scheduleLate: ReturnType<typeof attachAnchorScheduleLateFields>
+  scheduleLate: AnchorLateStatusPayload
 }): DailyOperationsAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
@@ -309,6 +305,7 @@ export async function buildDailyOperationsReport(params: {
   const anchorRows: DailyOperationsAnchorRow[] = []
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
+  const usedScheduleRowIds = new Set<string>()
 
   for (const anchor of reportAnchors) {
     const performanceViews = await getAnchorPerformanceViews(
@@ -366,6 +363,7 @@ export async function buildDailyOperationsReport(params: {
           anchor.anchorName,
           shopName,
           sessions,
+          usedScheduleRowIds,
         ),
       }),
     )

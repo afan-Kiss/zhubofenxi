@@ -20,6 +20,7 @@ import {
 
 import { aggregateAnchorLeaderboard } from './board-metrics.service'
 import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
+import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { calculateBusinessMetrics } from './business-metrics.service'
 
 import { AMOUNT_FORMULA_VERSION } from './order-amount-metrics.service'
@@ -377,13 +378,19 @@ export async function executeBoardLocalQuery(params: {
   const anchorPerformanceSummary =
     performanceViews.length > 0 ? buildSummaryFromViews(performanceViews) : {}
 
-  const anchorLeaderboard = ensureAnchorPerformanceLeaderboardSlots(
+  const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
     aggregateAnchorLeaderboard(performanceViews, {
       scope: 'local-query-anchor-performance',
       dateRange: { startDate, endDate, preset: params.preset },
     }) as import('./board-metrics.service').BoardAnchorMetrics[],
     endDate,
   ) as unknown as Array<Record<string, unknown>>
+
+  const anchorLeaderboard = await enrichAnchorLeaderboardWithLateStatus(anchorLeaderboardRaw, {
+    startDate,
+    endDate,
+    preset: params.preset,
+  })
 
   logAnchorLeaderboardReconcile(
     anchorPerformanceSummary,

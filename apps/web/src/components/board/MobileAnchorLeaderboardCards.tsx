@@ -14,6 +14,12 @@ import {
   type AnchorLeaderboardRow,
 } from '../../lib/anchor-leaderboard-row'
 import { anchorCardTestId } from '../../lib/anchor-test-id'
+import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
+import {
+  formatLateTimingLine,
+  lateCardBorderClass,
+  readLateStatus,
+} from '../../lib/anchor-late-status'
 
 interface Props {
   rows: AnchorLeaderboardRow[]
@@ -27,9 +33,9 @@ interface Props {
 function MetricCell({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
   return (
     <div className="rounded-xl bg-rose-50/40 px-2.5 py-2">
-      <p className="text-[10px] text-slate-500">{label}</p>
+      <p className="text-xs text-slate-500">{label}</p>
       <p
-        className={`mt-0.5 text-[12px] font-semibold tabular-nums ${
+        className={`mt-0.5 text-sm font-semibold tabular-nums ${
           danger ? 'text-rose-600' : 'text-slate-900'
         }`}
       >
@@ -66,6 +72,8 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
         const returnRate = anchorRowReturnRefundRate(a)
         const qualityRate = anchorRowRate(a, 'qualityReturnRate')
         const signRate = anchorRowRate(a, 'signRate')
+        const late = readLateStatus(a)
+        const timingLine = formatLateTimingLine(late)
 
         return (
           <article
@@ -81,16 +89,24 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   }
                 : undefined
             }
-            className={`board-list-row-enter rounded-2xl border border-rose-100/80 bg-white p-4 shadow-sm shadow-rose-100/40 ${
+            className={`board-list-row-enter rounded-2xl border p-4 shadow-sm ${
+              lateCardBorderClass(late.isLate)
+            } shadow-rose-100/40 ${
               onSelect ? 'cursor-pointer transition active:scale-[0.99] hover:shadow-md' : ''
             }`}
             style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
           >
             <div className="flex items-start justify-between gap-2">
               <div>
-                <p className="text-[10px] text-slate-500">主播</p>
-                <p className="text-base font-semibold text-rose-800">{name}</p>
+                <p className="text-xs text-slate-500">主播</p>
+                <p className="text-lg font-semibold text-rose-800">{name}</p>
+                {timingLine ? (
+                  <p className={`mt-1 text-xs ${late.isLate ? 'font-medium text-red-600' : 'text-slate-500'}`}>
+                    {timingLine}
+                  </p>
+                ) : null}
               </div>
+              <AnchorLateStatusBadge row={late} />
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
@@ -120,7 +136,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
 
             <div className="mt-2 flex flex-wrap gap-2 border-t border-rose-50 pt-2.5">
               <span
-                className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${
+                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
                   isHighRefundRate(refundRate)
                     ? 'bg-rose-100 text-rose-700'
                     : 'bg-slate-100 text-slate-600'

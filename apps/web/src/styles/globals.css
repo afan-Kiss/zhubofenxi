@@ -24,13 +24,16 @@ body,
 
 body {
   margin: 0;
+  font-size: 15px;
+  line-height: 1.55;
   font-family:
+    'Microsoft YaHei UI',
+    'Microsoft YaHei',
+    '微软雅黑',
+    'Segoe UI',
     system-ui,
     -apple-system,
     BlinkMacSystemFont,
-    'SF Pro Display',
-    'PingFang SC',
-    'Microsoft YaHei',
     sans-serif;
   background: radial-gradient(circle at top left, #ffe4e9 0, #fdf8f5 40%, #fdf8f5 100%);
   color: #111827;

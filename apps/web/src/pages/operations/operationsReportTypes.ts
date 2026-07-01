@@ -1,3 +1,5 @@
+import type { AnchorLateStatusView } from '../../lib/anchor-late-status'
+
 export type RankingBasis =
   | 'official_order'
   | 'official_after_sales'
@@ -285,7 +287,8 @@ export interface LiveRoomNewFollowerRow {
   newFollowerCount: number
 }
 
-export interface DailyOperationsAnchorRow {
+
+export interface DailyOperationsAnchorRow extends AnchorLateStatusView {
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -308,11 +311,6 @@ export interface DailyOperationsAnchorRow {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
-  scheduledPeriodText?: string | null
-  actualStartText?: string | null
-  isLate?: boolean
-  lateMinutes?: number | null
-  hasManualSchedule?: boolean
 }
 
 export interface OperationsProductRow {

@@ -11,8 +11,15 @@ import {
   formatRatePercent,
   formatStayDurationSeconds,
 } from './dailyReportFormatters'
+import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
+import {
+  formatLateTimingLine,
+  lateCardBorderClass,
+  readLateStatus,
+  type AnchorLateStatusView,
+} from '../../lib/anchor-late-status'
 
-export interface DailyReportAnchorRow {
+export interface DailyReportAnchorRow extends AnchorLateStatusView {
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -34,11 +41,6 @@ export interface DailyReportAnchorRow {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
-  scheduledPeriodText?: string | null
-  actualStartText?: string | null
-  isLate?: boolean
-  lateMinutes?: number | null
-  hasManualSchedule?: boolean
 }
 
 export interface DailyReportPayload {
@@ -79,53 +81,29 @@ function MetricLine({ label, value, strong }: { label: string; value: string; st
   )
 }
 
-function formatAnchorLiveTimingLine(row: DailyReportAnchorRow): string {
-  if (row.hasManualSchedule && row.scheduledPeriodText) {
-    const actual =
-      row.actualStartText != null
-        ? `${row.actualStartText}起`
-        : row.livePeriodText !== '—'
-          ? row.livePeriodText
-          : '未开播'
-    const lateSuffix =
-      row.isLate && row.lateMinutes != null ? `（迟到${row.lateMinutes}分钟）` : ''
-    return `排班 ${row.scheduledPeriodText}｜实际 ${actual}${lateSuffix}`
-  }
-  return row.livePeriodText
-}
-
 function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
-  const timingLine = formatAnchorLiveTimingLine(row)
+  const late = readLateStatus(row)
+  const timingDetail = formatLateTimingLine(late)
+  const timingLine =
+    timingDetail ??
+    (late.hasSchedule && late.scheduledPeriodText
+      ? `排班 ${late.scheduledPeriodText}｜实际 ${row.livePeriodText}`
+      : row.livePeriodText)
+
   return (
-    <div
-      className={
-        row.isLate
-          ? 'rounded-2xl border border-red-300 bg-red-50/40 p-4 shadow-sm'
-          : 'rounded-2xl border border-rose-100 bg-white p-4 shadow-sm'
-      }
-    >
+    <div className={`rounded-2xl border p-4 shadow-sm ${lateCardBorderClass(late.isLate)}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[15px] font-semibold text-slate-900">
+          <p className="text-base font-semibold text-slate-900">
             {row.anchorName}｜{row.sessionLabel}
           </p>
-          <p
-            className={
-              row.isLate
-                ? 'mt-1 text-[12px] font-medium text-red-600'
-                : 'mt-1 text-[12px] text-slate-500'
-            }
-          >
+          <p className={`mt-1 text-[13px] ${late.isLate ? 'font-medium text-red-600' : 'text-slate-500'}`}>
             {timingLine}｜{row.liveDurationText}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          {row.isLate ? (
-            <span className="rounded-full bg-red-100 px-2.5 py-1 text-[11px] font-semibold text-red-700">
-              迟到
-            </span>
-          ) : null}
-          <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700">
+          <AnchorLateStatusBadge row={late} />
+          <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
             占比 {formatPercent(row.amountRatio)}
           </span>
         </div>

@@ -16,6 +16,8 @@ import {
 import { anchorCardTestId } from '../../lib/anchor-test-id'
 import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
 import { MobileAnchorLeaderboardCards } from './MobileAnchorLeaderboardCards'
+import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
+import { formatLateTimingLine, readLateStatus } from '../../lib/anchor-late-status'
 
 interface Props {
   rows: AnchorLeaderboardRow[]
@@ -86,17 +88,31 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
             ) : (
               rows.map((a, idx) => {
                 const refundRate = anchorRowRate(a, 'returnRate')
+                const late = readLateStatus(a)
+                const timingLine = formatLateTimingLine(late)
                 return (
                   <tr
                     key={String(a.anchorId ?? a.anchorName ?? idx)}
                     data-testid={anchorCardTestId(String(a.anchorName))}
                     style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
-                    className={`board-list-row-enter border-t border-rose-50/80 transition hover:bg-rose-50/40 ${
-                      onRowClick ? 'cursor-pointer' : ''
-                    }`}
+                    className={`board-list-row-enter border-t transition hover:bg-rose-50/40 ${
+                      late.isLate ? 'border-red-100 bg-red-50/30' : 'border-rose-50/80'
+                    } ${onRowClick ? 'cursor-pointer' : ''}`}
                     onClick={onRowClick ? () => onRowClick(a) : undefined}
                   >
-                    <td className="py-2.5 pl-4 font-medium text-rose-800">{String(a.anchorName)}</td>
+                    <td className="py-2.5 pl-4">
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-rose-800">{String(a.anchorName)}</span>
+                          <AnchorLateStatusBadge row={late} />
+                        </div>
+                        {timingLine ? (
+                          <span className={`text-xs ${late.isLate ? 'text-red-600' : 'text-slate-500'}`}>
+                            {timingLine}
+                          </span>
+                        ) : null}
+                      </div>
+                    </td>
                     <td className="py-2 text-right tabular-nums">{formatMoney(anchorRowGmv(a))}</td>
                     <td className="py-2 text-right tabular-nums">
                       {formatMoney(anchorRowValidSales(a))}

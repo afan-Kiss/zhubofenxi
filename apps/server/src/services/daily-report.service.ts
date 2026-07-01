@@ -32,8 +32,9 @@ import {
 } from './daily-report-order.util'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import { attachAnchorScheduleLateFields } from '../utils/anchor-schedule-late.util'
+import type { AnchorLateStatusPayload } from '../utils/anchor-schedule-late.util'
 
-export interface DailyReportAnchorRow {
+export interface DailyReportAnchorRow extends AnchorLateStatusPayload {
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -55,11 +56,6 @@ export interface DailyReportAnchorRow {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
-  scheduledPeriodText: string | null
-  actualStartText: string | null
-  isLate: boolean
-  lateMinutes: number | null
-  hasManualSchedule: boolean
 }
 
 export interface DailyReportPayload {
@@ -157,7 +153,7 @@ function buildAnchorRow(params: {
   invalidOrderCount: number
   sessions: AnchorLiveSessionBrief[]
   totalShippedAmountYuan: number
-  scheduleLate: ReturnType<typeof attachAnchorScheduleLateFields>
+  scheduleLate: AnchorLateStatusPayload
 }): DailyReportAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
@@ -217,6 +213,7 @@ export async function buildDailyReport(params: {
 
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
+  const usedScheduleRowIds = new Set<string>()
   for (const anchor of reportAnchors) {
     const performanceViews = await getAnchorPerformanceViews(
       scoped.views,
@@ -272,6 +269,7 @@ export async function buildDailyReport(params: {
           anchor.anchorName,
           shopName,
           sessions,
+          usedScheduleRowIds,
         ),
       }),
     )

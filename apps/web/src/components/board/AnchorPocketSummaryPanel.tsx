@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { apiRequest } from '../../lib/api'
 import { BOARD_LIVE_QUERY_INVALIDATE_EVENT } from '../../lib/board-live-query-cache'
+import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
+import { formatLateTimingLine, readLateStatus, type AnchorLateStatusView } from '../../lib/anchor-late-status'
 
-export interface AnchorPocketRow {
+export interface AnchorPocketRow extends AnchorLateStatusView {
   anchorName: string
   shopName: string
   sessionName: string
@@ -128,6 +130,7 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
               <th className="px-3 py-2 font-medium">主播</th>
               <th className="px-3 py-2 font-medium">店铺</th>
               <th className="px-3 py-2 font-medium">场次</th>
+              <th className="px-3 py-2 font-medium">开播</th>
               <th className="px-3 py-2 font-medium text-right">业绩内金额</th>
               <th className="px-3 py-2 font-medium text-right">已退款</th>
               <th className="px-3 py-2 font-medium text-right">售后处理中</th>
@@ -141,24 +144,37 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
           <tbody>
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
+                <td colSpan={12} className="px-3 py-6 text-center text-slate-500">
                   暂无数据
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              rows.map((row) => {
+                const late = readLateStatus(row)
+                const timingLine = formatLateTimingLine(late)
+                return (
                 <tr
                   key={row.anchorName}
-                  className="border-b border-slate-50 hover:bg-slate-50/80"
+                  className={`border-b hover:bg-slate-50/80 ${
+                    late.isLate ? 'border-red-100 bg-red-50/30' : 'border-slate-50'
+                  }`}
                   title={
                     row.detail
                       ? `业绩内 ${row.detail.performanceOrderCount} 单 · 刷单 ${row.detail.brushOrderCount} 单 · 退款完成 ${row.detail.refundFinishedOrderCount} 单`
                       : undefined
                   }
                 >
-                  <td className="px-3 py-2 font-medium text-slate-900">{row.anchorName}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex items-center gap-2 font-medium text-slate-900">
+                      <span>{row.anchorName}</span>
+                      <AnchorLateStatusBadge row={late} />
+                    </div>
+                  </td>
                   <td className="px-3 py-2 text-slate-600">{row.shopName}</td>
                   <td className="px-3 py-2 text-slate-600">{row.sessionName}</td>
+                  <td className={`px-3 py-2 text-xs ${late.isLate ? 'font-medium text-red-600' : 'text-slate-600'}`}>
+                    {timingLine ?? '—'}
+                  </td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatMoney(row.performanceAmount)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-rose-600">
                     {formatMoney(row.refundFinishedAmount)}
@@ -182,7 +198,8 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
                     {row.explainText}
                   </td>
                 </tr>
-              ))
+                )
+              })
             )}
           </tbody>
         </table>

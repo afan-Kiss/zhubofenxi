@@ -35,6 +35,7 @@ import {
 import type { QualityFeedbackPublicStatus } from './quality-badcase-auto-sync.service'
 import { attachRawByMatchToViews, filterViewsForAnchorPerformance } from './low-price-brush-order.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
+import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 
 export type BoardLiveQueryPreset =
   | 'today'
@@ -230,9 +231,13 @@ export async function executeBoardLiveQuery(
     }
     logBoardMetricsDebug(scopedCoreViews, { ...debugCtx, fetchMeta: bundle.fetchMeta })
     const summary = buildSummaryFromViews(scopedCoreViews)
-    const anchorLeaderboard = aggregateAnchorLeaderboard(
+    const anchorLeaderboardRaw = aggregateAnchorLeaderboard(
       params.anchorId || params.anchorName ? scopedPerformanceViews : performanceViews,
       debugCtx,
+    )
+    const anchorLeaderboard = await enrichAnchorLeaderboardWithLateStatus(
+      anchorLeaderboardRaw as unknown as Array<Record<string, unknown>>,
+      { startDate, endDate, preset: params.preset },
     )
     warnAnchorTotalsMismatch(summary, anchorLeaderboard as unknown as Array<Record<string, unknown>>)
     const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(scopedCoreViews)]

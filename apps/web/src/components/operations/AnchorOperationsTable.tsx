@@ -1,5 +1,10 @@
 import React from 'react'
 import type { DailyOperationsAnchorRow } from '../../pages/operations/operationsReportTypes'
+import { AnchorLateStatusBadge } from '../board/AnchorLateStatusBadge'
+import {
+  formatLateTimingLine,
+  readLateStatus,
+} from '../../lib/anchor-late-status'
 import {
   formatDuration,
   formatHourly,
@@ -11,18 +16,8 @@ import {
 } from './operationsReportFormatters'
 
 function formatAnchorSessionTiming(row: DailyOperationsAnchorRow): string {
-  if (row.hasManualSchedule && row.scheduledPeriodText) {
-    const actual =
-      row.actualStartText != null
-        ? `${row.actualStartText}起`
-        : row.livePeriodText !== '—'
-          ? row.livePeriodText
-          : '未开播'
-    const lateSuffix =
-      row.isLate && row.lateMinutes != null ? `（迟到${row.lateMinutes}分钟）` : ''
-    return `排班 ${row.scheduledPeriodText}｜实际 ${actual}${lateSuffix}`
-  }
-  return row.livePeriodText
+  const late = readLateStatus(row)
+  return formatLateTimingLine(late) ?? row.livePeriodText
 }
 
 interface Props {
@@ -65,11 +60,7 @@ export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
               <td className="px-3 py-2 font-medium text-slate-900">
                 <div className="flex items-center gap-2">
                   <span>{row.anchorName}</span>
-                  {row.isLate ? (
-                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
-                      迟到
-                    </span>
-                  ) : null}
+                  <AnchorLateStatusBadge row={row} />
                 </div>
               </td>
               <td className="px-3 py-2 text-slate-600">{row.sessionLabel}</td>

@@ -24,6 +24,11 @@ import {
 } from './xhs-after-sales-workbench.service'
 import { buildRawAnalyzeBundle } from './xhs-api-sync/xhs-analysis-from-raw.service'
 import { lookupWorkbenchRefund } from '../utils/live-account-cache-key.util'
+import { enrichPocketRowsWithLateStatus } from './anchor-late-enrichment.service'
+import type { AnchorLateStatusPayload } from '../utils/anchor-schedule-late.util'
+import { toLateStatusPayload, calculateAnchorLateStatus } from '../utils/anchor-schedule-late.util'
+
+const EMPTY_LATE_PAYLOAD = toLateStatusPayload(calculateAnchorLateStatus(undefined, null, null))
 
 export const ANCHOR_POCKET_CALIBER_NOTE =
   '29元以下按刷单剔除；已退款单独扣除；售后处理中和未签收不算实际到账；资金流水只做校验。实际到账按订单支付日期归属并扣累计退款；经营总览退款按退款发生日期统计，两数可能不同。'
@@ -34,7 +39,7 @@ export interface AnchorPocketDataQualityWarning {
   count: number
 }
 
-export interface AnchorPocketAnchorRow {
+export interface AnchorPocketAnchorRow extends AnchorLateStatusPayload {
   anchorName: string
   shopName: string
   sessionName: string
@@ -200,6 +205,7 @@ function aggToRow(agg: AnchorAgg): AnchorPocketAnchorRow {
       brushAmount,
       refundRate,
     }),
+    ...EMPTY_LATE_PAYLOAD,
     detail: {
       rawOrderCount: agg.rawOrderNos.size,
       performanceOrderCount: perfCount,
@@ -225,6 +231,7 @@ function emptyRow(anchorName: string): AnchorPocketAnchorRow {
     brushAmount: 0,
     refundRate: null,
     explainText: '本周期暂无业绩内订单。',
+    ...EMPTY_LATE_PAYLOAD,
     detail: {
       rawOrderCount: 0,
       performanceOrderCount: 0,
@@ -324,6 +331,17 @@ export async function buildAnchorPocketSummary(params: {
       ? fixedNames.map((name) => byName.get(name) ?? emptyRow(name))
       : rows.sort((a, b) => a.anchorName.localeCompare(b.anchorName, 'zh-CN'))
 
+  const lateRows = await enrichPocketRowsWithLateStatus(mergedAnchors, {
+    startDate: scoped.startDate,
+    endDate: scoped.endDate,
+    preset: scoped.preset,
+  })
+  const lateByName = new Map(lateRows.map((r) => [r.anchorName, r]))
+  const enrichedAnchors = mergedAnchors.map((row) => {
+    const late = lateByName.get(row.anchorName)
+    return late ? { ...row, ...late } : row
+  })
+
   return {
     ok: true,
     range: {
@@ -336,7 +354,7 @@ export async function buildAnchorPocketSummary(params: {
       note: ANCHOR_POCKET_CALIBER_NOTE,
       settlementNote: '资金数据仅作校验，主播实际到账按订单签收和售后状态计算。',
     },
-    anchors: mergedAnchors,
+    anchors: enrichedAnchors,
     dataQualityWarnings: warnings,
   }
 }

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { randomUuid } from '../../lib/random-id'
 
 const PLACEHOLDER =
   'data:image/svg+xml;utf8,' +
@@ -40,7 +41,7 @@ export function ensureGoodReviewImageSession(): string {
   const key = 'good-review-image-session-id'
   let id = sessionStorage.getItem(key)
   if (!id) {
-    id = crypto.randomUUID()
+    id = randomUuid()
     sessionStorage.setItem(key, id)
   }
   return id

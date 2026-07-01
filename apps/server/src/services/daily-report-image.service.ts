@@ -3,9 +3,16 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { prisma } from '../lib/prisma'
 import { getDataDir } from '../config/env'
+import { logInfo, logWarn } from '../utils/server-log'
 
 const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const MAX_BYTES = 10 * 1024 * 1024
+/** 发货前照片仅保留 24 小时（按上传时间 createdAt） */
+export const DAILY_REPORT_IMAGE_TTL_MS = 24 * 60 * 60 * 1000
+const CLEANUP_INTERVAL_MS = 60 * 60 * 1000
+const REPORT_DATE_DIR_RE = /^\d{4}-\d{2}-\d{2}$/
+
+let lastCleanupAt = 0
 
 export interface DailyReportImageDto {
   id: string
@@ -164,4 +171,88 @@ export async function getDailyReportImageFile(id: string): Promise<{
   const absPath = resolveDailyReportImageAbsPath(row.filePath)
   if (!fs.existsSync(absPath)) throw new Error('图片文件不存在')
   return { absPath, mimeType: row.mimeType, originalName: row.originalName }
+}
+
+function removeEmptyReportDateDirs(): number {
+  const root = dailyReportImagesRoot()
+  if (!fs.existsSync(root)) return 0
+  let removed = 0
+  for (const name of fs.readdirSync(root)) {
+    if (!REPORT_DATE_DIR_RE.test(name)) continue
+    const dir = path.join(root, name)
+    try {
+      if (!fs.statSync(dir).isDirectory()) continue
+      if (fs.readdirSync(dir).length === 0) {
+        fs.rmdirSync(dir)
+        removed++
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return removed
+}
+
+/** 仅清理 DailyReportImage 表中超时记录及其 data/daily-report-images 下对应文件 */
+export async function cleanupExpiredDailyReportImages(options?: {
+  now?: Date
+  force?: boolean
+}): Promise<{ removedRecords: number; removedFiles: number; removedEmptyDirs: number }> {
+  const nowMs = (options?.now ?? new Date()).getTime()
+  if (!options?.force && nowMs - lastCleanupAt < CLEANUP_INTERVAL_MS) {
+    return { removedRecords: 0, removedFiles: 0, removedEmptyDirs: 0 }
+  }
+  lastCleanupAt = nowMs
+
+  const cutoff = new Date(nowMs - DAILY_REPORT_IMAGE_TTL_MS)
+  const expired = await prisma.dailyReportImage.findMany({
+    where: { createdAt: { lt: cutoff } },
+  })
+
+  let removedRecords = 0
+  let removedFiles = 0
+
+  for (const row of expired) {
+    try {
+      try {
+        const absPath = resolveDailyReportImageAbsPath(row.filePath)
+        if (fs.existsSync(absPath)) {
+          fs.unlinkSync(absPath)
+          removedFiles++
+        }
+      } catch (err) {
+        logWarn(
+          '日报图片',
+          `跳过删除文件 id=${row.id}：${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+      await prisma.dailyReportImage.delete({ where: { id: row.id } })
+      removedRecords++
+    } catch (err) {
+      logWarn(
+        '日报图片',
+        `清理记录失败 id=${row.id}：${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  }
+
+  const removedEmptyDirs = removeEmptyReportDateDirs()
+  if (removedRecords > 0 || removedFiles > 0) {
+    logInfo(
+      '日报图片',
+      `已清理过期发货照片：记录 ${removedRecords} 条，文件 ${removedFiles} 个，空目录 ${removedEmptyDirs} 个`,
+    )
+  }
+  return { removedRecords, removedFiles, removedEmptyDirs }
+}
+
+export function startDailyReportImageCleanupTimer(): void {
+  void cleanupExpiredDailyReportImages({ force: true }).catch((err) => {
+    logWarn('日报图片', `启动清理失败：${err instanceof Error ? err.message : String(err)}`)
+  })
+  setInterval(() => {
+    void cleanupExpiredDailyReportImages({ force: true }).catch((err) => {
+      logWarn('日报图片', `定时清理失败：${err instanceof Error ? err.message : String(err)}`)
+    })
+  }, CLEANUP_INTERVAL_MS).unref()
 }

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { API_PREFIX, apiRequest } from '../../lib/api'
 import { DailyReportImageThumb } from './DailyReportImageThumb'
+import { DailyReportImagePreview } from './DailyReportImagePreview'
 import { fetchDailyReportImageBlobUrl } from '../../lib/daily-report-image-url'
 
 export interface DailyReportImageItem {
@@ -28,7 +29,29 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
   const [uploading, setUploading] = useState(false)
   const [captionDraft, setCaptionDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null)
+  const previewBlobRef = useRef<string | null>(null)
+
+  const closePreview = useCallback(() => {
+    if (previewBlobRef.current) {
+      URL.revokeObjectURL(previewBlobRef.current)
+      previewBlobRef.current = null
+    }
+    setPreview(null)
+  }, [])
+
+  useEffect(() => () => closePreview(), [closePreview])
+
+  const openPreview = useCallback(
+    async (publicUrl: string, alt: string) => {
+      closePreview()
+      const blobUrl = await fetchDailyReportImageBlobUrl(publicUrl)
+      if (!blobUrl) return
+      previewBlobRef.current = blobUrl
+      setPreview({ src: blobUrl, alt })
+    },
+    [closePreview],
+  )
 
   const lastSyncedIdsRef = useRef('')
 
@@ -127,7 +150,7 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
         <div>
           <p className="text-sm font-semibold text-slate-900">发货前照片</p>
           <p className="mt-1 text-xs text-slate-500">
-            这些照片会自动拼到昨日日报图片底部，发群时不用再单独补图。
+            上传后保存在服务器，生成日报时会拼进图片底部；照片仅保留 24 小时，到期自动删除。
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -168,12 +191,8 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
               <DailyReportImageThumb
                 publicUrl={img.publicUrl}
                 alt={img.originalName}
-                className="aspect-square w-full object-cover"
-                onClick={() => {
-                  void fetchDailyReportImageBlobUrl(img.publicUrl).then((url) => {
-                    if (url) setPreviewUrl(url)
-                  })
-                }}
+                className="aspect-square w-full cursor-zoom-in object-cover"
+                onClick={() => void openPreview(img.publicUrl, img.originalName)}
               />
               <p className="mt-1 truncate text-[10px] text-slate-500">
                 {new Date(img.createdAt).toLocaleString('zh-CN', { hour12: false })}
@@ -200,19 +219,12 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
         </div>
       ) : null}
 
-      {previewUrl ? (
-        <div
-          className="fixed inset-0 z-[10002] flex items-center justify-center bg-black/70 p-4"
-          onClick={() => setPreviewUrl(null)}
-        >
-          <img
-            src={previewUrl}
-            alt="预览"
-            className="max-h-[90vh] max-w-full rounded-lg object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      ) : null}
+      <DailyReportImagePreview
+        open={preview != null}
+        src={preview?.src ?? null}
+        alt={preview?.alt ?? '发货前照片'}
+        onClose={closePreview}
+      />
     </div>
   )
 }

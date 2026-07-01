@@ -5,13 +5,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
+  cleanupExpiredDailyReportImages,
   deleteDailyReportImage,
   getDailyReportImageFile,
   listDailyReportImages,
   uploadDailyReportImage,
   getDailyReportImagesDir,
+  DAILY_REPORT_IMAGE_TTL_MS,
 } from '../src/services/daily-report-image.service'
 import { getDataDir } from '../src/config/env'
+import { prisma } from '../src/lib/prisma'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -50,6 +53,33 @@ async function run(): Promise<void> {
   await deleteDailyReportImage(uploaded.id)
   const afterDelete = await listDailyReportImages(reportDate)
   assert(!afterDelete.some((r) => r.id === uploaded.id), '删除后列表应不含该图片', issues)
+
+  const expired = await uploadDailyReportImage({
+    reportDate,
+    buffer: pngHeader,
+    originalName: 'expired.png',
+    mimeType: 'image/png',
+  })
+  const expiredAt = new Date(Date.now() - DAILY_REPORT_IMAGE_TTL_MS - 60_000)
+  await prisma.dailyReportImage.update({
+    where: { id: expired.id },
+    data: { createdAt: expiredAt },
+  })
+  const fresh = await uploadDailyReportImage({
+    reportDate,
+    buffer: pngHeader,
+    originalName: 'fresh.png',
+    mimeType: 'image/png',
+  })
+
+  const cleaned = await cleanupExpiredDailyReportImages({ force: true })
+  assert(cleaned.removedRecords >= 1, '应清理至少 1 条过期记录', issues)
+
+  const remaining = await listDailyReportImages(reportDate)
+  assert(!remaining.some((r) => r.id === expired.id), '过期图片应从列表移除', issues)
+  assert(remaining.some((r) => r.id === fresh.id), '未过期图片应保留', issues)
+
+  await deleteDailyReportImage(fresh.id)
 
   if (issues.length) {
     console.error('verify:daily-report-images FAILED')

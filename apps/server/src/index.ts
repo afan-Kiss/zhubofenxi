@@ -3,7 +3,6 @@ import {
   getDataDir,
   getPort,
   getListenHost,
-  assertCookieEncryptionKey,
   getDownloadDir,
   getReportDir,
   getBackupDir,
@@ -48,7 +47,6 @@ function registerFatalErrorHandlers(): void {
 registerFatalErrorHandlers()
 
 loadEnv()
-assertCookieEncryptionKey()
 logDatabaseStartupDiagnostics()
 
 const port = getPort()
@@ -85,6 +83,10 @@ async function main() {
   await ensurePrimarySuperAdmin()
   await ensureDefaultDownloadConfigs()
   await ensureDefaultLiveAccount()
+  const { migrateStoredCookiesToPlaintext } = await import(
+    './services/cookie-plaintext-migration.service'
+  )
+  await migrateStoredCookiesToPlaintext()
   await refreshLiveAccountRowMapperContext()
   await migrateLegacyDownloadModes()
   await refreshAnchorConfigCache()
@@ -98,6 +100,11 @@ async function main() {
     './services/good-review/good-review-image-proxy.service'
   )
   startGoodReviewImageCacheCleanupTimer()
+
+  const { startDailyReportImageCleanupTimer } = await import(
+    './services/daily-report-image.service'
+  )
+  startDailyReportImageCleanupTimer()
 }
 
 main().catch((err) => {

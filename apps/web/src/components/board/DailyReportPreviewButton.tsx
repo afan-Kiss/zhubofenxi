@@ -10,6 +10,7 @@ import {
   DailyReportShipmentPhotos,
   type DailyReportImageItem,
 } from './DailyReportShipmentPhotos'
+import { DailyReportImagePreview } from './DailyReportImagePreview'
 import {
   resolveDailyReportImageFetchUrl,
 } from '../../lib/daily-report-image-url'
@@ -200,6 +201,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   const [aiSuggestionLines, setAiSuggestionLines] = useState<string[]>([])
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [reportZoomOpen, setReportZoomOpen] = useState(false)
   const [aiInputOpen, setAiInputOpen] = useState(false)
   const [aiDraft, setAiDraft] = useState('')
   const [clipboardFallbackText, setClipboardFallbackText] = useState<string | null>(null)
@@ -402,7 +404,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
           <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-base font-semibold text-slate-900">日报预览</p>
-              <p className="mt-1 text-xs text-slate-500">右键图片可复制</p>
+              <p className="mt-1 text-xs text-slate-500">点击图片可滚轮缩放放大 · 右键可复制</p>
             </div>
             <button
               type="button"
@@ -433,18 +435,31 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
             ) : null}
           </div>
 
-          <img
-            src={imageDataUrl}
-            alt="主播日报"
-            className={`mx-auto block max-w-full rounded-xl border border-slate-100 shadow-sm transition-opacity ${
-              capturing ? 'opacity-40' : 'opacity-100'
-            }`}
-          />
+          <button
+            type="button"
+            onClick={() => setReportZoomOpen(true)}
+            className="block w-full"
+          >
+            <img
+              src={imageDataUrl}
+              alt="主播日报"
+              className={`mx-auto block max-w-full cursor-zoom-in rounded-xl border border-slate-100 shadow-sm transition-opacity ${
+                capturing ? 'opacity-40' : 'opacity-100'
+              }`}
+            />
+          </button>
           {capturing ? (
             <p className="mt-2 text-center text-xs text-slate-500">正在更新日报图片…</p>
           ) : null}
         </ViewportModal>
       ) : null}
+
+      <DailyReportImagePreview
+        open={reportZoomOpen && Boolean(imageDataUrl)}
+        src={imageDataUrl}
+        alt="主播日报"
+        onClose={() => setReportZoomOpen(false)}
+      />
 
       <ViewportModal
         open={aiInputOpen}

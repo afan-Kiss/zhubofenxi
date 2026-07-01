@@ -5,7 +5,7 @@ import { resolveDateRange } from '../utils/date-range'
 import { requestXhsApi } from './xhs-api-sync/xhs-api-client.service'
 import { buildOrderListBody } from './xhs-api-sync/xhs-order-sync.service'
 import { classifyXhsErrorMessage } from '../utils/xhs-auth.util'
-import { deriveCookieSyncState } from '../utils/cookie-sync-status.util'
+import { deriveCookieSyncState, deriveStatusLevel, buildShopCookieSummary } from '../utils/cookie-sync-status.util'
 import { probeQualityBadcaseSignForAccount } from './quality-badcase-sign.service'
 
 const DEFAULT_PLATFORM = 'xiaohongshu'
@@ -515,7 +515,7 @@ export async function getCookieHealthPayload(): Promise<{
         ...account,
         canSyncOrders: shop.canSyncOrders,
         syncReason: shop.reason,
-        statusLevel: shop.statusLevel,
+        statusLevel: deriveStatusLevel(shop.canSyncOrders, shop.hasCookie, shop.status),
         cookieDisplayStatus: shop.status,
       }
     }
@@ -542,6 +542,18 @@ export async function getCookieHealthPayload(): Promise<{
   })
 
   const enabled = enrichedAccounts.filter((a) => a.enabled)
+  const shopSummary = buildShopCookieSummary(
+    shopPayload.shops.map((s) => {
+      const row = s.accountId ? rowById.get(s.accountId) : undefined
+      return {
+        hasCookie: s.hasCookie,
+        canSyncOrders: s.canSyncOrders,
+        reason: s.reason,
+        status: s.status,
+        cookieLastErrorCode: row?.cookieLastErrorCode ?? null,
+      }
+    }),
+  )
   const summary: CookieHealthSummary = {
     enabledCount: enabled.length,
     validCount: enabled.filter((a) => a.cookieStatus === 'valid').length,
@@ -550,10 +562,10 @@ export async function getCookieHealthPayload(): Promise<{
     unknownCount: enabled.filter((a) => a.cookieStatus === 'unknown').length,
     canSyncCount: enabled.filter((a) => a.canSyncOrders === true).length,
     cannotSyncCount: enabled.filter((a) => a.canSyncOrders === false).length,
-    missingCookieCount: shopPayload.summary.missingCookieCount,
-    missingA1Count: shopPayload.summary.missingA1Count,
-    missingArkCount: shopPayload.summary.missingArkCount,
-    expiredCount: shopPayload.summary.expiredCount,
+    missingCookieCount: shopSummary.missingCookieCount,
+    missingA1Count: shopSummary.missingA1Count,
+    missingArkCount: shopSummary.missingArkCount,
+    expiredCount: shopSummary.expiredCount,
   }
   return { accounts: enrichedAccounts, summary }
 }

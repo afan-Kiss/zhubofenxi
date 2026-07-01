@@ -246,9 +246,17 @@ function testBoardOverviewMatchesValidRevenuePool(issues: string[]) {
   )
 }
 
-function testDailyReportAlias(issues: string[]) {
-  const view = mockView({ orderStatusText: '已完成', afterSaleStatusText: '' })
-  assert(isDailyReportSoldOrder(view) === isValidRevenueOrder(view), '日报别名应与统一口径一致', issues)
+function testDailyReportShippedCaliber(issues: string[]) {
+  const completed = mockView({ orderStatusText: '已完成', afterSaleStatusText: '' })
+  assert(isDailyReportSoldOrder(completed), '已完成且无售后应计入真实发货', issues)
+  assert(isValidRevenueOrder(completed), '已完成且无售后仍属有效成交', issues)
+
+  const pending = mockView({ orderStatusText: '待发货', afterSaleStatusText: '' })
+  assert(isDailyReportSoldOrder(pending), '未签收但无售后应计入真实发货（主播业绩口径）', issues)
+  assert(!isValidRevenueOrder(pending), '未签收不应计入有效成交', issues)
+
+  const refunded = mockView({ orderStatusText: '已完成', afterSaleStatusText: '退款成功' })
+  assert(!isDailyReportSoldOrder(refunded), '售后订单不应计入真实发货', issues)
 }
 
 function testAmountCent(issues: string[]) {
@@ -265,7 +273,7 @@ function main() {
   testUnknownCollector(issues)
   testSumValidRevenue(issues)
   testBoardOverviewMatchesValidRevenuePool(issues)
-  testDailyReportAlias(issues)
+  testDailyReportShippedCaliber(issues)
   testAmountCent(issues)
 
   if (issues.length > 0) {

@@ -28,8 +28,8 @@ import {
   roundYuan,
   safeDivide,
   safeRatioPercent,
+  sumDailyReportShippedFromViews,
 } from './daily-report-order.util'
-import { sumValidRevenueFromViews } from './valid-revenue-order.service'
 
 export interface DailyReportAnchorRow {
   anchorName: string
@@ -214,11 +214,11 @@ export async function buildDailyReport(params: {
       anchor.anchorId,
       anchor.anchorName,
     )
-    const validRevenue = sumValidRevenueFromViews(performanceViews)
-    const shippedAmountYuan = validRevenue.validAmountYuan
+    const shipped = sumDailyReportShippedFromViews(performanceViews)
+    const shippedAmountYuan = shipped.shippedAmountYuan
 
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
-    const { soldOrderCount } = validRevenue
+    const { soldOrderCount } = shipped
     const { invalidOrderCount: invalidFromAll } = countDailyReportOrders(anchorAllViews)
     const fixedDisplay = useShopSessionRules
       ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]

@@ -1,35 +1,58 @@
 import type { AnalyzedOrderView } from '../types/analysis'
+import { centToYuan } from '../utils/money'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
-import {
-  isValidRevenueOrder,
-  resolveAfterSaleStatusText,
-  resolveValidRevenueRefundAmountCent,
-} from './valid-revenue-order.service'
+import { isLowPriceBrushOrderView } from './low-price-brush-order.service'
+import { isActualAfterSaleOrder } from './operations-after-sale-order.util'
 
 const CLOSED_KEYWORDS = ['已关闭', '交易关闭']
-const EXCLUDED_AFTER_SALE_FOR_INVALID_RE =
-  /售后完成|退款成功|退款完成|已退款|退货退款成功|售后处理中|待商家收货|待买家退货|退款中|退货退款中|部分退款|仅退款|退货退款|售后成功|售后中|退货完成|已退货/
 
 function normalizeOrderStatus(view: AnalyzedOrderView): string {
   return (view.orderStatusText ?? '').trim()
 }
 
-/** 关闭/退货单：已关闭，或存在需提醒的售后/退款状态（不计入有效成交） */
+/** 关闭/退货单：已关闭，或存在售后/退款（与真实发货剔除口径一致） */
 export function isDailyReportInvalidOrder(v: AnalyzedOrderView): boolean {
   const orderStatus = normalizeOrderStatus(v)
   if (CLOSED_KEYWORDS.some((k) => orderStatus.includes(k))) return true
-
-  const afterSale = resolveAfterSaleStatusText(v)
-  if (afterSale && EXCLUDED_AFTER_SALE_FOR_INVALID_RE.test(afterSale)) return true
-
-  if (resolveValidRevenueRefundAmountCent(v) > 0 && !isValidRevenueOrder(v)) return true
-
-  return false
+  return isActualAfterSaleOrder(v)
 }
 
-/** 有效成交订单（与运营报表 / 日报 / 下钻同一口径） */
+/**
+ * 真实发货计入订单：主播业绩内订单，剔除低价刷单与售后订单。
+ * 金额取支付基数 paymentBaseCent（与主播业绩支付金额一致）。
+ */
+export function isDailyReportShippedOrder(v: AnalyzedOrderView): boolean {
+  if (!v.includedInGmv) return false
+  if (isLowPriceBrushOrderView(v)) return false
+  if (isActualAfterSaleOrder(v)) return false
+  return (v.paymentBaseCent ?? 0) > 0
+}
+
+/** 真实卖出单数（与真实发货金额同一订单池） */
 export function isDailyReportSoldOrder(v: AnalyzedOrderView): boolean {
-  return isValidRevenueOrder(v)
+  return isDailyReportShippedOrder(v)
+}
+
+/** 真实发货金额：当天主播业绩合计，去除售后订单 */
+export function sumDailyReportShippedFromViews(views: AnalyzedOrderView[]): {
+  shippedAmountCent: number
+  shippedAmountYuan: number
+  soldOrderCount: number
+} {
+  const deduped = dedupeViewsByMetricOrderNo(views)
+  let shippedAmountCent = 0
+  let soldOrderCount = 0
+  for (const v of deduped) {
+    if (!resolveMetricOrderNo(v) && v.paymentBaseCent <= 0) continue
+    if (!isDailyReportShippedOrder(v)) continue
+    shippedAmountCent += v.paymentBaseCent
+    soldOrderCount += 1
+  }
+  return {
+    shippedAmountCent,
+    shippedAmountYuan: Math.round(centToYuan(shippedAmountCent)),
+    soldOrderCount,
+  }
 }
 
 export function countDailyReportOrders(views: AnalyzedOrderView[]): {

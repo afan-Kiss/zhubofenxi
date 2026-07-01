@@ -83,10 +83,6 @@ async function main() {
   await ensurePrimarySuperAdmin()
   await ensureDefaultDownloadConfigs()
   await ensureDefaultLiveAccount()
-  const { migrateStoredCookiesToPlaintext } = await import(
-    './services/cookie-plaintext-migration.service'
-  )
-  await migrateStoredCookiesToPlaintext()
   await refreshLiveAccountRowMapperContext()
   await migrateLegacyDownloadModes()
   await refreshAnchorConfigCache()

@@ -52,6 +52,8 @@ import { attachBusinessInsightActions } from './operations-business-insight-acti
 import type { BusinessInsightsPayload } from './operations-business-insights.types'
 import { computeReturnOrderRateRatio, computeOperationsRefundMetricsFromViews } from './operations-after-sale-order.util'
 import { prisma } from '../lib/prisma'
+import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
+import { attachAnchorScheduleLateFields } from '../utils/anchor-schedule-late.util'
 
 export interface DailyOperationsAnchorRow {
   anchorName: string
@@ -77,6 +79,11 @@ export interface DailyOperationsAnchorRow {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
+  scheduledPeriodText: string | null
+  actualStartText: string | null
+  isLate: boolean
+  lateMinutes: number | null
+  hasManualSchedule: boolean
 }
 
 export interface DailyOperationsSummary {
@@ -203,6 +210,7 @@ function buildAnchorRow(params: {
   paidOrderCount: number
   sessions: AnchorLiveSessionBrief[]
   totalValidAmountYuan: number
+  scheduleLate: ReturnType<typeof attachAnchorScheduleLateFields>
 }): DailyOperationsAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
@@ -243,6 +251,7 @@ function buildAnchorRow(params: {
     dealUserCount: traffic.dealUserCount,
     dealConversionRate: traffic.dealConversionRate,
     newFollowerRate: traffic.newFollowerRate,
+    ...params.scheduleLate,
   }
 }
 
@@ -299,6 +308,7 @@ export async function buildDailyOperationsReport(params: {
 
   const anchorRows: DailyOperationsAnchorRow[] = []
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
+  const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
 
   for (const anchor of reportAnchors) {
     const performanceViews = await getAnchorPerformanceViews(
@@ -334,14 +344,15 @@ export async function buildDailyOperationsReport(params: {
 
     if (!hasData && !useShopSessionRules) continue
 
+    const shopName =
+      fixedDisplay?.shopName ?? resolveAnchorShopName(anchorAllViews, sessions)
+
     anchorRows.push(
       buildAnchorRow({
         config,
         anchorId: anchor.anchorId,
         anchorName: anchor.anchorName,
-        shopName:
-          fixedDisplay?.shopName ??
-          resolveAnchorShopName(anchorAllViews, sessions),
+        shopName,
         sessionLabel: fixedDisplay?.sessionLabel,
         validAmountYuan,
         soldOrderCount,
@@ -350,6 +361,12 @@ export async function buildDailyOperationsReport(params: {
         paidOrderCount: anchorRefundMetrics.paidOrderCount,
         sessions,
         totalValidAmountYuan: 0,
+        scheduleLate: attachAnchorScheduleLateFields(
+          scheduleTable.rows,
+          anchor.anchorName,
+          shopName,
+          sessions,
+        ),
       }),
     )
   }

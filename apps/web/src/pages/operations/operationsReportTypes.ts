@@ -308,6 +308,11 @@ export interface DailyOperationsAnchorRow {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
+  scheduledPeriodText?: string | null
+  actualStartText?: string | null
+  isLate?: boolean
+  lateMinutes?: number | null
+  hasManualSchedule?: boolean
 }
 
 export interface OperationsProductRow {

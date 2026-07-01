@@ -63,11 +63,30 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
       <div className="mt-4">
         <p className="mb-2 text-sm font-semibold">主播表现</p>
         {data.anchors.map((row) => (
-          <div key={row.anchorName} className="mb-2 rounded-xl border border-slate-200 p-3 text-xs">
+          <div
+            key={row.anchorName}
+            className={
+              row.isLate
+                ? 'mb-2 rounded-xl border border-red-200 bg-red-50/40 p-3 text-xs'
+                : 'mb-2 rounded-xl border border-slate-200 p-3 text-xs'
+            }
+          >
             <p className="font-semibold">
               {row.anchorName} · {row.sessionLabel}
+              {row.isLate ? (
+                <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-semibold text-red-700">
+                  迟到
+                </span>
+              ) : null}
             </p>
-            <p className="mt-1 text-slate-600">
+            <p className={row.isLate ? 'mt-1 font-medium text-red-600' : 'mt-1 text-slate-600'}>
+              {row.hasManualSchedule && row.scheduledPeriodText
+                ? `排班 ${row.scheduledPeriodText} · 实际 ${
+                    row.actualStartText ?? (row.livePeriodText !== '—' ? row.livePeriodText : '未开播')
+                  }${
+                    row.isLate && row.lateMinutes != null ? `（迟到${row.lateMinutes}分钟）` : ''
+                  } · `
+                : ''}
               有效成交 {formatIntegerMoney(row.validAmountYuan)} · 订单{' '}
               {formatOrderCount(row.soldOrderCount)} · 直播 {row.liveDurationText}
             </p>

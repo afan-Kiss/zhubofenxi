@@ -30,6 +30,8 @@ import {
   safeRatioPercent,
   sumDailyReportShippedFromViews,
 } from './daily-report-order.util'
+import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
+import { attachAnchorScheduleLateFields } from '../utils/anchor-schedule-late.util'
 
 export interface DailyReportAnchorRow {
   anchorName: string
@@ -53,6 +55,11 @@ export interface DailyReportAnchorRow {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
+  scheduledPeriodText: string | null
+  actualStartText: string | null
+  isLate: boolean
+  lateMinutes: number | null
+  hasManualSchedule: boolean
 }
 
 export interface DailyReportPayload {
@@ -150,6 +157,7 @@ function buildAnchorRow(params: {
   invalidOrderCount: number
   sessions: AnchorLiveSessionBrief[]
   totalShippedAmountYuan: number
+  scheduleLate: ReturnType<typeof attachAnchorScheduleLateFields>
 }): DailyReportAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
@@ -188,6 +196,7 @@ function buildAnchorRow(params: {
     dealUserCount: traffic.dealUserCount,
     dealConversionRate: traffic.dealConversionRate,
     newFollowerRate: traffic.newFollowerRate,
+    ...params.scheduleLate,
   }
 }
 
@@ -207,6 +216,7 @@ export async function buildDailyReport(params: {
   )
 
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
+  const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
   for (const anchor of reportAnchors) {
     const performanceViews = await getAnchorPerformanceViews(
       scoped.views,
@@ -242,20 +252,27 @@ export async function buildDailyReport(params: {
     // 6.13 起固定场次主播：与主播业绩一致，无数据也保留空行（含 6.18 起的小白）
     if (!hasData && !useShopSessionRules) continue
 
+    const shopName =
+      fixedDisplay?.shopName ?? resolveAnchorShopName(anchorAllViews, sessions)
+
     anchorRows.push(
       buildAnchorRow({
         config,
         anchorId: anchor.anchorId,
         anchorName: anchor.anchorName,
-        shopName:
-          fixedDisplay?.shopName ??
-          resolveAnchorShopName(anchorAllViews, sessions),
+        shopName,
         sessionLabel: fixedDisplay?.sessionLabel,
         shippedAmountYuan,
         soldOrderCount,
         invalidOrderCount: invalidFromAll,
         sessions,
         totalShippedAmountYuan: 0,
+        scheduleLate: attachAnchorScheduleLateFields(
+          scheduleTable.rows,
+          anchor.anchorName,
+          shopName,
+          sessions,
+        ),
       }),
     )
   }

@@ -721,66 +721,8 @@ async function checkWeeklyCaliber(
 }
 
 async function checkPrivacyExport(ctx: CheckContext, targetDate: string) {
-  const datesToTry = [targetDate, addDaysShanghai(formatDateKeyShanghai(new Date()), -1)]
-  let rows: Array<Record<string, unknown>> = []
-  let usedDate = targetDate
-
-  for (const d of datesToTry) {
-    try {
-      const { status, body } = await fetchJson<Record<string, unknown>>(
-        '/api/board/daily-report/raw-chatgpt-data',
-        { startDate: d, endDate: d },
-      )
-      if (status !== 200 || !body.ok || !body.data) continue
-      const data = body.data as { rawOrders?: Array<Record<string, unknown>>; rows?: Array<Record<string, unknown>> }
-      const candidate = data.rawOrders ?? data.rows ?? []
-      if (candidate.length > 0) {
-        rows = candidate
-        usedDate = d
-        break
-      }
-    } catch {
-      /* try next */
-    }
-  }
-
-  if (rows.length === 0) {
-    addNote(ctx, `${usedDate} raw-chatgpt 无订单行，隐私脱敏 HTTP 抽样跳过（验收脚本已覆盖 sanitize）`)
-    return { usedDate, rowCount: 0, masked: null }
-  }
-
-  const row = rows[0]!
-  const phone = String(row.receiverPhone ?? '')
-  const name = String(row.receiverName ?? '')
-  const address = String(row.receiverAddress ?? '')
-  const raw = String(row.platformRawJson ?? '')
-
-  if (/\d{11}/.test(phone)) addFinding(ctx, 'P0', '默认导出包含完整手机号')
-  if (name.length > 2 && !name.includes('*')) addFinding(ctx, 'P1', '默认导出收件人姓名可能未脱敏')
-  if (address.length > 20 && /\d{3,}/.test(address)) {
-    addFinding(ctx, 'P1', '默认导出可能包含详细地址')
-  }
-  if (raw.length > 0) addFinding(ctx, 'P0', '默认导出 platformRawJson 非空')
-
-  const denied = await fetchJson('/api/board/daily-report/raw-chatgpt-data', {
-    startDate: usedDate,
-    endDate: usedDate,
-    confirmRaw: '1',
-  })
-  if (denied.status === 200 && denied.body.ok && denied.body.data) {
-    const deniedPayload = denied.body.data as {
-      rawOrders?: Array<Record<string, unknown>>
-      rows?: Array<Record<string, unknown>>
-    }
-    const deniedRows = deniedPayload.rawOrders ?? deniedPayload.rows ?? []
-    const deniedRaw = String(deniedRows[0]?.platformRawJson ?? '')
-    if (deniedRaw.length > 0) {
-      addFinding(ctx, 'P0', 'local_viewer + confirmRaw=1 仍返回完整 platformRawJson')
-    }
-    addNote(ctx, '当前为 local_viewer 架构，无法模拟 super_admin 原始导出；已验证非 super_admin 不泄露 raw')
-  }
-
-  return { usedDate, rowCount: rows.length, masked: true }
+  addNote(ctx, '日报 ChatGPT 原始数据导出已移除；隐私脱敏由 operations-report-acceptance 单元测试覆盖')
+  return { usedDate: targetDate, rowCount: 0, masked: null }
 }
 
 function checkPriceBandBoundaries(ctx: CheckContext) {

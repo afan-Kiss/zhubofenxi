@@ -14,12 +14,6 @@ import { DailyReportZoomPanImage } from './DailyReportZoomPanImage'
 import {
   resolveDailyReportImageFetchUrl,
 } from '../../lib/daily-report-image-url'
-import {
-  buildChatGptRawOrderPrompt,
-  copyTextToClipboard,
-  normalizeAiSuggestionText,
-  type DailyReportRawChatGptPayload,
-} from './dailyReportFormatters'
 import { ViewportModal } from '../ui/ViewportModal'
 
 async function waitForNextPaint(): Promise<void> {
@@ -196,25 +190,14 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   const [loading, setLoading] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
   const [report, setReport] = useState<DailyReportPayload | null>(null)
-  const [aiSuggestionLines, setAiSuggestionLines] = useState<string[]>([])
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
-  const [aiInputOpen, setAiInputOpen] = useState(false)
-  const [aiDraft, setAiDraft] = useState('')
-  const [clipboardFallbackText, setClipboardFallbackText] = useState<string | null>(null)
-  const [copyingRawData, setCopyingRawData] = useState(false)
   const [pendingCapture, setPendingCapture] = useState(false)
   const [shipmentPhotos, setShipmentPhotos] = useState<DailyReportImageItem[]>([])
   const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
 
   const isSingleDay = startDate.trim() === endDate.trim() && Boolean(startDate.trim())
-
-  const showToast = useCallback((msg: string) => {
-    setToast(msg)
-    window.setTimeout(() => setToast(null), 2800)
-  }, [])
 
   const closePreview = useCallback(() => {
     setPreviewOpen(false)
@@ -264,7 +247,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     return () => {
       cancelled = true
     }
-  }, [pendingCapture, report, aiSuggestionLines, captureImage])
+  }, [pendingCapture, report, captureImage])
 
   const handleViewReport = async () => {
     if (loading || disabled || capturing) return
@@ -289,7 +272,6 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
       setShipmentPhotos(photos)
       setShipmentPhotoDataUrls(dataUrlMap)
       setReport(data)
-      setAiSuggestionLines([])
       setImageDataUrl(null)
       setPreviewOpen(false)
       setPendingCapture(true)
@@ -297,51 +279,6 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
       setError(e instanceof Error ? e.message : '加载日报失败')
       setLoading(false)
     }
-  }
-
-  const openAiInputModal = (prefill = '') => {
-    setAiDraft(prefill || aiSuggestionLines.join('\n'))
-    setClipboardFallbackText(null)
-    setAiInputOpen(true)
-  }
-
-  const handleCopyForChatGpt = async () => {
-    if (!report || copyingRawData) return
-    setCopyingRawData(true)
-    setError(null)
-    try {
-      const qs = new URLSearchParams({ startDate, endDate })
-      if (preset) qs.set('preset', preset)
-      const rawData = await apiRequest<DailyReportRawChatGptPayload>(
-        `/board/daily-report/raw-chatgpt-data?${qs}`,
-      )
-      const prompt = buildChatGptRawOrderPrompt(rawData)
-      const copied = await copyTextToClipboard(prompt)
-      if (copied) {
-        showToast('已复制当前时间段原始订单数据，请粘贴给 ChatGPT 分析。')
-        setClipboardFallbackText(null)
-      } else {
-        setClipboardFallbackText(prompt)
-        showToast('复制失败，请手动复制弹窗里的数据。')
-      }
-      openAiInputModal()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '加载小红书原始订单数据失败')
-    } finally {
-      setCopyingRawData(false)
-    }
-  }
-
-  const handleApplyAiSuggestion = async () => {
-    const normalized = normalizeAiSuggestionText(aiDraft)
-    if (normalized.length === 0) {
-      showToast('请先粘贴 AI 建议')
-      return
-    }
-    setAiSuggestionLines(normalized)
-    setAiInputOpen(false)
-    setPendingCapture(true)
-    showToast('AI建议已加入日报图片')
   }
 
   if (!isSingleDay) return null
@@ -353,7 +290,6 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
             <DailyReportImageSheet
               ref={sheetRef}
               data={report}
-              aiSuggestionLines={aiSuggestionLines}
               shipmentPhotos={shipmentPhotos.map((p) => ({
                 id: p.id,
                 publicUrl: p.publicUrl,
@@ -379,7 +315,6 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
             {loading || capturing ? '生成中...' : '查看日报'}
           </button>
           {error ? <p className="text-sm text-red-600">{error}</p> : null}
-          {toast ? <p className="text-sm text-emerald-700">{toast}</p> : null}
         </div>
         <DailyReportShipmentPhotos
           reportDate={startDate}
@@ -413,26 +348,6 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
             </button>
           </div>
 
-          <div className="mb-3 flex shrink-0 flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={copyingRawData}
-              onClick={() => void handleCopyForChatGpt()}
-              className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {copyingRawData ? '复制中...' : '复制原始数据给 ChatGPT'}
-            </button>
-            {aiSuggestionLines.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => openAiInputModal()}
-                className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                重新填写 AI 建议
-              </button>
-            ) : null}
-          </div>
-
           <DailyReportZoomPanImage
             src={imageDataUrl}
             alt="主播日报"
@@ -443,48 +358,6 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
           ) : null}
         </ViewportModal>
       ) : null}
-
-      <ViewportModal
-        open={aiInputOpen}
-        onClose={() => setAiInputOpen(false)}
-        zIndexClass="z-[10001]"
-        panelClassName="w-full max-w-lg overflow-visible p-5"
-        backdropClassName="bg-black/45"
-      >
-        <p className="text-base font-semibold text-slate-900">粘贴 ChatGPT 返回的 AI 建议</p>
-        <p className="mt-2 text-sm leading-6 text-slate-600">
-          已复制当前时间段的小红书原始订单业务数据，请发送给 ChatGPT，然后把返回的 AI建议粘贴到这里。
-        </p>
-        {clipboardFallbackText ? (
-          <textarea
-            readOnly
-            value={clipboardFallbackText}
-            className="mt-3 h-28 w-full resize-none rounded-xl border border-amber-200 bg-amber-50/40 p-3 text-xs leading-5 text-slate-700"
-          />
-        ) : null}
-        <textarea
-          value={aiDraft}
-          onChange={(e) => setAiDraft(e.target.value)}
-          placeholder="粘贴 ChatGPT 返回的 AI 建议..."
-          className="mt-3 h-40 w-full resize-y rounded-xl border border-slate-200 p-3 text-sm leading-6 text-slate-800 outline-none focus:border-rose-300"
-        />
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={() => setAiInputOpen(false)}
-            className="rounded-full border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleApplyAiSuggestion()}
-            className="rounded-full border border-rose-200 bg-rose-600 px-4 py-2 text-sm font-medium text-white hover:bg-rose-700"
-          >
-            应用到日报
-          </button>
-        </div>
-      </ViewportModal>
     </>
   )
 }

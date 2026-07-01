@@ -154,7 +154,7 @@ function resolveXiaoBaiAnchor(config: AnchorConfig): { anchorId: string; anchorN
   return { anchorId: found?.id ?? 'extra-小白', anchorName: '小白' }
 }
 
-/** 日报 / ChatGPT 导出使用的主播列表：6.13 前走后台配置，6.13 起固定四人场次 */
+/** 日报使用的主播列表：6.13 前走后台配置，6.13 起固定四人场次 */
 export function resolveDailyReportAnchors(
   config: AnchorConfig,
   useShopSessionRules: boolean,

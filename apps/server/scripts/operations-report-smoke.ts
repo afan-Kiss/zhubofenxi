@@ -220,54 +220,9 @@ async function checkReviewNote(sampleDate: string) {
   pass('review-note 无笔记时不报错（data 可为 null）')
 }
 
-async function checkPrivacyExport(sampleDate: string) {
-  const datesToTry = [sampleDate, addDaysShanghai(formatDateKeyShanghai(new Date()), -1)]
-  let rows: Array<Record<string, unknown>> = []
-  let usedDate = sampleDate
-  for (const d of datesToTry) {
-    try {
-      const data = await fetchExpectOk<{ rows?: Array<Record<string, unknown>>; rawOrders?: Array<Record<string, unknown>> }>(
-        '/api/board/daily-report/raw-chatgpt-data',
-        { startDate: d, endDate: d },
-      )
-      const candidate = data.rawOrders ?? data.rows ?? []
-      if (candidate.length > 0) {
-        rows = candidate
-        usedDate = d
-        break
-      }
-    } catch {
-      /* try next */
-    }
-  }
-  if (rows.length === 0) {
-    note(`${usedDate} raw-chatgpt 无订单行，隐私脱敏结构跳过（验收脚本已覆盖 sanitize）`)
-    return
-  }
-  const row = rows[0]
-  const phone = String(row.receiverPhone ?? '')
-  const raw = String(row.platformRawJson ?? '')
-  assert(!/\d{11}/.test(phone), '默认导出手机号已脱敏')
-  assert(raw === '', '默认导出 platformRawJson 为空')
-  pass('privacy 默认脱敏通过')
-
-  const denied = await fetchJson('/api/board/daily-report/raw-chatgpt-data', {
-    startDate: usedDate,
-    endDate: usedDate,
-    confirmRaw: '1',
-  })
-  if (denied.status === 200 && denied.body.ok && denied.body.data) {
-    const deniedPayload = denied.body.data as {
-      rows?: Array<Record<string, unknown>>
-      rawOrders?: Array<Record<string, unknown>>
-    }
-    const deniedRows = deniedPayload.rawOrders ?? deniedPayload.rows ?? []
-    const deniedRaw = deniedRows[0]?.platformRawJson
-    assert(deniedRaw === '' || deniedRaw == null, 'local_viewer + confirmRaw=1 仍不返回 raw JSON')
-    note('当前为 local_viewer 架构，无法模拟 super_admin 原始导出；已验证非 super_admin 不泄露 raw')
-  } else {
-    pass('local_viewer confirmRaw=1 未返回完整 raw（或非 200）')
-  }
+async function checkPrivacyExport(_sampleDate: string) {
+  note('日报 ChatGPT 原始数据导出已移除；隐私脱敏由 operations-report-acceptance 单元测试覆盖')
+  pass('privacy 默认脱敏（单元测试覆盖）')
 }
 
 function checkDailyCaliber(daily: DailyPayload, sampleDate: string) {

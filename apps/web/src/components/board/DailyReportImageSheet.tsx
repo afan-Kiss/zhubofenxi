@@ -55,7 +55,6 @@ export interface DailyReportPayload {
 
 interface Props {
   data: DailyReportPayload
-  aiSuggestionLines: string[]
   shipmentPhotos?: Array<{
     id: string
     publicUrl: string
@@ -125,10 +124,9 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
 }
 
 export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(function DailyReportImageSheet(
-  { data, aiSuggestionLines, shipmentPhotos = [] },
+  { data, shipmentPhotos = [] },
   ref,
 ) {
-  const hasAiSuggestions = aiSuggestionLines.length > 0
   const readyPhotos = shipmentPhotos.filter((photo) => photo.dataUrl).slice(0, 12)
   const extraPhotoCount = Math.max(0, shipmentPhotos.filter((photo) => photo.dataUrl).length - readyPhotos.length)
   const photoGridCols = readyPhotos.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'
@@ -192,23 +190,6 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
         {data.anchors.map((row) => (
           <AnchorCard key={`${row.anchorName}-${row.sessionLabel}`} row={row} />
         ))}
-      </div>
-
-      <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-4">
-        <p className="text-[14px] font-semibold text-slate-900">AI建议</p>
-        {hasAiSuggestions ? (
-          <ol className="mt-3 space-y-2 text-[13px] leading-6 text-slate-700">
-            {aiSuggestionLines.map((item, idx) => (
-              <li key={`${idx}-${item.slice(0, 24)}`} className="break-words">
-                {idx + 1}. {item}
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p className="mt-3 text-[13px] leading-6 text-slate-500">
-            AI建议待填写，点击「复制原始数据给 ChatGPT」生成建议后填入。
-          </p>
-        )}
       </div>
 
       {readyPhotos.length > 0 ? (

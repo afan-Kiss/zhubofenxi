@@ -267,32 +267,6 @@ boardRouter.get('/daily-report', async (req, res) => {
   }
 })
 
-boardRouter.get('/daily-report/raw-chatgpt-data', async (req, res) => {
-  try {
-    const startDate = req.query.startDate ? String(req.query.startDate) : ''
-    const endDate = req.query.endDate ? String(req.query.endDate) : ''
-    if (!startDate || !endDate) {
-      sendFail(res, '请提供 startDate 与 endDate', 400)
-      return
-    }
-    const confirmRaw = req.query.confirmRaw === '1' || req.query.confirmRaw === 'true'
-    const { buildDailyReportRawChatGptData } = await import(
-      '../services/daily-report-raw-chatgpt.service'
-    )
-    const data = await buildDailyReportRawChatGptData({
-      preset: req.query.preset ? String(req.query.preset) : 'custom',
-      startDate,
-      endDate,
-      role: req.user!.role as import('../types/roles').UserRole,
-      username: req.user!.username,
-      confirmRaw,
-    })
-    sendOk(res, data)
-  } catch (err) {
-    sendFail(res, err instanceof Error ? err.message : '加载小红书原始订单数据失败', 500)
-  }
-})
-
 boardRouter.get('/operations-report/daily', async (req, res) => {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : ''

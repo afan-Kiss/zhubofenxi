@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Calendar, Copy, Plus, RefreshCw, Save, Trash2, Wand2 } from 'lucide-react'
+import { ArrowLeft, Calendar, ChevronDown, Copy, MoreHorizontal, Plus, RefreshCw, Save, Trash2, Wand2 } from 'lucide-react'
 import { apiRequest, API_PREFIX } from '../../lib/api'
 import {
   conflictIndexes,
@@ -95,6 +95,8 @@ export const AnchorSchedulePage: React.FC = () => {
   const [yesterdayStatus, setYesterdayStatus] = useState<ConfirmStatus | null>(null)
   const [effectiveSummary, setEffectiveSummary] = useState<string | null>(null)
   const [scrollToNewRow, setScrollToNewRow] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreRef = useRef<HTMLDivElement>(null)
 
   const validation = useMemo(() => validateScheduleRows(rows), [rows])
   const conflictRowSet = useMemo(() => conflictIndexes(validation.conflicts), [validation.conflicts])
@@ -149,6 +151,17 @@ export const AnchorSchedulePage: React.FC = () => {
     tableEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
     setScrollToNewRow(false)
   }, [scrollToNewRow, rows.length])
+
+  useEffect(() => {
+    if (!moreOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
+        setMoreOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [moreOpen])
 
   useEffect(() => {
     void (async () => {
@@ -341,25 +354,31 @@ export const AnchorSchedulePage: React.FC = () => {
             onChange={(e) => setDate(e.target.value)}
             className="rounded border border-slate-300 px-2 py-1"
           />
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            title="重新加载"
+            className="rounded border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          </button>
         </label>
       </div>
 
-      <div className="flex flex-wrap gap-4 text-sm">
+      <div className="flex flex-wrap gap-2 text-sm text-slate-600">
         <span className="rounded border border-slate-200 px-2 py-1">
-          今日排班：{todayStatus?.confirmed ? '已确认' : '未确认'}
+          当前日期：{confirmStatus?.confirmed ? '已确认' : '未确认'}
         </span>
-        <span className="rounded border border-slate-200 px-2 py-1">
-          昨日排班：{yesterdayStatus?.confirmed ? '已确认' : '未确认'}
-        </span>
-        {confirmStatus ? (
+        {date !== todayKey() ? (
           <span className="rounded border border-slate-200 px-2 py-1">
-            当前日期：{confirmStatus.confirmed ? '已确认' : '未确认'}
+            今日：{todayStatus?.confirmed ? '已确认' : '未确认'}
           </span>
         ) : null}
       </div>
 
       <div className="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-        下面这张表就是系统计算当天主播业绩时使用的排班。你可以新增、删除、修改，保存后当天业绩会重新计算。有冲突时不能保存。
+        编辑下方排班后点「保存并确认」，系统会按新排班重算当天业绩，并用于日报迟到判断。
         {effectiveSummary ? <span className="mt-1 block text-sky-800">{effectiveSummary}</span> : null}
       </div>
 
@@ -377,73 +396,98 @@ export const AnchorSchedulePage: React.FC = () => {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => void handleGenerateDefault()}
-          disabled={saving || loading}
-          className="inline-flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200 disabled:opacity-50"
-        >
-          <Wand2 size={14} />
-          生成默认排班
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleCopyYesterday()}
-          disabled={saving || loading}
-          className="inline-flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200 disabled:opacity-50"
-        >
-          <Copy size={14} />
-          复制昨天
-        </button>
-        <button
-          type="button"
-          onClick={addRow}
-          className="inline-flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200"
-        >
-          <Plus size={14} />
-          新增排班
-        </button>
-        <button
-          type="button"
-          onClick={() => void load()}
-          disabled={loading}
-          className="inline-flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200"
-        >
-          <RefreshCw size={14} />
-          刷新
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleConfirm(todayKey())}
-          disabled={saving}
-          className="inline-flex items-center gap-1 rounded bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 hover:bg-emerald-100"
-        >
-          确认今日排班
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleConfirm(yesterdayKey())}
-          disabled={saving}
-          className="inline-flex items-center gap-1 rounded bg-emerald-50 px-3 py-1.5 text-sm text-emerald-800 hover:bg-emerald-100"
-        >
-          确认昨日排班
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleSave(false)}
-          disabled={saving || loading || hasBlockingIssues}
-          className="inline-flex items-center gap-1 rounded bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-700 disabled:opacity-50"
-        >
-          <Save size={14} />
-          保存当天排班
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={addRow}
+            className="inline-flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200"
+          >
+            <Plus size={14} />
+            新增
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleCopyYesterday()}
+            disabled={saving || loading}
+            className="inline-flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200 disabled:opacity-50"
+          >
+            <Copy size={14} />
+            复制昨天
+          </button>
+          <div className="relative" ref={moreRef}>
+            <button
+              type="button"
+              onClick={() => setMoreOpen((v) => !v)}
+              className="inline-flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200"
+            >
+              <MoreHorizontal size={14} />
+              更多
+              <ChevronDown size={14} />
+            </button>
+            {moreOpen ? (
+              <div className="absolute left-0 top-full z-20 mt-1 min-w-[10rem] rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false)
+                    void handleGenerateDefault()
+                  }}
+                  disabled={saving || loading}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <Wand2 size={14} />
+                  生成默认排班
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreOpen(false)
+                    void handleSave(false)
+                  }}
+                  disabled={saving || loading || hasBlockingIssues}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <Save size={14} />
+                  仅保存（不确认）
+                </button>
+                {!confirmStatus?.confirmed ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreOpen(false)
+                      void handleConfirm(date)
+                    }}
+                    disabled={saving || rows.length === 0}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    仅确认当前日期
+                  </button>
+                ) : null}
+                {date !== yesterdayKey() && !yesterdayStatus?.confirmed ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreOpen(false)
+                      void handleConfirm(yesterdayKey())
+                    }}
+                    disabled={saving}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    确认昨日排班
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        </div>
         <button
           type="button"
           onClick={() => void handleSave(true)}
           disabled={saving || loading || hasBlockingIssues}
-          className="inline-flex items-center gap-1 rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-800 disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-700 disabled:opacity-50"
         >
+          <Save size={14} />
           保存并确认
         </button>
       </div>
@@ -555,7 +599,7 @@ export const AnchorSchedulePage: React.FC = () => {
             {!loading && rows.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
-                  当天暂无排班，可点击「生成默认排班」或「新增排班」
+                  当天暂无排班，可点「更多 → 生成默认排班」或「新增」
                 </td>
               </tr>
             ) : null}

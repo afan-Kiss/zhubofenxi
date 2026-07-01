@@ -56,6 +56,11 @@ export interface DailyReportPayload {
 interface Props {
   data: DailyReportPayload
   aiSuggestionLines: string[]
+  shipmentPhotos?: Array<{
+    id: string
+    publicUrl: string
+    caption: string | null
+  }>
 }
 
 function MetricLine({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
@@ -119,10 +124,12 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
 }
 
 export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(function DailyReportImageSheet(
-  { data, aiSuggestionLines },
+  { data, aiSuggestionLines, shipmentPhotos = [] },
   ref,
 ) {
   const hasAiSuggestions = aiSuggestionLines.length > 0
+  const displayPhotos = shipmentPhotos.slice(0, 12)
+  const extraPhotoCount = Math.max(0, shipmentPhotos.length - displayPhotos.length)
 
   return (
     <div
@@ -198,6 +205,29 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
           </p>
         )}
       </div>
+
+      {displayPhotos.length > 0 ? (
+        <div className="mt-5 rounded-2xl border border-slate-100 bg-white p-4">
+          <p className="text-[14px] font-semibold text-slate-900">发货前照片</p>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {displayPhotos.map((photo) => (
+              <div key={photo.id} className="overflow-hidden rounded-lg border border-slate-100 bg-slate-50">
+                <img
+                  src={photo.publicUrl}
+                  alt={photo.caption ?? '发货前照片'}
+                  className="aspect-square w-full object-contain"
+                />
+                {photo.caption ? (
+                  <p className="truncate px-2 py-1 text-[11px] text-slate-600">{photo.caption}</p>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          {extraPhotoCount > 0 ? (
+            <p className="mt-2 text-[12px] text-slate-500">另有 {extraPhotoCount} 张发货前照片</p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 })

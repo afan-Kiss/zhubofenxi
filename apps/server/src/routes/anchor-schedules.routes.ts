@@ -8,6 +8,7 @@ import {
   saveDailySchedules,
   validateDailySchedulesBody,
   buildScheduleMutationResult,
+  ScheduleSaveError,
 } from '../services/anchor-daily-schedule.service'
 import {
   confirmDailySchedules,
@@ -107,6 +108,15 @@ anchorSchedulesRouter.post('/', async (req, res, next) => {
     await recalculateAnchorDataForDate(date)
     sendOk(res, { ok: true, ...data, ...buildScheduleMutationResult(date) })
   } catch (err) {
+    if (err instanceof ScheduleSaveError) {
+      res.status(400).json({
+        ok: false,
+        success: false,
+        message: err.message,
+        conflicts: err.conflicts,
+      })
+      return
+    }
     sendFail(res, err instanceof Error ? err.message : '保存排班失败', 400)
   }
 })

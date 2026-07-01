@@ -94,6 +94,7 @@ export function scheduleIntervalsOverlap(aStart: Date, aEnd: Date, bStart: Date,
 }
 
 export interface ScheduleOverlapInterval {
+  anchorName?: string
   shopName: string
   liveRoomName: string
   startAt: Date
@@ -111,37 +112,59 @@ export function scheduleIntervalsOverlapSameRoom(
   )
 }
 
+function intervalsOverlapSameAnchor(a: ScheduleOverlapInterval, b: ScheduleOverlapInterval): boolean {
+  if (!a.anchorName?.trim() || !b.anchorName?.trim()) return false
+  return (
+    a.anchorName.trim() === b.anchorName.trim() &&
+    scheduleIntervalsOverlap(a.startAt, a.endAt, b.startAt, b.endAt)
+  )
+}
+
 export function filterVirtualSchedulesAgainstOccupied<T extends ScheduleOverlapInterval>(
   virtualRows: T[],
   occupiedRows: ScheduleOverlapInterval[],
 ): { kept: T[]; skipped: T[] } {
   const kept: T[] = []
   const skipped: T[] = []
+  const accepted: ScheduleOverlapInterval[] = [...occupiedRows]
+
   for (const v of virtualRows) {
-    const overlaps = occupiedRows.some((row) => scheduleIntervalsOverlapSameRoom(row, v))
-    if (overlaps) skipped.push(v)
-    else kept.push(v)
+    const roomConflict = accepted.some((row) => scheduleIntervalsOverlapSameRoom(row, v))
+    const anchorConflict = accepted.some((row) => intervalsOverlapSameAnchor(row, v))
+    if (roomConflict || anchorConflict) {
+      skipped.push(v)
+    } else {
+      kept.push(v)
+      accepted.push(v)
+    }
   }
   return { kept, skipped }
 }
 
-function formatHmFromDate(d: Date): string {
+/** 结束时间为次日 00:00 时显示 24:00；开始时间 00:00 仍显示 00:00 */
+export function formatHmFromDate(d: Date, scheduleDate: string, role: 'start' | 'end' = 'start'): string {
+  const dateKey = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
   const hm = d.toLocaleTimeString('zh-CN', {
     timeZone: 'Asia/Shanghai',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false,
   })
-  const endDateKey = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
-  const startDateKey = new Date(d.getTime() - 60000).toLocaleDateString('en-CA', {
-    timeZone: 'Asia/Shanghai',
-  })
-  if (hm === '00:00' && endDateKey > startDateKey) return '24:00'
+  if (role === 'end' && hm === '00:00' && dateKey > scheduleDate) return '24:00'
   return hm
 }
 
-function formatIntervalRange(row: IntervalLike): string {
-  return `${formatHmFromDate(row.startAt)}-${formatHmFromDate(row.endAt)}`
+function scheduleDateFromInterval(row: IntervalLike): string {
+  return row.startAt.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+}
+
+function formatIntervalRange(row: IntervalLike, scheduleDate?: string): string {
+  const dateKey = scheduleDate ?? scheduleDateFromInterval(row)
+  return `${formatHmFromDate(row.startAt, dateKey, 'start')}-${formatHmFromDate(row.endAt, dateKey, 'end')}`
+}
+
+function roomLabel(row: IntervalLike): string {
+  return row.liveRoomName.trim() || row.shopName.trim()
 }
 
 export function detectScheduleConflicts(rows: IntervalLike[]): ScheduleConflict[] {
@@ -154,15 +177,16 @@ export function detectScheduleConflicts(rows: IntervalLike[]): ScheduleConflict[
       const b = enabled[j]!
       if (!scheduleIntervalsOverlap(a.startAt, a.endAt, b.startAt, b.endAt)) continue
 
+      const dateKey = scheduleDateFromInterval(a)
       if (sameShop(a, b)) {
         conflicts.push({
           type: 'shop_overlap',
-          message: `${a.liveRoomName} ${formatIntervalRange(a)} 已经排给${a.anchorName}，不能同时再排给${b.anchorName}（${formatIntervalRange(b)}）`,
+          message: `${roomLabel(a)} ${formatIntervalRange(a, dateKey)} 同时安排了${a.anchorName}和${b.anchorName}，请保留一个。`,
         })
       } else if (a.anchorName === b.anchorName) {
         conflicts.push({
           type: 'anchor_overlap',
-          message: `主播「${a.anchorName}」在 ${formatIntervalRange(a)} 已排 ${a.liveRoomName}，与 ${b.liveRoomName} ${formatIntervalRange(b)} 时间重叠`,
+          message: `${a.anchorName}在 ${formatIntervalRange(a, dateKey)} 已排 ${roomLabel(a)}，同时又排了 ${roomLabel(b)} ${formatIntervalRange(b, dateKey)}，请删掉一条或调整时间。`,
         })
       }
     }

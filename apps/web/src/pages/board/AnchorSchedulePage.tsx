@@ -1,7 +1,12 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowLeft, Calendar, Copy, Plus, RefreshCw, Save, Wand2 } from 'lucide-react'
-import { apiRequest } from '../../lib/api'
+import { ArrowLeft, Calendar, Copy, Plus, RefreshCw, Save, Trash2, Wand2 } from 'lucide-react'
+import { apiRequest, API_PREFIX } from '../../lib/api'
+import {
+  conflictIndexes,
+  rowConflictMessages,
+  validateScheduleRows,
+} from '../../lib/anchor-schedule-conflicts'
 import { invalidateBoardLiveQueryCache } from '../../lib/board-live-query-cache'
 import { useBoardLiveQuery } from '../../providers/BoardLiveQueryProvider'
 
@@ -32,6 +37,7 @@ interface ScheduleResponse {
     }
   >
   warnings: string[]
+  hasManualDay?: boolean
   effectiveTable?: {
     date: string
     confirmed: boolean
@@ -58,9 +64,25 @@ const yesterdayKey = () => {
 }
 
 const SHOP_OPTIONS = ['XY祥钰珠宝', '和田雅玉', '拾玉居和田玉', '祥钰珠宝']
+const DEFAULT_SHOP = 'XY祥钰珠宝'
+
+function sourceLabel(source?: string): string {
+  if (source === 'manual') return '人工排班'
+  if (source === 'virtual_template') return '系统模板补齐'
+  return '默认排班'
+}
+
+function defaultEndFromStart(startTime: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(startTime.trim())
+  if (!m) return '18:00'
+  const mins = Number(m[1]) * 60 + Number(m[2])
+  if (mins >= 24 * 60) return '24:00'
+  return '24:00'
+}
 
 export const AnchorSchedulePage: React.FC = () => {
   const { reload } = useBoardLiveQuery()
+  const tableEndRef = useRef<HTMLTableRowElement>(null)
   const [date, setDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }))
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [warnings, setWarnings] = useState<string[]>([])
@@ -72,6 +94,11 @@ export const AnchorSchedulePage: React.FC = () => {
   const [todayStatus, setTodayStatus] = useState<ConfirmStatus | null>(null)
   const [yesterdayStatus, setYesterdayStatus] = useState<ConfirmStatus | null>(null)
   const [effectiveSummary, setEffectiveSummary] = useState<string | null>(null)
+  const [scrollToNewRow, setScrollToNewRow] = useState(false)
+
+  const validation = useMemo(() => validateScheduleRows(rows), [rows])
+  const conflictRowSet = useMemo(() => conflictIndexes(validation.conflicts), [validation.conflicts])
+  const hasBlockingIssues = validation.fieldErrors.length > 0 || validation.conflicts.length > 0
 
   const applyScheduleResponse = (data: ScheduleResponse) => {
     setRows(
@@ -111,11 +138,17 @@ export const AnchorSchedulePage: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [date])
+  }, [date, reload])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!scrollToNewRow) return
+    tableEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    setScrollToNewRow(false)
+  }, [scrollToNewRow, rows.length])
 
   useEffect(() => {
     void (async () => {
@@ -144,6 +177,7 @@ export const AnchorSchedulePage: React.FC = () => {
       applyScheduleResponse(data)
       setMessage('已生成当天默认排班')
       afterScheduleMutation()
+      void reload()
     } catch (e) {
       setError(e instanceof Error ? e.message : '生成失败')
     } finally {
@@ -165,6 +199,7 @@ export const AnchorSchedulePage: React.FC = () => {
       applyScheduleResponse(data)
       setMessage(`已从 ${fromKey} 复制排班`)
       afterScheduleMutation()
+      void reload()
     } catch (e) {
       setError(e instanceof Error ? e.message : '复制失败')
     } finally {
@@ -172,44 +207,44 @@ export const AnchorSchedulePage: React.FC = () => {
     }
   }
 
-  const handleValidate = async () => {
-    setError(null)
-    try {
-      const result = await apiRequest<{ ok: boolean; conflicts: Array<{ message: string }>; warnings: string[] }>(
-        '/anchor-schedules/validate',
-        {
-          method: 'POST',
-          body: JSON.stringify({ date, schedules: rows }),
-        },
-      )
-      setWarnings([...(result.warnings ?? []), ...(result.conflicts?.map((c) => c.message) ?? [])])
-      if (result.ok) setMessage('排班校验通过，无冲突')
-      else setError('存在排班冲突，请修改后保存')
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '校验失败')
-    }
-  }
-
   const handleSave = async (confirm = false) => {
+    if (hasBlockingIssues) return
     setSaving(true)
     setError(null)
     setMessage(null)
     try {
-      const data = await apiRequest<ScheduleResponse>('/anchor-schedules', {
+      const res = await fetch(`${API_PREFIX}/anchor-schedules`, {
         method: 'POST',
-        body: JSON.stringify({ date, schedules: rows, confirm }),
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          date,
+          schedules: rows.map((r) => ({
+            ...r,
+            source: 'manual',
+          })),
+          confirm,
+        }),
       })
-      applyScheduleResponse(data)
+      const body = (await res.json()) as ScheduleResponse & {
+        ok?: boolean
+        message?: string
+        conflicts?: Array<{ message: string }>
+        data?: ScheduleResponse
+      }
+      const payload = body.data ?? body
+      if (!res.ok || body.ok === false) {
+        const conflictMsg = body.conflicts?.map((c) => c.message).join('；')
+        throw new Error(conflictMsg || body.message || '保存失败')
+      }
+      applyScheduleResponse(payload as ScheduleResponse)
       setMessage(
         confirm
           ? '排班已保存并确认，系统已按新排班重新计算当天业绩。'
           : '排班已保存，系统已按新排班重新计算当天业绩。',
       )
-      await apiRequest('/board/anchor-pocket-summary/recalculate', {
-        method: 'POST',
-        body: JSON.stringify({ date }),
-      })
       afterScheduleMutation()
+      void reload()
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败')
     } finally {
@@ -228,6 +263,7 @@ export const AnchorSchedulePage: React.FC = () => {
       if (targetDate === date) await load()
       setMessage(`${targetDate} 排班已确认`)
       afterScheduleMutation()
+      void reload()
     } catch (e) {
       setError(e instanceof Error ? e.message : '确认失败')
     } finally {
@@ -236,22 +272,52 @@ export const AnchorSchedulePage: React.FC = () => {
   }
 
   const updateRow = (index: number, patch: Partial<ScheduleRow>) => {
-    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)))
+    setRows((prev) =>
+      prev.map((r, i) =>
+        i === index
+          ? {
+              ...r,
+              ...patch,
+              source: 'manual',
+            }
+          : r,
+      ),
+    )
+  }
+
+  const deleteRow = (index: number) => {
+    const row = rows[index]
+    if (!row) return
+    const label = row.anchorName.trim() || row.liveRoomName || '这条排班'
+    if (
+      !window.confirm(
+        `确定删除「${label}」吗？保存后当天业绩会按新排班重算。`,
+      )
+    ) {
+      return
+    }
+    setRows((prev) => prev.filter((_, i) => i !== index))
   }
 
   const addRow = () => {
+    const last = rows[rows.length - 1]
+    const shop = last?.shopName?.trim() || last?.liveRoomName?.trim() || DEFAULT_SHOP
+    const startTime = last?.endTime === '24:00' ? '18:00' : last?.endTime?.trim() || '09:00'
+    const endTime = last ? defaultEndFromStart(startTime) : '18:00'
     setRows((prev) => [
       ...prev,
       {
         anchorName: '',
-        shopName: 'XY祥钰珠宝',
-        liveRoomName: 'XY祥钰珠宝',
-        startTime: '14:30',
-        endTime: '18:00',
+        shopName: shop,
+        liveRoomName: shop,
+        startTime,
+        endTime,
         enabled: true,
         note: '',
+        source: 'manual',
       },
     ])
+    setScrollToNewRow(true)
   }
 
   return (
@@ -289,6 +355,25 @@ export const AnchorSchedulePage: React.FC = () => {
         ) : null}
       </div>
 
+      <div className="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
+        下面这张表就是系统计算当天主播业绩时使用的排班。你可以新增、删除、修改，保存后当天业绩会重新计算。有冲突时不能保存。
+        {effectiveSummary ? <span className="mt-1 block text-sky-800">{effectiveSummary}</span> : null}
+      </div>
+
+      {validation.conflicts.length > 0 ? (
+        <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+          当前排班有冲突，不能保存。请先调整或删除冲突行。
+        </div>
+      ) : null}
+
+      {validation.fieldErrors.length > 0 ? (
+        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {validation.fieldErrors.map((w) => (
+            <div key={w}>{w}</div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -318,13 +403,6 @@ export const AnchorSchedulePage: React.FC = () => {
         </button>
         <button
           type="button"
-          onClick={() => void handleValidate()}
-          className="inline-flex items-center gap-1 rounded bg-amber-50 px-3 py-1.5 text-sm text-amber-800 hover:bg-amber-100"
-        >
-          检查冲突
-        </button>
-        <button
-          type="button"
           onClick={() => void load()}
           disabled={loading}
           className="inline-flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200"
@@ -351,7 +429,7 @@ export const AnchorSchedulePage: React.FC = () => {
         <button
           type="button"
           onClick={() => void handleSave(false)}
-          disabled={saving || loading}
+          disabled={saving || loading || hasBlockingIssues}
           className="inline-flex items-center gap-1 rounded bg-sky-600 px-3 py-1.5 text-sm text-white hover:bg-sky-700 disabled:opacity-50"
         >
           <Save size={14} />
@@ -360,18 +438,13 @@ export const AnchorSchedulePage: React.FC = () => {
         <button
           type="button"
           onClick={() => void handleSave(true)}
-          disabled={saving || loading}
+          disabled={saving || loading || hasBlockingIssues}
           className="inline-flex items-center gap-1 rounded bg-sky-700 px-3 py-1.5 text-sm text-white hover:bg-sky-800 disabled:opacity-50"
         >
           保存并确认
         </button>
       </div>
 
-      {effectiveSummary ? (
-        <div className="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-          下面这张表就是系统计算当天主播业绩时使用的排班。{effectiveSummary}。你修改并保存后，当天业绩会重新计算。
-        </div>
-      ) : null}
       {message ? (
         <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{message}</div>
       ) : null}
@@ -394,76 +467,92 @@ export const AnchorSchedulePage: React.FC = () => {
               <th className="px-3 py-2">结束</th>
               <th className="px-3 py-2">来源</th>
               <th className="px-3 py-2">备注</th>
+              <th className="px-3 py-2">操作</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, index) => (
-              <tr key={`${row.anchorName}-${index}`} className="border-t border-slate-100">
-                <td className="px-3 py-2">
-                  <input
-                    value={row.anchorName}
-                    onChange={(e) => updateRow(index, { anchorName: e.target.value })}
-                    className="w-24 rounded border border-slate-200 px-2 py-1"
-                    placeholder="主播名"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <select
-                    value={row.liveRoomName}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      updateRow(index, { liveRoomName: v, shopName: v })
-                    }}
-                    className="rounded border border-slate-200 px-2 py-1"
-                  >
-                    {SHOP_OPTIONS.map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    type="time"
-                    value={row.startTime}
-                    onChange={(e) => updateRow(index, { startTime: e.target.value })}
-                    className="rounded border border-slate-200 px-2 py-1"
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    type="time"
-                    value={row.endTime === '24:00' ? '23:59' : row.endTime}
-                    onChange={(e) => {
-                      const v = e.target.value === '23:59' ? '24:00' : e.target.value
-                      updateRow(index, { endTime: v })
-                    }}
-                    className="rounded border border-slate-200 px-2 py-1"
-                  />
-                  {row.endTime === '24:00' ? <span className="ml-1 text-xs text-slate-500">24:00</span> : null}
-                </td>
-                <td className="px-3 py-2 text-slate-500">
-                  {row.source === 'manual'
-                    ? '人工排班'
-                    : row.source === 'virtual_template'
-                      ? '系统模板补齐'
-                      : '默认排班'}
-                </td>
-                <td className="px-3 py-2">
-                  <input
-                    value={row.note ?? ''}
-                    onChange={(e) => updateRow(index, { note: e.target.value })}
-                    className="w-full min-w-[8rem] rounded border border-slate-200 px-2 py-1"
-                    placeholder="备注"
-                  />
-                </td>
-              </tr>
-            ))}
+            {rows.map((row, index) => {
+              const isConflict = conflictRowSet.has(index)
+              const rowTips = rowConflictMessages(index, validation.conflicts)
+              const tip = rowTips.join('\n')
+              return (
+                <tr
+                  key={`${row.anchorName}-${index}-${row.startTime}`}
+                  ref={index === rows.length - 1 ? tableEndRef : undefined}
+                  className={`border-t border-slate-100 ${isConflict ? 'bg-rose-50/80' : ''}`}
+                  title={tip || undefined}
+                >
+                  <td className="px-3 py-2">
+                    <input
+                      value={row.anchorName}
+                      onChange={(e) => updateRow(index, { anchorName: e.target.value })}
+                      className="w-24 rounded border border-slate-200 px-2 py-1"
+                      placeholder="主播名"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <select
+                      value={row.liveRoomName}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        updateRow(index, { liveRoomName: v, shopName: v })
+                      }}
+                      className="rounded border border-slate-200 px-2 py-1"
+                    >
+                      {SHOP_OPTIONS.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="time"
+                      value={row.startTime}
+                      onChange={(e) => updateRow(index, { startTime: e.target.value })}
+                      className="rounded border border-slate-200 px-2 py-1"
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <input
+                      type="time"
+                      value={row.endTime === '24:00' ? '23:59' : row.endTime}
+                      onChange={(e) => {
+                        const v = e.target.value === '23:59' ? '24:00' : e.target.value
+                        updateRow(index, { endTime: v })
+                      }}
+                      className="rounded border border-slate-200 px-2 py-1"
+                    />
+                    {row.endTime === '24:00' ? <span className="ml-1 text-xs text-slate-500">24:00</span> : null}
+                  </td>
+                  <td className="px-3 py-2 text-slate-500">{sourceLabel(row.source)}</td>
+                  <td className="px-3 py-2" title={tip || undefined}>
+                    <input
+                      value={row.note ?? ''}
+                      onChange={(e) => updateRow(index, { note: e.target.value })}
+                      className="w-full min-w-[8rem] rounded border border-slate-200 px-2 py-1"
+                      placeholder={tip || '备注'}
+                    />
+                    {tip ? <p className="mt-1 text-xs text-rose-600">{tip}</p> : null}
+                  </td>
+                  <td className="px-3 py-2">
+                    <button
+                      type="button"
+                      onClick={() => deleteRow(index)}
+                      className="inline-flex items-center gap-1 rounded border border-rose-200 px-2 py-1 text-xs text-rose-700 hover:bg-rose-50"
+                    >
+                      <Trash2 size={12} />
+                      删除
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
             {!loading && rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
-                  当天暂无排班，可点击「生成默认排班」
+                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                  当天暂无排班，可点击「生成默认排班」或「新增排班」
                 </td>
               </tr>
             ) : null}

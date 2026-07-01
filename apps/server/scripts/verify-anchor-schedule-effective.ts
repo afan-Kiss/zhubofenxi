@@ -5,6 +5,7 @@
 import type { AnalyzedOrderView } from '../src/types/analysis'
 import {
   buildScheduleBounds,
+  detectScheduleConflicts,
   filterVirtualSchedulesAgainstOccupied,
   isPayTimeInSchedule,
   scheduleIntervalsOverlap,
@@ -140,7 +141,26 @@ async function run(): Promise<void> {
   )
 
   const normalVirtual = filterVirtualSchedulesAgainstOccupied(virtual0630, [])
-  assert(normalVirtual.kept.length === 6, `6/30 无人工排班时应补齐 6 条模板，实际=${normalVirtual.kept.length}`, issues)
+  assert(
+    normalVirtual.kept.length === 5,
+    `6/30 子杰跨直播间模板冲突应跳过 1 条，实际 kept=${normalVirtual.kept.length}`,
+    issues,
+  )
+  assert(
+    normalVirtual.skipped.some((v) => v.anchorName === '子杰'),
+    '冲突的子杰模板应被跳过',
+    issues,
+  )
+  const virtualConflicts = detectScheduleConflicts(
+    normalVirtual.kept.map((v) => ({
+      anchorName: v.anchorName,
+      shopName: v.shopName,
+      liveRoomName: v.liveRoomName,
+      startAt: v.startAt,
+      endAt: v.endAt,
+    })),
+  )
+  assert(virtualConflicts.length === 0, '补齐后模板行之间不应再有冲突', issues)
 
   const splitOccupied = [
     {

@@ -7,6 +7,10 @@ import {
   type DailyReportPayload,
 } from './DailyReportImageSheet'
 import {
+  DailyReportShipmentPhotos,
+  type DailyReportImageItem,
+} from './DailyReportShipmentPhotos'
+import {
   buildChatGptRawOrderPrompt,
   copyTextToClipboard,
   normalizeAiSuggestionText,
@@ -41,6 +45,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   const [clipboardFallbackText, setClipboardFallbackText] = useState<string | null>(null)
   const [copyingRawData, setCopyingRawData] = useState(false)
   const [pendingCapture, setPendingCapture] = useState(false)
+  const [shipmentPhotos, setShipmentPhotos] = useState<DailyReportImageItem[]>([])
 
   const isSingleDay = startDate.trim() === endDate.trim() && Boolean(startDate.trim())
 
@@ -88,7 +93,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     return () => {
       cancelled = true
     }
-  }, [pendingCapture, report, aiSuggestionLines, captureImage])
+  }, [pendingCapture, report, aiSuggestionLines, shipmentPhotos, captureImage])
 
   const handleViewReport = async () => {
     if (loading || disabled || capturing) return
@@ -163,6 +168,11 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
               ref={sheetRef}
               data={report}
               aiSuggestionLines={aiSuggestionLines}
+              shipmentPhotos={shipmentPhotos.map((p) => ({
+                id: p.id,
+                publicUrl: p.publicUrl,
+                caption: p.caption,
+              }))}
             />
           </div>,
           document.body,
@@ -171,16 +181,21 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
 
   return (
     <>
-      <button
-        type="button"
-        disabled={disabled || loading || capturing}
-        onClick={() => void handleViewReport()}
-        className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        {loading || capturing ? '生成中...' : '查看日报'}
-      </button>
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
-      {toast ? <p className="text-sm text-emerald-700">{toast}</p> : null}
+      <div className="flex w-full flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={disabled || loading || capturing}
+            onClick={() => void handleViewReport()}
+            className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading || capturing ? '生成中...' : '查看日报'}
+          </button>
+          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          {toast ? <p className="text-sm text-emerald-700">{toast}</p> : null}
+        </div>
+        <DailyReportShipmentPhotos reportDate={startDate} onImagesChange={setShipmentPhotos} />
+      </div>
 
       {sheetPortal}
 

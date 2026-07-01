@@ -236,23 +236,32 @@ export function validateScheduleDraft(
   const xb = xiaobaiWarningForDate(dateKey)
   if (xb) warnings.push(xb)
 
-  const intervals = rows
-    .filter((r) => r.enabled !== false)
-    .map((r) => {
-      const { startAt, endAt } = buildScheduleBounds(dateKey, r.startTime, r.endTime)
-      return {
-        anchorName: r.anchorName.trim(),
-        shopName: r.shopName.trim(),
-        liveRoomName: r.liveRoomName.trim(),
-        startAt,
-        endAt,
-      }
-    })
-
-  for (const row of intervals) {
-    if (!row.anchorName) throw new Error('主播不能为空')
-    if (!row.shopName || !row.liveRoomName) throw new Error('店铺/直播间不能为空')
+  const enabledRows = rows.filter((r) => r.enabled !== false)
+  for (let i = 0; i < enabledRows.length; i++) {
+    const r = enabledRows[i]!
+    if (!r.startTime?.trim()) throw new Error(`第 ${i + 1} 行开始时间不能为空`)
+    if (!r.endTime?.trim()) throw new Error(`第 ${i + 1} 行结束时间不能为空`)
+    if (!r.anchorName?.trim()) throw new Error(`第 ${i + 1} 行主播不能为空`)
+    if (!r.shopName?.trim() || !r.liveRoomName?.trim()) {
+      throw new Error(`第 ${i + 1} 行店铺/直播间不能为空`)
+    }
+    const startMin = r.startTime.trim()
+    const endMin = r.endTime.trim()
+    if (startMin === endMin && endMin !== '24:00') {
+      throw new Error(`第 ${i + 1} 行开始时间不能等于结束时间`)
+    }
   }
+
+  const intervals = enabledRows.map((r) => {
+    const { startAt, endAt } = buildScheduleBounds(dateKey, r.startTime, r.endTime)
+    return {
+      anchorName: r.anchorName.trim(),
+      shopName: r.shopName.trim(),
+      liveRoomName: r.liveRoomName.trim(),
+      startAt,
+      endAt,
+    }
+  })
 
   const conflicts = detectScheduleConflicts(intervals)
   return { ok: conflicts.length === 0, conflicts, warnings }

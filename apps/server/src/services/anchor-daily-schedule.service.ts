@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma'
-import { buildScheduleBounds, detectScheduleConflicts, filterVirtualSchedulesAgainstOccupied } from '../utils/anchor-schedule-time.util'
+import { buildScheduleBounds, detectScheduleConflicts, filterVirtualSchedulesAgainstOccupied, type ScheduleConflict } from '../utils/anchor-schedule-time.util'
 import {
   buildVirtualSchedulesFromTemplates,
   listActiveTemplatesForDate,
@@ -45,6 +45,15 @@ export interface ScheduleMutationResult {
   changed: boolean
   affectedDate: string
   shouldRefreshPerformance: boolean
+}
+
+export class ScheduleSaveError extends Error {
+  conflicts: ScheduleConflict[]
+
+  constructor(conflicts: ScheduleConflict[]) {
+    super('当前排班有冲突，不能保存')
+    this.conflicts = conflicts
+  }
 }
 
 export interface DailyScheduleDto {
@@ -138,12 +147,14 @@ function hmFromDate(d: Date, scheduleDate: string): string {
 }
 
 function occupiedIntervalFromDbRow(row: {
+  anchorName: string
   shopName: string
   liveRoomName: string
   startAt: Date
   endAt: Date
 }) {
   return {
+    anchorName: row.anchorName,
     shopName: row.shopName,
     liveRoomName: row.liveRoomName,
     startAt: row.startAt,
@@ -197,18 +208,26 @@ export async function getEffectiveScheduleTableForDate(dateKey: string): Promise
 
   const manualRows = dbRows.filter((r) => r.source === 'manual' || r.locked)
   const generatedRows = dbRows.filter((r) => r.source === 'generated_default' && !r.locked)
+  const hasManualDay = manualRows.length > 0
   const occupiedRows = [...manualRows, ...generatedRows].map(occupiedIntervalFromDbRow)
 
-  const templates = await listActiveTemplatesForDate(dateKey)
-  const allVirtual = buildVirtualSchedulesFromTemplates(dateKey, templates)
-  const { kept: virtualRows, skipped: skippedVirtual } = filterVirtualSchedulesAgainstOccupied(
-    allVirtual,
-    occupiedRows,
-  )
-  for (const v of skippedVirtual) {
-    warnings.push(
-      `${v.liveRoomName} ${hmFromDate(v.startAt, dateKey)}-${hmFromDate(v.endAt, dateKey)} 模板已被当天人工/默认排班覆盖，未重复补齐。`,
-    )
+  let virtualRows: ReturnType<typeof buildVirtualSchedulesFromTemplates> = []
+  let skippedVirtual: ReturnType<typeof buildVirtualSchedulesFromTemplates> = []
+
+  if (!hasManualDay) {
+    const templates = await listActiveTemplatesForDate(dateKey)
+    const allVirtual = buildVirtualSchedulesFromTemplates(dateKey, templates)
+    const filtered = filterVirtualSchedulesAgainstOccupied(allVirtual, occupiedRows)
+    virtualRows = filtered.kept
+    skippedVirtual = filtered.skipped
+    if (skippedVirtual.length > 0) {
+      warnings.push('部分系统模板存在冲突，已跳过，请人工补齐。')
+    }
+    for (const v of skippedVirtual) {
+      warnings.push(
+        `${v.liveRoomName} ${hmFromDate(v.startAt, dateKey)}-${hmFromDate(v.endAt, dateKey)} 模板与当天排班冲突，未参与业绩计算。`,
+      )
+    }
   }
 
   const effectiveRows: EffectiveScheduleRow[] = [
@@ -302,13 +321,23 @@ export async function listDailySchedulesForDate(dateKey: string): Promise<{
   schedules: DailyScheduleDto[]
   warnings: string[]
   effectiveTable: EffectiveScheduleTable
+  hasManualDay: boolean
 }> {
   const table = await getEffectiveScheduleTableForDate(dateKey)
+  const dbRows = await prisma.anchorDailySchedule.findMany({
+    where: { scheduleDate: dateKey, enabled: true },
+    orderBy: { startAt: 'asc' },
+  })
+  const hasManualDay = dbRows.some((r) => r.source === 'manual')
+  const schedules = hasManualDay
+    ? dbRows.filter((r) => r.source === 'manual').map(rowToDto)
+    : table.rows.map((r) => effectiveRowToDto(r, dateKey))
   return {
     date: dateKey,
-    schedules: table.rows.map((r) => effectiveRowToDto(r, dateKey)),
+    schedules,
     warnings: table.warnings,
     effectiveTable: table,
+    hasManualDay,
   }
 }
 
@@ -466,9 +495,19 @@ export async function saveDailySchedules(params: {
   createdBy?: string
   confirm?: boolean
 }): Promise<{ date: string; schedules: DailyScheduleDto[]; warnings: string[] }> {
-  const validation = validateScheduleDraft(params.date, params.schedules)
+  let validation: ReturnType<typeof validateScheduleDraft>
+  try {
+    validation = validateScheduleDraft(params.date, params.schedules)
+  } catch (err) {
+    throw new ScheduleSaveError([
+      {
+        type: 'anchor_overlap',
+        message: err instanceof Error ? err.message : '排班校验失败',
+      },
+    ])
+  }
   if (!validation.ok) {
-    throw new Error(validation.conflicts.map((c) => c.message).join('；'))
+    throw new ScheduleSaveError(validation.conflicts)
   }
 
   await prisma.anchorDailySchedule.deleteMany({
@@ -501,7 +540,7 @@ export async function saveDailySchedules(params: {
   ]
   const extraConflicts = detectScheduleConflicts(allForConflict)
   if (extraConflicts.length) {
-    throw new Error(extraConflicts.map((c) => c.message).join('；'))
+    throw new ScheduleSaveError(extraConflicts)
   }
 
   for (const s of draftEnabled) {

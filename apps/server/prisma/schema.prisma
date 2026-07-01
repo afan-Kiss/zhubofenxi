@@ -750,3 +750,20 @@ model AnchorDailySchedule {
   @@index([scheduleDate, enabled])
   @@index([scheduleDate, confirmed])
 }
+
+/// 日报发货前照片（按日期归档，文件存 data 目录）
+model DailyReportImage {
+  id           String   @id @default(cuid())
+  reportDate   String
+  filePath     String
+  publicUrl    String
+  originalName String
+  mimeType     String
+  size         Int
+  caption      String?
+  sortOrder    Int      @default(0)
+  uploadedBy   String?
+  createdAt    DateTime @default(now())
+
+  @@index([reportDate, sortOrder])
+}

@@ -89,15 +89,29 @@ function clearBusinessPeriodicTimer(): void {
   }
 }
 
+async function syncJadeAccountingUsersOnSchedule(): Promise<void> {
+  try {
+    const { syncJadeAccountingUsers } = await import('./jade-accounting-user-sync.service')
+    await syncJadeAccountingUsers()
+  } catch (err) {
+    logWarn(
+      '记账用户同步',
+      `执行异常：${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+}
+
 async function runBusinessPeriodicSyncTick(): Promise<void> {
   if (periodicSyncRunning) return
   periodicSyncRunning = true
   try {
     const s = await getApiSyncSettings()
-    if (!s.apiSyncEnabled) return
-    logInfo('定时任务', `触发经营数据自动同步（每 ${BUSINESS_SYNC_INTERVAL_MINUTES} 分钟）`)
-    const { runNormalBusinessSyncJob } = await import('./business-sync-scheduler.service')
-    await runNormalBusinessSyncJob('interval')
+    if (s.apiSyncEnabled) {
+      logInfo('定时任务', `触发经营数据自动同步（每 ${BUSINESS_SYNC_INTERVAL_MINUTES} 分钟）`)
+      const { runNormalBusinessSyncJob } = await import('./business-sync-scheduler.service')
+      await runNormalBusinessSyncJob('interval')
+    }
+    await syncJadeAccountingUsersOnSchedule()
   } catch (err) {
     logWarn(
       '定时任务',

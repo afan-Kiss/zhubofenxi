@@ -1,5 +1,6 @@
 import type { EffectiveScheduleRow } from '../services/anchor-daily-schedule.service'
 import type { AnchorLiveSessionBrief } from '../services/anchor-live-sessions.service'
+import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
 import { anchorNamesMatch } from './anchor-name-normalize.util'
 import { orderLiveRoomMatchesSchedule } from './shop-name-normalize.util'
 
@@ -72,18 +73,40 @@ function parseClockMinutes(clock: string): number {
   return h * 60 + m
 }
 
-/** 从排班备注或开始时间推导场次名（14:30 → 下午场，不用「午场」） */
-export function deriveSessionLabelFromSchedule(row: EffectiveScheduleRow): string {
+function resolveScheduleDateKey(row: EffectiveScheduleRow, dateKey?: string): string {
+  if (dateKey?.trim()) return dateKey.trim()
+  const fromStartAt = row.startAt?.slice(0, 10)
+  if (fromStartAt && /^\d{4}-\d{2}-\d{2}$/.test(fromStartAt)) return fromStartAt
+  return ''
+}
+
+function usesNewSessionLabelRules(dateKey: string): boolean {
+  return dateKey >= ANCHOR_NEW_SCHEDULE_START_DATE
+}
+
+/** 从排班备注或开始时间推导场次名；2026-07-01 起 14:00 显示「午场」 */
+export function deriveSessionLabelFromSchedule(
+  row: EffectiveScheduleRow,
+  dateKey?: string,
+): string {
+  const scheduleDate = resolveScheduleDateKey(row, dateKey)
+  const useNewRules = usesNewSessionLabelRules(scheduleDate)
+
   const note = (row.note ?? '').trim()
   if (note.includes('早场')) return '早场'
-  if (note.includes('下午场')) return '下午场'
   if (note.includes('晚场')) return '晚场'
-  if (note.includes('午场')) return '下午场'
+  if (note.includes('午场')) return useNewRules ? '午场' : '下午场'
+  if (note.includes('下午场')) return useNewRules ? '午场' : '下午场'
 
   const minutes = parseClockMinutes(row.startTime)
   if (minutes >= 18 * 60) return '晚场'
-  if (minutes >= 12 * 60) return '下午场'
-  if (minutes >= 8 * 60) return '早场'
+  if (useNewRules) {
+    if (minutes >= 14 * 60) return '午场'
+    if (minutes >= 8 * 60) return '早场'
+  } else {
+    if (minutes >= 12 * 60) return '下午场'
+    if (minutes >= 8 * 60) return '早场'
+  }
   return '场次'
 }
 
@@ -280,7 +303,10 @@ export function calculateAnchorAttendanceStatus(
     return { ...NO_SCHEDULE, label: '未排班', attendanceLabel: '未排班', attendanceReason: '未排班' }
   }
 
-  const sessionLabel = deriveSessionLabelFromSchedule(scheduleRow)
+  const sessionLabel = deriveSessionLabelFromSchedule(
+    scheduleRow,
+    scheduleRow.startAt?.slice(0, 10),
+  )
   const shopName = resolveShopNameFromSchedule(scheduleRow)
   const displaySessionLabel = formatDisplaySessionLabel(sessionLabel, shopName)
   const scheduledStartAt = scheduleRow.startAt
@@ -455,6 +481,7 @@ export function resolveFallbackSessionDisplay(params: {
   fallbackSessionLabel?: string
   fallbackShopName?: string
   timeRuleSessionLabel?: string
+  dateKey?: string
 }): { sessionLabel: string; shopName: string; displaySessionLabel: string } {
   const shopName = params.fallbackShopName?.trim() ?? ''
   let sessionLabel = params.fallbackSessionLabel?.trim() ?? ''
@@ -462,8 +489,9 @@ export function resolveFallbackSessionDisplay(params: {
     sessionLabel = params.timeRuleSessionLabel
   }
   if (!sessionLabel) sessionLabel = '场次'
-  if (sessionLabel.includes('午场')) {
-    sessionLabel = sessionLabel.replace('午场', '下午场')
+  const useNewRules = usesNewSessionLabelRules(params.dateKey?.trim() ?? '')
+  if (!useNewRules && sessionLabel.includes('午场')) {
+    sessionLabel = sessionLabel.replace(/午场/g, '下午场')
   }
   const displaySessionLabel = formatDisplaySessionLabel(sessionLabel.split('·')[0] ?? sessionLabel, shopName)
   return { sessionLabel, shopName, displaySessionLabel }

@@ -8,6 +8,8 @@ import {
 import {
   ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE,
   ANCHOR_XIAOBAI_SCHEDULE_START_DATE,
+  ANCHOR_NEW_SCHEDULE_START_DATE,
+  ANCHOR_NEW_SCHEDULE_CUTOFF_DATE,
 } from '../config/anchor-schedule.constants'
 import { XIAOBAI_ANCHOR_CUTOFF_MS, SHOP_SESSION_ANCHOR_CUTOFF_MS } from './anchor-performance-attribution.service'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
@@ -15,6 +17,8 @@ import { addDaysShanghai } from '../utils/business-timezone'
 
 export const XIAOBAI_SCHEDULE_START_DATE = ANCHOR_XIAOBAI_SCHEDULE_START_DATE
 export const SHOP_SESSION_SCHEDULE_START_DATE = ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE
+export const NEW_SCHEDULE_START_DATE = ANCHOR_NEW_SCHEDULE_START_DATE
+export const NEW_SCHEDULE_CUTOFF_DATE = ANCHOR_NEW_SCHEDULE_CUTOFF_DATE
 
 export interface ScheduleTemplateSeed {
   anchorName: string
@@ -28,7 +32,67 @@ export interface ScheduleTemplateSeed {
   note?: string
 }
 
-export const DEFAULT_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
+/** 2026-07-01 起生效的新固定排班（5 行） */
+export const NEW_SCHEDULE_TEMPLATE_SEEDS_20260701: ScheduleTemplateSeed[] = [
+  {
+    anchorName: '子杰',
+    shopName: '拾玉居和田玉',
+    liveRoomName: '拾玉居和田玉',
+    startTime: '09:30',
+    endTime: '14:00',
+    effectiveFrom: NEW_SCHEDULE_START_DATE,
+    effectiveTo: null,
+    sortOrder: 10,
+    note: '早场·拾玉居和田玉',
+  },
+  {
+    anchorName: '小红',
+    shopName: '和田雅玉',
+    liveRoomName: '和田雅玉',
+    startTime: '09:30',
+    endTime: '14:00',
+    effectiveFrom: NEW_SCHEDULE_START_DATE,
+    effectiveTo: null,
+    sortOrder: 20,
+    note: '早场·和田雅玉',
+  },
+  {
+    anchorName: '小白',
+    shopName: 'XY祥钰珠宝',
+    liveRoomName: 'XY祥钰珠宝',
+    startTime: '14:00',
+    endTime: '18:30',
+    effectiveFrom: NEW_SCHEDULE_START_DATE,
+    effectiveTo: null,
+    sortOrder: 30,
+    note: '午场·XY祥钰珠宝',
+  },
+  {
+    anchorName: '小艺',
+    shopName: '和田雅玉',
+    liveRoomName: '和田雅玉',
+    startTime: '14:00',
+    endTime: '18:30',
+    effectiveFrom: NEW_SCHEDULE_START_DATE,
+    effectiveTo: null,
+    sortOrder: 40,
+    note: '午场·和田雅玉',
+  },
+  {
+    anchorName: '飞云',
+    shopName: '拾玉居和田玉',
+    liveRoomName: '拾玉居和田玉',
+    startTime: '18:30',
+    endTime: '23:00',
+    effectiveFrom: NEW_SCHEDULE_START_DATE,
+    effectiveTo: null,
+    sortOrder: 50,
+    note: '晚场·拾玉居和田玉',
+  },
+]
+
+/** 2026-06-30 及之前仍生效的历史模板 */
+const LEGACY_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
   {
     anchorName: '飞云',
     shopName: '拾玉居和田玉',
@@ -36,7 +100,7 @@ export const DEFAULT_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
     startTime: '18:00',
     endTime: '24:00',
     effectiveFrom: null,
-    effectiveTo: null,
+    effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
     sortOrder: 50,
     note: '晚场·拾玉居',
   },
@@ -47,7 +111,7 @@ export const DEFAULT_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
     startTime: '00:00',
     endTime: '18:00',
     effectiveFrom: SHOP_SESSION_SCHEDULE_START_DATE,
-    effectiveTo: null,
+    effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
     sortOrder: 20,
     note: '早场·和田雅玉',
   },
@@ -58,7 +122,7 @@ export const DEFAULT_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
     startTime: '18:00',
     endTime: '24:00',
     effectiveFrom: SHOP_SESSION_SCHEDULE_START_DATE,
-    effectiveTo: null,
+    effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
     sortOrder: 40,
     note: '晚场·和田雅玉',
   },
@@ -69,7 +133,7 @@ export const DEFAULT_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
     startTime: '00:00',
     endTime: '18:00',
     effectiveFrom: SHOP_SESSION_SCHEDULE_START_DATE,
-    effectiveTo: null,
+    effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
     sortOrder: 12,
     note: '早场·祥钰珠宝',
   },
@@ -91,7 +155,7 @@ export const DEFAULT_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
     startTime: '00:00',
     endTime: '14:30',
     effectiveFrom: XIAOBAI_SCHEDULE_START_DATE,
-    effectiveTo: null,
+    effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
     sortOrder: 11,
     note: '早场·XY祥钰（14:30 前）',
   },
@@ -102,10 +166,15 @@ export const DEFAULT_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
     startTime: '14:30',
     endTime: '18:00',
     effectiveFrom: XIAOBAI_SCHEDULE_START_DATE,
-    effectiveTo: null,
+    effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
     sortOrder: 15,
     note: '午场·XY祥钰 14:30-18:00',
   },
+]
+
+export const DEFAULT_SCHEDULE_TEMPLATE_SEEDS: ScheduleTemplateSeed[] = [
+  ...LEGACY_SCHEDULE_TEMPLATE_SEEDS,
+  ...NEW_SCHEDULE_TEMPLATE_SEEDS_20260701,
 ]
 
 export function templateAppliesOnDate(template: ScheduleTemplateSeed, dateKey: string): boolean {
@@ -125,26 +194,29 @@ function templateSeedKey(seed: ScheduleTemplateSeed): string {
   ].join('|')
 }
 
-export async function ensureScheduleTemplatesSeeded(): Promise<void> {
-  const existing = await prisma.anchorScheduleTemplate.findMany()
-  const existingKeys = new Set(
-    existing.map((row) =>
-      templateSeedKey({
-        anchorName: row.anchorName,
-        shopName: row.shopName,
-        liveRoomName: row.liveRoomName,
-        startTime: row.startTime,
-        endTime: row.endTime,
-        effectiveFrom: row.effectiveFrom,
-        effectiveTo: row.effectiveTo,
-        sortOrder: row.sortOrder,
-      }),
-    ),
+function isNewScheduleTemplateRow(
+  row: Pick<ScheduleTemplateSeed, 'anchorName' | 'shopName' | 'startTime' | 'effectiveFrom'>,
+): boolean {
+  return NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.some(
+    (seed) =>
+      seed.anchorName === row.anchorName &&
+      seed.shopName === row.shopName &&
+      seed.startTime === row.startTime &&
+      seed.effectiveFrom === row.effectiveFrom,
   )
+}
 
-  for (const seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
-    const key = templateSeedKey(seed)
-    if (existingKeys.has(key)) continue
+export async function upsertScheduleTemplateSeed(seed: ScheduleTemplateSeed): Promise<'created' | 'updated' | 'unchanged'> {
+  const existing = await prisma.anchorScheduleTemplate.findFirst({
+    where: {
+      anchorName: seed.anchorName,
+      shopName: seed.shopName,
+      startTime: seed.startTime,
+      effectiveFrom: seed.effectiveFrom,
+    },
+  })
+
+  if (!existing) {
     await prisma.anchorScheduleTemplate.create({
       data: {
         anchorName: seed.anchorName,
@@ -159,7 +231,143 @@ export async function ensureScheduleTemplatesSeeded(): Promise<void> {
         note: seed.note ?? null,
       },
     })
-    existingKeys.add(key)
+    return 'created'
+  }
+
+  const needsUpdate =
+    existing.endTime !== seed.endTime ||
+    existing.liveRoomName !== seed.liveRoomName ||
+    existing.effectiveTo !== seed.effectiveTo ||
+    existing.sortOrder !== seed.sortOrder ||
+    (existing.note ?? '') !== (seed.note ?? '') ||
+    !existing.enabled
+
+  if (!needsUpdate) return 'unchanged'
+
+  await prisma.anchorScheduleTemplate.update({
+    where: { id: existing.id },
+    data: {
+      endTime: seed.endTime,
+      liveRoomName: seed.liveRoomName,
+      effectiveTo: seed.effectiveTo,
+      sortOrder: seed.sortOrder,
+      note: seed.note ?? null,
+      enabled: true,
+    },
+  })
+  return 'updated'
+}
+
+export async function repairScheduleTemplatesFrom20260701(options?: {
+  dryRun?: boolean
+  regenerateFromDate?: string
+}): Promise<{
+  truncatedTemplates: number
+  upserted: { created: number; updated: number; unchanged: number }
+  deletedGeneratedDefaults: number
+  manualSchedulesKept: number
+  regeneratedDates: string[]
+}> {
+  const dryRun = options?.dryRun ?? false
+  const regenerateFromDate = options?.regenerateFromDate ?? NEW_SCHEDULE_START_DATE
+
+  const before = await prisma.anchorScheduleTemplate.findMany({
+    orderBy: [{ sortOrder: 'asc' }, { anchorName: 'asc' }],
+  })
+
+  let truncatedTemplates = 0
+  for (const row of before) {
+    const asSeed: ScheduleTemplateSeed = {
+      anchorName: row.anchorName,
+      shopName: row.shopName,
+      liveRoomName: row.liveRoomName,
+      startTime: row.startTime,
+      endTime: row.endTime,
+      effectiveFrom: row.effectiveFrom,
+      effectiveTo: row.effectiveTo,
+      sortOrder: row.sortOrder,
+      note: row.note ?? undefined,
+    }
+    if (!templateAppliesOnDate(asSeed, NEW_SCHEDULE_START_DATE)) continue
+    if (isNewScheduleTemplateRow(asSeed)) continue
+
+    const nextEffectiveTo =
+      !row.effectiveTo || row.effectiveTo > NEW_SCHEDULE_CUTOFF_DATE
+        ? NEW_SCHEDULE_CUTOFF_DATE
+        : row.effectiveTo
+    if (row.effectiveTo !== nextEffectiveTo) {
+      truncatedTemplates += 1
+      if (!dryRun) {
+        await prisma.anchorScheduleTemplate.update({
+          where: { id: row.id },
+          data: { effectiveTo: nextEffectiveTo },
+        })
+      }
+    }
+  }
+
+  const upserted = { created: 0, updated: 0, unchanged: 0 }
+  for (const seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
+    if (dryRun) continue
+    const result = await upsertScheduleTemplateSeed(seed)
+    upserted[result] += 1
+  }
+
+  const manualSchedulesKept = dryRun
+    ? await prisma.anchorDailySchedule.count({
+        where: { scheduleDate: { gte: regenerateFromDate }, source: 'manual' },
+      })
+    : 0
+
+  let deletedGeneratedDefaults = 0
+  if (!dryRun) {
+    const deleted = await prisma.anchorDailySchedule.deleteMany({
+      where: {
+        scheduleDate: { gte: regenerateFromDate },
+        source: 'generated_default',
+        locked: false,
+      },
+    })
+    deletedGeneratedDefaults = deleted.count
+  }
+
+  const regeneratedDates: string[] = []
+  if (!dryRun) {
+    const { generateDefaultSchedulesForDate } = await import('./anchor-daily-schedule.service')
+    const dates = await prisma.anchorDailySchedule.findMany({
+      where: { scheduleDate: { gte: regenerateFromDate } },
+      select: { scheduleDate: true },
+      distinct: ['scheduleDate'],
+    })
+    const dateKeys = new Set<string>([NEW_SCHEDULE_START_DATE, '2026-07-02'])
+    for (const d of dates) dateKeys.add(d.scheduleDate)
+
+    for (const dateKey of [...dateKeys].sort()) {
+      const hasManual = await prisma.anchorDailySchedule.count({
+        where: { scheduleDate: dateKey, source: 'manual' },
+      })
+      if (hasManual > 0) continue
+      await generateDefaultSchedulesForDate({ date: dateKey, overwrite: true })
+      regeneratedDates.push(dateKey)
+    }
+  }
+
+  return {
+    truncatedTemplates,
+    upserted,
+    deletedGeneratedDefaults,
+    manualSchedulesKept: dryRun
+      ? manualSchedulesKept
+      : await prisma.anchorDailySchedule.count({
+          where: { scheduleDate: { gte: regenerateFromDate }, source: 'manual' },
+        }),
+    regeneratedDates,
+  }
+}
+
+export async function ensureScheduleTemplatesSeeded(): Promise<void> {
+  for (const seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
+    await upsertScheduleTemplateSeed(seed)
   }
 }
 
@@ -272,4 +480,10 @@ export const XIAOBAI_CUTOFF_MS = XIAOBAI_ANCHOR_CUTOFF_MS
 
 export function todayShanghaiDateKey(): string {
   return formatDateKeyShanghai(new Date())
+}
+
+export function listTemplateSeedKeysForDate(dateKey: string): string[] {
+  return DEFAULT_SCHEDULE_TEMPLATE_SEEDS.filter((seed) => templateAppliesOnDate(seed, dateKey)).map(
+    templateSeedKey,
+  )
 }

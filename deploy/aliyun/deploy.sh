@@ -87,6 +87,8 @@ install_deps_build() {
   npm run db:generate -w @live/server
   log "prisma migrate deploy"
   npm run db:migrate:deploy -w @live/server
+  log "repair schedule templates from 20260701"
+  npx tsx apps/server/scripts/repair-schedule-templates-20260701.ts
   log "npm run build"
   npm run build
 }

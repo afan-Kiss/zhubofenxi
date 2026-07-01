@@ -196,6 +196,7 @@ function buildAnchorRow(params: {
   anchorName: string
   shopName: string
   sessionLabel?: string
+  reportDate: string
   validAmountYuan: number
   soldOrderCount: number
   invalidOrderCount: number
@@ -212,6 +213,7 @@ function buildAnchorRow(params: {
     fallbackSessionLabel: params.sessionLabel,
     fallbackShopName: params.shopName,
     timeRuleSessionLabel: resolveSessionLabel(params.config, params.anchorId),
+    dateKey: params.reportDate,
   })
   const sessionLabel =
     params.scheduleAttendance.displaySessionLabel ||
@@ -361,6 +363,7 @@ export async function buildDailyOperationsReport(params: {
         anchorId: anchor.anchorId,
         anchorName: anchor.anchorName,
         shopName,
+        reportDate: params.startDate,
         sessionLabel: scheduleAttendance.hasSchedule
           ? scheduleAttendance.displaySessionLabel
           : fixedDisplay?.sessionLabel,

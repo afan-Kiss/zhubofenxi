@@ -9,6 +9,12 @@ import {
   pickLatestValidSessionEnd,
   type AnchorAttendanceStatus,
 } from '../src/utils/anchor-attendance-status.util'
+import {
+  DEFAULT_SCHEDULE_TEMPLATE_SEEDS,
+  NEW_SCHEDULE_START_DATE,
+  NEW_SCHEDULE_TEMPLATE_SEEDS_20260701,
+  templateAppliesOnDate,
+} from '../src/services/anchor-schedule-template.service'
 import type { EffectiveScheduleRow } from '../src/services/anchor-daily-schedule.service'
 import type { AnchorLiveSessionBrief } from '../src/services/anchor-live-sessions.service'
 
@@ -34,17 +40,17 @@ function runCase(name: string, status: AnchorAttendanceStatus, expect: Partial<A
   console.log(`[verify-anchor-attendance] PASS ${name}`)
 }
 
-const STANDARD_SCHEDULES: EffectiveScheduleRow[] = [
+const NEW_SCHEDULES: EffectiveScheduleRow[] = [
   row({
     rowId: 'zijie',
     anchorName: '子杰',
     shopName: '拾玉居和田玉',
     liveRoomName: '拾玉居和田玉',
     startTime: '09:30',
-    endTime: '14:30',
+    endTime: '14:00',
     startAt: '2026-07-01T09:30:00+08:00',
-    endAt: '2026-07-01T14:30:00+08:00',
-    note: '早场',
+    endAt: '2026-07-01T14:00:00+08:00',
+    note: '早场·拾玉居和田玉',
   }),
   row({
     rowId: 'xiaohong',
@@ -52,32 +58,32 @@ const STANDARD_SCHEDULES: EffectiveScheduleRow[] = [
     shopName: '和田雅玉',
     liveRoomName: '和田雅玉',
     startTime: '09:30',
-    endTime: '14:30',
+    endTime: '14:00',
     startAt: '2026-07-01T09:30:00+08:00',
-    endAt: '2026-07-01T14:30:00+08:00',
-    note: '早场',
+    endAt: '2026-07-01T14:00:00+08:00',
+    note: '早场·和田雅玉',
   }),
   row({
     rowId: 'xiaobai',
     anchorName: '小白',
     shopName: 'XY祥钰珠宝',
     liveRoomName: 'XY祥钰珠宝',
-    startTime: '14:30',
+    startTime: '14:00',
     endTime: '18:30',
-    startAt: '2026-07-01T14:30:00+08:00',
+    startAt: '2026-07-01T14:00:00+08:00',
     endAt: '2026-07-01T18:30:00+08:00',
-    note: '下午场',
+    note: '午场·XY祥钰珠宝',
   }),
   row({
     rowId: 'xiaoyi',
     anchorName: '小艺',
     shopName: '和田雅玉',
     liveRoomName: '和田雅玉',
-    startTime: '14:30',
+    startTime: '14:00',
     endTime: '18:30',
-    startAt: '2026-07-01T14:30:00+08:00',
+    startAt: '2026-07-01T14:00:00+08:00',
     endAt: '2026-07-01T18:30:00+08:00',
-    note: '下午场',
+    note: '午场·和田雅玉',
   }),
   row({
     rowId: 'feiyun',
@@ -85,148 +91,152 @@ const STANDARD_SCHEDULES: EffectiveScheduleRow[] = [
     shopName: '拾玉居和田玉',
     liveRoomName: '拾玉居和田玉',
     startTime: '18:30',
-    endTime: '22:30',
+    endTime: '23:00',
     startAt: '2026-07-01T18:30:00+08:00',
-    endAt: '2026-07-01T22:30:00+08:00',
-    note: '晚场',
+    endAt: '2026-07-01T23:00:00+08:00',
+    note: '晚场·拾玉居和田玉',
   }),
 ]
 
-const SESSION_CASES: Array<{ anchor: string; shop: string; expect: string }> = [
-  { anchor: '子杰', shop: '拾玉居和田玉', expect: '早场·拾玉居和田玉' },
-  { anchor: '小红', shop: '和田雅玉', expect: '早场·和田雅玉' },
-  { anchor: '小白', shop: 'XY祥钰珠宝', expect: '下午场·XY祥钰珠宝' },
-  { anchor: '小艺', shop: '和田雅玉', expect: '下午场·和田雅玉' },
-  { anchor: '飞云', shop: '拾玉居和田玉', expect: '晚场·拾玉居和田玉' },
+const templates0630 = DEFAULT_SCHEDULE_TEMPLATE_SEEDS.filter((seed) => templateAppliesOnDate(seed, '2026-06-30'))
+assert.ok(templates0630.length >= 5, '2026-06-30 legacy templates')
+assert.equal(
+  DEFAULT_SCHEDULE_TEMPLATE_SEEDS.filter((seed) => templateAppliesOnDate(seed, NEW_SCHEDULE_START_DATE)).length,
+  NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.length,
+  '2026-07-01 template count',
+)
+assert.equal(
+  DEFAULT_SCHEDULE_TEMPLATE_SEEDS.filter((seed) => templateAppliesOnDate(seed, '2026-07-02')).length,
+  NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.length,
+  '2026-07-02 template count',
+)
+console.log('[verify-anchor-attendance] PASS default-templates-by-date')
+
+const SESSION_CASES: Array<{ anchor: string; shop: string; expect: string; schedule: EffectiveScheduleRow }> = [
+  { anchor: '子杰', shop: '拾玉居和田玉', expect: '早场·拾玉居和田玉', schedule: NEW_SCHEDULES[0]! },
+  { anchor: '小红', shop: '和田雅玉', expect: '早场·和田雅玉', schedule: NEW_SCHEDULES[1]! },
+  { anchor: '小白', shop: 'XY祥钰珠宝', expect: '午场·XY祥钰珠宝', schedule: NEW_SCHEDULES[2]! },
+  { anchor: '小艺', shop: '和田雅玉', expect: '午场·和田雅玉', schedule: NEW_SCHEDULES[3]! },
+  { anchor: '飞云', shop: '拾玉居和田玉', expect: '晚场·拾玉居和田玉', schedule: NEW_SCHEDULES[4]! },
 ]
 
-for (const { anchor, shop, expect: expectLabel } of SESSION_CASES) {
-  const schedule = STANDARD_SCHEDULES.find((s) => s.anchorName === anchor)!
-  const sessionLabel = deriveSessionLabelFromSchedule(schedule)
+for (const { anchor, shop, expect: expectLabel, schedule } of SESSION_CASES) {
+  const sessionLabel = deriveSessionLabelFromSchedule(schedule, NEW_SCHEDULE_START_DATE)
   const display = formatDisplaySessionLabel(sessionLabel, shop)
   assert.equal(display, expectLabel, `session-label ${anchor}`)
+  assert.notEqual(sessionLabel, '下午场', `${anchor} should not use 下午场 on 2026-07-01`)
   console.log(`[verify-anchor-attendance] PASS session-label ${anchor}`)
 }
 
-const zijieSchedule = STANDARD_SCHEDULES.find((s) => s.anchorName === '子杰')!
+const zijie = NEW_SCHEDULES[0]!
+const xiaohong = NEW_SCHEDULES[1]!
+const xiaobai = NEW_SCHEDULES[2]!
+const xiaoyi = NEW_SCHEDULES[3]!
+const feiyun = NEW_SCHEDULES[4]!
+
 runCase(
-  'on-time-start',
+  'zijie-late-early',
   calculateAnchorAttendanceStatus(
-    zijieSchedule,
+    zijie,
+    Date.parse('2026-07-01T09:35:00+08:00'),
+    '2026-07-01T09:35:00+08:00',
+    Date.parse('2026-07-01T13:50:00+08:00'),
+    '2026-07-01T13:50:00+08:00',
+  ),
+  { isLate: true, lateMinutes: 5, isEarlyLeave: true, earlyLeaveMinutes: 10 },
+)
+
+runCase(
+  'xiaohong-on-time',
+  calculateAnchorAttendanceStatus(
+    xiaohong,
     Date.parse('2026-07-01T09:30:00+08:00'),
     '2026-07-01T09:30:00+08:00',
-    Date.parse('2026-07-01T14:30:00+08:00'),
-    '2026-07-01T14:30:00+08:00',
+    Date.parse('2026-07-01T14:00:00+08:00'),
+    '2026-07-01T14:00:00+08:00',
   ),
-  { isLate: false, lateMinutes: 0, isEarlyLeave: false, earlyLeaveMinutes: 0 },
+  { isLate: false, isEarlyLeave: false },
 )
 
 runCase(
-  'late-10m',
+  'xiaobai-late-early',
   calculateAnchorAttendanceStatus(
-    zijieSchedule,
-    Date.parse('2026-07-01T09:40:00+08:00'),
-    '2026-07-01T09:40:00+08:00',
-    Date.parse('2026-07-01T14:30:00+08:00'),
-    '2026-07-01T14:30:00+08:00',
-  ),
-  { isLate: true, lateMinutes: 10, isEarlyLeave: false },
-)
-
-runCase(
-  'early-not-late-before-start',
-  calculateAnchorAttendanceStatus(
-    STANDARD_SCHEDULES.find((s) => s.anchorName === '小白')!,
-    Date.parse('2026-07-01T14:20:00+08:00'),
-    '2026-07-01T14:20:00+08:00',
-    Date.parse('2026-07-01T18:30:00+08:00'),
-    '2026-07-01T18:30:00+08:00',
-  ),
-  { isLate: false, lateMinutes: 0 },
-)
-
-runCase(
-  'early-leave-20m',
-  calculateAnchorAttendanceStatus(
-    zijieSchedule,
-    Date.parse('2026-07-01T09:30:00+08:00'),
-    '2026-07-01T09:30:00+08:00',
+    xiaobai,
     Date.parse('2026-07-01T14:10:00+08:00'),
     '2026-07-01T14:10:00+08:00',
-  ),
-  { isEarlyLeave: true, earlyLeaveMinutes: 20, isLate: false },
-)
-
-runCase(
-  'late-and-early-leave',
-  calculateAnchorAttendanceStatus(
-    STANDARD_SCHEDULES.find((s) => s.anchorName === '小白')!,
-    Date.parse('2026-07-01T14:40:00+08:00'),
-    '2026-07-01T14:40:00+08:00',
     Date.parse('2026-07-01T18:00:00+08:00'),
     '2026-07-01T18:00:00+08:00',
   ),
   { isLate: true, lateMinutes: 10, isEarlyLeave: true, earlyLeaveMinutes: 30 },
 )
 
-const durationSession: AnchorLiveSessionBrief = {
-  liveId: 'd1',
-  liveName: 'XY',
-  startTime: '2026-07-01T09:30:00+08:00',
-  endTime: '—',
-  durationMinutes: 240,
-  durationText: '4小时',
-}
-const durationEnd = pickLatestValidSessionEnd([durationSession])
-assert.equal(durationEnd?.endMs, Date.parse('2026-07-01T13:30:00+08:00'), 'duration-end-fallback')
-console.log('[verify-anchor-attendance] PASS duration-end-fallback')
+runCase(
+  'xiaoyi-early-only',
+  calculateAnchorAttendanceStatus(
+    xiaoyi,
+    Date.parse('2026-07-01T13:58:00+08:00'),
+    '2026-07-01T13:58:00+08:00',
+    Date.parse('2026-07-01T18:20:00+08:00'),
+    '2026-07-01T18:20:00+08:00',
+  ),
+  { isLate: false, isEarlyLeave: true, earlyLeaveMinutes: 10 },
+)
 
-runCase('no-end-no-early', calculateAnchorAttendanceStatus(
-  zijieSchedule,
-  Date.parse('2026-07-01T09:30:00+08:00'),
-  '2026-07-01T09:30:00+08:00',
-  null,
-  null,
-), {
-  isEarlyLeave: false,
-  hasActualEndTime: false,
-})
+runCase(
+  'feiyun-late-early',
+  calculateAnchorAttendanceStatus(
+    feiyun,
+    Date.parse('2026-07-01T18:45:00+08:00'),
+    '2026-07-01T18:45:00+08:00',
+    Date.parse('2026-07-01T22:30:00+08:00'),
+    '2026-07-01T22:30:00+08:00',
+  ),
+  { isLate: true, lateMinutes: 15, isEarlyLeave: true, earlyLeaveMinutes: 30 },
+)
 
 const multiSegments: AnchorLiveSessionBrief[] = [
   {
     liveId: '1',
     liveName: '拾玉居',
-    startTime: '2026-07-01T09:30:00+08:00',
+    startTime: '2026-07-01T09:35:00+08:00',
     endTime: '2026-07-01T11:00:00+08:00',
-    durationMinutes: 90,
-    durationText: '1.5小时',
+    durationMinutes: 85,
+    durationText: '1小时25分',
   },
   {
     liveId: '2',
     liveName: '拾玉居',
-    startTime: '2026-07-01T11:10:00+08:00',
-    endTime: '2026-07-01T14:20:00+08:00',
-    durationMinutes: 190,
-    durationText: '3小时',
+    startTime: '2026-07-01T11:20:00+08:00',
+    endTime: '2026-07-01T13:50:00+08:00',
+    durationMinutes: 150,
+    durationText: '2小时30分',
   },
 ]
-assert.equal(
-  buildActualLivePeriodText(multiSegments),
-  '09:30~14:20',
-  'multi-segment-period',
+assert.equal(buildActualLivePeriodText(multiSegments), '09:35~13:50', 'multi-segment-period')
+const multiEnd = pickLatestValidSessionEnd(multiSegments)!
+runCase(
+  'multi-segment-zijie',
+  calculateAnchorAttendanceStatus(
+    zijie,
+    Date.parse('2026-07-01T09:35:00+08:00'),
+    '2026-07-01T09:35:00+08:00',
+    multiEnd.endMs,
+    multiEnd.endAt,
+  ),
+  { isLate: true, lateMinutes: 5, isEarlyLeave: true, earlyLeaveMinutes: 10 },
 )
-const multiStatus = calculateAnchorAttendanceStatus(
-  zijieSchedule,
-  Date.parse('2026-07-01T09:30:00+08:00'),
-  '2026-07-01T09:30:00+08:00',
-  pickLatestValidSessionEnd(multiSegments)!.endMs,
-  pickLatestValidSessionEnd(multiSegments)!.endAt,
-)
-runCase('multi-segment-early-10m', multiStatus, {
-  isEarlyLeave: true,
-  earlyLeaveMinutes: 10,
-  isLate: false,
-})
+
+const durationSession: AnchorLiveSessionBrief = {
+  liveId: 'd1',
+  liveName: 'XY',
+  startTime: '2026-07-01T14:00:00+08:00',
+  endTime: '—',
+  durationMinutes: 240,
+  durationText: '4小时',
+}
+const durationEnd = pickLatestValidSessionEnd([durationSession])
+assert.equal(durationEnd?.endMs, Date.parse('2026-07-01T18:00:00+08:00'), 'duration-end-fallback')
+console.log('[verify-anchor-attendance] PASS duration-end-fallback')
 
 const twoShiftRows: EffectiveScheduleRow[] = [
   row({
@@ -266,6 +276,19 @@ matchTwoShiftsInStableOrder([
   { iso: '2026-06-30T14:12:00+08:00', expectRowId: 'c-afternoon' },
 ])
 console.log('[verify-anchor-attendance] PASS two-shift-stable')
+
+const legacyAfternoon = row({
+  rowId: 'legacy',
+  anchorName: '小白',
+  startTime: '14:30',
+  endTime: '18:00',
+  startAt: '2026-06-30T14:30:00+08:00',
+  endAt: '2026-06-30T18:00:00+08:00',
+  note: '午场·XY祥钰',
+})
+assert.equal(deriveSessionLabelFromSchedule(legacyAfternoon, '2026-06-30'), '下午场', 'legacy 午场 -> 下午场')
+assert.equal(deriveSessionLabelFromSchedule(xiaobai, NEW_SCHEDULE_START_DATE), '午场', 'new 午场 label')
+console.log('[verify-anchor-attendance] PASS legacy-vs-new-session-label')
 
 const sessions = [
   {

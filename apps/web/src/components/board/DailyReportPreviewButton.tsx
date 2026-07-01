@@ -24,21 +24,69 @@ async function waitForNextPaint(): Promise<void> {
   })
 }
 
-async function waitForSheetImages(root: HTMLElement): Promise<void> {
-  const imgs = Array.from(root.querySelectorAll('img'))
-  await Promise.all(
-    imgs.map(
-      (img) =>
-        new Promise<void>((resolve) => {
-          if (img.complete) {
-            resolve()
-            return
-          }
-          img.onload = () => resolve()
-          img.onerror = () => resolve()
-        }),
-    ),
-  )
+async function waitForSheetRef(
+  ref: React.RefObject<HTMLDivElement | null>,
+  timeoutMs = 4000,
+): Promise<HTMLDivElement> {
+  const started = Date.now()
+  while (!ref.current) {
+    if (Date.now() - started > timeoutMs) {
+      throw new Error('日报组件未就绪，请稍后重试')
+    }
+    await waitForNextPaint()
+    await new Promise((resolve) => window.setTimeout(resolve, 40))
+  }
+  return ref.current
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result ?? ''))
+    reader.onerror = () => reject(new Error('图片读取失败'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+/** 截图前把同域图片转成 data URL，避免 html-to-image 跨域/凭证失败 */
+async function inlineSheetImages(root: HTMLElement): Promise<() => void> {
+  const restores: Array<() => void> = []
+  for (const img of Array.from(root.querySelectorAll('img'))) {
+    const src = img.getAttribute('src')?.trim() ?? ''
+    if (!src || src.startsWith('data:')) continue
+    try {
+      const res = await fetch(src, { credentials: 'include' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const dataUrl = await blobToDataUrl(await res.blob())
+      const previous = img.src
+      img.src = dataUrl
+      img.removeAttribute('crossorigin')
+      restores.push(() => {
+        img.src = previous
+      })
+    } catch {
+      img.style.visibility = 'hidden'
+      restores.push(() => {
+        img.style.visibility = ''
+      })
+    }
+  }
+  return () => {
+    for (const restore of restores) restore()
+  }
+}
+
+async function renderSheetToPng(node: HTMLElement): Promise<string> {
+  const baseOptions = {
+    cacheBust: true,
+    backgroundColor: '#ffffff',
+    skipFonts: true,
+  } as const
+  try {
+    return await toPng(node, { ...baseOptions, pixelRatio: 2 })
+  } catch {
+    return await toPng(node, { ...baseOptions, pixelRatio: 1 })
+  }
 }
 
 interface Props {
@@ -83,16 +131,16 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   }, [])
 
   const captureImage = useCallback(async () => {
-    if (!sheetRef.current) throw new Error('日报图片生成失败，请重试')
-    await waitForSheetImages(sheetRef.current)
+    const node = await waitForSheetRef(sheetRef)
     await waitForNextPaint()
-    const dataUrl = await toPng(sheetRef.current, {
-      cacheBust: true,
-      pixelRatio: 2,
-      backgroundColor: '#ffffff',
-      fetchRequestInit: { credentials: 'include' },
-    })
-    setImageDataUrl(dataUrl)
+    const restoreImages = await inlineSheetImages(node)
+    try {
+      await waitForNextPaint()
+      const dataUrl = await renderSheetToPng(node)
+      setImageDataUrl(dataUrl)
+    } finally {
+      restoreImages()
+    }
   }, [])
 
   useEffect(() => {
@@ -102,17 +150,18 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     void (async () => {
       setCapturing(true)
       await waitForNextPaint()
-      await new Promise((resolve) => window.setTimeout(resolve, 200))
+      await new Promise((resolve) => window.setTimeout(resolve, 320))
       if (cancelled || token !== captureTokenRef.current) return
       try {
         await captureImage()
         if (!cancelled && token === captureTokenRef.current) setPreviewOpen(true)
       } catch (e) {
         if (!cancelled && token === captureTokenRef.current) {
-          setError(e instanceof Error ? e.message : '日报图片生成失败，请重试')
+          const msg = e instanceof Error ? e.message : '日报图片生成失败，请重试'
+          setError(msg.includes('日报') ? msg : `日报图片生成失败：${msg}`)
         }
       } finally {
-        if (!cancelled && token === captureTokenRef.current) {
+        if (token === captureTokenRef.current) {
           setPendingCapture(false)
           setCapturing(false)
           setLoading(false)
@@ -202,13 +251,9 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   if (!isSingleDay) return null
 
   const sheetPortal =
-    report && (pendingCapture || previewOpen)
+    report
       ? createPortal(
-          <div
-            aria-hidden
-            className="pointer-events-none fixed top-0 left-0"
-            style={{ transform: 'translateX(-10000px)' }}
-          >
+          <div aria-hidden className="pointer-events-none fixed left-[-9999px] top-0">
             <DailyReportImageSheet
               ref={sheetRef}
               data={report}

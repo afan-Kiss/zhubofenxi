@@ -359,6 +359,28 @@ export async function resolveAnchorLiveSessionsWithTrafficForRange(params: {
   return dedupeLiveSessionBriefs(briefs)
 }
 
+export async function listLiveSessionBriefsForRange(params: {
+  preset?: string
+  startDate: string
+  endDate: string
+}): Promise<AnchorLiveSessionBrief[]> {
+  const range = resolveDateRange(
+    (params.preset ?? 'custom') as DateRangePreset,
+    params.startDate,
+    params.endDate,
+  )
+  const all = dedupeLiveSessions(await normalizeLiveSessionsFromRaw({ range }))
+  const briefs = all
+    .filter((s) => {
+      if (s.errors.length > 0 || !s.startTime) return false
+      const ms = s.startTime.getTime()
+      return ms >= range.startTimeMs && ms <= range.endTimeMs
+    })
+    .sort((a, b) => (a.startTime?.getTime() ?? 0) - (b.startTime?.getTime() ?? 0))
+    .map((s) => toBrief(s))
+  return dedupeLiveSessionBriefs(briefs)
+}
+
 export function aggregateAnchorLiveSessionTraffic(
   sessions: AnchorLiveSessionBrief[],
 ): AggregatedLiveSessionTraffic {

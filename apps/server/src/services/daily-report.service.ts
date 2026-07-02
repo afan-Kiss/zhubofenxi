@@ -8,7 +8,7 @@ import {
 } from './board-scoped-views.service'
 import {
   formatLiveDurationMinutes,
-  resolveAnchorLiveSessionsForRange,
+  listLiveSessionBriefsForRange,
   aggregateAnchorLiveSessionTraffic,
   sumUniqueLiveDurationMinutesForRange,
   sumNewFollowersByLiveAccountForRange,
@@ -31,10 +31,10 @@ import {
   sumDailyReportShippedFromViews,
 } from './daily-report-order.util'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
+import { buildDailyReportLiveScheduleFields } from './daily-report-live-schedule-match.service'
 import {
-  attachAnchorScheduleLateFields,
-  buildActualLivePeriodText,
   resolveFallbackSessionDisplay,
+  buildActualLivePeriodText,
   type AnchorAttendanceStatusPayload,
 } from '../utils/anchor-attendance-status.util'
 
@@ -43,6 +43,12 @@ export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   sessionLabel: string
   shopName: string
   livePeriodText: string
+  liveTimeRange: string
+  liveStartTime: string | null
+  liveEndTime: string | null
+  scheduleTimeRange: string | null
+  scheduleMatched: boolean
+  scheduleMatchReason: string | null
   liveDurationText: string
   liveDurationMinutes: number
   shippedAmountYuan: number
@@ -96,6 +102,7 @@ function resolveSessionLabel(config: AnchorConfig, anchorId: string): string {
 }
 
 function buildLivePeriodText(sessions: AnchorLiveSessionBrief[]): string {
+  if (sessions.length === 0) return '—'
   return buildActualLivePeriodText(sessions)
 }
 
@@ -152,6 +159,12 @@ function buildAnchorRow(params: {
   sessions: AnchorLiveSessionBrief[]
   totalShippedAmountYuan: number
   scheduleAttendance: AnchorAttendanceStatusPayload
+  liveTimeRange: string
+  liveStartTime: string | null
+  liveEndTime: string | null
+  scheduleTimeRange: string | null
+  scheduleMatched: boolean
+  scheduleMatchReason: string | null
 }): DailyReportAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
@@ -170,6 +183,12 @@ function buildAnchorRow(params: {
   return {
     anchorName: params.anchorName,
     livePeriodText: buildLivePeriodText(params.sessions),
+    liveTimeRange: params.liveTimeRange,
+    liveStartTime: params.liveStartTime,
+    liveEndTime: params.liveEndTime,
+    scheduleTimeRange: params.scheduleTimeRange,
+    scheduleMatched: params.scheduleMatched,
+    scheduleMatchReason: params.scheduleMatchReason,
     liveDurationText: formatLiveDurationMinutes(liveDurationMinutes),
     liveDurationMinutes,
     shippedAmountYuan: params.shippedAmountYuan,
@@ -216,6 +235,11 @@ export async function buildDailyReport(params: {
 
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
+  const allLiveSessions = await listLiveSessionBriefsForRange({
+    preset: params.preset,
+    startDate: params.startDate,
+    endDate: params.endDate,
+  })
   const usedScheduleRowIds = new Set<string>()
   for (const anchor of reportAnchors) {
     const performanceViews = await getAnchorPerformanceViews(
@@ -233,14 +257,14 @@ export async function buildDailyReport(params: {
     const fixedDisplay = useShopSessionRules
       ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]
       : undefined
-    const sessions = await resolveAnchorLiveSessionsForRange({
-      preset: params.preset,
-      startDate: params.startDate,
-      endDate: params.endDate,
-      anchorId: anchor.anchorId,
+
+    const liveSchedule = buildDailyReportLiveScheduleFields({
       anchorName: anchor.anchorName,
-      anchorOrders: performanceViews,
+      allSessions: allLiveSessions,
+      scheduleRows: scheduleTable.rows,
+      usedScheduleRowIds,
     })
+    const sessions = liveSchedule.matchedSessions
 
     const hasData =
       shippedAmountYuan > 0 ||
@@ -255,15 +279,10 @@ export async function buildDailyReport(params: {
     const shopNameHint =
       fixedDisplay?.shopName ?? resolveAnchorShopName(anchorAllViews, sessions)
 
-    const scheduleAttendance = attachAnchorScheduleLateFields(
-      scheduleTable.rows,
-      anchor.anchorName,
-      shopNameHint,
-      sessions,
-      usedScheduleRowIds,
-    )
+    const scheduleAttendance = liveSchedule.scheduleAttendance
 
-    const shopName = scheduleAttendance.shopName || shopNameHint
+    const shopName =
+      scheduleAttendance.shopName || liveSchedule.primaryScheduleRow?.shopName || shopNameHint
 
     anchorRows.push(
       buildAnchorRow({
@@ -281,6 +300,12 @@ export async function buildDailyReport(params: {
         sessions,
         totalShippedAmountYuan: 0,
         scheduleAttendance,
+        liveTimeRange: liveSchedule.liveTimeRange,
+        liveStartTime: liveSchedule.liveStartTime,
+        liveEndTime: liveSchedule.liveEndTime,
+        scheduleTimeRange: liveSchedule.scheduleTimeRange,
+        scheduleMatched: liveSchedule.scheduleMatched,
+        scheduleMatchReason: liveSchedule.scheduleMatchReason,
       }),
     )
   }

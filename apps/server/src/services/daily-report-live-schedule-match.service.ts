@@ -1,0 +1,262 @@
+import type { EffectiveScheduleRow } from './anchor-daily-schedule.service'
+import type { AnchorLiveSessionBrief } from './anchor-live-sessions.service'
+import {
+  buildActualLivePeriodText,
+  calculateAnchorAttendanceStatus,
+  deriveSessionLabelFromSchedule,
+  formatDisplaySessionLabel,
+  resolveShopNameFromSchedule,
+  toAttendanceStatusPayload,
+  type AnchorAttendanceStatusPayload,
+} from '../utils/anchor-attendance-status.util'
+import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
+import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
+
+export interface LiveSessionScheduleMatchResult {
+  session: AnchorLiveSessionBrief
+  scheduleRow: EffectiveScheduleRow | null
+  overlapMinutes: number
+  matchTier: number | null
+  matchReason: string
+}
+
+export interface DailyReportLiveScheduleFields {
+  livePeriodText: string
+  liveTimeRange: string
+  liveStartTime: string | null
+  liveEndTime: string | null
+  scheduleTimeRange: string | null
+  scheduleMatched: boolean
+  scheduleMatchReason: string | null
+  matchedSessions: AnchorLiveSessionBrief[]
+  primaryScheduleRow: EffectiveScheduleRow | null
+}
+
+function formatClockFromIso(iso: string): string {
+  return iso.slice(11, 16)
+}
+
+function resolveSessionEndMs(session: AnchorLiveSessionBrief): number | null {
+  const startMs =
+    session.startTime && session.startTime !== '—' ? new Date(session.startTime).getTime() : NaN
+  if (session.endTime && session.endTime !== '—') {
+    let endMs = new Date(session.endTime).getTime()
+    if (!Number.isFinite(endMs)) return null
+    if (Number.isFinite(startMs) && endMs < startMs) endMs += 24 * 60 * 60_000
+    return endMs
+  }
+  if (Number.isFinite(startMs) && session.durationMinutes > 0) {
+    return startMs + session.durationMinutes * 60_000
+  }
+  return Number.isFinite(startMs) ? startMs : null
+}
+
+export function computeScheduleOverlapMinutes(
+  liveStartMs: number,
+  liveEndMs: number,
+  scheduleStartMs: number,
+  scheduleEndMs: number,
+): number {
+  const start = Math.max(liveStartMs, scheduleStartMs)
+  const end = Math.min(liveEndMs, scheduleEndMs)
+  if (end <= start) return 0
+  return Math.round((end - start) / 60_000)
+}
+
+/** 单场次 → 最佳排班段（按重叠分钟 + 店铺/主播优先级） */
+export function matchLiveSessionToBestScheduleRow(
+  session: AnchorLiveSessionBrief,
+  scheduleRows: EffectiveScheduleRow[],
+): LiveSessionScheduleMatchResult {
+  const liveName = session.liveName?.trim() || ''
+  const startMs =
+    session.startTime && session.startTime !== '—' ? new Date(session.startTime).getTime() : NaN
+  const endMs = resolveSessionEndMs(session)
+
+  if (!Number.isFinite(startMs) || endMs == null) {
+    return {
+      session,
+      scheduleRow: null,
+      overlapMinutes: 0,
+      matchTier: null,
+      matchReason: '无有效开播/下播时间',
+    }
+  }
+
+  let best: {
+    row: EffectiveScheduleRow
+    overlapMinutes: number
+    matchTier: number
+    matchReason: string
+  } | null = null
+
+  for (const row of scheduleRows) {
+    if (!row.enabled) continue
+    const scheduleStart = new Date(row.startAt).getTime()
+    const scheduleEnd = new Date(row.endAt).getTime()
+    const overlap = computeScheduleOverlapMinutes(startMs, endMs, scheduleStart, scheduleEnd)
+    if (overlap <= 0) continue
+
+    const shopMatch = orderLiveRoomMatchesSchedule(liveName, row.shopName, row.liveRoomName)
+    if (!shopMatch) continue
+
+    const matchTier = 1
+    const matchReason = `店铺+主播(${row.anchorName})+时间重叠${overlap}分钟`
+
+    const better =
+      !best ||
+      matchTier < best.matchTier ||
+      (matchTier === best.matchTier && overlap > best.overlapMinutes)
+
+    if (better) {
+      best = { row, overlapMinutes: overlap, matchTier, matchReason }
+    }
+  }
+
+  if (!best) {
+    return {
+      session,
+      scheduleRow: null,
+      overlapMinutes: 0,
+      matchTier: null,
+      matchReason: '未匹配排班',
+    }
+  }
+
+  return {
+    session,
+    scheduleRow: best.row,
+    overlapMinutes: best.overlapMinutes,
+    matchTier: best.matchTier,
+    matchReason: best.matchReason,
+  }
+}
+
+export function matchAllLiveSessionsToSchedule(
+  sessions: AnchorLiveSessionBrief[],
+  scheduleRows: EffectiveScheduleRow[],
+): LiveSessionScheduleMatchResult[] {
+  return sessions.map((session) => matchLiveSessionToBestScheduleRow(session, scheduleRows))
+}
+
+/** 日报：某主播行 — 真实场次时间 + 排班归属（不混用排班时间作直播时间） */
+export function buildDailyReportLiveScheduleFields(params: {
+  anchorName: string
+  allSessions: AnchorLiveSessionBrief[]
+  scheduleRows: EffectiveScheduleRow[]
+  usedScheduleRowIds?: Set<string>
+}): DailyReportLiveScheduleFields & { scheduleAttendance: AnchorAttendanceStatusPayload } {
+  const matches = matchAllLiveSessionsToSchedule(params.allSessions, params.scheduleRows)
+  const matchedForAnchor = matches.filter(
+    (m) => m.scheduleRow && anchorNamesMatch(m.scheduleRow.anchorName, params.anchorName),
+  )
+
+  const matchedSessions = matchedForAnchor.map((m) => m.session)
+
+  const livePeriodText = buildActualLivePeriodText(matchedSessions)
+  const start = matchedSessions.length
+    ? matchedForAnchor
+        .map((m) => m.session)
+        .filter((s) => s.startTime && s.startTime !== '—')
+        .sort((a, b) => a.startTime.localeCompare(b.startTime))[0]?.startTime ?? null
+    : null
+  const endMsList = matchedSessions
+    .map((s) => resolveSessionEndMs(s))
+    .filter((ms): ms is number => ms != null)
+  const end =
+    endMsList.length > 0
+      ? new Date(Math.max(...endMsList)).toISOString()
+      : null
+
+  let primaryScheduleRow: EffectiveScheduleRow | null = null
+  let scheduleMatchReason: string | null = null
+  if (matchedForAnchor.length > 0) {
+    const best = matchedForAnchor.reduce((a, b) =>
+      b.overlapMinutes > a.overlapMinutes ? b : a,
+    )
+    primaryScheduleRow = best.scheduleRow
+    scheduleMatchReason = best.matchReason
+    params.usedScheduleRowIds?.add(best.scheduleRow!.rowId)
+  }
+
+  const scheduleTimeRange = primaryScheduleRow
+    ? `${primaryScheduleRow.startTime}–${primaryScheduleRow.endTime}`
+    : null
+
+  const scheduleAttendance = primaryScheduleRow
+    ? (() => {
+        const earliest = matchedSessions
+          .filter((s) => s.startTime && s.startTime !== '—')
+          .sort((a, b) => a.startTime.localeCompare(b.startTime))[0]
+        const latestEndMs = endMsList.length ? Math.max(...endMsList) : null
+        const actualStartMs = earliest ? new Date(earliest.startTime).getTime() : null
+        const actualEndAt = latestEndMs != null ? new Date(latestEndMs).toISOString() : null
+        return toAttendanceStatusPayload(
+          calculateAnchorAttendanceStatus(
+            primaryScheduleRow,
+            actualStartMs,
+            earliest?.startTime ?? null,
+            latestEndMs,
+            actualEndAt,
+          ),
+        )
+      })()
+    : toAttendanceStatusPayload(
+        calculateAnchorAttendanceStatus(undefined, null, null, null, null),
+      )
+
+  const sessionLabel = primaryScheduleRow
+    ? formatDisplaySessionLabel(
+        deriveSessionLabelFromSchedule(
+          primaryScheduleRow,
+          primaryScheduleRow.startAt?.slice(0, 10),
+        ),
+        resolveShopNameFromSchedule(primaryScheduleRow),
+      )
+    : ''
+
+  return {
+    livePeriodText,
+    liveTimeRange: livePeriodText.replace(/~/g, '–'),
+    liveStartTime: start,
+    liveEndTime: end,
+    scheduleTimeRange,
+    scheduleMatched: Boolean(primaryScheduleRow),
+    scheduleMatchReason,
+    matchedSessions,
+    primaryScheduleRow,
+    scheduleAttendance: {
+      ...scheduleAttendance,
+      hasManualSchedule: scheduleAttendance.hasSchedule,
+      displaySessionLabel: sessionLabel || scheduleAttendance.displaySessionLabel,
+      sessionLabel: sessionLabel || scheduleAttendance.sessionLabel,
+      shopName: primaryScheduleRow
+        ? resolveShopNameFromSchedule(primaryScheduleRow)
+        : scheduleAttendance.shopName,
+    },
+  }
+}
+
+/** 边界用例：13:50–14:20 应匹配重叠更大的排班段 */
+export function pickBestScheduleRowByOverlapForTest(
+  liveStartMs: number,
+  liveEndMs: number,
+  liveName: string,
+  scheduleRows: EffectiveScheduleRow[],
+): EffectiveScheduleRow | null {
+  const session: AnchorLiveSessionBrief = {
+    liveId: 'test',
+    liveName,
+    startTime: new Date(liveStartMs).toISOString(),
+    endTime: new Date(liveEndMs).toISOString(),
+    durationMinutes: Math.round((liveEndMs - liveStartMs) / 60_000),
+    durationText: 'test',
+    viewSessionCount: null,
+    joinUserCount: null,
+    avgOnlineUserCount: null,
+    avgViewDurationSeconds: null,
+    newFollowerCount: null,
+    dealUserCount: null,
+  }
+  return matchLiveSessionToBestScheduleRow(session, scheduleRows).scheduleRow
+}

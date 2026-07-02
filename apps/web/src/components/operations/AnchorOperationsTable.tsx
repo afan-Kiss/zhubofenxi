@@ -15,9 +15,24 @@ import {
   formatStayDurationSeconds,
 } from './operationsReportFormatters'
 
-function formatAnchorSessionTiming(row: DailyOperationsAnchorRow): string {
+function formatAnchorSessionTiming(
+  row: DailyOperationsAnchorRow,
+  showAttendanceStatus: boolean,
+): string {
+  const liveTime =
+    row.liveTimeRange && row.liveTimeRange !== '—'
+      ? row.liveTimeRange
+      : row.livePeriodText?.replace(/~/g, '–') ?? '—'
+  if (!showAttendanceStatus) return liveTime
   const late = readLateStatus(row)
-  return formatLateTimingLine(late) ?? row.livePeriodText
+  const scheduleHint =
+    row.scheduleMatched && row.scheduleTimeRange
+      ? `（排班 ${row.scheduleTimeRange}）`
+      : ''
+  if (liveTime !== '—') {
+    return `${liveTime}${scheduleHint}`
+  }
+  return formatLateTimingLine(late) ?? liveTime
 }
 
 interface Props {
@@ -79,7 +94,7 @@ export const AnchorOperationsTable: React.FC<Props> = ({
                     : 'px-3 py-2 text-slate-600'
                 }
               >
-                {showAttendanceStatus ? formatAnchorSessionTiming(row) : row.livePeriodText}
+                {formatAnchorSessionTiming(row, showAttendanceStatus)}
               </td>
               <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>

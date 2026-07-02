@@ -24,6 +24,12 @@ export interface DailyReportAnchorRow extends AnchorLateStatusView {
   sessionLabel: string
   shopName: string
   livePeriodText: string
+  liveTimeRange?: string
+  liveStartTime?: string | null
+  liveEndTime?: string | null
+  scheduleTimeRange?: string | null
+  scheduleMatched?: boolean
+  scheduleMatchReason?: string | null
   liveDurationText: string
   liveDurationMinutes: number
   shippedAmountYuan: number
@@ -90,13 +96,24 @@ function AnchorCard({
   showAttendanceStatus: boolean
 }) {
   const late = readLateStatus(row)
+  const liveTime =
+    row.liveTimeRange && row.liveTimeRange !== '—'
+      ? row.liveTimeRange
+      : row.livePeriodText && row.livePeriodText !== '—'
+        ? row.livePeriodText.replace(/~/g, '–')
+        : '—'
+  const scheduleHint =
+    showAttendanceStatus && row.scheduleMatched && row.scheduleTimeRange
+      ? `（排班 ${row.scheduleTimeRange}）`
+      : showAttendanceStatus && row.scheduleMatched && late.scheduledPeriodText
+        ? `（排班 ${late.scheduledPeriodText.replace(/~/g, '–')}）`
+        : ''
   const timingDetail = showAttendanceStatus ? formatLateTimingLine(late) : null
   const timingLine = showAttendanceStatus
-    ? timingDetail ??
-      (late.hasSchedule && late.scheduledPeriodText
-        ? `排班 ${late.scheduledPeriodText}｜实际 ${row.livePeriodText}`
-        : row.livePeriodText)
-    : row.livePeriodText
+    ? liveTime !== '—'
+      ? `${liveTime}${scheduleHint}${late.isLate || late.isEarlyLeave ? `｜${late.attendanceLabel || late.label}` : ''}`
+      : timingDetail ?? '—'
+    : liveTime
   const cardBorderClass = showAttendanceStatus
     ? lateCardBorderClass(late.isLate, late.isEarlyLeave)
     : 'border-rose-100 bg-white'

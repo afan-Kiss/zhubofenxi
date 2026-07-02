@@ -293,6 +293,12 @@ export interface DailyOperationsAnchorRow extends AnchorLateStatusView {
   sessionLabel: string
   shopName: string
   livePeriodText: string
+  liveTimeRange?: string
+  liveStartTime?: string | null
+  liveEndTime?: string | null
+  scheduleTimeRange?: string | null
+  scheduleMatched?: boolean
+  scheduleMatchReason?: string | null
   liveDurationText: string
   liveDurationMinutes: number
   validAmountYuan: number

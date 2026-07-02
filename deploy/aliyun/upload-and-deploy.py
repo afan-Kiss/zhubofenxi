@@ -252,6 +252,7 @@ def load_env(path: Path):
 
 preserve_keys = [
     "SESSION_SECRET",
+    "COOKIE_ENCRYPTION_KEY",
     "CONTROL_SERVICE_TOKEN",
     "SHOP_COOKIE_UPLOAD_TOKEN",
 ]

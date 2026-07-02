@@ -15,6 +15,8 @@ import {
   resolveDailyReportImageFetchUrl,
 } from '../../lib/daily-report-image-url'
 import { ViewportModal } from '../ui/ViewportModal'
+import { DailyReportAttendanceCheckbox } from './DailyReportAttendanceCheckbox'
+import { useDailyReportShowAttendance } from '../../lib/daily-report-attendance-pref'
 
 async function waitForNextPaint(): Promise<void> {
   await new Promise<void>((resolve) => {
@@ -187,6 +189,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
 }) => {
   const sheetRef = useRef<HTMLDivElement>(null)
   const captureTokenRef = useRef(0)
+  const prevShowAttendanceRef = useRef<boolean | null>(null)
   const [loading, setLoading] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -196,6 +199,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   const [pendingCapture, setPendingCapture] = useState(false)
   const [shipmentPhotos, setShipmentPhotos] = useState<DailyReportImageItem[]>([])
   const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
+  const [showAttendanceStatus, setShowAttendanceStatus] = useDailyReportShowAttendance()
 
   const isSingleDay = startDate.trim() === endDate.trim() && Boolean(startDate.trim())
 
@@ -249,6 +253,21 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     }
   }, [pendingCapture, report, captureImage])
 
+  useEffect(() => {
+    if (!report) {
+      prevShowAttendanceRef.current = null
+      return
+    }
+    if (prevShowAttendanceRef.current === null) {
+      prevShowAttendanceRef.current = showAttendanceStatus
+      return
+    }
+    if (prevShowAttendanceRef.current === showAttendanceStatus) return
+    prevShowAttendanceRef.current = showAttendanceStatus
+    setImageDataUrl(null)
+    setPendingCapture(true)
+  }, [showAttendanceStatus, report])
+
   const handleViewReport = async () => {
     if (loading || disabled || capturing) return
     setLoading(true)
@@ -290,6 +309,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
             <DailyReportImageSheet
               ref={sheetRef}
               data={report}
+              showAttendanceStatus={showAttendanceStatus}
               shipmentPhotos={shipmentPhotos.map((p) => ({
                 id: p.id,
                 publicUrl: p.publicUrl,
@@ -306,6 +326,11 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     <>
       <div className="flex w-full flex-col gap-3">
         <div className="flex flex-wrap items-center gap-3">
+          <DailyReportAttendanceCheckbox
+            checked={showAttendanceStatus}
+            onChange={setShowAttendanceStatus}
+            disabled={loading || capturing}
+          />
           <button
             type="button"
             disabled={disabled || loading || capturing}

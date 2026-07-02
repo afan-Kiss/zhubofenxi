@@ -14,6 +14,7 @@ import {
 
 interface Props {
   data: DailyOperationsReportPayload
+  showAttendanceStatus?: boolean
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
@@ -25,7 +26,8 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   )
 }
 
-export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ data }, ref) => {
+export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(
+  ({ data, showAttendanceStatus = true }, ref) => {
   return (
     <div ref={ref} className="w-[720px] bg-white p-6 text-slate-900">
       <h1 className="text-xl font-bold">{data.title}</h1>
@@ -66,19 +68,28 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
         <p className="mb-2 text-sm font-semibold">主播表现</p>
         {data.anchors.map((row) => {
           const late = readLateStatus(row)
-          const timingLine = formatLateTimingLine(late)
+          const timingLine = showAttendanceStatus ? formatLateTimingLine(late) : null
+          const cardBorderClass = showAttendanceStatus
+            ? lateCardBorderClass(late.isLate, late.isEarlyLeave)
+            : 'border-slate-200 bg-white'
+          const timingTextClass =
+            showAttendanceStatus && (late.isLate || late.isEarlyLeave)
+              ? 'mt-1 font-medium text-red-600'
+              : 'mt-1 text-slate-600'
           return (
           <div
             key={row.anchorName}
-            className={`mb-2 rounded-xl border p-3 text-xs ${lateCardBorderClass(late.isLate, late.isEarlyLeave)}`}
+            className={`mb-2 rounded-xl border p-3 text-xs ${cardBorderClass}`}
           >
             <p className="text-sm font-semibold">
               {row.anchorName} · {row.sessionLabel}
-              <span className="ml-2 inline-flex align-middle">
-                <AnchorLateStatusBadge row={late} />
-              </span>
+              {showAttendanceStatus ? (
+                <span className="ml-2 inline-flex align-middle">
+                  <AnchorLateStatusBadge row={late} />
+                </span>
+              ) : null}
             </p>
-            <p className={late.isLate ? 'mt-1 font-medium text-red-600' : 'mt-1 text-slate-600'}>
+            <p className={timingTextClass}>
               {timingLine ? `${timingLine} · ` : ''}
               有效成交 {formatIntegerMoney(row.validAmountYuan)} · 订单{' '}
               {formatOrderCount(row.soldOrderCount)} · 直播 {row.liveDurationText}
@@ -89,6 +100,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
       </div>
     </div>
   )
-})
+},
+)
 
 OperationsReportImageSheet.displayName = 'OperationsReportImageSheet'

@@ -22,9 +22,13 @@ function formatAnchorSessionTiming(row: DailyOperationsAnchorRow): string {
 
 interface Props {
   rows: DailyOperationsAnchorRow[]
+  showAttendanceStatus?: boolean
 }
 
-export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
+export const AnchorOperationsTable: React.FC<Props> = ({
+  rows,
+  showAttendanceStatus = true,
+}) => {
   if (rows.length === 0) {
     return <p className="text-sm text-slate-500">暂无主播数据</p>
   }
@@ -50,28 +54,32 @@ export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const late = readLateStatus(row)
+            const highlightRow =
+              showAttendanceStatus && (late.isLate || late.isEarlyLeave)
+            return (
             <tr
               key={row.anchorName}
               className={
-                row.isLate ? 'border-t border-red-100 bg-red-50/40' : 'border-t border-slate-100'
+                highlightRow ? 'border-t border-red-100 bg-red-50/40' : 'border-t border-slate-100'
               }
             >
               <td className="px-3 py-2 font-medium text-slate-900">
                 <div className="flex items-center gap-2">
                   <span>{row.anchorName}</span>
-                  <AnchorLateStatusBadge row={row} />
+                  {showAttendanceStatus ? <AnchorLateStatusBadge row={row} /> : null}
                 </div>
               </td>
               <td className="px-3 py-2 text-slate-600">{row.sessionLabel}</td>
               <td
                 className={
-                  row.isLate
+                  showAttendanceStatus && late.isLate
                     ? 'px-3 py-2 font-medium text-red-600'
                     : 'px-3 py-2 text-slate-600'
                 }
               >
-                {formatAnchorSessionTiming(row)}
+                {showAttendanceStatus ? formatAnchorSessionTiming(row) : row.livePeriodText}
               </td>
               <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
@@ -85,7 +93,8 @@ export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
               <td className="px-3 py-2">{formatRatePercent(row.dealConversionRate)}</td>
               <td className="px-3 py-2">{formatPeopleCount(row.newFollowerCount)}</td>
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>

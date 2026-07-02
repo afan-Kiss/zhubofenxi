@@ -31,6 +31,8 @@ import type { OperationsBiDrillRequest } from './operationsBiDrillTypes'
 import { OperationsCoreMetrics, CollapsibleWarnings } from '../../components/operations/charts/OperationsCoreMetrics'
 import { DailyReportCharts } from '../../components/operations/charts/DailyReportCharts'
 import { useChartTopLimit } from '../../components/operations/charts/useChartTopLimit'
+import { DailyReportAttendanceCheckbox } from '../../components/board/DailyReportAttendanceCheckbox'
+import { useDailyReportShowAttendance } from '../../lib/daily-report-attendance-pref'
 
 interface Props {
   dateKey: string
@@ -51,6 +53,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [showFullHot, setShowFullHot] = useState(false)
   const [showFullReturn, setShowFullReturn] = useState(false)
+  const [showAttendanceStatus, setShowAttendanceStatus] = useDailyReportShowAttendance()
 
   const {
     data: loaded,
@@ -154,14 +157,21 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
           <h2 className="text-lg font-semibold text-slate-900">{report.title}</h2>
           <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} className="mt-1" />
         </div>
-        <button
-          type="button"
-          disabled={exporting}
-          onClick={() => void handleExportImage()}
-          className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-        >
-          {exporting ? '导出中...' : '导出长图'}
-        </button>
+        <div className="flex flex-wrap items-center gap-3">
+          <DailyReportAttendanceCheckbox
+            checked={showAttendanceStatus}
+            onChange={setShowAttendanceStatus}
+            disabled={exporting}
+          />
+          <button
+            type="button"
+            disabled={exporting}
+            onClick={() => void handleExportImage()}
+            className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+          >
+            {exporting ? '导出中...' : '导出长图'}
+          </button>
+        </div>
       </div>
 
       <OperationsCoreMetrics
@@ -222,6 +232,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
         priceBands={report.priceBands}
         anchors={report.anchors}
         afterSalesReasons={report.afterSalesReasons}
+        showAttendanceStatus={showAttendanceStatus}
       />
 
       <BusinessInsightCards
@@ -295,7 +306,11 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
       {report
         ? createPortal(
             <div className="pointer-events-none fixed left-[-9999px] top-0">
-              <OperationsReportImageSheet ref={sheetRef} data={report} />
+              <OperationsReportImageSheet
+                ref={sheetRef}
+                data={report}
+                showAttendanceStatus={showAttendanceStatus}
+              />
             </div>,
             document.body,
           )

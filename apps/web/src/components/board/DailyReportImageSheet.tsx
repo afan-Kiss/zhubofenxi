@@ -62,6 +62,7 @@ export interface DailyReportPayload {
 
 interface Props {
   data: DailyReportPayload
+  showAttendanceStatus?: boolean
   shipmentPhotos?: Array<{
     id: string
     publicUrl: string
@@ -81,28 +82,42 @@ function MetricLine({ label, value, strong }: { label: string; value: string; st
   )
 }
 
-function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
+function AnchorCard({
+  row,
+  showAttendanceStatus,
+}: {
+  row: DailyReportAnchorRow
+  showAttendanceStatus: boolean
+}) {
   const late = readLateStatus(row)
-  const timingDetail = formatLateTimingLine(late)
-  const timingLine =
-    timingDetail ??
-    (late.hasSchedule && late.scheduledPeriodText
-      ? `排班 ${late.scheduledPeriodText}｜实际 ${row.livePeriodText}`
-      : row.livePeriodText)
+  const timingDetail = showAttendanceStatus ? formatLateTimingLine(late) : null
+  const timingLine = showAttendanceStatus
+    ? timingDetail ??
+      (late.hasSchedule && late.scheduledPeriodText
+        ? `排班 ${late.scheduledPeriodText}｜实际 ${row.livePeriodText}`
+        : row.livePeriodText)
+    : row.livePeriodText
+  const cardBorderClass = showAttendanceStatus
+    ? lateCardBorderClass(late.isLate, late.isEarlyLeave)
+    : 'border-rose-100 bg-white'
+  const timingTextClass =
+    showAttendanceStatus && (late.isLate || late.isEarlyLeave)
+      ? 'font-medium text-red-600'
+      : 'text-slate-500'
 
   return (
-    <div className={`rounded-2xl border p-4 shadow-sm ${lateCardBorderClass(late.isLate, late.isEarlyLeave)}`}>
+    <div className={`rounded-2xl border p-4 shadow-sm ${cardBorderClass}`}>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-base font-semibold text-slate-900">
             {row.anchorName}｜{row.sessionLabel}
           </p>
-          <p className={`mt-1 text-[13px] ${late.isLate || late.isEarlyLeave ? 'font-medium text-red-600' : 'text-slate-500'}`}>
+          <p className={`mt-1 text-[13px] ${timingTextClass}`}>
             {timingLine}｜{row.liveDurationText}
           </p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <AnchorLateStatusBadge row={late} />
+          {showAttendanceStatus ? <AnchorLateStatusBadge row={late} /> : null}
           <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
             占比 {formatPercent(row.amountRatio)}
           </span>
@@ -142,7 +157,7 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
 }
 
 export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(function DailyReportImageSheet(
-  { data, shipmentPhotos = [] },
+  { data, showAttendanceStatus = true, shipmentPhotos = [] },
   ref,
 ) {
   const readyPhotos = shipmentPhotos.filter((photo) => photo.dataUrl).slice(0, 12)
@@ -206,7 +221,11 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
 
       <div className="mt-4 space-y-3">
         {data.anchors.map((row) => (
-          <AnchorCard key={`${row.anchorName}-${row.sessionLabel}`} row={row} />
+          <AnchorCard
+            key={`${row.anchorName}-${row.sessionLabel}`}
+            row={row}
+            showAttendanceStatus={showAttendanceStatus}
+          />
         ))}
       </div>
 

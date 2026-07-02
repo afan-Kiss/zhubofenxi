@@ -46,6 +46,12 @@ export interface CookieHealthPayload {
   summary: CookieHealthSummary
 }
 
+export interface CookieSessionTest {
+  ok: boolean
+  checkedAt: string
+  status?: 'valid' | 'invalid' | 'limited' | 'unknown' | 'testing'
+}
+
 export function accountCookieAvailable(account: LiveAccountPublic): boolean {
   if (!account.hasCookie) return false
   // 以最近一次 Cookie 检测结果为准（与「检测」按钮口径一致）
@@ -55,8 +61,26 @@ export function accountCookieAvailable(account: LiveAccountPublic): boolean {
   return accountCanSyncOrders(account)
 }
 
+/** 列表、详情、统计共用：优先采用比服务端记录更新的本次检测结果 */
+export function resolveAccountCookieAvailable(
+  account: LiveAccountPublic,
+  sessionTest?: CookieSessionTest | null,
+): boolean {
+  if (sessionTest?.status === 'testing') {
+    return accountCookieAvailable(account)
+  }
+  if (sessionTest) {
+    const testAt = Date.parse(sessionTest.checkedAt)
+    const serverAt = account.cookieLastCheckedAt ? Date.parse(account.cookieLastCheckedAt) : 0
+    if (!Number.isNaN(testAt) && testAt >= serverAt) {
+      return sessionTest.ok
+    }
+  }
+  return accountCookieAvailable(account)
+}
+
 export function cookieStatusLabel(status: CookieHealthStatus): string {
-  if (status === 'valid') return '正常'
+  if (status === 'valid') return '可用'
   return '不可用'
 }
 
@@ -66,7 +90,7 @@ export function cookieStatusTone(status: CookieHealthStatus): string {
 }
 
 export function cookieAvailableLabel(available: boolean): string {
-  return available ? '正常' : '不可用'
+  return available ? '可用' : '不可用'
 }
 
 export function cookieAvailableTone(available: boolean): string {

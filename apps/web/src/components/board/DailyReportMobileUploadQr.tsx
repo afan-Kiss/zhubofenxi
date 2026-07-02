@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import QRCode from 'qrcode'
 import { apiRequest } from '../../lib/api'
 import {
@@ -19,6 +20,7 @@ export const DailyReportMobileUploadQr: React.FC<Props> = ({
   onClose,
   onRefresh,
 }) => {
+  const [mounted, setMounted] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
@@ -26,6 +28,10 @@ export const DailyReportMobileUploadQr: React.FC<Props> = ({
   const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const pollTimerRef = useRef<number | null>(null)
   const onRefreshRef = useRef(onRefresh)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
 
   useEffect(() => {
     onRefreshRef.current = onRefresh
@@ -79,6 +85,15 @@ export const DailyReportMobileUploadQr: React.FC<Props> = ({
 
   useEffect(() => {
     if (!open) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prevOverflow
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
     }
@@ -86,11 +101,12 @@ export const DailyReportMobileUploadQr: React.FC<Props> = ({
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [open, onClose])
 
-  if (!open) return null
+  if (!mounted || !open) return null
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/50 p-4"
+      className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-900/50 p-4"
+      style={{ height: '100dvh', maxHeight: '100dvh' }}
       onClick={onClose}
       role="presentation"
     >
@@ -162,6 +178,7 @@ export const DailyReportMobileUploadQr: React.FC<Props> = ({
           上传成功后电脑端会自动刷新列表；关闭窗口不影响手机继续上传
         </p>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

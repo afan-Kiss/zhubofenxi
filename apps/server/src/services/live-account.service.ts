@@ -129,7 +129,7 @@ function toPublicView(
     cookieText: cookie,
     cookiePreview,
     cookieUpdatedAt: hasCookie ? row.updatedAt.toISOString() : null,
-    cookieStatus: derived.canSyncOrders ? 'valid' : 'invalid',
+    cookieStatus: (row.cookieStatus as CookieHealthStatus) || 'unknown',
     cookieLastCheckedAt: row.cookieLastCheckedAt?.toISOString() ?? null,
     cookieLastSuccessAt: row.cookieLastSuccessAt?.toISOString() ?? null,
     cookieLastFailedAt: row.cookieLastFailedAt?.toISOString() ?? null,

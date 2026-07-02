@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import {
-  accountCookieAvailable,
   accountCookieReason,
   cookieAvailableLabel,
   cookieAvailableTone,
   cookieStatusLabel,
-  cookieStatusTone,
+  resolveAccountCookieAvailable,
   type CookieHealthStatus,
   type LiveAccountPublic,
 } from '../../lib/live-account'
@@ -66,12 +65,6 @@ function testStatusTone(status: CookieTestStatus | undefined): string {
     default:
       return 'text-slate-600 bg-slate-100'
   }
-}
-
-function apiLabel(api: string | null | undefined): string {
-  if (!api) return '—'
-  if (api === 'order_list') return '订单接口'
-  return api
 }
 
 async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -221,11 +214,16 @@ export const LiveAccountCookiePanel: React.FC = () => {
   >({})
   const toastTimer = useRef<number | null>(null)
   const accountsRef = useRef<LiveAccountPublic[]>([])
+  const testResultsRef = useRef<Record<string, CookieTestResult>>({})
   const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null)
 
   useEffect(() => {
     accountsRef.current = accounts
   }, [accounts])
+
+  useEffect(() => {
+    testResultsRef.current = testResults
+  }, [testResults])
 
   const showToast = useCallback((type: 'ok' | 'err', text: string) => {
     setToast({ type, text })
@@ -254,7 +252,35 @@ export const LiveAccountCookiePanel: React.FC = () => {
           ? mergeAccounts(accountsRef.current, res.accounts)
           : res.accounts
       nextAccounts = await hydrateAccountCookies(nextAccounts, { force: true })
+      const sessionTests = testResultsRef.current
+      nextAccounts = nextAccounts.map((account) => {
+        const test = sessionTests[account.id]
+        if (!test || test.status === 'testing') return account
+        const testAt = Date.parse(test.checkedAt)
+        const serverAt = account.cookieLastCheckedAt ? Date.parse(account.cookieLastCheckedAt) : 0
+        if (!Number.isNaN(testAt) && testAt > serverAt) {
+          return applyTestResultToAccount(account, test)
+        }
+        return account
+      })
       setAccounts(nextAccounts)
+      setTestResults((prev) => {
+        const next = { ...prev }
+        for (const [id, test] of Object.entries(prev)) {
+          if (test.status === 'testing') continue
+          const account = nextAccounts.find((a) => a.id === id)
+          if (!account) {
+            delete next[id]
+            continue
+          }
+          const testAt = Date.parse(test.checkedAt)
+          const serverAt = account.cookieLastCheckedAt ? Date.parse(account.cookieLastCheckedAt) : 0
+          if (Number.isNaN(testAt) || serverAt >= testAt) {
+            delete next[id]
+          }
+        }
+        return next
+      })
       const hints: Record<string, { orderApiStatus: string; qualityApiHint: string }> = {}
       for (const h of health.qualityBadCaseSync?.perAccountHints ?? []) {
         hints[h.liveAccountId] = {
@@ -383,7 +409,6 @@ export const LiveAccountCookiePanel: React.FC = () => {
   const handleTest = async (account: LiveAccountPublic) => {
     if (testingIds.has(account.id) || batchTesting) return
     await runSingleTest(account)
-    await refreshAccounts({ silent: true })
   }
 
   const handleTestAllEnabledCookies = async () => {
@@ -586,61 +611,70 @@ export const LiveAccountCookiePanel: React.FC = () => {
   }
 
   const stats = useMemo(() => {
-    const available = accounts.filter((a) => a.enabled && accountCookieAvailable(a)).length
-    const unavailable = accounts.filter((a) => a.enabled && !accountCookieAvailable(a)).length
+    const available = accounts.filter(
+      (a) => a.enabled && resolveAccountCookieAvailable(a, testResults[a.id]),
+    ).length
+    const unavailable = accounts.filter(
+      (a) => a.enabled && !resolveAccountCookieAvailable(a, testResults[a.id]),
+    ).length
     return { available, unavailable }
-  }, [accounts])
+  }, [accounts, testResults])
 
   const renderTestResultBlock = (account: LiveAccountPublic) => {
     const latest = testResults[account.id]
     const isTesting = testingIds.has(account.id)
-    const recentStatus = accountCookieAvailable(account) ? 'valid' : 'invalid'
-    const thisStatus: CookieTestStatus | undefined = isTesting
+    const available = resolveAccountCookieAvailable(account, latest)
+    const displayStatus: CookieTestStatus = isTesting
       ? 'testing'
-      : latest?.status
+      : available
+        ? 'valid'
+        : 'invalid'
+    const showSessionResult =
+      latest &&
+      latest.status !== 'testing' &&
+      Date.parse(latest.checkedAt) >=
+        (account.cookieLastCheckedAt ? Date.parse(account.cookieLastCheckedAt) : 0)
 
     return (
       <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50/80 p-2.5 text-[11px]">
         <div className="grid gap-1.5 sm:grid-cols-2">
           <div>
-            <span className="text-slate-400">最近检测状态：</span>
+            <span className="text-slate-400">Cookie 状态：</span>
             <span
-              className={`ml-1 inline-flex rounded px-1.5 py-0.5 font-medium ${testStatusTone(recentStatus)}`}
+              className={`ml-1 inline-flex rounded px-1.5 py-0.5 font-medium ${testStatusTone(displayStatus)}`}
             >
-              {testStatusLabel(recentStatus)}
+              {testStatusLabel(displayStatus)}
             </span>
           </div>
           <div>
             <span className="text-slate-400">最近检测时间：</span>
-            <span className="text-slate-700">{formatTime(account.cookieLastCheckedAt)}</span>
+            <span className="text-slate-700">
+              {formatTime(showSessionResult ? latest!.checkedAt : account.cookieLastCheckedAt)}
+            </span>
           </div>
-          <div>
-            <span className="text-slate-400">最近检测接口：</span>
-            <span className="text-slate-700">{apiLabel(account.cookieLastFailedApi ?? 'order_list')}</span>
-          </div>
-          {accountCookieReason(account) && (
+          {!available && accountCookieReason(account) ? (
             <div className="sm:col-span-2">
               <span className="text-slate-400">不可用原因：</span>
               <span className="text-rose-700">{accountCookieReason(account)}</span>
             </div>
-          )}
+          ) : null}
         </div>
-        {(latest || isTesting) && (
+        {(showSessionResult || isTesting) && (
           <div className="mt-2 border-t border-slate-200 pt-2">
-            <span className="text-slate-400">本次检测结果：</span>
+            <span className="text-slate-400">本次检测：</span>
             {isTesting ? (
               <span className="ml-1 text-indigo-700">检测中…</span>
-            ) : latest ? (
+            ) : showSessionResult && latest ? (
               <>
                 <span
-                  className={`ml-1 inline-flex rounded px-1.5 py-0.5 font-medium ${testStatusTone(thisStatus)}`}
+                  className={`ml-1 inline-flex rounded px-1.5 py-0.5 font-medium ${testStatusTone(latest.ok ? 'valid' : 'invalid')}`}
                 >
-                  {latest.ok ? '本次成功' : '本次失败'}
+                  {latest.ok ? '通过' : '未通过'}
                 </span>
                 <span className="ml-2 text-slate-500">{formatTime(latest.checkedAt)}</span>
-                {latest.apiName && (
+                {latest.apiName ? (
                   <span className="ml-2 text-slate-500">· {latest.apiName}</span>
-                )}
+                ) : null}
                 <p className={`mt-1 ${latest.ok ? 'text-emerald-800' : 'text-rose-700'}`}>
                   {latest.message}
                 </p>
@@ -674,7 +708,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
       {!loading && accounts.length > 0 ? (
         <div className="mt-4 grid grid-cols-2 gap-2">
           <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
-            <p className="text-[10px] text-emerald-700">Cookie 正常</p>
+            <p className="text-[10px] text-emerald-700">Cookie 可用</p>
             <p className="mt-0.5 text-lg font-semibold text-emerald-800">{stats.available}</p>
           </div>
           <div
@@ -771,6 +805,9 @@ export const LiveAccountCookiePanel: React.FC = () => {
                 const isBusy = busyId === account.id
                 const cookieText = resolveAccountCookie(account)
                 const accountExpanded = expandedAccountId === account.id
+                const latestTest = testResults[account.id]
+                const cookieAvailable = resolveAccountCookieAvailable(account, latestTest)
+                const cookieReason = cookieAvailable ? null : accountCookieReason(account)
 
                 return (
                   <React.Fragment key={account.id}>
@@ -794,13 +831,13 @@ export const LiveAccountCookiePanel: React.FC = () => {
                       <td className="px-3 py-2.5">
                         <div className="space-y-1">
                           <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieAvailableTone(accountCookieAvailable(account))}`}
+                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieAvailableTone(cookieAvailable)}`}
                           >
-                            {cookieAvailableLabel(accountCookieAvailable(account))}
+                            {cookieAvailableLabel(cookieAvailable)}
                           </span>
-                          {accountCookieReason(account) ? (
+                          {cookieReason ? (
                             <p className="max-w-[220px] text-[10px] leading-snug text-rose-700">
-                              {accountCookieReason(account)}
+                              {cookieReason}
                             </p>
                           ) : null}
                           {isTesting ? (

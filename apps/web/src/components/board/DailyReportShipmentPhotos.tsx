@@ -68,9 +68,10 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
     [onImagesChange],
   )
 
-  const loadImages = useCallback(async () => {
+  const loadImages = useCallback(async (options?: { silent?: boolean }) => {
     if (!reportDate) return
-    setLoading(true)
+    const silent = options?.silent ?? false
+    if (!silent) setLoading(true)
     setError(null)
     try {
       const data = await apiRequest<{ images: DailyReportImageItem[] }>(
@@ -78,9 +79,9 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
       )
       syncImages(data.images ?? [])
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加载发货前照片失败')
+      setError(e instanceof Error ? e.message : '读取已上传照片失败')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [reportDate, syncImages])
 
@@ -114,7 +115,7 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
         }
       }
       setCaptionDraft('')
-      await loadImages()
+      await loadImages({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : '上传失败')
     } finally {
@@ -128,7 +129,7 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
     setError(null)
     try {
       await apiRequest(`/daily-report-images/${id}`, { method: 'DELETE' })
-      await loadImages()
+      await loadImages({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : '删除失败')
     }
@@ -140,7 +141,7 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
         method: 'PATCH',
         body: JSON.stringify({ caption }),
       })
-      await loadImages()
+      await loadImages({ silent: true })
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存备注失败')
     }
@@ -191,7 +192,9 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
 
       {error ? <p className="mt-2 text-xs text-red-600">{error}</p> : null}
       <p className="mt-2 text-xs text-slate-500">
-        {loading ? '加载中…' : `已上传 ${images.length} 张（jpg / png / webp，单张 ≤ 10MB）`}
+        {loading
+          ? '正在读取已上传照片…'
+          : `已上传 ${images.length} 张（jpg / png / webp，单张 ≤ 10MB）`}
       </p>
 
       {images.length > 0 ? (
@@ -240,7 +243,7 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
         open={qrOpen}
         reportDate={reportDate}
         onClose={() => setQrOpen(false)}
-        onRefresh={loadImages}
+        onRefresh={() => void loadImages({ silent: true })}
       />
     </div>
   )

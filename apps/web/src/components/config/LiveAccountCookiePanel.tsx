@@ -574,15 +574,9 @@ export const LiveAccountCookiePanel: React.FC = () => {
   }
 
   const stats = useMemo(() => {
-    const enabled = accounts.filter((a) => a.enabled).length
     const available = accounts.filter((a) => a.enabled && accountCookieAvailable(a)).length
     const unavailable = accounts.filter((a) => a.enabled && !accountCookieAvailable(a)).length
-    return {
-      total: accounts.length,
-      enabled,
-      available,
-      unavailable,
-    }
+    return { available, unavailable }
   }, [accounts])
 
   const renderTestResultBlock = (account: LiveAccountPublic) => {
@@ -667,15 +661,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
       </div>
 
       {!loading && accounts.length > 0 ? (
-        <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-            <p className="text-[10px] text-slate-500">直播号</p>
-            <p className="mt-0.5 text-lg font-semibold text-slate-900">{stats.total}</p>
-          </div>
-          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-            <p className="text-[10px] text-slate-500">已启用</p>
-            <p className="mt-0.5 text-lg font-semibold text-slate-900">{stats.enabled}</p>
-          </div>
+        <div className="mt-4 grid grid-cols-2 gap-2">
           <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
             <p className="text-[10px] text-emerald-700">Cookie 正常</p>
             <p className="mt-0.5 text-lg font-semibold text-emerald-800">{stats.available}</p>

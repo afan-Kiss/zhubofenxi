@@ -75,6 +75,15 @@
 - 验收步骤（含日期范围、指标口径）
 - 影响范围（哪些页面 / API / 缓存）
 
+### 提交与部署（每次改完自动执行，无需用户提醒）
+
+1. `npm run build`（或 `npm run acceptance`）
+2. `git add` 相关文件 → `git commit` → `git push origin main`
+3. `npm run deploy:aliyun` 部署到阿里云
+4. 确认 `GET /api/health` 正常
+
+不入库：secrets、临时排查脚本、`tsconfig.tsbuildinfo`、`deploy/aliyun/__pycache__`。
+
 ### 数据口径变更
 
 若改动涉及金额、退款、品退、订单数、买家标识：

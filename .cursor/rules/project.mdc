@@ -36,6 +36,13 @@ alwaysApply: true
 - 涉及金额/退款/品退/订单数：前后端口径一起查，对照 `docs/DATA_METRICS_SPEC.md`。
 - 若任务与以上规则冲突：**先停止**，向用户说明冲突点，不要擅自扩展 scope。
 
+## 交付与部署（每次改完必做）
+
+- 代码改动完成后 **自动** `git commit` + `git push origin main`，无需用户提醒。
+- 随后 **自动** `npm run deploy:aliyun` 部署到阿里云（`8.137.126.18`）。
+- 部署后确认健康检查 `GET /api/health` 正常；有专项验收脚本则一并跑。
+- 仅本地调试脚本、临时排查文件、secrets 不入库；`tsconfig.tsbuildinfo` 不提交。
+
 ## 文档
 
 改业务前阅读：`AGENTS.md`、`docs/PRODUCT_SPEC.md`、`docs/DATA_METRICS_SPEC.md`、`docs/UI_COPY_RULES.md`。

@@ -31,7 +31,7 @@ interface Props {
 }
 
 function resolvePhotoWall(totalCount: number): { cols: 2 | 3 | 4; colsClass: string } {
-  if (totalCount >= 10) {
+  if (totalCount >= 9) {
     return { cols: 4, colsClass: 'daily-report-export-photo-wall--cols-4' }
   }
   if (totalCount >= 5) {
@@ -126,13 +126,18 @@ export const DailyReportExportView = React.forwardRef<HTMLDivElement, Props>(
     const photoCaption = buildPhotoCaption(totalPhotoCount, displayedCount, remainingCount)
 
     const anchorCols =
-      displayedCount > 0
-        ? data.anchors.length >= 5
-          ? 'daily-report-export-grid--cols-3'
-          : 'daily-report-export-grid--cols-2'
-        : data.anchors.length >= 4
-          ? 'daily-report-export-grid--cols-3'
-          : 'daily-report-export-grid--cols-2'
+      data.anchors.length >= 4
+        ? 'daily-report-export-grid--cols-3'
+        : 'daily-report-export-grid--cols-2'
+
+    const photoWallSizeClass =
+      displayedCount <= 2
+        ? 'daily-report-export-photo-wall--size-xl'
+        : displayedCount <= 4
+          ? 'daily-report-export-photo-wall--size-lg'
+          : displayedCount <= 9
+            ? 'daily-report-export-photo-wall--size-md'
+            : 'daily-report-export-photo-wall--size-sm'
 
     return (
       <div
@@ -203,34 +208,37 @@ export const DailyReportExportView = React.forwardRef<HTMLDivElement, Props>(
               ))}
             </div>
           </div>
-
-          {displayedCount > 0 ? (
-            <div className="daily-report-export-photos">
-              <p className="text-[13px] font-semibold text-slate-900">发货前照片</p>
-              {photoCaption ? (
-                <p className="mt-1 text-[11px] leading-snug text-slate-500">{photoCaption}</p>
-              ) : null}
-              <div className={`daily-report-export-photo-wall ${photoWall.colsClass}`}>
-                {displayedPhotos.map((photo) => (
-                  <div key={photo.id} className="daily-report-export-photo-item" data-shipment-photo-cell>
-                    <img
-                      data-shipment-photo-img
-                      src={photo.dataUrl!}
-                      alt={photo.caption ?? '发货前照片'}
-                    />
-                  </div>
-                ))}
-                {remainingCount > 0 ? (
-                  <div className="daily-report-export-photo-more">
-                    还有 {remainingCount} 张
-                    <br />
-                    系统内查看
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          ) : null}
         </div>
+
+        {displayedCount > 0 ? (
+          <div className="daily-report-export-photos">
+            <p className="text-[13px] font-semibold text-slate-900">发货前照片</p>
+            {photoCaption ? (
+              <p className="mt-1 text-[11px] leading-snug text-slate-500">{photoCaption}</p>
+            ) : null}
+            <div
+              className={`daily-report-export-photo-wall ${photoWall.colsClass} ${photoWallSizeClass}`}
+            >
+              {displayedPhotos.map((photo) => (
+                <div key={photo.id} className="daily-report-export-photo-item" data-shipment-photo-cell>
+                  <img
+                    data-shipment-photo-img
+                    src={photo.dataUrl!}
+                    alt={photo.caption ?? '发货前照片'}
+                    decoding="sync"
+                  />
+                </div>
+              ))}
+              {remainingCount > 0 ? (
+                <div className="daily-report-export-photo-more">
+                  还有 {remainingCount} 张
+                  <br />
+                  系统内查看
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </div>
     )
   },

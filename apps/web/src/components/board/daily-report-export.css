@@ -31,15 +31,11 @@
 }
 
 .daily-report-export-body {
-  display: flex;
-  align-items: flex-start;
-  gap: 20px;
   margin-top: 18px;
 }
 
 .daily-report-export-anchors {
-  flex: 1;
-  min-width: 0;
+  width: 100%;
 }
 
 .daily-report-export-grid {
@@ -69,19 +65,20 @@
   background: #fff1f2;
 }
 
+/* 发货前照片：底部全宽展示，按数量动态放大 */
 .daily-report-export-photos {
-  width: 360px;
-  flex-shrink: 0;
+  width: 100%;
+  margin-top: 18px;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
-  padding: 12px;
+  padding: 14px 16px;
   background: #f8fafc;
 }
 
 .daily-report-export-photo-wall {
   display: grid;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .daily-report-export-photo-wall--cols-2 {
@@ -96,33 +93,60 @@
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.daily-report-export-photo-wall--size-xl .daily-report-export-photo-item,
+.daily-report-export-photo-wall--size-xl .daily-report-export-photo-more {
+  min-height: 420px;
+}
+
+.daily-report-export-photo-wall--size-lg .daily-report-export-photo-item,
+.daily-report-export-photo-wall--size-lg .daily-report-export-photo-more {
+  min-height: 340px;
+}
+
+.daily-report-export-photo-wall--size-md .daily-report-export-photo-item,
+.daily-report-export-photo-wall--size-md .daily-report-export-photo-more {
+  min-height: 280px;
+}
+
+.daily-report-export-photo-wall--size-sm .daily-report-export-photo-item,
+.daily-report-export-photo-wall--size-sm .daily-report-export-photo-more {
+  min-height: 220px;
+}
+
 .daily-report-export-photo-item {
   position: relative;
-  aspect-ratio: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px solid #e2e8f0;
-  background: #e2e8f0;
+  background: #ffffff;
+  padding: 4px;
 }
 
 .daily-report-export-photo-item img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  object-position: center center;
   display: block;
+  image-rendering: auto;
 }
 
 .daily-report-export-photo-more {
   display: flex;
-  aspect-ratio: 1 / 1;
+  min-height: 220px;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: 8px;
   border: 1px dashed #cbd5e1;
   background: #f1f5f9;
-  padding: 6px;
+  padding: 8px;
   text-align: center;
-  font-size: 11px;
-  line-height: 1.35;
+  font-size: 12px;
+  line-height: 1.4;
   color: #64748b;
 }

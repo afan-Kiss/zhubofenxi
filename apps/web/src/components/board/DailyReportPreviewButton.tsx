@@ -111,6 +111,43 @@ async function inlineSheetImages(root: HTMLElement): Promise<() => void> {
   }
 }
 
+async function prepareExportPhotosForCapture(root: HTMLElement): Promise<() => void> {
+  const restores: Array<() => void> = []
+  for (const cell of Array.from(root.querySelectorAll('[data-shipment-photo-cell]'))) {
+    const el = cell as HTMLElement
+    const img = el.querySelector('[data-shipment-photo-img]') as HTMLImageElement | null
+    if (!img) continue
+    await img.decode().catch(() => undefined)
+
+    const prevCellStyle = el.style.cssText
+    const prevImgStyle = img.style.cssText
+    const naturalW = img.naturalWidth
+    const naturalH = img.naturalHeight
+    if (naturalW > 0 && naturalH > 0) {
+      const cellWidth = el.clientWidth > 0 ? el.clientWidth - 8 : 760
+      const scale = Math.min(1, cellWidth / naturalW)
+      const displayW = Math.round(naturalW * scale)
+      const displayH = Math.round(naturalH * scale)
+      img.style.width = `${displayW}px`
+      img.style.height = `${displayH}px`
+      img.style.maxWidth = '100%'
+      img.style.maxHeight = '100%'
+      img.style.objectFit = 'contain'
+    }
+    el.style.display = 'flex'
+    el.style.alignItems = 'center'
+    el.style.justifyContent = 'center'
+    restores.push(() => {
+      el.style.cssText = prevCellStyle
+      img.style.cssText = prevImgStyle
+    })
+  }
+  await waitForNextPaint()
+  return () => {
+    for (const restore of restores) restore()
+  }
+}
+
 async function renderSheetToPng(node: HTMLElement): Promise<string> {
   const baseOptions = {
     cacheBust: true,
@@ -119,7 +156,11 @@ async function renderSheetToPng(node: HTMLElement): Promise<string> {
   } as const
   for (const pixelRatio of [3, 2, 1]) {
     try {
-      return await toPng(node, { ...baseOptions, pixelRatio })
+      return await toPng(node, {
+        ...baseOptions,
+        pixelRatio,
+        style: { transform: 'scale(1)' },
+      })
     } catch {
       // try lower ratio on memory / canvas limits
     }
@@ -164,12 +205,14 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     const node = await waitForSheetRef(sheetRef)
     await waitForImagesReady(node)
     const restoreImages = await inlineSheetImages(node)
+    const restorePhotos = await prepareExportPhotosForCapture(node)
     try {
       await waitForNextPaint()
       await new Promise((resolve) => window.setTimeout(resolve, 120))
       const dataUrl = await renderSheetToPng(node)
       setImageDataUrl(dataUrl)
     } finally {
+      restorePhotos()
       restoreImages()
     }
   }, [])

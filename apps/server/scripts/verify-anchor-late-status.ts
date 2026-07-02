@@ -5,6 +5,8 @@ import {
   deriveSessionLabelFromSchedule,
   formatDisplaySessionLabel,
   matchManualSchedule,
+  matchEffectiveScheduleRow,
+  sessionOverlapsEffectiveScheduleRow,
   pickEarliestValidSession,
   pickLatestValidSessionEnd,
   type AnchorAttendanceStatus,
@@ -310,5 +312,37 @@ const sessions = [
 ] as AnchorLiveSessionBrief[]
 assert.equal(pickEarliestValidSession(sessions)?.startTime, '2026-06-30T10:00:00+08:00', 'earliest-session')
 console.log('[verify-anchor-attendance] PASS earliest-session')
+
+const virtualZijie = row({
+  rowId: 'virtual-zijie',
+  source: 'virtual_template',
+  anchorName: '子杰',
+  shopName: '拾玉居和田玉',
+  liveRoomName: '拾玉居和田玉',
+  startTime: '09:30',
+  endTime: '14:00',
+  startAt: '2026-07-02T09:30:00+08:00',
+  endAt: '2026-07-02T14:00:00+08:00',
+  note: '早场·拾玉居和田玉',
+})
+const matchedVirtual = matchEffectiveScheduleRow(
+  [virtualZijie],
+  '子杰',
+  '拾玉居和田玉',
+  Date.parse('2026-07-02T10:05:00+08:00'),
+  new Set(),
+)
+assert.equal(matchedVirtual?.rowId, 'virtual-zijie', 'virtual-template schedule match')
+assert.ok(
+  sessionOverlapsEffectiveScheduleRow(
+    [virtualZijie],
+    '子杰',
+    '拾玉居和田玉',
+    Date.parse('2026-07-02T10:05:00+08:00'),
+    Date.parse('2026-07-02T13:00:00+08:00'),
+  ),
+  'virtual-template session overlap',
+)
+console.log('[verify-anchor-attendance] PASS virtual-template-match')
 
 console.log('[verify-anchor-attendance] ALL PASS')

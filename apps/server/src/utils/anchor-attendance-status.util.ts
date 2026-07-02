@@ -3,6 +3,7 @@ import type { AnchorLiveSessionBrief } from '../services/anchor-live-sessions.se
 import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
 import { anchorNamesMatch } from './anchor-name-normalize.util'
 import { orderLiveRoomMatchesSchedule } from './shop-name-normalize.util'
+import { isPayTimeInSchedule } from './anchor-schedule-time.util'
 
 export interface AnchorAttendanceStatus {
   hasSchedule: boolean
@@ -145,42 +146,55 @@ export function formatScheduleActualTimingLine(params: {
   return timing
 }
 
-function filterManualRowsForAnchor(
+function filterScheduleRowsForAnchor(
   rows: EffectiveScheduleRow[],
   anchorName: string,
   shopName: string,
   usedRowIds: Set<string>,
 ): EffectiveScheduleRow[] {
-  const manualRows = rows.filter(
+  const candidates = rows.filter(
     (r) =>
-      r.source === 'manual' &&
       r.enabled &&
       anchorNamesMatch(r.anchorName, anchorName) &&
       !usedRowIds.has(r.rowId),
   )
   const shop = shopName.trim()
-  if (!shop) return manualRows
-  const shopMatched = manualRows.filter((r) =>
+  if (!shop) return candidates
+  const shopMatched = candidates.filter((r) =>
     orderLiveRoomMatchesSchedule(shop, r.shopName, r.liveRoomName),
   )
-  return shopMatched.length > 0 ? shopMatched : manualRows
+  return shopMatched.length > 0 ? shopMatched : candidates
 }
 
-/** 匹配手动排班：同一天多段时，优先选实际开播前最近的一段排班（且未被占用）。 */
-export function matchManualSchedule(
+/** 按主播 + 直播号 + 时刻匹配生效排班（含 manual / generated / virtual） */
+export function matchEffectiveScheduleRow(
   rows: EffectiveScheduleRow[],
   anchorName: string,
   shopName: string,
-  actualStartMs: number | null,
+  timeMs: number | null,
   usedRowIds: Set<string>,
 ): EffectiveScheduleRow | undefined {
-  const candidates = filterManualRowsForAnchor(rows, anchorName, shopName, usedRowIds)
+  const candidates = filterScheduleRowsForAnchor(rows, anchorName, shopName, usedRowIds)
   if (candidates.length === 0) return undefined
   if (candidates.length === 1) return candidates[0]
 
+  if (timeMs != null && Number.isFinite(timeMs)) {
+    const inWindow = candidates.filter((row) =>
+      isPayTimeInSchedule(timeMs, new Date(row.startAt), new Date(row.endAt)),
+    )
+    if (inWindow.length === 1) return inWindow[0]
+    if (inWindow.length > 1) {
+      return inWindow.sort(
+        (a, b) =>
+          Math.abs(timeMs - new Date(a.startAt).getTime()) -
+          Math.abs(timeMs - new Date(b.startAt).getTime()),
+      )[0]
+    }
+  }
+
   const sorted = [...candidates].sort((a, b) => a.startAt.localeCompare(b.startAt))
 
-  if (actualStartMs == null) {
+  if (timeMs == null) {
     return sorted[0]
   }
 
@@ -188,19 +202,54 @@ export function matchManualSchedule(
     const startMs = new Date(row.startAt).getTime()
     const endMs = new Date(row.endAt).getTime()
     const inWindow =
-      actualStartMs >= startMs - 30 * 60_000 && actualStartMs <= endMs + 60 * 60_000
-    return { row, startMs, inWindow, delta: actualStartMs - startMs }
+      timeMs >= startMs - 30 * 60_000 && timeMs <= endMs + 60 * 60_000
+    return { row, startMs, inWindow, delta: timeMs - startMs }
   })
 
   const inWindow = scored.filter((s) => s.inWindow)
   const pool = inWindow.length > 0 ? inWindow : scored
 
-  const beforeActual = pool.filter((s) => s.startMs <= actualStartMs)
+  const beforeActual = pool.filter((s) => s.startMs <= timeMs)
   if (beforeActual.length > 0) {
     return beforeActual.sort((a, b) => b.startMs - a.startMs)[0]!.row
   }
 
   return pool.sort((a, b) => Math.abs(a.delta) - Math.abs(b.delta))[0]!.row
+}
+
+/** 直播场次是否与某段生效排班重叠（7/1 起场次归属） */
+export function sessionOverlapsEffectiveScheduleRow(
+  rows: EffectiveScheduleRow[],
+  anchorName: string,
+  liveAccountName: string,
+  startMs: number,
+  endMs: number,
+): boolean {
+  const liveName = liveAccountName.trim()
+  if (!liveName || !Number.isFinite(startMs)) return false
+  const effectiveEnd = Number.isFinite(endMs) ? endMs : startMs
+
+  for (const row of rows) {
+    if (!row.enabled) continue
+    if (!anchorNamesMatch(row.anchorName, anchorName)) continue
+    if (!orderLiveRoomMatchesSchedule(liveName, row.shopName, row.liveRoomName)) continue
+    const scheduleStart = new Date(row.startAt).getTime()
+    const scheduleEnd = new Date(row.endAt).getTime()
+    if (isPayTimeInSchedule(startMs, new Date(row.startAt), new Date(row.endAt))) return true
+    if (startMs < scheduleStart && effectiveEnd > scheduleStart) return true
+  }
+  return false
+}
+
+/** 匹配生效排班：同一天多段时，优先选实际开播时刻命中的排班（且未被占用）。 */
+export function matchManualSchedule(
+  rows: EffectiveScheduleRow[],
+  anchorName: string,
+  shopName: string,
+  actualStartMs: number | null,
+  usedRowIds: Set<string>,
+): EffectiveScheduleRow | undefined {
+  return matchEffectiveScheduleRow(rows, anchorName, shopName, actualStartMs, usedRowIds)
 }
 
 function resolveSessionEndMs(session: AnchorLiveSessionBrief): number | null {

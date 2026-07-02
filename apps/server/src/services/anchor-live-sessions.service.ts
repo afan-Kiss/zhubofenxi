@@ -23,6 +23,12 @@ import {
   type AggregatedLiveSessionTraffic,
   type LiveSessionTrafficMetrics,
 } from './live-session-traffic.util'
+import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
+import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
+import { formatDateKeyShanghai } from '../utils/business-timezone'
+import { sessionOverlapsEffectiveScheduleRow } from '../utils/anchor-attendance-status.util'
+
+const NEW_SCHEDULE_START_MS = Date.parse(`${ANCHOR_NEW_SCHEDULE_START_DATE}T00:00:00+08:00`)
 
 export interface AnchorLiveSessionBrief extends LiveSessionTrafficMetrics {
   liveId: string
@@ -151,10 +157,26 @@ function liveSessionMatchesAnchor(
   session: NormalizedLiveSession,
   target: { anchorId: string; anchorName: string },
   anchorOrders: AnalyzedOrderView[],
+  scheduleRows?: import('./anchor-daily-schedule.service').EffectiveScheduleRow[],
 ): boolean {
   if (session.errors.length > 0 || !session.startTime) return false
   const startMs = session.startTime.getTime()
-  if (startMs >= SHOP_SESSION_ANCHOR_CUTOFF_MS) {
+  const endMs = sessionEndTime(session)?.getTime() ?? startMs
+
+  if (startMs >= NEW_SCHEDULE_START_MS && scheduleRows && scheduleRows.length > 0) {
+    const liveName = pickSessionLiveAccountName(session)
+    if (
+      sessionOverlapsEffectiveScheduleRow(
+        scheduleRows,
+        target.anchorName,
+        liveName,
+        startMs,
+        endMs,
+      )
+    ) {
+      return true
+    }
+  } else if (startMs >= SHOP_SESSION_ANCHOR_CUTOFF_MS) {
     if (target.anchorName === '小白') {
       if (!isXiaoBaiLiveSession(session)) return false
       const liveName = pickSessionLiveAccountName(session)
@@ -166,7 +188,6 @@ function liveSessionMatchesAnchor(
   if (liveSessionBelongsToAnchor(session, target)) return true
   if (sessionMatchesTargetTimeRule(session, target)) return true
 
-  const endMs = sessionEndTime(session)?.getTime()
   if (endMs != null) {
     for (const v of anchorOrders) {
       const payMs = orderPayTimeMs(v)
@@ -306,17 +327,36 @@ export async function resolveAnchorLiveSessionsWithTrafficForRange(params: {
   )
   const anchorOrders = params.anchorOrders ?? []
   const all = dedupeLiveSessions(await normalizeLiveSessionsFromRaw())
-  const matched = all
-    .filter((s) => {
-      if (!s.startTime) return false
-      const ms = s.startTime.getTime()
-      if (ms < range.startTimeMs || ms > range.endTimeMs) return false
-      return liveSessionMatchesAnchor(s, target, anchorOrders)
-    })
+
+  const scheduleCache = new Map<string, Awaited<ReturnType<typeof getEffectiveScheduleTableForDate>>['rows']>()
+  async function scheduleRowsForSession(session: NormalizedLiveSession) {
+    if (!session.startTime || session.startTime.getTime() < NEW_SCHEDULE_START_MS) return []
+    const dateKey = formatDateKeyShanghai(session.startTime)
+    let cached = scheduleCache.get(dateKey)
+    if (!cached) {
+      const table = await getEffectiveScheduleTableForDate(dateKey)
+      cached = table.rows
+      scheduleCache.set(dateKey, cached)
+    }
+    return cached
+  }
+
+  const matched: NormalizedLiveSession[] = []
+  for (const s of all) {
+    if (!s.startTime) continue
+    const ms = s.startTime.getTime()
+    if (ms < range.startTimeMs || ms > range.endTimeMs) continue
+    const scheduleRows = await scheduleRowsForSession(s)
+    if (liveSessionMatchesAnchor(s, target, anchorOrders, scheduleRows)) {
+      matched.push(s)
+    }
+  }
+
+  const briefs = matched
     .sort((a, b) => (a.startTime?.getTime() ?? 0) - (b.startTime?.getTime() ?? 0))
     .map((s) => clipBriefForTargetAnchor(toBrief(s), s, target))
     .filter((s) => s.durationMinutes > 0)
-  return dedupeLiveSessionBriefs(matched)
+  return dedupeLiveSessionBriefs(briefs)
 }
 
 export function aggregateAnchorLiveSessionTraffic(

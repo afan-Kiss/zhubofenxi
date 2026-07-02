@@ -42,7 +42,9 @@ model Session {
 
 model PlatformCredential {
   id                    String    @id @default(cuid())
+  /// 唯一标识；四店官方账号固定为 shopKey：shiyuju / hetianyayu / xiangyu / xyxiangyu
   platformName          String    @unique
+  /// 展示名称（如「XY祥钰珠宝」）；非唯一，四店以外可为普通直播号
   displayName           String    @default("")
   cookieEncrypted       String    @default("")
   remark                String?

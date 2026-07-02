@@ -1,25 +1,24 @@
-import { prisma } from '../lib/prisma'
-import { decryptText, encryptText } from '../utils/crypto'
+import { decryptText } from '../utils/crypto'
 import { getShopCookieUploadToken } from '../config/env'
-import { resolveCanonicalShopName } from '../config/qianfan-shops.constants'
 import {
   GOOD_REVIEW_SHOPS,
   getGoodReviewShopName,
   resolveGoodReviewShopKey,
   type GoodReviewShopKey,
 } from '../config/good-review-shops.constants'
-import {
-  persistLiveAccountCookieOnly,
-  refreshLiveAccountRowMapperContext,
-  testLiveAccountCookie,
-} from './live-account.service'
+import { refreshLiveAccountRowMapperContext } from './live-account.service'
 import { clearSessionCookieCache } from './qianfan-cookie-resolver.service'
 import { logInfo } from '../utils/server-log'
 import {
   buildShopCookieSummary,
+  cookieContainsA1,
   deriveCookieSyncState,
   type ShopCookieStatusSummary,
 } from '../utils/cookie-sync-status.util'
+import {
+  resolveOfficialShopAccountForStatus,
+  upsertOfficialShopAccountCookie,
+} from './official-shop-account.service'
 
 export interface ShopCookieUploadItemResult {
   shopKey: string
@@ -86,10 +85,6 @@ function extractCookieKeys(cookie: string): string[] {
   return [...new Set(keys)].sort()
 }
 
-function cookieContainsA1(cookie: string): boolean {
-  return /(?:^|;\s*)a1=[^;]+/i.test(cookie.trim())
-}
-
 function isGarbageCookieString(cookie: string): boolean {
   const trimmed = cookie.trim()
   if (!trimmed) return true
@@ -137,47 +132,6 @@ function buildCookieReason(
   plainCookie?: string | null,
 ): ReturnType<typeof deriveCookieSyncState> {
   return deriveCookieSyncState(row, { plainCookie })
-}
-
-async function findAccountIdForShop(shopKey: GoodReviewShopKey): Promise<string | null> {
-  const shopName = getGoodReviewShopName(shopKey)
-  const targetCanonical = resolveCanonicalShopName(shopName)
-  if (!targetCanonical) return null
-
-  const rows = await prisma.platformCredential.findMany({
-    where: { enabled: true },
-    orderBy: { createdAt: 'asc' },
-  })
-  for (const row of rows) {
-    const name = row.displayName?.trim() || row.platformName
-    if (resolveCanonicalShopName(name) === targetCanonical) {
-      return row.id
-    }
-  }
-  return null
-}
-
-async function ensureAccountForShop(
-  shopKey: GoodReviewShopKey,
-  cookie: string,
-  updatedBy: string,
-): Promise<string> {
-  const existingId = await findAccountIdForShop(shopKey)
-  if (existingId) return existingId
-
-  const shopName = getGoodReviewShopName(shopKey)
-  const row = await prisma.platformCredential.create({
-    data: {
-      platformName: shopKey,
-      displayName: shopName,
-      cookieEncrypted: encryptText(cookie),
-      enabled: true,
-      updatedBy,
-      cookieStatus: 'unknown',
-    },
-  })
-  await testLiveAccountCookie(row.id).catch(() => undefined)
-  return row.id
 }
 
 function normalizeUploadPayload(raw: unknown): Array<{
@@ -279,41 +233,29 @@ export async function uploadShopCookies(params: {
     }
 
     try {
-      let accountId = await findAccountIdForShop(item.shopKey)
-      if (!accountId) {
-        accountId = await ensureAccountForShop(item.shopKey, item.cookie, params.updatedBy)
-      } else {
-        await persistLiveAccountCookieOnly(accountId, item.cookie, params.updatedBy)
-        await testLiveAccountCookie(accountId).catch(() => undefined)
-      }
-
-      const row = await prisma.platformCredential.findUnique({ where: { id: accountId } })
-      let savedContainsA1 = false
-      if (row?.cookieEncrypted?.trim()) {
-        try {
-          savedContainsA1 = cookieContainsA1(decryptText(row.cookieEncrypted))
-        } catch {
-          savedContainsA1 = cookieContainsA1(row.cookieEncrypted)
-        }
-      }
+      const saved = await upsertOfficialShopAccountCookie(
+        item.shopKey,
+        item.cookie,
+        params.updatedBy,
+      )
 
       logInfo(
         'Cookie上传诊断',
-        `${shopName} field=${item.fieldUsed ?? '-'} receivedA1=${receivedContainsA1} savedA1=${savedContainsA1} len=${receivedCookieLength} accountId=${accountId}`,
+        `${shopName} field=${item.fieldUsed ?? '-'} receivedA1=${receivedContainsA1} savedA1=${saved.savedContainsA1} len=${receivedCookieLength} accountId=${saved.savedAccountId} official=${saved.createdOfficial ? 'created' : 'updated'}`,
       )
 
       results.push({
         ...baseDiag,
         success: true,
-        accountId,
-        savedAccountId: accountId,
-        savedAt: row?.updatedAt?.toISOString() ?? new Date().toISOString(),
-        savedContainsA1,
-        cookiePreview: row?.cookieEncrypted ? maskCookiePreview(item.cookie) : null,
-        cookieStatus: row?.cookieStatus ?? 'unknown',
-        status: row?.cookieStatus ?? 'uploaded',
+        accountId: saved.savedAccountId,
+        savedAccountId: saved.savedAccountId,
+        savedAt: saved.account.updatedAt?.toISOString() ?? new Date().toISOString(),
+        savedContainsA1: saved.savedContainsA1,
+        cookiePreview: saved.cookiePreview,
+        cookieStatus: saved.cookieStatus,
+        status: saved.status,
       })
-      logInfo('Cookie上传', `${shopName} 已落库，状态=${row?.cookieStatus ?? 'unknown'}`)
+      logInfo('Cookie上传', `${shopName} 已落库官方账号 ${saved.savedAccountId}，状态=${saved.cookieStatus}`)
     } catch (err) {
       results.push({
         ...baseDiag,
@@ -352,56 +294,45 @@ export async function getShopCookieStatusPayload(): Promise<{
   summary: ShopCookieStatusSummary
   checkedAt: string
 }> {
-  const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
-  const accountByShop = new Map<GoodReviewShopKey, (typeof rows)[number]>()
-
-  for (const row of rows) {
-    const name = row.displayName?.trim() || row.platformName
-    const canonical = resolveCanonicalShopName(name)
-    if (!canonical) continue
-    const shopKey = GOOD_REVIEW_SHOPS.find((s) => s.shopName === canonical)?.shopKey
-    if (shopKey && !accountByShop.has(shopKey)) {
-      accountByShop.set(shopKey, row)
-    }
-  }
-
-  const shops = GOOD_REVIEW_SHOPS.map((def) => {
-    const row = accountByShop.get(def.shopKey)
-    const hasCookie = Boolean(row?.cookieEncrypted?.trim())
-    let cookiePreview: string | null = null
-    let plain: string | null = null
-    if (hasCookie && row) {
-      try {
-        plain = decryptText(row.cookieEncrypted).trim()
-        cookiePreview = plain ? maskCookiePreview(plain) : '已保存'
-      } catch {
-        if (row.cookieEncrypted.includes(';')) {
-          plain = row.cookieEncrypted.trim()
-          cookiePreview = maskCookiePreview(row.cookieEncrypted)
-        } else {
-          cookiePreview = '已保存'
+  const shops = await Promise.all(
+    GOOD_REVIEW_SHOPS.map(async (def) => {
+      const row = await resolveOfficialShopAccountForStatus(def.shopKey)
+      const hasCookie = Boolean(row?.cookieEncrypted?.trim())
+      let cookiePreview: string | null = null
+      let plain: string | null = null
+      if (hasCookie && row) {
+        try {
+          plain = decryptText(row.cookieEncrypted).trim()
+          cookiePreview = plain ? maskCookiePreview(plain) : '已保存'
+        } catch {
+          if (row.cookieEncrypted.includes(';')) {
+            plain = row.cookieEncrypted.trim()
+            cookiePreview = maskCookiePreview(row.cookieEncrypted)
+          } else {
+            cookiePreview = '已保存'
+          }
         }
       }
-    }
-    const derived = buildCookieReason(row ?? null, plain)
-    return {
-      shopKey: def.shopKey,
-      shopName: def.shopName,
-      liveRoomName: def.shopName,
-      accountId: row?.id ?? null,
-      accountDisplayName: row?.displayName?.trim() || row?.platformName || null,
-      hasCookie,
-      cookiePreview,
-      cookieStatus: row?.cookieStatus ?? 'unknown',
-      status: derived.status,
-      reason: derived.reason,
-      lastUploadAt: hasCookie ? row!.updatedAt.toISOString() : null,
-      lastValidateAt: row?.cookieLastCheckedAt?.toISOString() ?? null,
-      canSyncOrders: derived.canSyncOrders,
-      cookieUpdatedAt: hasCookie ? row!.updatedAt.toISOString() : null,
-      statusLevel: derived.statusLevel,
-    }
-  })
+      const derived = buildCookieReason(row ?? null, plain)
+      return {
+        shopKey: def.shopKey,
+        shopName: def.shopName,
+        liveRoomName: def.shopName,
+        accountId: row?.id ?? null,
+        accountDisplayName: row?.displayName?.trim() || row?.platformName || null,
+        hasCookie,
+        cookiePreview,
+        cookieStatus: row?.cookieStatus ?? 'unknown',
+        status: derived.status,
+        reason: derived.reason,
+        lastUploadAt: hasCookie ? row!.updatedAt.toISOString() : null,
+        lastValidateAt: row?.cookieLastCheckedAt?.toISOString() ?? null,
+        canSyncOrders: derived.canSyncOrders,
+        cookieUpdatedAt: hasCookie ? row!.updatedAt.toISOString() : null,
+        statusLevel: derived.statusLevel,
+      }
+    }),
+  )
 
   const summary = buildShopCookieSummary(
     shops.map((s) => ({
@@ -409,9 +340,7 @@ export async function getShopCookieStatusPayload(): Promise<{
       canSyncOrders: s.canSyncOrders,
       reason: s.reason,
       status: s.status,
-      cookieLastErrorCode: accountByShop.get(
-        s.shopKey as GoodReviewShopKey,
-      )?.cookieLastErrorCode,
+      cookieLastErrorCode: null,
     })),
   )
 
@@ -428,3 +357,12 @@ export async function getShopCookieStatusPayload(): Promise<{
     checkedAt: new Date().toISOString(),
   }
 }
+
+export {
+  resolveOfficialShopAccount,
+  resolveOfficialShopAccountForStatus,
+  ensureOfficialShopAccount,
+  upsertOfficialShopAccountCookie,
+  isOfficialShopPlatformName,
+  findLegacyDuplicateShopAccounts,
+} from './official-shop-account.service'

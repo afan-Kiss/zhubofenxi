@@ -692,7 +692,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-slate-800">直播号 Cookie 管理</h3>
           <p className="mt-1 text-xs text-slate-500">
-            各直播号仅保存一份 Cookie（本页编辑、外部接口上传共用同一存储）。检测、同步、日报均使用此处 Cookie。
+            这里显示的 Cookie 就是系统实际使用的 Cookie。外部程序上传后，也会覆盖这里对应店铺的 Cookie。
           </p>
         </div>
         <button
@@ -816,7 +816,20 @@ export const LiveAccountCookiePanel: React.FC = () => {
                         accountExpanded ? 'bg-indigo-50/40' : 'hover:bg-slate-50/80'
                       }`}
                     >
-                      <td className="px-3 py-2.5 font-medium text-slate-900">{account.name}</td>
+                      <td className="px-3 py-2.5 font-medium text-slate-900">
+                        <div className="space-y-1">
+                          <span>{account.name}</span>
+                          {account.officialShopKey ? (
+                            <span className="block text-[10px] font-normal text-indigo-600">
+                              四店官方账号 · 外部上传覆盖此条
+                            </span>
+                          ) : account.legacyShopKey ? (
+                            <span className="block text-[10px] font-normal text-amber-700">
+                              历史账号 · 四店上传请以官方账号为准
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
                       <td className="px-3 py-2.5">
                         <span
                           className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${

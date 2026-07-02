@@ -11,6 +11,10 @@ import {
   buildShopCookieSummary,
 } from '../utils/cookie-sync-status.util'
 import { probeQualityBadcaseSignForAccount } from './quality-badcase-sign.service'
+import {
+  isOfficialShopPlatformName,
+  resolveShopKeyFromAccountName,
+} from './official-shop-account.service'
 
 const DEFAULT_PLATFORM = 'xiaohongshu'
 
@@ -36,6 +40,10 @@ export interface LiveAccountPublicView {
   lastSyncSuccessAt: string | null
   /** 是否可同步订单（与 shop-cookies/status 口径一致） */
   canSyncOrders?: boolean
+  /** 四店官方 shopKey（platformName === shopKey 时有值） */
+  officialShopKey?: string | null
+  /** 历史重复账号：别名匹配四店但非官方 platformName */
+  legacyShopKey?: string | null
   /** 面向用户的 Cookie 同步说明 */
   syncReason?: string
   statusLevel?: 'ok' | 'warning' | 'error'
@@ -120,6 +128,11 @@ function toPublicView(
     },
     { plainCookie: plain },
   )
+  const officialShopKey = isOfficialShopPlatformName(row.platformName) ? row.platformName : null
+  const legacyShopKey =
+    !officialShopKey && resolveShopKeyFromAccountName(row.displayName?.trim() || row.platformName)
+      ? resolveShopKeyFromAccountName(row.displayName?.trim() || row.platformName)
+      : null
   return {
     id: row.id,
     name: row.displayName?.trim() || row.platformName,
@@ -139,6 +152,8 @@ function toPublicView(
     affectedBusinessSync: row.affectedBusinessSync,
     lastSyncSuccessAt: row.lastSyncSuccessAt?.toISOString() ?? null,
     canSyncOrders: derived.canSyncOrders,
+    officialShopKey,
+    legacyShopKey,
     syncReason: derived.reason,
     statusLevel: derived.statusLevel,
     cookieDisplayStatus: derived.status,

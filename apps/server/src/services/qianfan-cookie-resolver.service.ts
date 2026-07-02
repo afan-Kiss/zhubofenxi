@@ -7,6 +7,8 @@ import {
   resolveCanonicalShopName,
   type QianfanShopName,
 } from '../config/qianfan-shops.constants'
+import { resolveGoodReviewShopKey } from '../config/good-review-shops.constants'
+import { resolveOfficialShopAccountForStatus } from './official-shop-account.service'
 import { logInfo, logWarn } from '../utils/server-log'
 
 export type CookieSource = 'control' | 'env' | 'sqlite' | 'missing'
@@ -159,26 +161,14 @@ async function resolveShopCookieInternal(
 export async function bootstrapQianfanCookiesForSync(): Promise<CookieBootstrapSummary> {
   clearSessionCookieCache()
 
-  const accounts = await prisma.platformCredential.findMany({
-    where: { enabled: true },
-    orderBy: { createdAt: 'asc' },
-  })
-
-  const accountByShop = new Map<QianfanShopName, string>()
-  for (const row of accounts) {
-    const name = row.displayName?.trim() || row.platformName
-    const shop = resolveCanonicalShopName(name)
-    if (shop && !accountByShop.has(shop)) {
-      accountByShop.set(shop, row.id)
-    }
-  }
-
   const shops: ShopCookieState[] = []
   for (const shopName of QIANFAN_SHOPS) {
-    const accountId = accountByShop.get(shopName)
+    const shopKey = resolveGoodReviewShopKey(shopName)
+    const row = shopKey ? await resolveOfficialShopAccountForStatus(shopKey) : null
+    const accountId = row?.id ?? null
     const sqlite = accountId ? await readSqliteCookieByAccountId(accountId) : null
     if (sqlite) {
-      cacheEntry(shopName, accountId, { cookie: sqlite, source: 'sqlite' })
+      cacheEntry(shopName, accountId ?? undefined, { cookie: sqlite, source: 'sqlite' })
       shops.push({ shopName, source: 'sqlite' })
     } else {
       shops.push({
@@ -223,16 +213,16 @@ export async function refreshShopCookieFromControl(shopName: string): Promise<st
   if (!canonical) return null
 
   sessionByShop.delete(canonical)
+  const shopKey = resolveGoodReviewShopKey(canonical)
+  const officialRow = shopKey ? await resolveOfficialShopAccountForStatus(shopKey) : null
+  const accountId = officialRow?.id ?? null
+
   const accounts = await prisma.platformCredential.findMany({ where: { enabled: true } })
   for (const row of accounts) {
-    if (resolveCanonicalShopName(row.displayName?.trim() || row.platformName) === canonical) {
+    if (accountId && row.id === accountId) {
       sessionByAccountId.delete(row.id)
     }
   }
-  const accountId = accounts.find((a) => {
-    const n = a.displayName?.trim() || a.platformName
-    return resolveCanonicalShopName(n) === canonical
-  })?.id
 
   const envFallback = readEnvFallbackCookie(canonical)
   const sqliteFallback = accountId ? await readSqliteCookieByAccountId(accountId) : null
@@ -243,7 +233,7 @@ export async function refreshShopCookieFromControl(shopName: string): Promise<st
   })
 
   if (control.source === 'control' && control.value) {
-    cacheEntry(canonical, accountId, {
+    cacheEntry(canonical, accountId ?? undefined, {
       cookie: control.value,
       source: 'control',
       updatedAt: control.updatedAt,

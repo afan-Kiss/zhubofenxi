@@ -22,6 +22,10 @@ export interface LiveAccountPublic {
   lastSyncSuccessAt: string | null
   canSyncOrders?: boolean
   syncReason?: string
+  /** 四店官方 shopKey（外部上传会覆盖此账号 Cookie） */
+  officialShopKey?: string | null
+  /** 历史重复账号：同名店铺但非官方 platformName */
+  legacyShopKey?: string | null
   statusLevel?: CookieStatusLevel
   cookieDisplayStatus?: string
 }

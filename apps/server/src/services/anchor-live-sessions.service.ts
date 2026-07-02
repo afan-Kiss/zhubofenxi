@@ -37,6 +37,8 @@ export interface AnchorLiveSessionBrief extends LiveSessionTrafficMetrics {
   endTime: string
   durationMinutes: number
   durationText: string
+  sourceShopCode?: string
+  sourceShopName?: string
 }
 
 export function formatLiveDurationMinutes(minutes: number): string {
@@ -472,9 +474,12 @@ export async function sumUniqueLiveDurationMinutesForRange(params: {
 function dedupeLiveSessionBriefs(sessions: AnchorLiveSessionBrief[]): AnchorLiveSessionBrief[] {
   const byKey = new Map<string, AnchorLiveSessionBrief>()
   for (const session of sessions) {
-    const key =
-      session.liveId?.trim() ||
-      `${session.startTime}|${session.endTime}|${session.durationMinutes}`
+    const shopCode = session.sourceShopCode?.trim()
+    const liveId = session.liveId?.trim()
+    const key = shopCode && liveId
+      ? `${shopCode}::${liveId}`
+      : liveId ||
+        `${session.startTime}|${session.endTime}|${session.durationMinutes}`
     const existing = byKey.get(key)
     if (!existing || session.durationMinutes > existing.durationMinutes) {
       byKey.set(key, session)

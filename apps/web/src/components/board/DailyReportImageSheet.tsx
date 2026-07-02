@@ -121,6 +121,7 @@ function AnchorCard({
     showAttendanceStatus && (late.isLate || late.isEarlyLeave)
       ? 'font-medium text-red-600'
       : 'text-slate-500'
+  const liveTimeMultiline = liveTime.includes('\n')
 
   return (
     <div className={`rounded-2xl border p-4 shadow-sm ${cardBorderClass}`}>
@@ -129,7 +130,7 @@ function AnchorCard({
           <p className="text-base font-semibold text-slate-900">
             {row.anchorName}｜{row.sessionLabel}
           </p>
-          <p className={`mt-1 text-[13px] ${timingTextClass}`}>
+          <p className={`mt-1 text-[13px] ${timingTextClass}${liveTimeMultiline ? ' whitespace-pre-line' : ''}`}>
             {timingLine}｜{row.liveDurationText}
           </p>
         </div>

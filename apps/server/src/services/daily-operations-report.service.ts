@@ -7,13 +7,16 @@ import {
 } from './board-scoped-views.service'
 import {
   formatLiveDurationMinutes,
-  listLiveSessionBriefsForRange,
   aggregateAnchorLiveSessionTraffic,
-  sumUniqueLiveDurationMinutesForRange,
   sumNewFollowersByLiveAccountForRange,
   type AnchorLiveSessionBrief,
   type LiveRoomNewFollowerRow,
 } from './anchor-live-sessions.service'
+import {
+  getAssignedSessionsForAnchor,
+  loadAndAssignDailyReportLiveSessions,
+  sumUniqueDailyReportLiveDurationMinutes,
+} from './daily-report-live-sessions.service'
 import {
   ANCHOR_SESSION_DISPLAY_FROM_0613,
   isReportDateOnOrAfterShopSessionCutoff,
@@ -53,9 +56,8 @@ import type { BusinessInsightsPayload } from './operations-business-insights.typ
 import { computeReturnOrderRateRatio, computeOperationsRefundMetricsFromViews } from './operations-after-sale-order.util'
 import { prisma } from '../lib/prisma'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
-import { buildDailyReportLiveScheduleFields } from './daily-report-live-schedule-match.service'
+import { buildDailyReportLiveScheduleFields, buildLiveSessionCountSummary, buildPerSessionLivePeriodText } from './daily-report-live-schedule-match.service'
 import {
-  buildActualLivePeriodText,
   resolveFallbackSessionDisplay,
   type AnchorAttendanceStatusPayload,
 } from '../utils/anchor-attendance-status.util'
@@ -150,7 +152,7 @@ function resolveSessionLabel(config: AnchorConfig, anchorId: string): string {
 
 function buildLivePeriodText(sessions: AnchorLiveSessionBrief[]): string {
   if (sessions.length === 0) return '—'
-  return buildActualLivePeriodText(sessions)
+  return buildPerSessionLivePeriodText(sessions)
 }
 
 function pickShopNameFromRaw(raw: Record<string, unknown> | undefined): string {
@@ -246,7 +248,7 @@ function buildAnchorRow(params: {
     scheduleTimeRange: params.scheduleTimeRange,
     scheduleMatched: params.scheduleMatched,
     scheduleMatchReason: params.scheduleMatchReason,
-    liveDurationText: formatLiveDurationMinutes(liveDurationMinutes),
+    liveDurationText: buildLiveSessionCountSummary(params.sessions),
     liveDurationMinutes,
     validAmountYuan: params.validAmountYuan,
     soldOrderCount: params.soldOrderCount,
@@ -327,12 +329,14 @@ export async function buildDailyOperationsReport(params: {
   const anchorRows: DailyOperationsAnchorRow[] = []
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
-  const usedScheduleRowIds = new Set<string>()
-  const allLiveSessions = await listLiveSessionBriefsForRange({
+  const liveAssignment = await loadAndAssignDailyReportLiveSessions({
+    reportDate: params.startDate,
     preset: dayParams.preset,
     startDate: params.startDate,
     endDate: params.endDate,
+    scheduleRows: scheduleTable.rows,
   })
+  const usedScheduleRowIds = new Set<string>()
 
   for (const anchor of reportAnchors) {
     const performanceViews = await getAnchorPerformanceViews(
@@ -351,13 +355,14 @@ export async function buildDailyOperationsReport(params: {
       ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]
       : undefined
 
+    const sessions = getAssignedSessionsForAnchor(liveAssignment, anchor.anchorName)
+
     const liveSchedule = buildDailyReportLiveScheduleFields({
       anchorName: anchor.anchorName,
-      allSessions: allLiveSessions,
+      allSessions: sessions,
       scheduleRows: scheduleTable.rows,
       usedScheduleRowIds,
     })
-    const sessions = liveSchedule.matchedSessions
 
     const hasData =
       validAmountYuan > 0 ||
@@ -412,11 +417,9 @@ export async function buildDailyOperationsReport(params: {
   const invalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)
   const summaryRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViewsAll)
 
-  const totalLiveDurationMinutes = await sumUniqueLiveDurationMinutesForRange({
-    preset: dayParams.preset,
-    startDate: params.startDate,
-    endDate: params.endDate,
-  })
+  const totalLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(
+    liveAssignment.allSessions,
+  )
   const liveRoomNewFollowers = await sumNewFollowersByLiveAccountForRange({
     preset: dayParams.preset,
     startDate: params.startDate,
@@ -428,7 +431,7 @@ export async function buildDailyOperationsReport(params: {
   )
   const totalLiveHours = safeDivide(totalLiveDurationMinutes, 60)
 
-  const summaryTraffic = aggregateAnchorLiveSessionTraffic(allLiveSessions)
+  const summaryTraffic = aggregateAnchorLiveSessionTraffic(liveAssignment.allSessions)
 
   const products = await buildOperationsProductAnalysis(performanceViewsAll, scoped.rawByMatch)
   const priceBands = buildOperationsPriceBandAnalysis(performanceViewsAll)

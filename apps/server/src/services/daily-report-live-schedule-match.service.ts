@@ -1,7 +1,7 @@
 import type { EffectiveScheduleRow } from './anchor-daily-schedule.service'
 import type { AnchorLiveSessionBrief } from './anchor-live-sessions.service'
+import { formatLiveDurationMinutes } from './anchor-live-sessions.service'
 import {
-  buildActualLivePeriodText,
   calculateAnchorAttendanceStatus,
   deriveSessionLabelFromSchedule,
   formatDisplaySessionLabel,
@@ -34,6 +34,29 @@ export interface DailyReportLiveScheduleFields {
 
 function formatClockFromIso(iso: string): string {
   return iso.slice(11, 16)
+}
+
+/** 将真实场次时间按行展示（每场一行 start~end） */
+export function buildPerSessionLivePeriodText(sessions: AnchorLiveSessionBrief[]): string {
+  if (sessions.length === 0) return '—'
+  const lines = sessions
+    .filter((s) => s.startTime && s.startTime !== '—')
+    .sort((a, b) => a.startTime.localeCompare(b.startTime))
+    .map((s) => {
+      const start = formatClockFromIso(s.startTime)
+      const end = s.endTime && s.endTime !== '—' ? formatClockFromIso(s.endTime) : '—'
+      return `${start}~${end}`
+    })
+  return lines.length > 0 ? lines.join('\n') : '—'
+}
+
+export function buildLiveSessionCountSummary(sessions: AnchorLiveSessionBrief[]): string {
+  if (sessions.length === 0) return '—'
+  const totalMin = sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
+  if (sessions.length === 1) {
+    return formatLiveDurationMinutes(totalMin)
+  }
+  return `直播 ${sessions.length} 场 · 合计 ${formatLiveDurationMinutes(totalMin)}`
 }
 
 function resolveSessionEndMs(session: AnchorLiveSessionBrief): number | null {
@@ -101,7 +124,7 @@ export function matchLiveSessionToBestScheduleRow(
     if (!shopMatch) continue
 
     const matchTier = 1
-    const matchReason = `店铺+主播(${row.anchorName})+时间重叠${overlap}分钟`
+    const matchReason = `店铺(${row.shopName})+时间重叠${overlap}分钟→${row.anchorName}`
 
     const better =
       !best ||
@@ -153,7 +176,7 @@ export function buildDailyReportLiveScheduleFields(params: {
 
   const matchedSessions = matchedForAnchor.map((m) => m.session)
 
-  const livePeriodText = buildActualLivePeriodText(matchedSessions)
+  const livePeriodText = buildPerSessionLivePeriodText(matchedSessions)
   const start = matchedSessions.length
     ? matchedForAnchor
         .map((m) => m.session)

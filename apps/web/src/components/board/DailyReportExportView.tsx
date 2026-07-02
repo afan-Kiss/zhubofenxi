@@ -70,6 +70,7 @@ function ExportAnchorCard({
         : null
   const timingDetail = showAttendanceStatus ? formatLateTimingLine(late) : null
   const alert = showAttendanceStatus && (late.isLate || late.isEarlyLeave)
+  const liveTimeMultiline = liveTime.includes('\n')
 
   return (
     <div
@@ -90,7 +91,7 @@ function ExportAnchorCard({
         </div>
       </div>
       <div className="mt-2 space-y-0.5 text-[11px]">
-        <p className={alert ? 'font-medium text-red-600' : 'text-slate-600'}>
+        <p className={`${alert ? 'font-medium text-red-600' : 'text-slate-600'}${liveTimeMultiline ? ' whitespace-pre-line' : ''}`}>
           直播 {liveTime}
           {scheduleText ? (
             <span className="text-slate-400">（排班 {scheduleText}）</span>

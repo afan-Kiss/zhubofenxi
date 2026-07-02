@@ -329,6 +329,10 @@ export async function executeDailyStrategySync(
           accountTotal,
         })
       }
+
+      await progress.touchHeartbeat(
+        `直播号「${account.name}」同步完成（${accountIndex}/${accountTotal}）`,
+      )
     }
 
     await prisma.xhsSyncJob.update({
@@ -368,6 +372,7 @@ export async function executeDailyStrategySync(
       liveAccountIds: accounts.map((a) => a.id),
       windowDays: BUSINESS_SYNC_LOOKBACK_DAYS,
     })
+    await progress.touchHeartbeat('官方品质反馈同步完成，正在更新追踪池')
     if (qualityResult.ok) {
       const qualityMeta = await prisma.qualityBadCaseSyncMeta.findUnique({
         where: { id: 'default' },
@@ -391,12 +396,14 @@ export async function executeDailyStrategySync(
     await progress.setStep('normalizing_data', 65, '更新未完结订单追踪池')
     await refreshTrackingPoolFromRaw(jobId)
     await recheckTrackingPool(jobId)
+    await progress.touchHeartbeat('追踪池更新完成，正在检测历史调整项')
 
     await progress.setStep('analyzing_business', 72, '检测历史月份调整项')
     const adjCount = await detectHistoricalAdjustments(jobId)
     if (adjCount > 0) warnings.push(`检测到 ${adjCount} 条历史调整项`)
 
     await refreshMonthlyDataStatuses()
+    await progress.touchHeartbeat('正在校验各日期范围数据')
 
     await progress.setStep('analyzing_business', 80, '校验各日期范围数据')
     let savedRanges = 0

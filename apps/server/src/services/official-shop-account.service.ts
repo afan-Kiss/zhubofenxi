@@ -207,6 +207,27 @@ export async function resolveOfficialShopAccountByKeyOrName(
   return { shopKey, shopName, account }
 }
 
+/** 本机服务读取四店明文 Cookie（祥钰/协议桥接兜底） */
+export async function getOfficialShopCookiePlaintext(shopKeyOrName: string): Promise<{
+  shopKey: GoodReviewShopKey
+  shopName: QianfanShopName
+  cookie: string
+  cookieStatus: string
+  accountId: string
+} | null> {
+  const resolved = await resolveOfficialShopAccountByKeyOrName(shopKeyOrName, { ensureForRead: true })
+  if (!resolved?.account) return null
+  const plain = readPlainCookie(resolved.account.cookieEncrypted)
+  if (!plain || plain.length < 80) return null
+  return {
+    shopKey: resolved.shopKey,
+    shopName: resolved.shopName,
+    cookie: plain,
+    cookieStatus: resolved.account.cookieStatus || 'unknown',
+    accountId: resolved.account.id,
+  }
+}
+
 /** 同步/BI/品退/任务：启用且有 Cookie，排除四店历史重复账号 */
 export async function listActiveLiveAccountsWithCookie(): Promise<
   Array<{ id: string; name: string; platformName: string }>

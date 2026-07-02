@@ -7,7 +7,7 @@ import { waitForSyncJobComplete } from './scheduled-sync-queue.service'
 import { BUYER_RANKING_CACHE_VERSION } from './buyer-ranking-cache.service'
 
 import { getApiSyncSettings } from './system-setting.service'
-import { clearStaleBusinessSyncJobs } from './business-sync-stale-cleanup.service'
+import { clearStaleBusinessSyncJobs, isIgnorableBusinessSyncFailure } from './business-sync-stale-cleanup.service'
 import { logInfo, logWarn } from '../utils/server-log'
 import { taskComplete, taskFail, taskStart } from '../utils/task-log'
 
@@ -459,17 +459,12 @@ export async function getBusinessSyncStatus(): Promise<{
     businessStatus = 'queued'
 
   } else if (
-
     lastFailedJob &&
-
+    !isIgnorableBusinessSyncFailure(lastFailedJob.errorMessage) &&
     (!lastSuccessJob ||
-
       (lastFailedJob.finishedAt &&
-
         lastSuccessJob.finishedAt &&
-
         lastFailedJob.finishedAt > lastSuccessJob.finishedAt))
-
   ) {
 
     businessStatus = 'failed'

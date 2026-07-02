@@ -2,11 +2,11 @@ import { prisma } from '../lib/prisma'
 import { logInfo } from '../utils/server-log'
 import { XHS_SYNC_STEP_LABELS } from './xhs-api-sync/xhs-api-types'
 
-/** running 超过 10 分钟视为 stale */
-export const BUSINESS_SYNC_STALE_RUNNING_MS = 10 * 60 * 1000
+/** running 超过 45 分钟视为 stale（多账号 + 90 天回溯可能较慢） */
+export const BUSINESS_SYNC_STALE_RUNNING_MS = 45 * 60 * 1000
 
-/** updatedAt 超过 3 分钟无变化视为 stale（含订单列表阶段） */
-export const BUSINESS_SYNC_HEARTBEAT_STALE_MS = 3 * 60 * 1000
+/** updatedAt 超过 10 分钟无变化视为 stale（品退/缓存等长步骤） */
+export const BUSINESS_SYNC_HEARTBEAT_STALE_MS = 10 * 60 * 1000
 
 /** 经营 BI 同步不应再停留在结算步骤；超过此时长仍卡在结算步骤则释放 */
 export const SETTLEMENT_STUCK_STEP_MS = 5 * 60 * 1000
@@ -18,6 +18,20 @@ export const BUSINESS_SYNC_HEARTBEAT_STALE_MSG =
 
 export const BUSINESS_SYNC_SETTLEMENT_SKIPPED_MSG =
   '经营BI同步不再等待待结算/已结算账单，任务已自动释放（settlementSkippedForBusinessBI）'
+
+/** 超时自动释放的失败不应覆盖最近一次成功同步的展示状态 */
+export function isIgnorableBusinessSyncFailure(
+  errorMessage: string | null | undefined,
+): boolean {
+  if (!errorMessage?.trim()) return false
+  const msg = errorMessage.trim()
+  return (
+    msg.includes('已自动释放') ||
+    msg === BUSINESS_SYNC_STALE_ERROR_MSG ||
+    msg === BUSINESS_SYNC_HEARTBEAT_STALE_MSG ||
+    msg === BUSINESS_SYNC_SETTLEMENT_SKIPPED_MSG
+  )
+}
 
 const SETTLEMENT_STUCK_STEPS = new Set([
   'syncing_pending_settlement',
@@ -52,7 +66,7 @@ export function isBusinessSyncJobStale(job: {
   const now = Date.now()
   const startedRef = jobRunningReferenceTime(job)
   if (now - startedRef.getTime() >= BUSINESS_SYNC_STALE_RUNNING_MS) {
-    return { stale: true, reason: 'running 超过 10 分钟' }
+    return { stale: true, reason: 'running 超过 45 分钟' }
   }
   const heartbeatRef = jobStepReferenceTime(job)
   if (now - heartbeatRef.getTime() >= BUSINESS_SYNC_HEARTBEAT_STALE_MS) {
@@ -60,8 +74,8 @@ export function isBusinessSyncJobStale(job: {
       stale: true,
       reason:
         job.currentStep === 'syncing_order_list'
-          ? '订单列表阶段 3 分钟无 updatedAt 变化'
-          : 'updatedAt 超过 3 分钟无变化',
+          ? '订单列表阶段 10 分钟无 updatedAt 变化'
+          : 'updatedAt 超过 10 分钟无变化',
     }
   }
   return { stale: false }

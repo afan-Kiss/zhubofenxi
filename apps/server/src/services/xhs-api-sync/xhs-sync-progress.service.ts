@@ -87,6 +87,8 @@ export interface SyncProgressReporter {
     label?: string,
     extra?: Record<string, unknown>,
   ) => Promise<void>
+  /** 长步骤执行中刷新 updatedAt，避免被 stale 清理误判 */
+  touchHeartbeat: (label?: string) => Promise<void>
 }
 
 export function createSyncProgressReporter(
@@ -113,6 +115,10 @@ export function createSyncProgressReporter(
         rangeLabel,
         ...extra,
       })
+    },
+
+    async touchHeartbeat(label) {
+      await flush(label ? { currentStepLabel: label } : {})
     },
 
     async beforeRequest(apiKey, page, totalPage) {

@@ -34,7 +34,7 @@ async function run(): Promise<void> {
   assert(status.shops.length === 4, '应返回四店状态', issues)
   const xy = status.shops.find((s) => s.shopKey === 'xyxiangyu')
   assert(xy?.hasCookie === true, 'xyxiangyu 应有 Cookie', issues)
-  assert(xy?.status === 'uploaded' || xy?.status === 'valid', '上传后状态应为 uploaded 或 valid', issues)
+  assert(xy?.status !== 'valid', '假 Cookie 不应标记为正常', issues)
 
   const row = xy?.accountId
     ? await prisma.platformCredential.findUnique({ where: { id: xy.accountId } })

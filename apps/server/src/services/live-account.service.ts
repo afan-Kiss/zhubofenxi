@@ -453,12 +453,45 @@ export async function testLiveAccountCookie(id: string): Promise<{
   })
 
   if (res.ok) {
-    await markCookieCheckResult(id, { status: 'valid' })
+    const signIssue = !qualityProbe.signOk
+    const qualityApiIssue = qualityProbe.signOk && !qualityProbe.qualityApiOk
     const message = qualityProbe.signOk
       ? qualityProbe.qualityApiOk
         ? 'Cookie 测试成功（订单接口 + 品退签名 + 品退接口）'
         : 'Cookie 订单接口与品退签名正常，品退接口请求未通过'
       : 'Cookie 订单接口可用，但品退签名失败（请检查 Python / xhshow）'
+
+    if (signIssue || qualityApiIssue) {
+      const status: CookieHealthStatus = 'suspected'
+      const errorCode = signIssue
+        ? qualityProbe.errorReason ?? 'quality_sign_failed'
+        : qualityProbe.errorReason ?? 'quality_api_failed'
+      const errorMessage = signIssue
+        ? qualityProbe.signError ?? message
+        : qualityProbe.qualityApiError ?? message
+      const failedApi = signIssue ? 'quality_sign' : 'quality_badcase'
+      await markCookieCheckResult(id, {
+        status,
+        errorCode,
+        errorMessage,
+        failedApi,
+        affectedBusinessSync: signIssue,
+      })
+      return {
+        ok: false,
+        cookieStatus: status,
+        message,
+        errorCode,
+        commonApiOk: true,
+        commonApiError: null,
+        qualitySignOk: qualityProbe.signOk,
+        qualitySignError: qualityProbe.signError,
+        qualityApiOk: qualityProbe.qualityApiOk,
+        qualityApiError: qualityProbe.qualityApiError,
+      }
+    }
+
+    await markCookieCheckResult(id, { status: 'valid' })
     return {
       ok: true,
       cookieStatus: 'valid',

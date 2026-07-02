@@ -53,7 +53,7 @@ export function cookieStatusLabel(status: CookieHealthStatus): string {
     case 'invalid':
       return '暂不可同步'
     case 'suspected':
-      return '疑似异常'
+      return '需检查'
     default:
       return '未检测'
   }
@@ -75,7 +75,7 @@ export function cookieStatusTone(status: CookieHealthStatus): string {
 export function accountCanSyncOrders(account: LiveAccountPublic): boolean {
   if (account.canSyncOrders !== undefined) return account.canSyncOrders
   if (!account.enabled || !account.hasCookie) return false
-  return account.cookieStatus === 'valid' || account.cookieStatus === 'unknown'
+  return account.cookieStatus === 'valid'
 }
 
 export function accountsNotSyncableForModal(payload: CookieHealthPayload | null): LiveAccountPublic[] {

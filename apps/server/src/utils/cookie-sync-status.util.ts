@@ -82,9 +82,9 @@ export function deriveCookieSyncState(
   if (st === 'unknown') {
     return {
       status: 'uploaded',
-      reason: '已收到 Cookie，可尝试同步',
-      canSyncOrders: true,
-      statusLevel: 'ok',
+      reason: '已收到 Cookie，等待验证结果',
+      canSyncOrders: false,
+      statusLevel: 'warning',
     }
   }
 
@@ -119,9 +119,9 @@ export function deriveCookieSyncState(
   if (st === 'suspected') {
     return {
       status: 'suspected',
-      reason: msg || '已收到 Cookie，但平台接口疑似异常',
+      reason: msg || 'Cookie 部分能力异常，请检查后再用于同步',
       canSyncOrders: false,
-      statusLevel: 'error',
+      statusLevel: 'warning',
     }
   }
 

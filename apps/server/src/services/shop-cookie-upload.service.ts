@@ -173,7 +173,7 @@ async function ensureAccountForShop(
       cookieStatus: 'unknown',
     },
   })
-  void testLiveAccountCookie(row.id).catch(() => undefined)
+  await testLiveAccountCookie(row.id).catch(() => undefined)
   return row.id
 }
 
@@ -281,7 +281,7 @@ export async function uploadShopCookies(params: {
         accountId = await ensureAccountForShop(item.shopKey, item.cookie, params.updatedBy)
       } else {
         await persistLiveAccountCookieOnly(accountId, item.cookie, params.updatedBy)
-        void testLiveAccountCookie(accountId).catch(() => undefined)
+        await testLiveAccountCookie(accountId).catch(() => undefined)
       }
 
       const row = await prisma.platformCredential.findUnique({ where: { id: accountId } })

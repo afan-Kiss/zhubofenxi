@@ -557,7 +557,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
     const enabled = accounts.filter((a) => a.enabled).length
     const valid = accounts.filter((a) => a.cookieStatus === 'valid').length
     const needsAttention = accounts.filter(
-      (a) => a.enabled && a.cookieStatus !== 'valid',
+      (a) => a.enabled && (a.cookieStatus === 'suspected' || a.cookieStatus === 'invalid' || a.cookieStatus === 'unknown'),
     ).length
     return {
       total: accounts.length,
@@ -764,14 +764,21 @@ export const LiveAccountCookiePanel: React.FC = () => {
                         </span>
                       </td>
                       <td className="px-3 py-2.5">
-                        <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieStatusTone(account.cookieStatus)}`}
-                        >
-                          {cookieStatusLabel(account.cookieStatus)}
-                        </span>
-                        {isTesting ? (
-                          <span className="ml-1 text-[10px] text-indigo-600">检测中</span>
-                        ) : null}
+                        <div className="space-y-1">
+                          <span
+                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieStatusTone(account.cookieStatus)}`}
+                          >
+                            {cookieStatusLabel(account.cookieStatus)}
+                          </span>
+                          {account.cookieStatus !== 'valid' && account.cookieLastErrorMessage ? (
+                            <p className="max-w-[220px] text-[10px] leading-snug text-amber-800">
+                              {account.cookieLastErrorMessage}
+                            </p>
+                          ) : null}
+                          {isTesting ? (
+                            <span className="block text-[10px] text-indigo-600">检测中</span>
+                          ) : null}
+                        </div>
                       </td>
                       <td className="px-3 py-2.5 text-slate-600">
                         {formatTime(account.lastSyncSuccessAt)}

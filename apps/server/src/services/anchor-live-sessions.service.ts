@@ -322,6 +322,18 @@ export async function resolveAnchorLiveSessionsWithTrafficForRange(params: {
   const target = resolveTargetAnchor(params)
   if (!target) return []
 
+  if (params.endDate.trim() >= ANCHOR_NEW_SCHEDULE_START_DATE) {
+    const { resolveAssignedRealLiveSessionsForAnchor } = await import(
+      './daily-report-live-sessions.service'
+    )
+    return resolveAssignedRealLiveSessionsForAnchor({
+      preset: params.preset,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      anchorName: target.anchorName,
+    })
+  }
+
   const range = resolveDateRange(
     (params.preset ?? 'custom') as DateRangePreset,
     params.startDate,

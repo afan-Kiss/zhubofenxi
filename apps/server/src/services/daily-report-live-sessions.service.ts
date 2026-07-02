@@ -20,6 +20,7 @@ import {
   type AnchorLiveSessionBrief,
 } from './anchor-live-sessions.service'
 import type { EffectiveScheduleRow } from './anchor-daily-schedule.service'
+import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import {
   matchLiveSessionToBestScheduleRow,
   type LiveSessionScheduleMatchResult,
@@ -277,4 +278,41 @@ export function sumUniqueDailyReportLiveDurationMinutes(
   sessions: DailyReportLiveSession[],
 ): number {
   return sessions.reduce((sum, s) => sum + Math.max(0, s.durationMinutes), 0)
+}
+
+/** 主播业绩/订单明细：按店真实场次 + 排班重叠归属某主播（每场只归一人） */
+export async function resolveAssignedRealLiveSessionsForAnchor(params: {
+  preset?: string
+  startDate: string
+  endDate: string
+  anchorName: string
+}): Promise<DailyReportLiveSession[]> {
+  const anchorName = params.anchorName.trim()
+  if (!anchorName || anchorName === '未归属') return []
+
+  const sessions = await loadPerShopDailyReportLiveSessions({
+    reportDate: params.startDate,
+    preset: params.preset,
+    startDate: params.startDate,
+    endDate: params.endDate,
+  })
+
+  const scheduleCache = new Map<string, EffectiveScheduleRow[]>()
+  const assigned: DailyReportLiveSession[] = []
+
+  for (const session of sessions) {
+    const dateKey = session.startTime.slice(0, 10)
+    let scheduleRows = scheduleCache.get(dateKey)
+    if (!scheduleRows) {
+      const table = await getEffectiveScheduleTableForDate(dateKey)
+      scheduleRows = table.rows
+      scheduleCache.set(dateKey, scheduleRows)
+    }
+    const match = matchLiveSessionToBestScheduleRow(session, scheduleRows)
+    if (match.scheduleRow && anchorNamesMatch(match.scheduleRow.anchorName, anchorName)) {
+      assigned.push(session)
+    }
+  }
+
+  return assigned.sort((a, b) => a.startTime.localeCompare(b.startTime))
 }

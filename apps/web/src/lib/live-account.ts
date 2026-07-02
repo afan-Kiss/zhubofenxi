@@ -50,6 +50,64 @@ export interface CookieHealthPayload {
   summary: CookieHealthSummary
 }
 
+/** 四店官方账号固定展示顺序 */
+export const OFFICIAL_SHOP_KEYS_ORDER = [
+  'shiyuju',
+  'hetianyayu',
+  'xiangyu',
+  'xyxiangyu',
+] as const
+
+export const OFFICIAL_SHOP_DISPLAY_NAMES: Record<(typeof OFFICIAL_SHOP_KEYS_ORDER)[number], string> = {
+  shiyuju: '拾玉居和田玉',
+  hetianyayu: '和田雅玉',
+  xiangyu: '祥钰珠宝',
+  xyxiangyu: 'XY祥钰珠宝',
+}
+
+export function getOfficialShopDisplayName(shopKey: string | null | undefined): string | null {
+  if (!shopKey) return null
+  return OFFICIAL_SHOP_DISPLAY_NAMES[shopKey as keyof typeof OFFICIAL_SHOP_DISPLAY_NAMES] ?? null
+}
+
+export function isLegacyDuplicateAccount(account: LiveAccountPublic): boolean {
+  return Boolean(account.legacyShopKey && !account.officialShopKey)
+}
+
+export function getAccountDisplayName(account: LiveAccountPublic): string {
+  if (account.officialShopKey) {
+    return getOfficialShopDisplayName(account.officialShopKey) ?? account.name
+  }
+  return account.name
+}
+
+export function partitionLiveAccounts(accounts: LiveAccountPublic[]): {
+  activeAccounts: LiveAccountPublic[]
+  legacyAccounts: LiveAccountPublic[]
+} {
+  const legacyAccounts: LiveAccountPublic[] = []
+  const activeAccounts: LiveAccountPublic[] = []
+  for (const account of accounts) {
+    if (isLegacyDuplicateAccount(account)) legacyAccounts.push(account)
+    else activeAccounts.push(account)
+  }
+  const orderIndex = new Map<string, number>(
+    OFFICIAL_SHOP_KEYS_ORDER.map((key, index) => [key, index]),
+  )
+  activeAccounts.sort((a, b) => {
+    const aOfficial = a.officialShopKey
+    const bOfficial = b.officialShopKey
+    if (aOfficial && bOfficial) {
+      return (orderIndex.get(aOfficial) ?? 99) - (orderIndex.get(bOfficial) ?? 99)
+    }
+    if (aOfficial) return -1
+    if (bOfficial) return 1
+    return a.name.localeCompare(b.name, 'zh-CN')
+  })
+  legacyAccounts.sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+  return { activeAccounts, legacyAccounts }
+}
+
 export interface CookieSessionTest {
   ok: boolean
   checkedAt: string
@@ -105,6 +163,35 @@ export function accountCookieReason(account: LiveAccountPublic): string | null {
   if (accountCookieAvailable(account)) return null
   const msg = account.cookieLastErrorMessage?.trim() || account.syncReason?.trim()
   return msg || 'Cookie 不可用，请重新提交或点击检测查看原因'
+}
+
+/** 设置页展示：不可用时的白话原因 */
+export function resolveAccountCookieFriendlyReason(
+  account: LiveAccountPublic,
+  sessionTest?: CookieSessionTest | null,
+): string | null {
+  if (resolveAccountCookieAvailable(account, sessionTest)) return null
+  if (!account.hasCookie) return '尚未收到 Cookie'
+
+  const code = account.cookieLastErrorCode?.trim() ?? ''
+  const msg = account.cookieLastErrorMessage?.trim() || account.syncReason?.trim() || ''
+  const combined = `${code} ${msg}`
+
+  if (!account.cookieLastCheckedAt && account.cookieStatus === 'unknown') {
+    return 'Cookie 尚未验证通过'
+  }
+  if (/401|403|902|登录已过期|未登录|expired/i.test(combined)) {
+    return 'Cookie 已过期'
+  }
+  if (/cookie_missing_a1|缺少 a1|缺 a1|access-token-ark|订单同步 token|关键字段|不完整/i.test(combined)) {
+    return 'Cookie 缺少关键字段'
+  }
+  if (account.cookieLastFailedAt || account.cookieStatus === 'invalid') {
+    if (msg) return `最近校验失败：${msg}`
+    return '最近校验失败'
+  }
+  if (msg) return msg
+  return 'Cookie 尚未验证通过'
 }
 
 export function accountCanSyncOrders(account: LiveAccountPublic): boolean {

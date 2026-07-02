@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import {
-  accountCookieReason,
   cookieAvailableLabel,
   cookieAvailableTone,
   cookieStatusLabel,
+  getAccountDisplayName,
+  partitionLiveAccounts,
   resolveAccountCookieAvailable,
+  resolveAccountCookieFriendlyReason,
   type CookieHealthStatus,
   type LiveAccountPublic,
 } from '../../lib/live-account'
@@ -413,7 +415,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
 
   const handleTestAllEnabledCookies = async () => {
     if (batchTesting) return
-    const targets = accounts.filter((a) => a.enabled && a.hasCookie)
+    const targets = activeAccounts.filter((a) => a.enabled && a.hasCookie)
     if (targets.length === 0) {
       showToast('err', '暂无可检测的启用直播号，请先添加或启用 Cookie。')
       return
@@ -427,7 +429,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
       total: targets.length,
       success: 0,
       failed: 0,
-      currentName: targets[0]!.name,
+      currentName: getAccountDisplayName(targets[0]!),
       done: false,
     })
 
@@ -438,7 +440,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         total: targets.length,
         success,
         failed,
-        currentName: account.name,
+        currentName: getAccountDisplayName(account),
         done: false,
       })
       const result = await runSingleTest(account)
@@ -449,7 +451,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         total: targets.length,
         success,
         failed,
-        currentName: account.name,
+        currentName: getAccountDisplayName(account),
         done: false,
       })
     }
@@ -610,15 +612,20 @@ export const LiveAccountCookiePanel: React.FC = () => {
     setExpandedAccountId((prev) => (prev === id ? null : id))
   }
 
+  const { activeAccounts, legacyAccounts } = useMemo(
+    () => partitionLiveAccounts(accounts),
+    [accounts],
+  )
+
   const stats = useMemo(() => {
-    const available = accounts.filter(
+    const available = activeAccounts.filter(
       (a) => a.enabled && resolveAccountCookieAvailable(a, testResults[a.id]),
     ).length
-    const unavailable = accounts.filter(
+    const unavailable = activeAccounts.filter(
       (a) => a.enabled && !resolveAccountCookieAvailable(a, testResults[a.id]),
     ).length
     return { available, unavailable }
-  }, [accounts, testResults])
+  }, [activeAccounts, testResults])
 
   const renderTestResultBlock = (account: LiveAccountPublic) => {
     const latest = testResults[account.id]
@@ -652,10 +659,12 @@ export const LiveAccountCookiePanel: React.FC = () => {
               {formatTime(showSessionResult ? latest!.checkedAt : account.cookieLastCheckedAt)}
             </span>
           </div>
-          {!available && accountCookieReason(account) ? (
+          {!available && resolveAccountCookieFriendlyReason(account, latest) ? (
             <div className="sm:col-span-2">
               <span className="text-slate-400">不可用原因：</span>
-              <span className="text-rose-700">{accountCookieReason(account)}</span>
+              <span className="text-rose-700">
+                {resolveAccountCookieFriendlyReason(account, latest)}
+              </span>
             </div>
           ) : null}
         </div>
@@ -686,18 +695,298 @@ export const LiveAccountCookiePanel: React.FC = () => {
     )
   }
 
+  const renderAccountRows = (
+    accountList: LiveAccountPublic[],
+    options?: { legacy?: boolean },
+  ) =>
+    accountList.map((account) => {
+      const isTesting = testingIds.has(account.id)
+      const isBusy = busyId === account.id
+      const cookieText = resolveAccountCookie(account)
+      const accountExpanded = expandedAccountId === account.id
+      const latestTest = testResults[account.id]
+      const cookieAvailable = resolveAccountCookieAvailable(account, latestTest)
+      const cookieReason = resolveAccountCookieFriendlyReason(account, latestTest)
+      const displayName = getAccountDisplayName(account)
+      const isLegacy = options?.legacy === true
+
+      return (
+        <React.Fragment key={account.id}>
+          <tr
+            className={`border-b border-slate-100 ${
+              accountExpanded ? 'bg-indigo-50/40' : 'hover:bg-slate-50/80'
+            } ${isLegacy ? 'bg-amber-50/20' : ''}`}
+          >
+            <td className="px-3 py-2.5 font-medium text-slate-900">
+              <div className="space-y-1">
+                <span>{displayName}</span>
+                {isLegacy ? (
+                  <span className="block text-[10px] font-normal leading-snug text-amber-800">
+                    这是旧账号，系统现在不会用它同步订单。四店 Cookie 请看上面的官方账号。
+                  </span>
+                ) : account.officialShopKey ? (
+                  <span className="block text-[10px] font-normal text-indigo-600">
+                    四店官方账号 · 外部上传覆盖此条
+                  </span>
+                ) : null}
+              </div>
+            </td>
+            <td className="px-3 py-2.5">
+              <span
+                className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                  account.enabled
+                    ? 'bg-emerald-50 text-emerald-700'
+                    : 'bg-slate-100 text-slate-500'
+                }`}
+              >
+                {account.enabled ? '已启用' : '已停用'}
+              </span>
+            </td>
+            <td className="px-3 py-2.5">
+              <div className="space-y-1">
+                <span
+                  className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieAvailableTone(cookieAvailable)}`}
+                >
+                  {cookieAvailableLabel(cookieAvailable)}
+                </span>
+                {cookieReason ? (
+                  <p className="max-w-[260px] text-[10px] leading-snug text-rose-700">{cookieReason}</p>
+                ) : null}
+                {isTesting ? (
+                  <span className="block text-[10px] text-indigo-600">检测中</span>
+                ) : null}
+              </div>
+            </td>
+            <td className="px-3 py-2.5 text-slate-600">
+              {formatTime(account.lastSyncSuccessAt)}
+            </td>
+            <td className="px-3 py-2.5 text-slate-600">
+              {formatTime(account.cookieUpdatedAt)}
+            </td>
+            <td className="px-3 py-2.5">
+              <div className="flex flex-wrap justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => toggleAccountExpanded(account.id)}
+                  className="rounded border border-slate-200 px-2 py-1 text-[11px] hover:bg-white"
+                >
+                  {accountExpanded ? '收起' : '详情'}
+                </button>
+                {!isLegacy ? (
+                  <button
+                    type="button"
+                    disabled={isTesting || batchTesting || isBusy || !account.hasCookie}
+                    onClick={() => void handleTest(account)}
+                    className="rounded border border-indigo-200 px-2 py-1 text-[11px] text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
+                  >
+                    检测
+                  </button>
+                ) : null}
+              </div>
+            </td>
+          </tr>
+          {accountExpanded ? (
+            <tr className="border-b border-slate-100 bg-slate-50/50">
+              <td colSpan={6} className="px-3 py-3">
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  {isLegacy ? (
+                    <p className="mb-3 rounded-lg border border-amber-100 bg-amber-50/80 px-2.5 py-2 text-[11px] text-amber-900">
+                      历史重复账号仅保留查看，不参与四店上传和订单同步。请使用上方对应官方账号。
+                    </p>
+                  ) : null}
+                  {editingNameId === account.id && !isLegacy ? (
+                    <div className="mb-3 flex flex-wrap items-center gap-2">
+                      <input
+                        value={editNames[account.id] ?? account.name}
+                        onChange={(e) =>
+                          setEditNames((prev) => ({
+                            ...prev,
+                            [account.id]: e.target.value,
+                          }))
+                        }
+                        className="rounded border border-slate-200 px-2 py-1 text-sm"
+                      />
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => void handleSaveName(account.id)}
+                        className="rounded bg-slate-900 px-2 py-1 text-xs text-white disabled:opacity-50"
+                      >
+                        保存名称
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingNameId(null)}
+                        className="text-xs text-slate-500"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : !isLegacy ? (
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={isBusy || Boolean(account.officialShopKey)}
+                        onClick={() => {
+                          setEditingNameId(account.id)
+                          setEditNames((prev) => ({
+                            ...prev,
+                            [account.id]: account.name,
+                          }))
+                        }}
+                        className="text-[11px] text-slate-500 underline hover:text-slate-800 disabled:opacity-50"
+                      >
+                        编辑名称
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!cookieText.trim() || isBusy}
+                        onClick={() => void handleCopyCookie(account)}
+                        className="text-[11px] text-slate-500 underline hover:text-slate-800 disabled:opacity-50"
+                      >
+                        复制 Cookie
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isBusy || batchTesting}
+                        onClick={() => void handleToggleEnabled(account)}
+                        className="text-[11px] text-slate-500 underline hover:text-slate-800"
+                      >
+                        {account.enabled ? '停用' : '启用'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isBusy || batchTesting}
+                        onClick={() => void handleDelete(account)}
+                        className="text-[11px] text-rose-600 underline hover:text-rose-800"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mb-3">
+                      <button
+                        type="button"
+                        disabled={!cookieText.trim() || isBusy}
+                        onClick={() => void handleCopyCookie(account)}
+                        className="text-[11px] text-slate-500 underline hover:text-slate-800 disabled:opacity-50"
+                      >
+                        复制 Cookie（仅查看）
+                      </button>
+                    </div>
+                  )}
+
+                  {!isLegacy ? renderTestResultBlock(account) : null}
+
+                  <div className="mt-3">
+                    <label className="text-xs font-medium text-slate-700">当前 Cookie</label>
+                    {account.hasCookie ? (
+                      <textarea
+                        readOnly
+                        value={cookieText}
+                        rows={4}
+                        className="mt-1 max-h-40 min-h-[4rem] w-full resize-y overflow-auto rounded border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-slate-800"
+                      />
+                    ) : (
+                      <p className="mt-1 text-xs text-slate-500">尚未保存 Cookie</p>
+                    )}
+                  </div>
+
+                  {!isLegacy ? (
+                    <>
+                      <dl className="mt-3 grid gap-2 text-[11px] text-slate-600 sm:grid-cols-2">
+                        <div>
+                          <dt className="text-slate-400">最近成功同步</dt>
+                          <dd>{formatTime(account.lastSyncSuccessAt)}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-slate-400">Cookie 更新时间</dt>
+                          <dd>{formatTime(account.cookieUpdatedAt)}</dd>
+                        </div>
+                        {qualityHints[account.id] ? (
+                          <div className="sm:col-span-2">
+                            <dt className="text-slate-400">接口探测</dt>
+                            <dd>
+                              订单接口：
+                              {cookieStatusLabel(
+                                qualityHints[account.id]!
+                                  .orderApiStatus as LiveAccountPublic['cookieStatus'],
+                              )}
+                              {' · '}
+                              官方品退：{qualityHints[account.id]!.qualityApiHint}
+                            </dd>
+                          </div>
+                        ) : null}
+                      </dl>
+
+                      <div className="mt-3 border-t border-slate-100 pt-3">
+                        <label className="text-xs text-slate-600">
+                          更新 Cookie（粘贴新内容后保存）
+                        </label>
+                        <textarea
+                          value={editCookies[account.id] ?? ''}
+                          onChange={(e) =>
+                            setEditCookies((prev) => ({
+                              ...prev,
+                              [account.id]: e.target.value,
+                            }))
+                          }
+                          rows={2}
+                          className="mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
+                          placeholder="从浏览器开发者工具复制 Cookie"
+                        />
+                        <button
+                          type="button"
+                          disabled={isBusy || batchTesting}
+                          onClick={() => void handleUpdateCookie(account.id)}
+                          className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                        >
+                          {isBusy ? '保存并检测中…' : '更新 Cookie'}
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </td>
+            </tr>
+          ) : null}
+        </React.Fragment>
+      )
+    })
+
+  const renderAccountTable = (
+    accountList: LiveAccountPublic[],
+    options?: { legacy?: boolean },
+  ) => (
+    <div className="overflow-x-auto rounded-lg border border-slate-200">
+      <table className="min-w-[720px] w-full text-left text-xs">
+        <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
+          <tr>
+            <th className="px-3 py-2 font-medium">直播号</th>
+            <th className="px-3 py-2 font-medium">启用</th>
+            <th className="px-3 py-2 font-medium">Cookie 状态</th>
+            <th className="px-3 py-2 font-medium">最近同步</th>
+            <th className="px-3 py-2 font-medium">Cookie 更新</th>
+            <th className="px-3 py-2 font-medium text-right">操作</th>
+          </tr>
+        </thead>
+        <tbody>{renderAccountRows(accountList, options)}</tbody>
+      </table>
+    </div>
+  )
+
   return (
     <section id="live-account-cookie" className="scroll-mt-4 rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-slate-800">直播号 Cookie 管理</h3>
           <p className="mt-1 text-xs text-slate-500">
-            这里显示的 Cookie 就是系统实际使用的 Cookie。外部程序上传后，也会覆盖这里对应店铺的 Cookie。
+            上面四条官方账号就是系统实际使用的 Cookie。外部程序上传后，只会覆盖这里对应店铺的官方账号。下面历史账号仅保留查看，不参与同步。
           </p>
         </div>
         <button
           type="button"
-          disabled={batchTesting || loading || accounts.length === 0}
+          disabled={batchTesting || loading || activeAccounts.length === 0}
           onClick={() => void handleTestAllEnabledCookies()}
           className="shrink-0 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
@@ -705,7 +994,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         </button>
       </div>
 
-      {!loading && accounts.length > 0 ? (
+      {!loading && activeAccounts.length > 0 ? (
         <div className="mt-4 grid grid-cols-2 gap-2">
           <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
             <p className="text-[10px] text-emerald-700">Cookie 可用</p>
@@ -782,260 +1071,27 @@ export const LiveAccountCookiePanel: React.FC = () => {
 
       {loading ? (
         <p className="mt-4 text-xs text-slate-500">加载中…</p>
-      ) : accounts.length === 0 ? (
+      ) : activeAccounts.length === 0 && legacyAccounts.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-xs text-slate-600">
           暂无直播号，请在下方添加，或通过外部程序调用上传接口写入 Cookie。
         </p>
-      ) : (
-        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
-          <table className="min-w-[720px] w-full text-left text-xs">
-            <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
-              <tr>
-                <th className="px-3 py-2 font-medium">直播号</th>
-                <th className="px-3 py-2 font-medium">启用</th>
-                <th className="px-3 py-2 font-medium">Cookie 状态</th>
-                <th className="px-3 py-2 font-medium">最近同步</th>
-                <th className="px-3 py-2 font-medium">Cookie 更新</th>
-                <th className="px-3 py-2 font-medium text-right">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((account) => {
-                const isTesting = testingIds.has(account.id)
-                const isBusy = busyId === account.id
-                const cookieText = resolveAccountCookie(account)
-                const accountExpanded = expandedAccountId === account.id
-                const latestTest = testResults[account.id]
-                const cookieAvailable = resolveAccountCookieAvailable(account, latestTest)
-                const cookieReason = cookieAvailable ? null : accountCookieReason(account)
+      ) : null}
 
-                return (
-                  <React.Fragment key={account.id}>
-                    <tr
-                      className={`border-b border-slate-100 ${
-                        accountExpanded ? 'bg-indigo-50/40' : 'hover:bg-slate-50/80'
-                      }`}
-                    >
-                      <td className="px-3 py-2.5 font-medium text-slate-900">
-                        <div className="space-y-1">
-                          <span>{account.name}</span>
-                          {account.officialShopKey ? (
-                            <span className="block text-[10px] font-normal text-indigo-600">
-                              四店官方账号 · 外部上传覆盖此条
-                            </span>
-                          ) : account.legacyShopKey ? (
-                            <span className="block text-[10px] font-normal text-amber-700">
-                              历史账号 · 四店上传请以官方账号为准
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                            account.enabled
-                              ? 'bg-emerald-50 text-emerald-700'
-                              : 'bg-slate-100 text-slate-500'
-                          }`}
-                        >
-                          {account.enabled ? '已启用' : '已停用'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="space-y-1">
-                          <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieAvailableTone(cookieAvailable)}`}
-                          >
-                            {cookieAvailableLabel(cookieAvailable)}
-                          </span>
-                          {cookieReason ? (
-                            <p className="max-w-[220px] text-[10px] leading-snug text-rose-700">
-                              {cookieReason}
-                            </p>
-                          ) : null}
-                          {isTesting ? (
-                            <span className="block text-[10px] text-indigo-600">检测中</span>
-                          ) : null}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2.5 text-slate-600">
-                        {formatTime(account.lastSyncSuccessAt)}
-                      </td>
-                      <td className="px-3 py-2.5 text-slate-600">
-                        {formatTime(account.cookieUpdatedAt)}
-                      </td>
-                      <td className="px-3 py-2.5">
-                        <div className="flex flex-wrap justify-end gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => toggleAccountExpanded(account.id)}
-                            className="rounded border border-slate-200 px-2 py-1 text-[11px] hover:bg-white"
-                          >
-                            {accountExpanded ? '收起' : '详情'}
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isTesting || batchTesting || isBusy || !account.hasCookie}
-                            onClick={() => void handleTest(account)}
-                            className="rounded border border-indigo-200 px-2 py-1 text-[11px] text-indigo-700 hover:bg-indigo-50 disabled:opacity-50"
-                          >
-                            检测
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                    {accountExpanded ? (
-                      <tr className="border-b border-slate-100 bg-slate-50/50">
-                        <td colSpan={6} className="px-3 py-3">
-                          <div className="rounded-lg border border-slate-200 bg-white p-3">
-                            {editingNameId === account.id ? (
-                              <div className="mb-3 flex flex-wrap items-center gap-2">
-                                <input
-                                  value={editNames[account.id] ?? account.name}
-                                  onChange={(e) =>
-                                    setEditNames((prev) => ({
-                                      ...prev,
-                                      [account.id]: e.target.value,
-                                    }))
-                                  }
-                                  className="rounded border border-slate-200 px-2 py-1 text-sm"
-                                />
-                                <button
-                                  type="button"
-                                  disabled={isBusy}
-                                  onClick={() => void handleSaveName(account.id)}
-                                  className="rounded bg-slate-900 px-2 py-1 text-xs text-white disabled:opacity-50"
-                                >
-                                  保存名称
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingNameId(null)}
-                                  className="text-xs text-slate-500"
-                                >
-                                  取消
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="mb-3 flex flex-wrap gap-2">
-                                <button
-                                  type="button"
-                                  disabled={isBusy}
-                                  onClick={() => {
-                                    setEditingNameId(account.id)
-                                    setEditNames((prev) => ({
-                                      ...prev,
-                                      [account.id]: account.name,
-                                    }))
-                                  }}
-                                  className="text-[11px] text-slate-500 underline hover:text-slate-800"
-                                >
-                                  编辑名称
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={!cookieText.trim() || isBusy}
-                                  onClick={() => void handleCopyCookie(account)}
-                                  className="text-[11px] text-slate-500 underline hover:text-slate-800 disabled:opacity-50"
-                                >
-                                  复制 Cookie
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={isBusy || batchTesting}
-                                  onClick={() => void handleToggleEnabled(account)}
-                                  className="text-[11px] text-slate-500 underline hover:text-slate-800"
-                                >
-                                  {account.enabled ? '停用' : '启用'}
-                                </button>
-                                <button
-                                  type="button"
-                                  disabled={isBusy || batchTesting}
-                                  onClick={() => void handleDelete(account)}
-                                  className="text-[11px] text-rose-600 underline hover:text-rose-800"
-                                >
-                                  删除
-                                </button>
-                              </div>
-                            )}
+      {!loading && activeAccounts.length > 0 ? (
+        <div className="mt-4">{renderAccountTable(activeAccounts)}</div>
+      ) : null}
 
-                            {renderTestResultBlock(account)}
-
-                            <div className="mt-3">
-                              <label className="text-xs font-medium text-slate-700">当前 Cookie</label>
-                              {account.hasCookie ? (
-                                <textarea
-                                  readOnly
-                                  value={cookieText}
-                                  rows={4}
-                                  className="mt-1 max-h-40 min-h-[4rem] w-full resize-y overflow-auto rounded border border-slate-200 bg-slate-50 px-2 py-1.5 font-mono text-[11px] leading-relaxed text-slate-800"
-                                />
-                              ) : (
-                                <p className="mt-1 text-xs text-slate-500">尚未保存 Cookie</p>
-                              )}
-                            </div>
-
-                            <dl className="mt-3 grid gap-2 text-[11px] text-slate-600 sm:grid-cols-2">
-                              <div>
-                                <dt className="text-slate-400">最近成功同步</dt>
-                                <dd>{formatTime(account.lastSyncSuccessAt)}</dd>
-                              </div>
-                              <div>
-                                <dt className="text-slate-400">Cookie 更新时间</dt>
-                                <dd>{formatTime(account.cookieUpdatedAt)}</dd>
-                              </div>
-                              {qualityHints[account.id] ? (
-                                <div className="sm:col-span-2">
-                                  <dt className="text-slate-400">接口探测</dt>
-                                  <dd>
-                                    订单接口：
-                                    {cookieStatusLabel(
-                                      qualityHints[account.id]!
-                                        .orderApiStatus as LiveAccountPublic['cookieStatus'],
-                                    )}
-                                    {' · '}
-                                    官方品退：{qualityHints[account.id]!.qualityApiHint}
-                                  </dd>
-                                </div>
-                              ) : null}
-                            </dl>
-
-                            <div className="mt-3 border-t border-slate-100 pt-3">
-                              <label className="text-xs text-slate-600">
-                                更新 Cookie（粘贴新内容后保存）
-                              </label>
-                              <textarea
-                                value={editCookies[account.id] ?? ''}
-                                onChange={(e) =>
-                                  setEditCookies((prev) => ({
-                                    ...prev,
-                                    [account.id]: e.target.value,
-                                  }))
-                                }
-                                rows={2}
-                                className="mt-1 w-full rounded border border-slate-200 px-2 py-1.5 text-xs"
-                                placeholder="从浏览器开发者工具复制 Cookie"
-                              />
-                              <button
-                                type="button"
-                                disabled={isBusy || batchTesting}
-                                onClick={() => void handleUpdateCookie(account.id)}
-                                className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-                              >
-                                {isBusy ? '保存并检测中…' : '更新 Cookie'}
-                              </button>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : null}
-                  </React.Fragment>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+      {!loading && legacyAccounts.length > 0 ? (
+        <details className="mt-4 rounded-lg border border-amber-100 bg-amber-50/40">
+          <summary className="cursor-pointer select-none px-3 py-2.5 text-xs font-medium text-amber-900">
+            历史重复账号（不参与四店上传和同步）
+            <span className="ml-2 font-normal text-amber-700">共 {legacyAccounts.length} 条</span>
+          </summary>
+          <div className="border-t border-amber-100 px-1 pb-1 pt-1">
+            {renderAccountTable(legacyAccounts, { legacy: true })}
+          </div>
+        </details>
+      ) : null}
 
       <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-600">
         <p className="font-medium text-slate-700">外部程序自动上传</p>

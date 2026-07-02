@@ -43,6 +43,12 @@ export function anchorRowReturnRefundRate(row: AnchorLeaderboardRow): number | n
   return anchorRowRate(row, 'returnRefundRate')
 }
 
+export function anchorRowLivePeriodText(row: AnchorLeaderboardRow): string | null {
+  const raw = String(row.livePeriodText ?? row.liveTimeRange ?? '').trim()
+  if (!raw || raw === '—') return null
+  return raw.replace(/~/g, '–')
+}
+
 export function isHighRefundRate(rate: number | null): boolean {
   return rate != null && rate >= 0.5
 }

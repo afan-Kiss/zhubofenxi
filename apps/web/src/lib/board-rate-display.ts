@@ -30,3 +30,18 @@ export function showDrawerSignQualityMetrics(preset?: string): boolean {
     preset === 'custom'
   )
 }
+
+/** 昨日/今日订单尚未签收，抽屉不展示「实际签收」分栏 */
+export function showAnchorDrillSignedTab(preset?: string): boolean {
+  if (!preset || preset === 'yesterday' || preset === 'today') return false
+  return showDrawerSignQualityMetrics(preset)
+}
+
+/** 短周期主播卡片不展示签收类指标（昨日刚卖出） */
+export function showAnchorLeaderboardSignMetrics(
+  preset: BoardRangePreset,
+  startDate?: string,
+  endDate?: string,
+): boolean {
+  return showLongPeriodRates(preset, startDate, endDate)
+}

@@ -6,7 +6,7 @@ import {
 } from '../../lib/anchor-drawer-summary'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { Pagination } from '../ui/Pagination'
-import { showDrawerSignQualityMetrics } from '../../lib/board-rate-display'
+import { showDrawerSignQualityMetrics, showAnchorDrillSignedTab } from '../../lib/board-rate-display'
 import { BoardDrawerShell } from './BoardDrawerShell'
 import { BoardDrillOrderTable, type BoardDrillOrderRow } from './BoardDrillOrderTable'
 
@@ -65,7 +65,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
   const [reloadNonce, setReloadNonce] = useState(0)
   const [copyDone, setCopyDone] = useState(false)
   const [liveSessionsOpen, setLiveSessionsOpen] = useState(false)
-  const [orderTab, setOrderTab] = useState<'signed' | 'all'>('signed')
+  const [orderTab, setOrderTab] = useState<'signed' | 'all'>('all')
   const [anchorOptions, setAnchorOptions] = useState<Array<{ id: string; name: string }>>([])
   const [assigningOrderNo, setAssigningOrderNo] = useState<string | null>(null)
   const [assignError, setAssignError] = useState<string | null>(null)
@@ -85,7 +85,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
     setError(null)
     setCopyDone(false)
     setLiveSessionsOpen(false)
-    setOrderTab('signed')
+    setOrderTab(showAnchorDrillSignedTab(preset) ? 'signed' : 'all')
     setAssignError(null)
     setAssigningOrderNo(null)
   }, [open, anchorName, anchorId, startDate, endDate, preset])
@@ -193,6 +193,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
   const stats = data?.stats ?? (loading ? rowSnapshot : undefined)
   const showInitialSkeleton = loading && !data && !error
   const showSignQuality = showDrawerSignQualityMetrics(preset)
+  const showSignedTab = showAnchorDrillSignedTab(preset)
 
   const shippedOrderAmount =
     statNum(stats, 'validSalesAmount') || statNum(stats, 'effectiveGmv')
@@ -244,6 +245,11 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
     },
     [],
   )
+
+  useEffect(() => {
+    if (!data?.liveSessions?.length) return
+    setLiveSessionsOpen(true)
+  }, [data?.liveSessions])
 
   const liveSessions = data?.liveSessions ?? []
   const hasLiveSessions = liveSessions.length > 0
@@ -388,7 +394,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
         >
           <div className="mb-3 flex flex-wrap gap-1 rounded-2xl bg-white/80 p-1">
             {(data?.tabs ?? [
-              { key: 'signed', label: '实际签收', count: 0 },
+              ...(showSignedTab ? [{ key: 'signed', label: '实际签收', count: 0 }] : []),
               { key: 'all', label: '全部订单', count: 0 },
             ]).map((t) => (
               <button

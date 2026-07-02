@@ -27,6 +27,7 @@ import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.servic
 import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import { sessionOverlapsEffectiveScheduleRow } from '../utils/anchor-attendance-status.util'
+import { shouldUsePerShopRealLiveSessions } from './daily-report-live-sessions.service'
 
 const NEW_SCHEDULE_START_MS = Date.parse(`${ANCHOR_NEW_SCHEDULE_START_DATE}T00:00:00+08:00`)
 
@@ -322,7 +323,7 @@ export async function resolveAnchorLiveSessionsWithTrafficForRange(params: {
   const target = resolveTargetAnchor(params)
   if (!target) return []
 
-  if (params.endDate.trim() >= ANCHOR_NEW_SCHEDULE_START_DATE) {
+  if (shouldUsePerShopRealLiveSessions(params.startDate, params.endDate)) {
     const { resolveAssignedRealLiveSessionsForAnchor } = await import(
       './daily-report-live-sessions.service'
     )

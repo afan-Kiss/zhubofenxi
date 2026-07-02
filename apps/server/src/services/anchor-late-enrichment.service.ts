@@ -1,17 +1,19 @@
 import type { AnchorLiveSessionBrief } from './anchor-live-sessions.service'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
-import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
 import {
   getAssignedSessionsForAnchor,
   loadAndAssignDailyReportLiveSessions,
+  shouldUsePerShopRealLiveSessions,
 } from './daily-report-live-sessions.service'
 import { resolveAnchorLiveSessionsForRange } from './anchor-live-sessions.service'
 import {
+  buildActualLivePeriodText,
   earliestSessionStart,
   resolveAnchorAttendanceFromSessions,
   toAttendanceStatusPayload,
   type AnchorAttendanceStatusPayload,
 } from '../utils/anchor-attendance-status.util'
+import { buildPerSessionLivePeriodText } from './daily-report-live-schedule-match.service'
 
 export function isSingleDayRange(startDate: string, endDate: string): boolean {
   return startDate.trim() === endDate.trim()
@@ -91,7 +93,7 @@ async function resolveLiveSessionsForAnchorRow(params: {
   anchorName: string
   liveAssignment?: Awaited<ReturnType<typeof loadAndAssignDailyReportLiveSessions>>
 }): Promise<AnchorLiveSessionBrief[]> {
-  if (params.endDate.trim() >= ANCHOR_NEW_SCHEDULE_START_DATE && params.liveAssignment) {
+  if (shouldUsePerShopRealLiveSessions(params.startDate, params.endDate) && params.liveAssignment) {
     return getAssignedSessionsForAnchor(params.liveAssignment, params.anchorName)
   }
   return resolveAnchorLiveSessionsForRange({
@@ -111,16 +113,15 @@ export async function enrichAnchorLeaderboardWithLateStatus(
   if (!isSingleDayRange(params.startDate, params.endDate)) return rows
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
-  const liveAssignment =
-    params.endDate.trim() >= ANCHOR_NEW_SCHEDULE_START_DATE
-      ? await loadAndAssignDailyReportLiveSessions({
-          reportDate: params.startDate,
-          preset: params.preset,
-          startDate: params.startDate,
-          endDate: params.endDate,
-          scheduleRows: scheduleTable.rows,
-        })
-      : undefined
+  const liveAssignment = shouldUsePerShopRealLiveSessions(params.startDate, params.endDate)
+    ? await loadAndAssignDailyReportLiveSessions({
+        reportDate: params.startDate,
+        preset: params.preset,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        scheduleRows: scheduleTable.rows,
+      })
+    : undefined
 
   type WorkItem = {
     index: number
@@ -200,10 +201,22 @@ export async function enrichAnchorLeaderboardWithLateStatus(
 
   return rows.map((row, index) => {
     const attendance = attendanceByIndex.get(index)
-    if (!attendance) return row
+    const item = prefetched[index]
+    const sessions = item?.sessions ?? []
+    const livePeriodText = buildPerSessionLivePeriodText(sessions)
+    const liveTimeRange = buildActualLivePeriodText(sessions)
+    if (!attendance) {
+      return {
+        ...row,
+        livePeriodText,
+        liveTimeRange,
+      }
+    }
     return {
       ...row,
       ...attendance,
+      livePeriodText,
+      liveTimeRange,
       sessionLabel: attendance.displaySessionLabel || row.sessionLabel,
       shopName: attendance.shopName || row.shopName,
     }
@@ -221,16 +234,15 @@ export async function enrichPocketRowsWithLateStatus(
   }
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
-  const liveAssignment =
-    params.endDate.trim() >= ANCHOR_NEW_SCHEDULE_START_DATE
-      ? await loadAndAssignDailyReportLiveSessions({
-          reportDate: params.startDate,
-          preset: params.preset,
-          startDate: params.startDate,
-          endDate: params.endDate,
-          scheduleRows: scheduleTable.rows,
-        })
-      : undefined
+  const liveAssignment = shouldUsePerShopRealLiveSessions(params.startDate, params.endDate)
+    ? await loadAndAssignDailyReportLiveSessions({
+        reportDate: params.startDate,
+        preset: params.preset,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        scheduleRows: scheduleTable.rows,
+      })
+    : undefined
 
   type WorkItem = {
     index: number

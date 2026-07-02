@@ -26,6 +26,15 @@ import {
   type LiveSessionScheduleMatchResult,
 } from './daily-report-live-schedule-match.service'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
+import { SHOP_SESSION_ANCHOR_CUTOFF_MS } from './anchor-performance-attribution.service'
+
+export function shouldUsePerShopRealLiveSessions(startDate: string, endDate: string): boolean {
+  const start = startDate.trim()
+  const end = endDate.trim()
+  if (!start || start !== end) return false
+  const ms = Date.parse(`${start}T00:00:00+08:00`)
+  return Number.isFinite(ms) && ms >= SHOP_SESSION_ANCHOR_CUTOFF_MS
+}
 
 const RAW_LIVE_RANGE_DB_BUFFER_MS = 1 * 24 * 60 * 60 * 1000
 const LOG_TAG = '[daily-report-live]'

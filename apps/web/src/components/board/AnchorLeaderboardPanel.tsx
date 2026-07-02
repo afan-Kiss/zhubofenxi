@@ -8,6 +8,7 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnRefundCount,
   anchorRowReturnRefundRate,
+  anchorRowLivePeriodText,
   anchorRowSignedCount,
   anchorRowValidSales,
   isHighRefundRate,
@@ -70,11 +71,11 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
               <th className="py-2.5 pl-4 pr-2">主播</th>
               <th className="py-2 pr-2 text-right">本期销售额</th>
               <th className="py-2 pr-2 text-right">有效成交额</th>
-              <th className="py-2 pr-2 text-right">签收金额</th>
+              {showRates ? <th className="py-2 pr-2 text-right">签收金额</th> : null}
               <th className="py-2 pr-2 text-right">退款金额</th>
               <th className="py-2 pr-2 text-right">本期订单数</th>
               <th className="py-2 pr-2 text-right">支付订单数</th>
-              <th className="py-2 pr-2 text-right">签收单数</th>
+              {showRates ? <th className="py-2 pr-2 text-right">签收单数</th> : null}
               <th className="py-2 pr-2 text-right">退款单数</th>
               <th className="py-2 pr-2 text-right">退货退款单数</th>
               <th className="py-2 pr-2 text-right">商品问题单数</th>
@@ -96,6 +97,8 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                 const refundRate = anchorRowRate(a, 'returnRate')
                 const late = readLateStatus(a)
                 const timingLine = formatLateTimingLine(late)
+                const livePeriod = anchorRowLivePeriodText(a)
+                const livePeriodMultiline = livePeriod?.includes('\n') ?? false
                 return (
                   <tr
                     key={String(a.anchorId ?? a.anchorName ?? idx)}
@@ -118,6 +121,11 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                           <span className="font-medium text-rose-800">{String(a.anchorName)}</span>
                           <AnchorLateStatusBadge row={late} />
                         </div>
+                        {livePeriod ? (
+                          <span className={`text-[12px] text-slate-600${livePeriodMultiline ? ' whitespace-pre-line' : ''}`}>
+                            直播 {livePeriod}
+                          </span>
+                        ) : null}
                         {timingLine ? (
                           <span className={`text-[12px] ${late.isLate || late.isEarlyLeave ? 'text-red-600' : 'text-slate-500'}`}>
                             {timingLine}
@@ -129,9 +137,11 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     <td className="py-2 text-right tabular-nums">
                       {formatMoney(anchorRowValidSales(a))}
                     </td>
-                    <td className="py-2 text-right tabular-nums">
-                      {formatMoney(anchorRowNum(a, 'actualSignedAmount'))}
-                    </td>
+                    {showRates ? (
+                      <td className="py-2 text-right tabular-nums">
+                        {formatMoney(anchorRowNum(a, 'actualSignedAmount'))}
+                      </td>
+                    ) : null}
                     <td className="py-2 text-right font-medium text-rose-600 tabular-nums">
                       {formatMoney(anchorRowRefundAmount(a))}
                     </td>
@@ -141,9 +151,11 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     <td className="py-2 text-right tabular-nums">
                       {formatCount(anchorRowPaidCount(a))}
                     </td>
-                    <td className="py-2 text-right tabular-nums">
-                      {formatCount(anchorRowSignedCount(a))}
-                    </td>
+                    {showRates ? (
+                      <td className="py-2 text-right tabular-nums">
+                        {formatCount(anchorRowSignedCount(a))}
+                      </td>
+                    ) : null}
                     <td className="py-2 text-right tabular-nums">
                       {formatCount(anchorRowNum(a, 'returnCount'))}
                     </td>

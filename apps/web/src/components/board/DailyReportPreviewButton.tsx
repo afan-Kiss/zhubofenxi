@@ -2,8 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { toPng } from 'html-to-image'
 import { apiRequest } from '../../lib/api'
-import { type DailyReportPayload } from './DailyReportImageSheet'
-import { DailyReportExportView } from './DailyReportExportView'
+import { type DailyReportPayload, DailyReportImageSheet } from './DailyReportImageSheet'
 import {
   DailyReportShipmentPhotos,
   type DailyReportImageItem,
@@ -305,7 +304,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     report
       ? createPortal(
           <div aria-hidden className="pointer-events-none fixed left-[-9999px] top-0">
-            <DailyReportExportView
+            <DailyReportImageSheet
               ref={sheetRef}
               data={report}
               showAttendanceStatus={showAttendanceStatus}

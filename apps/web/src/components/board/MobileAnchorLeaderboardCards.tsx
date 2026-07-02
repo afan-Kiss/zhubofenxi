@@ -8,6 +8,7 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnRefundCount,
   anchorRowReturnRefundRate,
+  anchorRowLivePeriodText,
   anchorRowSignedCount,
   anchorRowValidSales,
   isHighRefundRate,
@@ -74,6 +75,8 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
         const signRate = anchorRowRate(a, 'signRate')
         const late = readLateStatus(a)
         const timingLine = formatLateTimingLine(late)
+        const livePeriod = anchorRowLivePeriodText(a)
+        const livePeriodMultiline = livePeriod?.includes('\n') ?? false
 
         return (
           <article
@@ -100,6 +103,11 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               <div>
                 <p className="text-[12px] text-slate-500">主播</p>
                 <p className="text-lg font-semibold text-rose-800">{name}</p>
+                {livePeriod ? (
+                  <p className={`mt-1 text-[12px] text-slate-600${livePeriodMultiline ? ' whitespace-pre-line' : ''}`}>
+                    直播 {livePeriod}
+                  </p>
+                ) : null}
                 {timingLine ? (
                   <p className={`mt-1 text-[12px] ${late.isLate || late.isEarlyLeave ? 'font-medium text-red-600' : 'text-slate-500'}`}>
                     {timingLine}
@@ -112,17 +120,21 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
               <MetricCell label="本期销售额" value={formatMoney(anchorRowGmv(a))} />
               <MetricCell label="有效成交额" value={formatMoney(anchorRowValidSales(a))} />
-              <MetricCell
-                label="签收金额"
-                value={formatMoney(anchorRowNum(a, 'actualSignedAmount'))}
-              />
+              {showRates ? (
+                <MetricCell
+                  label="签收金额"
+                  value={formatMoney(anchorRowNum(a, 'actualSignedAmount'))}
+                />
+              ) : null}
               <MetricCell label="退款金额" value={formatMoney(anchorRowRefundAmount(a))} danger />
             </div>
 
             <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
               <MetricCell label="订单数" value={formatCount(anchorRowNum(a, 'periodOrderCount'))} />
               <MetricCell label="支付订单数" value={formatCount(anchorRowPaidCount(a))} />
-              <MetricCell label="签收单数" value={formatCount(anchorRowSignedCount(a))} />
+              {showRates ? (
+                <MetricCell label="签收单数" value={formatCount(anchorRowSignedCount(a))} />
+              ) : null}
               <MetricCell label="退款单数" value={formatCount(anchorRowNum(a, 'returnCount'))} />
               <MetricCell
                 label="退货退款单数"

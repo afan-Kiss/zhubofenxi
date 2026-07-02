@@ -44,6 +44,11 @@ import {
 } from './staff-anchor-scope.service'
 import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
 
+function shouldExposeSignedDrillTab(preset?: string): boolean {
+  if (!preset || preset === 'yesterday' || preset === 'today') return false
+  return preset === 'thisWeek' || preset === 'thisMonth' || preset === 'lastMonth' || preset === 'custom'
+}
+
 function filterDrillViewsByStatus(
   views: AnalyzedOrderView[],
   statusType?: string,
@@ -131,7 +136,9 @@ export async function buildAnchorDrill(params: {
   )
 
   const anchorViews = performanceScoped
-  const drillViews = filterDrillViewsByStatus(anchorViews, params.statusType ?? 'signed')
+  const defaultStatusType = shouldExposeSignedDrillTab(params.preset) ? 'signed' : 'all'
+  const statusType = params.statusType ?? defaultStatusType
+  const drillViews = filterDrillViewsByStatus(anchorViews, statusType)
   const signedCount = anchorViews.filter((v) => isEffectiveSignedView(v)).length
   const leaderboard = aggregateAnchorLeaderboard(performanceScoped)
   const stats =
@@ -180,10 +187,12 @@ export async function buildAnchorDrill(params: {
     liveSessions,
     liveSummaryText: formatAnchorLiveSessionsSummary(liveSessions),
     blacklistedBuyerIds: [...blacklist],
-    tabs: [
-      { key: 'signed', label: '实际签收', count: signedCount },
-      { key: 'all', label: '全部订单', count: anchorViews.length },
-    ],
+    tabs: shouldExposeSignedDrillTab(params.preset)
+      ? [
+          { key: 'signed', label: '实际签收', count: signedCount },
+          { key: 'all', label: '全部订单', count: anchorViews.length },
+        ]
+      : [{ key: 'all', label: '全部订单', count: anchorViews.length }],
     pagination: {
       page,
       pageSize,

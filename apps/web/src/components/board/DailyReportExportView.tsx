@@ -60,17 +60,15 @@ function ExportAnchorCard({
 }) {
   const late = readLateStatus(row)
   const liveTime =
-    row.liveTimeRange && row.liveTimeRange !== '—'
+    row.liveTimeRange &&
+    row.liveTimeRange !== '—' &&
+    row.liveTimeRange !== '未读取到直播场次'
       ? row.liveTimeRange
       : row.livePeriodText && row.livePeriodText !== '—'
         ? row.livePeriodText.replace(/~/g, '–')
-        : '—'
+        : '未读取到直播场次'
   const scheduleText =
-    showAttendanceStatus && row.scheduleMatched && row.scheduleTimeRange
-      ? row.scheduleTimeRange
-      : showAttendanceStatus && row.scheduleMatched && late.scheduledPeriodText
-        ? late.scheduledPeriodText.replace(/~/g, '–')
-        : null
+    showAttendanceStatus && row.scheduleTimeRange ? row.scheduleTimeRange : null
   const timingDetail = showAttendanceStatus ? formatLateTimingLine(late) : null
   const alert = showAttendanceStatus && (late.isLate || late.isEarlyLeave)
   const liveTimeMultiline = liveTime.includes('\n')
@@ -94,15 +92,15 @@ function ExportAnchorCard({
         </div>
       </div>
       <div className="mt-2 space-y-0.5 text-[11px]">
+        {scheduleText ? <p className="text-slate-500">排班 {scheduleText}</p> : null}
         <p className={`${alert ? 'font-medium text-red-600' : 'text-slate-600'}${liveTimeMultiline ? ' whitespace-pre-line' : ''}`}>
           直播 {liveTime}
-          {scheduleText ? (
-            <span className="text-slate-400">（排班 {scheduleText}）</span>
-          ) : null}
-          {showAttendanceStatus && (late.isLate || late.isEarlyLeave) && timingDetail
-            ? `｜${late.attendanceLabel || late.label}`
-            : null}
         </p>
+        {timingDetail ? (
+          <p className={alert ? 'font-medium text-red-600' : 'text-slate-500'}>
+            出勤 {timingDetail}
+          </p>
+        ) : null}
         <p className="text-slate-800">
           <span className="font-semibold text-slate-900">
             真实发货 {formatMoney(row.shippedAmountYuan)}
@@ -239,6 +237,11 @@ export const DailyReportExportView = React.forwardRef<HTMLDivElement, Props>(
             <div />
           )}
         </div>
+        {data.summary.liveSessionAttributionNote ? (
+          <p className="mt-2 text-[11px] leading-relaxed text-amber-800">
+            {data.summary.liveSessionAttributionNote}
+          </p>
+        ) : null}
 
         <div className="daily-report-export-body">
           <div className="daily-report-export-anchors">

@@ -23,6 +23,45 @@ export interface LiveSessionScheduleMatchResult {
   matchReason: string
 }
 
+export interface LiveSessionScheduleMatchCandidate {
+  scheduleRow: EffectiveScheduleRow
+  overlapMinutes: number
+  shopMatch: boolean
+  matchReason: string
+}
+
+/** 单场直播与全部 enabled 排班行的重叠明细（调试用） */
+export function listSessionScheduleMatchCandidates(
+  session: AnchorLiveSessionBrief,
+  scheduleRows: EffectiveScheduleRow[],
+): LiveSessionScheduleMatchCandidate[] {
+  const liveName = resolveSessionShopLabelForScheduleMatch(session)
+  const startMs = parseLiveSessionTimeMs(session.startTime)
+  const endMs = resolveSessionEndMs(session)
+  if (startMs == null || endMs == null) return []
+
+  const candidates: LiveSessionScheduleMatchCandidate[] = []
+  for (const row of scheduleRows) {
+    if (!row.enabled) continue
+    const scheduleStart = new Date(row.startAt).getTime()
+    const scheduleEnd = new Date(row.endAt).getTime()
+    const overlap = computeScheduleOverlapMinutes(startMs, endMs, scheduleStart, scheduleEnd)
+    const shopMatch = orderLiveRoomMatchesSchedule(liveName, row.shopName, row.liveRoomName)
+    candidates.push({
+      scheduleRow: row,
+      overlapMinutes: overlap,
+      shopMatch,
+      matchReason:
+        overlap > 0 && shopMatch
+          ? `店铺(${row.shopName})+时间重叠${overlap}分钟→${row.anchorName}`
+          : overlap <= 0
+            ? '时间无重叠'
+            : '店铺不匹配',
+    })
+  }
+  return candidates.sort((a, b) => b.overlapMinutes - a.overlapMinutes)
+}
+
 export interface DailyReportLiveScheduleFields {
   livePeriodText: string
   liveTimeRange: string
@@ -187,7 +226,6 @@ export function buildDailyReportLiveScheduleFields(params: {
     (m) => m.scheduleRow && anchorNamesMatch(m.scheduleRow.anchorName, params.anchorName),
   )
 
-  const livePeriodText = buildPerSessionLivePeriodText(matchedSessions)
   const actualStart = earliestSessionStart(matchedSessions)
   const actualEnd = pickLatestValidSessionEnd(matchedSessions)
   const start = actualStart?.startAt ?? null
@@ -202,6 +240,16 @@ export function buildDailyReportLiveScheduleFields(params: {
     primaryScheduleRow = best.scheduleRow
     scheduleMatchReason = best.matchReason
     params.usedScheduleRowIds?.add(best.scheduleRow!.rowId)
+  } else if (matchedSessions.length === 0) {
+    const anchorScheduleRows = params.scheduleRows.filter(
+      (row) => row.enabled && anchorNamesMatch(row.anchorName, params.anchorName),
+    )
+    if (anchorScheduleRows.length > 0) {
+      primaryScheduleRow = [...anchorScheduleRows].sort((a, b) =>
+        a.startTime.localeCompare(b.startTime),
+      )[0]!
+      scheduleMatchReason = '当日生效排班（无真实直播场次）'
+    }
   }
 
   const scheduleTimeRange = primaryScheduleRow
@@ -251,11 +299,15 @@ export function buildDailyReportLiveScheduleFields(params: {
       )
     : ''
 
+  const hasRealSessions = matchedSessions.length > 0
+  const livePeriodText = hasRealSessions ? buildPerSessionLivePeriodText(matchedSessions) : '—'
+  const liveTimeRange = hasRealSessions ? livePeriodText.replace(/~/g, '–') : '未读取到直播场次'
+
   return {
     livePeriodText,
-    liveTimeRange: livePeriodText.replace(/~/g, '–'),
-    liveStartTime: start,
-    liveEndTime: end,
+    liveTimeRange,
+    liveStartTime: hasRealSessions ? start : null,
+    liveEndTime: hasRealSessions ? end : null,
     scheduleTimeRange,
     scheduleMatched: Boolean(primaryScheduleRow),
     scheduleMatchReason,

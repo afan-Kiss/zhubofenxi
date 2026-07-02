@@ -192,7 +192,7 @@ function liveSessionMatchesAnchor(
   if (liveSessionBelongsToAnchor(session, target)) return true
   if (sessionMatchesTargetTimeRule(session, target)) return true
 
-  if (endMs != null) {
+  if (startMs < SHOP_SESSION_ANCHOR_CUTOFF_MS && endMs != null) {
     for (const v of anchorOrders) {
       const payMs = orderPayTimeMs(v)
       if (payMs != null && payMs >= startMs && payMs <= endMs) return true
@@ -329,11 +329,9 @@ export async function resolveAnchorLiveSessionsWithTrafficForRange(params: {
       './daily-report-live-sessions.service'
     )
     return resolveAssignedRealLiveSessionsForAnchor({
-      preset: params.preset,
       startDate: params.startDate,
       endDate: params.endDate,
       anchorName: target.anchorName,
-      anchorOrders: params.anchorOrders,
     })
   }
 

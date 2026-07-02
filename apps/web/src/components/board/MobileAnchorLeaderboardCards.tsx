@@ -107,7 +107,9 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   <p className={`mt-1 text-[12px] text-slate-600${livePeriodMultiline ? ' whitespace-pre-line' : ''}`}>
                     直播 {livePeriod}
                   </p>
-                ) : null}
+                ) : (
+                  <p className="mt-1 text-[12px] text-slate-500">未读取到直播场次</p>
+                )}
                 {timingLine ? (
                   <p className={`mt-1 text-[12px] ${late.isLate || late.isEarlyLeave ? 'font-medium text-red-600' : 'text-slate-500'}`}>
                     {timingLine}

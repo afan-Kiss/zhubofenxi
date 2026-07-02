@@ -277,7 +277,7 @@ boardRouter.get('/daily-report', async (req, res) => {
     }
     const { buildDailyReport } = await import('../services/daily-report.service')
     const data = await buildDailyReport({
-      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      preset: 'custom',
       startDate,
       endDate,
       role: req.user!.role as import('../types/roles').UserRole,
@@ -286,6 +286,64 @@ boardRouter.get('/daily-report', async (req, res) => {
     sendOk(res, data)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '加载日报失败', 500)
+  }
+})
+
+boardRouter.get('/daily-report/debug-live-sessions', async (req, res) => {
+  try {
+    const date = req.query.date ? String(req.query.date).trim() : ''
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      sendFail(res, '请提供 date=YYYY-MM-DD', 400)
+      return
+    }
+    const { resolveDailyReportLiveSessionAssignments } = await import(
+      '../services/daily-report-live-sessions.service'
+    )
+    const assignment = await resolveDailyReportLiveSessionAssignments(date)
+    const byAnchor = Object.fromEntries(
+      [...assignment.byAnchor.entries()].map(([anchorName, sessions]) => [
+        anchorName,
+        {
+          sessionCount: sessions.length,
+          liveDurationMinutes: sessions.reduce((sum, s) => sum + s.durationMinutes, 0),
+          liveTimeRanges: sessions.map((s) => ({
+            liveId: s.liveId,
+            shop: s.sourceShopName,
+            start: s.startTime,
+            end: s.endTime,
+          })),
+        },
+      ]),
+    )
+    sendOk(res, {
+      dateKey: assignment.dateKey,
+      effectiveSchedules: assignment.effectiveSchedules,
+      rawSessions: assignment.allSessions.map((s) => ({
+        sourceShopCode: s.sourceShopCode,
+        sourceShopName: s.sourceShopName,
+        liveId: s.liveId,
+        liveAccountName: s.liveAccountName,
+        actualStartAt: s.startTime,
+        actualEndAt: s.endTime,
+        durationMinutes: s.durationMinutes,
+      })),
+      assignedSessions: assignment.assignedSessions.map((s) => s.liveId),
+      unassignedSessions: assignment.unassignedSessions.map((s) => ({
+        liveId: s.liveId,
+        shop: s.sourceShopName,
+        start: s.startTime,
+        end: s.endTime,
+        skipReason:
+          assignment.debugRows.find((d) => d.liveId === s.liveId)?.skipReason ?? '未匹配排班',
+      })),
+      debugRows: assignment.debugRows,
+      byAnchor,
+      assignedLiveDurationMinutes: assignment.assignedLiveDurationMinutes,
+      unassignedLiveDurationMinutes: assignment.unassignedLiveDurationMinutes,
+      unassignedLiveSessionCount: assignment.unassignedLiveSessionCount,
+    })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '调试直播场次失败', 500)
   }
 })
 

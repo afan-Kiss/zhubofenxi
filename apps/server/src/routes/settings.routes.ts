@@ -11,6 +11,7 @@ import {
 import {
   createLiveAccount,
   deleteLiveAccount,
+  deleteLegacyDuplicateLiveAccounts,
   getLiveAccountCookiePlaintext,
   listLiveAccountsForSettings,
   refreshLiveAccountRowMapperContext,
@@ -392,6 +393,21 @@ settingsRouter.post(
     }
   },
 )
+
+settingsRouter.delete('/live-accounts/legacy-duplicates', async (_req, res) => {
+  try {
+    const result = await deleteLegacyDuplicateLiveAccounts()
+    sendOk(res, {
+      message:
+        result.deletedCount > 0
+          ? `已删除 ${result.deletedCount} 个历史重复账号`
+          : '没有可删除的历史重复账号',
+      ...result,
+    })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '删除历史账号失败')
+  }
+})
 
 settingsRouter.delete('/live-accounts/:id', async (req, res) => {
   try {

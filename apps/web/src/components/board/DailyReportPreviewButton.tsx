@@ -271,12 +271,12 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     setLoading(true)
     setError(null)
     try {
-      const qs = new URLSearchParams({ startDate, endDate })
-      if (preset) qs.set('preset', preset)
+      const qs = new URLSearchParams({ startDate, endDate, preset: 'custom' })
       const [data, photoPayload] = await Promise.all([
-        apiRequest<DailyReportPayload>(`/board/daily-report?${qs}`),
+        apiRequest<DailyReportPayload>(`/board/daily-report?${qs}`, { retryOnGateway: 2 }),
         apiRequest<{ images: DailyReportImageItem[] }>(
           `/daily-report-images?date=${encodeURIComponent(startDate)}`,
+          { retryOnGateway: 2 },
         ).catch(() => ({ images: [] as DailyReportImageItem[] })),
       ])
       if (!data?.summary || !Array.isArray(data?.anchors)) {

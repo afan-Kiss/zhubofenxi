@@ -331,7 +331,6 @@ export async function buildDailyOperationsReport(params: {
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
   const liveAssignment = await loadAndAssignDailyReportLiveSessions({
     reportDate: params.startDate,
-    preset: dayParams.preset,
     startDate: params.startDate,
     endDate: params.endDate,
     scheduleRows: scheduleTable.rows,

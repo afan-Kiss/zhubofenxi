@@ -2,8 +2,9 @@ import type { AnchorLiveSessionBrief } from './anchor-live-sessions.service'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import {
   getAssignedSessionsForAnchor,
-  loadAndAssignDailyReportLiveSessions,
+  resolveDailyReportLiveSessionAssignments,
   shouldUsePerShopRealLiveSessions,
+  type DailyReportLiveSessionAssignments,
 } from './daily-report-live-sessions.service'
 import { resolveAnchorLiveSessionsForRange } from './anchor-live-sessions.service'
 import {
@@ -91,18 +92,17 @@ async function resolveLiveSessionsForAnchorRow(params: {
   endDate: string
   anchorId: string
   anchorName: string
-  liveAssignment?: Awaited<ReturnType<typeof loadAndAssignDailyReportLiveSessions>>
+  liveAssignment?: DailyReportLiveSessionAssignments
 }): Promise<AnchorLiveSessionBrief[]> {
   if (shouldUsePerShopRealLiveSessions(params.startDate, params.endDate) && params.liveAssignment) {
     return getAssignedSessionsForAnchor(params.liveAssignment, params.anchorName)
   }
   return resolveAnchorLiveSessionsForRange({
-    preset: params.preset,
+    preset: 'custom',
     startDate: params.startDate,
     endDate: params.endDate,
     anchorId: params.anchorId,
     anchorName: params.anchorName,
-    anchorOrders: [],
   })
 }
 
@@ -114,13 +114,7 @@ export async function enrichAnchorLeaderboardWithLateStatus(
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
   const liveAssignment = shouldUsePerShopRealLiveSessions(params.startDate, params.endDate)
-    ? await loadAndAssignDailyReportLiveSessions({
-        reportDate: params.startDate,
-        preset: params.preset,
-        startDate: params.startDate,
-        endDate: params.endDate,
-        scheduleRows: scheduleTable.rows,
-      })
+    ? await resolveDailyReportLiveSessionAssignments(params.startDate)
     : undefined
 
   type WorkItem = {
@@ -235,13 +229,7 @@ export async function enrichPocketRowsWithLateStatus(
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
   const liveAssignment = shouldUsePerShopRealLiveSessions(params.startDate, params.endDate)
-    ? await loadAndAssignDailyReportLiveSessions({
-        reportDate: params.startDate,
-        preset: params.preset,
-        startDate: params.startDate,
-        endDate: params.endDate,
-        scheduleRows: scheduleTable.rows,
-      })
+    ? await resolveDailyReportLiveSessionAssignments(params.startDate)
     : undefined
 
   type WorkItem = {

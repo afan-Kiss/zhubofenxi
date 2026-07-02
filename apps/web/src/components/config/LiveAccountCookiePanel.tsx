@@ -220,6 +220,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
   const accountsRef = useRef<LiveAccountPublic[]>([])
   const testResultsRef = useRef<Record<string, CookieTestResult>>({})
   const [expandedAccountId, setExpandedAccountId] = useState<string | null>(null)
+  const [purgingLegacy, setPurgingLegacy] = useState(false)
 
   useEffect(() => {
     accountsRef.current = accounts
@@ -620,6 +621,35 @@ export const LiveAccountCookiePanel: React.FC = () => {
     [accounts],
   )
 
+  const handlePurgeLegacyAccounts = async () => {
+    if (legacyAccounts.length === 0) return
+    const ok = window.confirm(
+      `确定删除全部 ${legacyAccounts.length} 个历史重复账号吗？\n\n仅删除系统设置中的账号配置，已同步的订单和直播数据不会删除。`,
+    )
+    if (!ok) return
+    setPurgingLegacy(true)
+    try {
+      const result = await apiRequest<{
+        deletedCount: number
+        deletedIds: string[]
+        deletedNames: string[]
+        message: string
+      }>('/api/settings/live-accounts/legacy-duplicates', { method: 'DELETE' })
+      const removed = new Set(result.deletedIds)
+      setAccounts((prev) => prev.filter((a) => !removed.has(a.id)))
+      setTestResults((prev) => {
+        const next = { ...prev }
+        for (const id of removed) delete next[id]
+        return next
+      })
+      showToast('ok', result.message || `已删除 ${result.deletedCount} 个历史账号`)
+    } catch (e) {
+      showToast('err', e instanceof Error ? e.message : '删除历史账号失败')
+    } finally {
+      setPurgingLegacy(false)
+    }
+  }
+
   const stats = useMemo(() => {
     const available = activeAccounts.filter(
       (a) => a.enabled && (a.healthStatus === 'ok' || (!a.healthStatus && resolveAccountCookieAvailable(a, testResults[a.id]))),
@@ -987,7 +1017,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-slate-800">直播号 Cookie 管理</h3>
           <p className="mt-1 text-xs text-slate-500">
-            上面四条官方账号就是系统实际使用的 Cookie。外部程序上传后，只会覆盖这里对应店铺的官方账号。下面历史账号仅保留查看，不参与同步。
+            上面四条官方账号就是系统实际使用的 Cookie。外部程序上传后，只会覆盖这里对应店铺的官方账号。
           </p>
         </div>
         <button
@@ -1093,9 +1123,22 @@ export const LiveAccountCookiePanel: React.FC = () => {
 
       {!loading && legacyAccounts.length > 0 ? (
         <details className="mt-4 rounded-lg border border-amber-100 bg-amber-50/40">
-          <summary className="cursor-pointer select-none px-3 py-2.5 text-xs font-medium text-amber-900">
-            历史重复账号（不参与四店上传和同步）
-            <span className="ml-2 font-normal text-amber-700">共 {legacyAccounts.length} 条</span>
+          <summary className="flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+            <span className="text-xs font-medium text-amber-900">
+              历史重复账号（不参与四店上传和同步）
+              <span className="ml-2 font-normal text-amber-700">共 {legacyAccounts.length} 条</span>
+            </span>
+            <button
+              type="button"
+              disabled={purgingLegacy || batchTesting}
+              onClick={(e) => {
+                e.preventDefault()
+                void handlePurgeLegacyAccounts()
+              }}
+              className="rounded border border-rose-200 bg-white px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+            >
+              {purgingLegacy ? '删除中…' : '全部删除'}
+            </button>
           </summary>
           <div className="border-t border-amber-100 px-1 pb-1 pt-1">
             {renderAccountTable(legacyAccounts, { legacy: true })}

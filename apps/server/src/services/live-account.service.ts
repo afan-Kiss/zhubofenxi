@@ -15,6 +15,8 @@ import {
   isOfficialShopPlatformName,
   isLegacyDuplicateShopAccountRow,
   resolveShopKeyFromAccountName,
+  deleteAllLegacyDuplicateShopAccounts,
+  type DeleteLegacyDuplicateShopAccountsResult,
 } from './official-shop-account.service'
 import {
   getAllShopCookieHealth,
@@ -405,6 +407,13 @@ export async function deleteLiveAccount(id: string): Promise<void> {
     )
   }
   await prisma.platformCredential.delete({ where: { id } })
+}
+
+export async function deleteLegacyDuplicateLiveAccounts(): Promise<DeleteLegacyDuplicateShopAccountsResult> {
+  const result = await deleteAllLegacyDuplicateShopAccounts()
+  clearShopCookieHealthCache()
+  await refreshLiveAccountRowMapperContext()
+  return result
 }
 
 export async function markCookieCheckResult(

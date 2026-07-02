@@ -59,6 +59,10 @@ export interface DailyReportPayload {
     totalSoldOrderCount: number
     totalInvalidOrderCount: number
     totalLiveDurationMinutes: number
+    assignedLiveDurationMinutes?: number
+    unassignedLiveDurationMinutes?: number
+    unassignedLiveSessionCount?: number
+    liveSessionAttributionNote?: string | null
     overallHourlyAmountYuan: number | null
     liveRoomNewFollowers: Array<{ liveAccountName: string; newFollowerCount: number }>
     totalNewFollowerCount: number
@@ -97,23 +101,22 @@ function AnchorCard({
 }) {
   const late = readLateStatus(row)
   const liveTime =
-    row.liveTimeRange && row.liveTimeRange !== '—'
+    row.liveTimeRange && row.liveTimeRange !== '—' && row.liveTimeRange !== '未读取到直播场次'
       ? row.liveTimeRange
       : row.livePeriodText && row.livePeriodText !== '—'
         ? row.livePeriodText.replace(/~/g, '–')
-        : '—'
-  const scheduleHint =
-    showAttendanceStatus && row.scheduleMatched && row.scheduleTimeRange
-      ? `（排班 ${row.scheduleTimeRange}）`
-      : showAttendanceStatus && row.scheduleMatched && late.scheduledPeriodText
-        ? `（排班 ${late.scheduledPeriodText.replace(/~/g, '–')}）`
-        : ''
+        : '未读取到直播场次'
+  const scheduleLine =
+    showAttendanceStatus && row.scheduleTimeRange ? `排班 ${row.scheduleTimeRange}` : null
   const timingDetail = showAttendanceStatus ? formatLateTimingLine(late) : null
-  const timingLine = showAttendanceStatus
-    ? liveTime !== '—'
-      ? `${liveTime}${scheduleHint}${late.isLate || late.isEarlyLeave ? `｜${late.attendanceLabel || late.label}` : ''}`
-      : timingDetail ?? '—'
-    : liveTime
+  const attendanceLine =
+    showAttendanceStatus && timingDetail
+      ? timingDetail
+      : showAttendanceStatus && (late.isLate || late.isEarlyLeave)
+        ? late.attendanceLabel || late.label
+        : showAttendanceStatus && late.hasSchedule
+          ? '正常'
+          : null
   const cardBorderClass = showAttendanceStatus
     ? lateCardBorderClass(late.isLate, late.isEarlyLeave)
     : 'border-rose-100 bg-white'
@@ -128,11 +131,22 @@ function AnchorCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-base font-semibold text-slate-900">
-            {row.anchorName}｜{row.sessionLabel}
+            {row.anchorName}
+            {row.shopName ? ` · ${row.shopName}` : ''}
           </p>
+          {row.sessionLabel ? (
+            <p className="mt-0.5 text-[12px] text-slate-500">{row.sessionLabel}</p>
+          ) : null}
+          {scheduleLine ? (
+            <p className="mt-1 text-[13px] text-slate-600">{scheduleLine}</p>
+          ) : null}
           <p className={`mt-1 text-[13px] ${timingTextClass}${liveTimeMultiline ? ' whitespace-pre-line' : ''}`}>
-            {timingLine}｜{row.liveDurationText}
+            直播 {liveTime}
           </p>
+          {attendanceLine ? (
+            <p className={`mt-1 text-[13px] ${timingTextClass}`}>出勤 {attendanceLine}</p>
+          ) : null}
+          <p className="mt-1 text-[12px] text-slate-500">{row.liveDurationText}</p>
         </div>
         <div className="flex flex-col items-end gap-1">
           {showAttendanceStatus ? <AnchorLateStatusBadge row={late} /> : null}
@@ -216,6 +230,11 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
             strong={data.summary.totalInvalidOrderCount > 0}
           />
         </div>
+        {data.summary.liveSessionAttributionNote ? (
+          <p className="mt-3 border-t border-rose-100 pt-3 text-[12px] leading-relaxed text-amber-800">
+            {data.summary.liveSessionAttributionNote}
+          </p>
+        ) : null}
         {(data.summary.liveRoomNewFollowers?.length ?? 0) > 0 && (
           <div className="mt-4 border-t border-rose-100 pt-3 space-y-1">
             <p className="text-[12px] text-slate-500">各直播号新增粉丝</p>

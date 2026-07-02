@@ -247,3 +247,25 @@ export async function listActiveLiveAccountsWithCookie(): Promise<
       platformName: row.platformName,
     }))
 }
+
+export interface DeleteLegacyDuplicateShopAccountsResult {
+  deletedCount: number
+  deletedIds: string[]
+  deletedNames: string[]
+}
+
+/** 删除四店历史重复账号（仅配置行，不删订单/直播原始数据） */
+export async function deleteAllLegacyDuplicateShopAccounts(): Promise<DeleteLegacyDuplicateShopAccountsResult> {
+  const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
+  const legacy = rows.filter((row) => isLegacyDuplicateShopAccountRow(row))
+  if (legacy.length === 0) {
+    return { deletedCount: 0, deletedIds: [], deletedNames: [] }
+  }
+  const ids = legacy.map((row) => row.id)
+  await prisma.platformCredential.deleteMany({ where: { id: { in: ids } } })
+  return {
+    deletedCount: ids.length,
+    deletedIds: ids,
+    deletedNames: legacy.map((row) => row.displayName?.trim() || row.platformName),
+  }
+}

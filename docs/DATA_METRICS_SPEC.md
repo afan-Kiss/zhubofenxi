@@ -133,6 +133,22 @@ npm run accept:gmv:fast
 
 ---
 
+## 11. 日报直播场次与排班归属口径
+
+| 项 | 口径 |
+|----|------|
+| 直播时段来源 | **仅**来自 Prisma `xhsRawLiveSession`（官方 sellerLiveDetailData 同步入库），按四店官方账号分别读取 |
+| 禁止伪造 | **不得**用订单支付时间、排班起止时间、兜底标题生成或冒充直播时段 |
+| 排班用途 | `anchorDailySchedule` 当日生效排班（manual → generated_default → virtual_template）仅用于：**归属主播**、**迟到/早退**、**场次标签/店铺展示** |
+| 匹配规则 | 店铺名归一化匹配 + 计算与排班行重叠分钟数，取重叠最大者；**一场直播只归一个主播** |
+| 未匹配场次 | 进入 `unassignedSessions`，计入 summary 总直播时长，**不计入**任何主播个人时长/流量/直播时段 |
+| 去重 | 第一层 `shopCode::liveId` 保留时长更长/字段更完整者；第二层同店同日重叠 ≥30 分钟合并 |
+| 订单 vs 直播 | 订单归属看**支付时间** + 同一套 effective schedule；直播归属看**真实开播/下播时间** + 同一套 effective schedule |
+| 无真实直播 | 主播行 `liveTimeRange` 显示「未读取到直播场次」，流量指标为 null（前端 `--`），排班时段仍可单独展示 |
+| 调试接口 | `GET /api/board/daily-report/debug-live-sessions?date=YYYY-MM-DD`（只读排查） |
+
+---
+
 ## 变更流程
 
 1. 改代码前确认是否影响上表口径  

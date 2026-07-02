@@ -9,7 +9,7 @@ import {
   normalizeXhsLiveSession,
   type NormalizedLiveSession,
 } from './xhs-api-sync/xhs-json-normalizer.service'
-import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
+import { resolveDateRange } from '../utils/date-range'
 import { formatDateTimeShanghai } from '../utils/business-timezone'
 import {
   extractLiveSessionTrafficFromSession,
@@ -19,19 +19,16 @@ import {
   formatLiveDurationMinutes,
   type AnchorLiveSessionBrief,
 } from './anchor-live-sessions.service'
-import type { EffectiveScheduleRow } from './anchor-daily-schedule.service'
+import type { EffectiveScheduleRow, EffectiveScheduleSource } from './anchor-daily-schedule.service'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import {
   matchLiveSessionToBestScheduleRow,
+  listSessionScheduleMatchCandidates,
   type LiveSessionScheduleMatchResult,
 } from './daily-report-live-schedule-match.service'
 import { dedupeOverlappingLiveSessionsByShopDay } from './live-session-overlap-dedupe.util'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
 import { SHOP_SESSION_ANCHOR_CUTOFF_MS } from './anchor-performance-attribution.service'
-import type { AnalyzedOrderView } from '../types/analysis'
-import { parseViewPayTimeMs } from './anchor-performance-attribution.service'
-import { resolveSessionEndMs } from './daily-report-live-schedule-match.service'
-import { parseLiveSessionTimeMs } from '../utils/business-timezone'
 
 export function shouldUsePerShopRealLiveSessions(startDate: string, endDate: string): boolean {
   const start = startDate.trim()
@@ -47,9 +44,44 @@ const LOG_TAG = '[daily-report-live]'
 export interface DailyReportLiveSession extends AnchorLiveSessionBrief, LiveSessionTrafficMetrics {
   sourceShopCode: GoodReviewShopKey
   sourceShopName: string
+  liveAccountName: string
   sellerRealIncomeAmtYuan: number
   dealOrderCnt: number
   refundAmtYuan: number
+  rawJson?: Record<string, unknown>
+}
+
+export interface DailyReportLiveSessionDebugRow {
+  sourceShopCode: GoodReviewShopKey
+  sourceShopName: string
+  liveId: string
+  liveAccountName: string
+  liveRoomName: string
+  actualStartAt: string
+  actualEndAt: string
+  durationMinutes: number
+  matchedAnchorName: string | null
+  matchedScheduleRowId: string | null
+  matchedScheduleSource: EffectiveScheduleSource | null
+  matchedScheduleTimeRange: string | null
+  overlapMinutes: number
+  skipReason: string | null
+  scheduleCandidates: ReturnType<typeof listSessionScheduleMatchCandidates>
+}
+
+export interface DailyReportLiveSessionAssignments {
+  dateKey: string
+  effectiveSchedules: EffectiveScheduleRow[]
+  allSessions: DailyReportLiveSession[]
+  assignedSessions: DailyReportLiveSession[]
+  unassignedSessions: DailyReportLiveSession[]
+  byAnchor: Map<string, DailyReportLiveSession[]>
+  matchesByAnchor: Map<string, LiveSessionScheduleMatchResult[]>
+  debugRows: DailyReportLiveSessionDebugRow[]
+  totalUniqueSessionCount: number
+  assignedLiveDurationMinutes: number
+  unassignedLiveDurationMinutes: number
+  unassignedLiveSessionCount: number
 }
 
 export interface DailyReportLiveSessionAssignment {
@@ -57,6 +89,12 @@ export interface DailyReportLiveSessionAssignment {
   matchesByAnchor: Map<string, LiveSessionScheduleMatchResult[]>
   allSessions: DailyReportLiveSession[]
   totalUniqueSessionCount: number
+  assignedSessions: DailyReportLiveSession[]
+  unassignedSessions: DailyReportLiveSession[]
+  assignedLiveDurationMinutes: number
+  unassignedLiveDurationMinutes: number
+  unassignedLiveSessionCount: number
+  debugRows: DailyReportLiveSessionDebugRow[]
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -69,6 +107,8 @@ function asRecord(value: unknown): Record<string, unknown> {
 function normalizedToDailyReportSession(
   session: NormalizedLiveSession,
   shopKey: GoodReviewShopKey,
+  rawJson?: Record<string, unknown>,
+  liveAccountName?: string,
 ): DailyReportLiveSession | null {
   if (session.errors.length > 0 || !session.startTime || !session.liveId?.trim()) {
     return null
@@ -79,11 +119,12 @@ function normalizedToDailyReportSession(
     endTime = formatDateTimeShanghai(new Date(session.endTime.getTime() + 86_400_000))
   }
   const shopName = getGoodReviewShopName(shopKey)
+  const accountName = liveAccountName?.trim() || session.liveAccountName?.trim() || shopName
   return {
     ...extractLiveSessionTrafficFromSession(session),
     liveId: session.liveId.trim(),
-    // 按店加载的场次：排班匹配用店铺名，不用直播标题（如「和田玉手镯专场」）
     liveName: shopName,
+    liveAccountName: accountName,
     startTime,
     endTime,
     durationMinutes: session.durationMinutes,
@@ -93,7 +134,29 @@ function normalizedToDailyReportSession(
     sellerRealIncomeAmtYuan: session.liveGmvCent / 100,
     dealOrderCnt: session.dealOrderCount,
     refundAmtYuan: session.refundAmountCent / 100,
+    rawJson,
   }
+}
+
+function sessionCompletenessScore(session: DailyReportLiveSession): number {
+  let score = 0
+  if (session.endTime && session.endTime !== '—') score += 2
+  if (session.viewSessionCount != null) score += 1
+  if (session.joinUserCount != null) score += 1
+  if (session.newFollowerCount != null) score += 1
+  return score
+}
+
+function pickPreferredDailyReportSession(
+  existing: DailyReportLiveSession,
+  candidate: DailyReportLiveSession,
+): DailyReportLiveSession {
+  if (candidate.durationMinutes !== existing.durationMinutes) {
+    return candidate.durationMinutes > existing.durationMinutes ? candidate : existing
+  }
+  return sessionCompletenessScore(candidate) > sessionCompletenessScore(existing)
+    ? candidate
+    : existing
 }
 
 export function buildDailyReportLiveSessionDedupeKey(session: {
@@ -116,7 +179,7 @@ export function dedupeDailyReportLiveSessions(
   for (const session of sessions) {
     const key = buildDailyReportLiveSessionDedupeKey(session)
     const existing = byKey.get(key)
-    if (!existing || session.durationMinutes > existing.durationMinutes) {
+    if (!existing || pickPreferredDailyReportSession(existing, session) === session) {
       byKey.set(key, session)
     }
   }
@@ -154,18 +217,13 @@ function logLiveSessionRow(params: {
   )
 }
 
-/** 按四店官方账号分别读取 sellerLiveDetailData 同步入库的真实直播场次 */
+/** 按四店官方账号分别读取 sellerLiveDetailData 同步入库的真实直播场次（preset 固定 custom） */
 export async function loadPerShopDailyReportLiveSessions(params: {
   reportDate: string
-  preset?: string
   startDate: string
   endDate: string
 }): Promise<DailyReportLiveSession[]> {
-  const range = resolveDateRange(
-    (params.preset ?? 'custom') as DateRangePreset,
-    params.startDate,
-    params.endDate,
-  )
+  const range = resolveDateRange('custom', params.startDate, params.endDate)
   const collected: DailyReportLiveSession[] = []
 
   for (const shop of GOOD_REVIEW_SHOPS) {
@@ -198,11 +256,17 @@ export async function loadPerShopDailyReportLiveSessions(params: {
 
     const inRange: DailyReportLiveSession[] = []
     for (const row of rows) {
-      const normalized = normalizeXhsLiveSession(asRecord(row.rawJson), row.id)
+      const rawJson = asRecord(row.rawJson)
+      const normalized = normalizeXhsLiveSession(rawJson, row.id)
       const withAccount: NormalizedLiveSession = row.liveAccountName?.trim()
         ? { ...normalized, liveAccountName: row.liveAccountName.trim() }
         : normalized
-      const brief = normalizedToDailyReportSession(withAccount, shop.shopKey)
+      const brief = normalizedToDailyReportSession(
+        withAccount,
+        shop.shopKey,
+        rawJson,
+        row.liveAccountName?.trim(),
+      )
       if (!brief) continue
       const startMs = new Date(brief.startTime).getTime()
       if (!Number.isFinite(startMs)) continue
@@ -228,6 +292,96 @@ export async function loadPerShopDailyReportLiveSessions(params: {
   return dedupeDailyReportLiveSessions(collected)
 }
 
+function toDebugRow(
+  session: DailyReportLiveSession,
+  match: LiveSessionScheduleMatchResult,
+  scheduleRows: EffectiveScheduleRow[],
+): DailyReportLiveSessionDebugRow {
+  const scheduleRow = match.scheduleRow
+  return {
+    sourceShopCode: session.sourceShopCode,
+    sourceShopName: session.sourceShopName,
+    liveId: session.liveId,
+    liveAccountName: session.liveAccountName,
+    liveRoomName: session.sourceShopName,
+    actualStartAt: session.startTime,
+    actualEndAt: session.endTime,
+    durationMinutes: session.durationMinutes,
+    matchedAnchorName: scheduleRow?.anchorName ?? null,
+    matchedScheduleRowId: scheduleRow?.rowId ?? null,
+    matchedScheduleSource: scheduleRow?.source ?? null,
+    matchedScheduleTimeRange: scheduleRow
+      ? `${scheduleRow.startTime}–${scheduleRow.endTime}`
+      : null,
+    overlapMinutes: match.overlapMinutes,
+    skipReason: scheduleRow ? null : match.matchReason,
+    scheduleCandidates: listSessionScheduleMatchCandidates(session, scheduleRows),
+  }
+}
+
+/** 日报直播场次统一归属：只读 xhsRawLiveSession + 当日 effective schedule */
+export async function resolveDailyReportLiveSessionAssignments(
+  dateKey: string,
+): Promise<DailyReportLiveSessionAssignments> {
+  const scheduleTable = await getEffectiveScheduleTableForDate(dateKey)
+  const scheduleRows = scheduleTable.rows
+  const allSessions = await loadPerShopDailyReportLiveSessions({
+    reportDate: dateKey,
+    startDate: dateKey,
+    endDate: dateKey,
+  })
+
+  const byAnchor = new Map<string, DailyReportLiveSession[]>()
+  const matchesByAnchor = new Map<string, LiveSessionScheduleMatchResult[]>()
+  const assignedSessions: DailyReportLiveSession[] = []
+  const unassignedSessions: DailyReportLiveSession[] = []
+  const debugRows: DailyReportLiveSessionDebugRow[] = []
+
+  for (const session of allSessions) {
+    const match = matchLiveSessionToBestScheduleRow(session, scheduleRows)
+    logLiveSessionRow({
+      reportDate: dateKey,
+      shopCode: session.sourceShopCode,
+      shopName: session.sourceShopName,
+      sellerLiveDetailDataCount: allSessions.filter((s) => s.sourceShopCode === session.sourceShopCode)
+        .length,
+      session,
+      match,
+    })
+    debugRows.push(toDebugRow(session, match, scheduleRows))
+
+    if (!match.scheduleRow) {
+      unassignedSessions.push(session)
+      continue
+    }
+
+    assignedSessions.push(session)
+    const anchorName = match.scheduleRow.anchorName
+    if (!byAnchor.has(anchorName)) byAnchor.set(anchorName, [])
+    if (!matchesByAnchor.has(anchorName)) matchesByAnchor.set(anchorName, [])
+    byAnchor.get(anchorName)!.push(session)
+    matchesByAnchor.get(anchorName)!.push(match)
+  }
+
+  const assignedLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(assignedSessions)
+  const unassignedLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(unassignedSessions)
+
+  return {
+    dateKey,
+    effectiveSchedules: scheduleRows,
+    allSessions,
+    assignedSessions,
+    unassignedSessions,
+    byAnchor,
+    matchesByAnchor,
+    debugRows,
+    totalUniqueSessionCount: allSessions.length,
+    assignedLiveDurationMinutes,
+    unassignedLiveDurationMinutes,
+    unassignedLiveSessionCount: unassignedSessions.length,
+  }
+}
+
 /** 真实场次 → 排班主播（每场只归一个主播，取重叠分钟最大） */
 export function assignDailyReportLiveSessionsToAnchors(
   sessions: DailyReportLiveSession[],
@@ -236,6 +390,9 @@ export function assignDailyReportLiveSessionsToAnchors(
 ): DailyReportLiveSessionAssignment {
   const byAnchor = new Map<string, DailyReportLiveSession[]>()
   const matchesByAnchor = new Map<string, LiveSessionScheduleMatchResult[]>()
+  const assignedSessions: DailyReportLiveSession[] = []
+  const unassignedSessions: DailyReportLiveSession[] = []
+  const debugRows: DailyReportLiveSessionDebugRow[] = []
 
   for (const session of sessions) {
     const match = matchLiveSessionToBestScheduleRow(session, scheduleRows)
@@ -248,8 +405,14 @@ export function assignDailyReportLiveSessionsToAnchors(
       session,
       match,
     })
+    debugRows.push(toDebugRow(session, match, scheduleRows))
 
-    if (!match.scheduleRow) continue
+    if (!match.scheduleRow) {
+      unassignedSessions.push(session)
+      continue
+    }
+
+    assignedSessions.push(session)
     const anchorName = match.scheduleRow.anchorName
     if (!byAnchor.has(anchorName)) byAnchor.set(anchorName, [])
     if (!matchesByAnchor.has(anchorName)) matchesByAnchor.set(anchorName, [])
@@ -262,19 +425,23 @@ export function assignDailyReportLiveSessionsToAnchors(
     matchesByAnchor,
     allSessions: sessions,
     totalUniqueSessionCount: sessions.length,
+    assignedSessions,
+    unassignedSessions,
+    assignedLiveDurationMinutes: sumUniqueDailyReportLiveDurationMinutes(assignedSessions),
+    unassignedLiveDurationMinutes: sumUniqueDailyReportLiveDurationMinutes(unassignedSessions),
+    unassignedLiveSessionCount: unassignedSessions.length,
+    debugRows,
   }
 }
 
 export async function loadAndAssignDailyReportLiveSessions(params: {
   reportDate: string
-  preset?: string
   startDate: string
   endDate: string
   scheduleRows: EffectiveScheduleRow[]
 }): Promise<DailyReportLiveSessionAssignment> {
   const sessions = await loadPerShopDailyReportLiveSessions({
     reportDate: params.reportDate,
-    preset: params.preset,
     startDate: params.startDate,
     endDate: params.endDate,
   })
@@ -282,7 +449,7 @@ export async function loadAndAssignDailyReportLiveSessions(params: {
 }
 
 export function getAssignedSessionsForAnchor(
-  assignment: DailyReportLiveSessionAssignment,
+  assignment: Pick<DailyReportLiveSessionAssignment, 'byAnchor'>,
   anchorName: string,
 ): DailyReportLiveSession[] {
   for (const [name, sessions] of assignment.byAnchor.entries()) {
@@ -297,63 +464,16 @@ export function sumUniqueDailyReportLiveDurationMinutes(
   return sessions.reduce((sum, s) => sum + Math.max(0, s.durationMinutes), 0)
 }
 
-function sessionOverlapsAnchorOrders(
-  session: DailyReportLiveSession,
-  orders: AnalyzedOrderView[],
-): boolean {
-  if (orders.length === 0) return false
-  const startMs = parseLiveSessionTimeMs(session.startTime)
-  const endMs = resolveSessionEndMs(session)
-  if (startMs == null || endMs == null) return false
-  for (const view of orders) {
-    const payMs = parseViewPayTimeMs(view)
-    if (payMs != null && payMs >= startMs && payMs <= endMs) return true
-  }
-  return false
-}
-
-/** 主播业绩/订单明细：按店真实场次 + 排班重叠归属某主播（每场只归一人） */
+/** 主播业绩/订单明细：按店真实场次 + 排班重叠归属某主播（仅排班匹配，不用订单支付时间） */
 export async function resolveAssignedRealLiveSessionsForAnchor(params: {
-  preset?: string
   startDate: string
   endDate: string
   anchorName: string
-  anchorOrders?: AnalyzedOrderView[]
 }): Promise<DailyReportLiveSession[]> {
   const anchorName = params.anchorName.trim()
   if (!anchorName || anchorName === '未归属') return []
+  if (!shouldUsePerShopRealLiveSessions(params.startDate, params.endDate)) return []
 
-  const sessions = await loadPerShopDailyReportLiveSessions({
-    reportDate: params.startDate,
-    preset: params.preset,
-    startDate: params.startDate,
-    endDate: params.endDate,
-  })
-
-  const scheduleCache = new Map<string, EffectiveScheduleRow[]>()
-  const assigned: DailyReportLiveSession[] = []
-  const assignedKeys = new Set<string>()
-
-  for (const session of sessions) {
-    const dateKey = session.startTime.slice(0, 10)
-    let scheduleRows = scheduleCache.get(dateKey)
-    if (!scheduleRows) {
-      const table = await getEffectiveScheduleTableForDate(dateKey)
-      scheduleRows = table.rows
-      scheduleCache.set(dateKey, scheduleRows)
-    }
-    const dedupeKey = buildDailyReportLiveSessionDedupeKey(session)
-    const match = matchLiveSessionToBestScheduleRow(session, scheduleRows)
-    const scheduleHit =
-      match.scheduleRow && anchorNamesMatch(match.scheduleRow.anchorName, anchorName)
-    const orderHit = sessionOverlapsAnchorOrders(session, params.anchorOrders ?? [])
-    if (!scheduleHit && !orderHit) continue
-    if (assignedKeys.has(dedupeKey)) continue
-    assignedKeys.add(dedupeKey)
-    assigned.push(session)
-  }
-
-  return dedupeOverlappingLiveSessionsByShopDay(
-    assigned.sort((a, b) => a.startTime.localeCompare(b.startTime)),
-  )
+  const assignment = await resolveDailyReportLiveSessionAssignments(params.startDate)
+  return getAssignedSessionsForAnchor(assignment, anchorName)
 }

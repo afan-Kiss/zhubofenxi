@@ -14,7 +14,7 @@ import {
 } from './anchor-live-sessions.service'
 import {
   getAssignedSessionsForAnchor,
-  loadAndAssignDailyReportLiveSessions,
+  resolveDailyReportLiveSessionAssignments,
   sumUniqueDailyReportLiveDurationMinutes,
 } from './daily-report-live-sessions.service'
 import {
@@ -39,6 +39,8 @@ import {
   resolveFallbackSessionDisplay,
   type AnchorAttendanceStatusPayload,
 } from '../utils/anchor-attendance-status.util'
+
+const NO_LIVE_SESSION_TEXT = '未读取到直播场次'
 
 export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   anchorName: string
@@ -80,6 +82,10 @@ export interface DailyReportPayload {
     totalSoldOrderCount: number
     totalInvalidOrderCount: number
     totalLiveDurationMinutes: number
+    assignedLiveDurationMinutes: number
+    unassignedLiveDurationMinutes: number
+    unassignedLiveSessionCount: number
+    liveSessionAttributionNote: string | null
     overallHourlyAmountYuan: number | null
     liveRoomNewFollowers: LiveRoomNewFollowerRow[]
     totalNewFollowerCount: number
@@ -170,28 +176,47 @@ function buildAnchorRow(params: {
 }): DailyReportAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
-  const traffic = aggregateAnchorLiveSessionTraffic(params.sessions)
-  const fallback = resolveFallbackSessionDisplay({
-    fallbackSessionLabel: params.sessionLabel,
-    fallbackShopName: params.shopName,
-    timeRuleSessionLabel: resolveSessionLabel(params.config, params.anchorId),
-    dateKey: params.reportDate,
-  })
+  const traffic =
+    params.sessions.length > 0 ? aggregateAnchorLiveSessionTraffic(params.sessions) : null
+  const hasRealSessions = params.sessions.length > 0
   const sessionLabel =
     params.scheduleAttendance.displaySessionLabel ||
     params.sessionLabel ||
-    fallback.displaySessionLabel
-  const shopName = params.scheduleAttendance.shopName || params.shopName || fallback.shopName
+    (hasRealSessions
+      ? resolveFallbackSessionDisplay({
+          fallbackSessionLabel: params.sessionLabel,
+          fallbackShopName: params.shopName,
+          timeRuleSessionLabel: resolveSessionLabel(params.config, params.anchorId),
+          dateKey: params.reportDate,
+        }).displaySessionLabel
+      : '')
+  const shopName =
+    params.scheduleAttendance.shopName ||
+    params.shopName ||
+    (hasRealSessions
+      ? resolveFallbackSessionDisplay({
+          fallbackSessionLabel: params.sessionLabel,
+          fallbackShopName: params.shopName,
+          timeRuleSessionLabel: resolveSessionLabel(params.config, params.anchorId),
+          dateKey: params.reportDate,
+        }).shopName
+      : '')
+  const liveDurationText = hasRealSessions ? buildLiveSessionCountSummary(params.sessions) : '—'
+  const liveTimeRange = hasRealSessions
+    ? params.liveTimeRange && params.liveTimeRange !== '—'
+      ? params.liveTimeRange
+      : buildLivePeriodText(params.sessions).replace(/~/g, '–')
+    : NO_LIVE_SESSION_TEXT
   return {
     anchorName: params.anchorName,
-    livePeriodText: buildLivePeriodText(params.sessions),
-    liveTimeRange: params.liveTimeRange,
-    liveStartTime: params.liveStartTime,
-    liveEndTime: params.liveEndTime,
+    livePeriodText: hasRealSessions ? buildLivePeriodText(params.sessions) : '—',
+    liveTimeRange,
+    liveStartTime: hasRealSessions ? params.liveStartTime : null,
+    liveEndTime: hasRealSessions ? params.liveEndTime : null,
     scheduleTimeRange: params.scheduleTimeRange,
     scheduleMatched: params.scheduleMatched,
     scheduleMatchReason: params.scheduleMatchReason,
-    liveDurationText: buildLiveSessionCountSummary(params.sessions),
+    liveDurationText,
     liveDurationMinutes,
     shippedAmountYuan: params.shippedAmountYuan,
     soldOrderCount: params.soldOrderCount,
@@ -206,14 +231,14 @@ function buildAnchorRow(params: {
       safeDivide(liveDurationMinutes, params.soldOrderCount),
     ),
     amountRatio: safeRatioPercent(params.shippedAmountYuan, params.totalShippedAmountYuan),
-    viewSessionCount: traffic.viewSessionCount,
-    joinUserCount: traffic.joinUserCount,
-    avgOnlineUserCount: traffic.avgOnlineUserCount,
-    avgViewDurationSeconds: traffic.avgViewDurationSeconds,
-    newFollowerCount: traffic.newFollowerCount,
-    dealUserCount: traffic.dealUserCount,
-    dealConversionRate: traffic.dealConversionRate,
-    newFollowerRate: traffic.newFollowerRate,
+    viewSessionCount: traffic?.viewSessionCount ?? null,
+    joinUserCount: traffic?.joinUserCount ?? null,
+    avgOnlineUserCount: traffic?.avgOnlineUserCount ?? null,
+    avgViewDurationSeconds: traffic?.avgViewDurationSeconds ?? null,
+    newFollowerCount: traffic?.newFollowerCount ?? null,
+    dealUserCount: traffic?.dealUserCount ?? null,
+    dealConversionRate: traffic?.dealConversionRate ?? null,
+    newFollowerRate: traffic?.newFollowerRate ?? null,
     ...params.scheduleAttendance,
     sessionLabel,
     shopName,
@@ -227,7 +252,10 @@ export async function buildDailyReport(params: {
   role?: UserRole
   username?: string
 }): Promise<DailyReportPayload> {
-  const scoped = await getBoardScopedViewsForRange(params)
+  const scoped = await getBoardScopedViewsForRange({
+    ...params,
+    preset: 'custom',
+  })
   await ensureManualAnchorOverrideCache()
   const config = getAnchorConfigSync()
   const anchorRows: DailyReportAnchorRow[] = []
@@ -238,13 +266,7 @@ export async function buildDailyReport(params: {
 
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
-  const liveAssignment = await loadAndAssignDailyReportLiveSessions({
-    reportDate: params.startDate,
-    preset: params.preset,
-    startDate: params.startDate,
-    endDate: params.endDate,
-    scheduleRows: scheduleTable.rows,
-  })
+  const liveAssignment = await resolveDailyReportLiveSessionAssignments(params.startDate)
   const usedScheduleRowIds = new Set<string>()
   for (const anchor of reportAnchors) {
     const performanceViews = await getAnchorPerformanceViews(
@@ -333,8 +355,12 @@ export async function buildDailyReport(params: {
   const totalLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(
     liveAssignment.allSessions,
   )
+  const liveSessionAttributionNote =
+    liveAssignment.unassignedLiveSessionCount > 0
+      ? `有 ${liveAssignment.unassignedLiveSessionCount} 场真实直播未匹配到排班，已计入总时长但不计入主播个人时长。`
+      : null
   const liveRoomNewFollowers = await sumNewFollowersByLiveAccountForRange({
-    preset: params.preset,
+    preset: 'custom',
     startDate: params.startDate,
     endDate: params.endDate,
   })
@@ -356,6 +382,10 @@ export async function buildDailyReport(params: {
       totalSoldOrderCount,
       totalInvalidOrderCount,
       totalLiveDurationMinutes,
+      assignedLiveDurationMinutes: liveAssignment.assignedLiveDurationMinutes,
+      unassignedLiveDurationMinutes: liveAssignment.unassignedLiveDurationMinutes,
+      unassignedLiveSessionCount: liveAssignment.unassignedLiveSessionCount,
+      liveSessionAttributionNote,
       overallHourlyAmountYuan: roundYuan(
         totalLiveHours != null ? safeDivide(totalShippedAmountYuan, totalLiveHours) : null,
       ),

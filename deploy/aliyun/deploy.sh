@@ -112,10 +112,15 @@ start_pm2() {
   else
     fail "缺少 ecosystem.config.js"
   fi
-  pm2 delete "$APP_NAME" 2>/dev/null || true
-  pm2 start ecosystem.config.js
-  pm2 save
-  log "pm2 已启动 $APP_NAME"
+  if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
+    pm2 restart "$APP_NAME"
+    pm2 save
+    log "pm2 已重启 $APP_NAME（避免 delete 造成短暂 502）"
+  else
+    pm2 start ecosystem.config.js
+    pm2 save
+    log "pm2 已启动 $APP_NAME"
+  fi
 }
 
 wait_health() {

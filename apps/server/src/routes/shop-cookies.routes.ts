@@ -21,6 +21,18 @@ shopCookiesRouter.get('/status', allowShopCookieAccess, async (_req, res, next) 
   }
 })
 
+/** 四店 Cookie 统一健康检查（fresh=1 时强制真实接口探测） */
+shopCookiesRouter.get('/health', allowShopCookieAccess, async (req, res, next) => {
+  try {
+    const { getShopCookieHealthPayload } = await import('../services/shop-cookie-health.service')
+    const fresh = String(req.query.fresh ?? '') === '1' || String(req.query.fresh ?? '') === 'true'
+    const payload = await getShopCookieHealthPayload({ fresh })
+    sendOk(res, payload)
+  } catch (err) {
+    next(err)
+  }
+})
+
 const uploadHandler = async (
   req: import('express').Request,
   res: import('express').Response,

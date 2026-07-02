@@ -94,10 +94,10 @@ export function deriveCookieSyncState(
 
   if (st === 'unknown') {
     return {
-      status: 'invalid',
-      reason: msg || 'Cookie 尚未验证通过，请检测或重新提交',
+      status: 'unknown',
+      reason: '正在校验 Cookie',
       canSyncOrders: false,
-      statusLevel: 'error',
+      statusLevel: 'warning',
     }
   }
 

@@ -13,8 +13,16 @@ import {
 import { probeQualityBadcaseSignForAccount } from './quality-badcase-sign.service'
 import {
   isOfficialShopPlatformName,
+  isLegacyDuplicateShopAccountRow,
   resolveShopKeyFromAccountName,
 } from './official-shop-account.service'
+import {
+  getAllShopCookieHealth,
+  isCookieHealthBlocking,
+  clearShopCookieHealthCache,
+  type ShopCookieHealthResult,
+  type ShopCookieHealthStatus,
+} from './shop-cookie-health.service'
 
 const DEFAULT_PLATFORM = 'xiaohongshu'
 
@@ -48,6 +56,8 @@ export interface LiveAccountPublicView {
   syncReason?: string
   statusLevel?: 'ok' | 'warning' | 'error'
   cookieDisplayStatus?: string
+  /** 统一健康状态（四店官方账号） */
+  healthStatus?: string
 }
 
 export interface CookieHealthSummary {
@@ -213,7 +223,18 @@ export async function listLiveAccountsPublic(): Promise<LiveAccountPublicView[]>
 /** 系统设置页：返回完整 Cookie 供查看与复制 */
 export async function listLiveAccountsForSettings(): Promise<LiveAccountPublicView[]> {
   const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
-  return rows.map((r) => toPublicView(r, { includeCookie: true }))
+  const shopHealthList = await getAllShopCookieHealth({ fresh: false })
+  const healthByShopKey = new Map(shopHealthList.map((h) => [h.shopCode, h]))
+
+  return rows.map((r) => {
+    if (isOfficialShopPlatformName(r.platformName)) {
+      const health = healthByShopKey.get(r.platformName)
+      if (health) {
+        return mapShopHealthToPublicView(health, r, { includeCookie: true })
+      }
+    }
+    return toPublicView(r, { includeCookie: true })
+  })
 }
 
 export async function getLiveAccountCookiePlaintext(id: string): Promise<string> {
@@ -339,6 +360,9 @@ export async function persistLiveAccountCookieOnly(
       affectedBusinessSync: false,
     },
   })
+  if (isOfficialShopPlatformName(row.platformName)) {
+    clearShopCookieHealthCache(row.platformName)
+  }
   return toPublicView(row, { includeCookie: false })
 }
 
@@ -546,76 +570,133 @@ export async function testLiveAccountCookie(id: string): Promise<{
   }
 }
 
-export async function getCookieHealthPayload(): Promise<{
+function mapShopHealthToPublicView(
+  health: ShopCookieHealthResult,
+  row: {
+    id: string
+    displayName: string
+    platformName: string
+    cookieEncrypted: string
+    enabled: boolean
+    updatedAt: Date
+    cookieStatus: string
+    cookieLastCheckedAt: Date | null
+    cookieLastSuccessAt: Date | null
+    cookieLastFailedAt: Date | null
+    cookieLastErrorCode: string | null
+    cookieLastErrorMessage: string | null
+    cookieLastFailedApi: string | null
+    affectedBusinessSync: boolean
+    lastSyncSuccessAt: Date | null
+  } | null,
+  options?: { includeCookie?: boolean },
+): LiveAccountPublicView {
+  const cookieStatus: CookieHealthStatus =
+    health.status === 'ok'
+      ? 'valid'
+      : health.status === 'unknown'
+        ? 'unknown'
+        : 'invalid'
+  const statusLevel: 'ok' | 'warning' | 'error' =
+    health.ok ? 'ok' : health.status === 'unknown' ? 'warning' : 'error'
+
+  let cookiePreview: string | null = null
+  let cookie: string | null = null
+  let cookieText: string | null = null
+  if (health.hasCookie && row?.cookieEncrypted?.trim()) {
+    const plain = resolveStoredCookiePlaintext(row.cookieEncrypted)
+    if (plain) {
+      cookiePreview = maskCookiePreview(plain)
+      if (options?.includeCookie) {
+        cookie = plain
+        cookieText = plain
+      }
+    } else {
+      cookiePreview = '已保存'
+    }
+  }
+
+  return {
+    id: health.accountId ?? row?.id ?? health.shopCode,
+    name: health.shopName,
+    enabled: row?.enabled ?? true,
+    hasCookie: health.hasCookie,
+    cookie,
+    cookieText,
+    cookiePreview,
+    cookieUpdatedAt: health.updatedAt,
+    cookieStatus,
+    cookieLastCheckedAt: health.checkedAt,
+    cookieLastSuccessAt: row?.cookieLastSuccessAt?.toISOString() ?? null,
+    cookieLastFailedAt: health.ok ? null : health.checkedAt,
+    cookieLastErrorCode: health.ok ? null : row?.cookieLastErrorCode ?? null,
+    cookieLastErrorMessage: health.ok ? null : health.reason,
+    cookieLastFailedApi: health.failedEndpoint,
+    affectedBusinessSync: row?.affectedBusinessSync ?? !health.ok,
+    lastSyncSuccessAt: row?.lastSyncSuccessAt?.toISOString() ?? null,
+    canSyncOrders: health.ok,
+    officialShopKey: health.shopCode,
+    legacyShopKey: null,
+    syncReason: health.reason,
+    statusLevel,
+    cookieDisplayStatus: health.status,
+    healthStatus: health.status,
+  }
+}
+
+export async function getCookieHealthPayload(options?: {
+  fresh?: boolean
+}): Promise<{
   accounts: LiveAccountPublicView[]
   summary: CookieHealthSummary
 }> {
-  const accounts = await listLiveAccountsPublic()
-  const { getShopCookieStatusPayload } = await import('./shop-cookie-upload.service')
-  const shopPayload = await getShopCookieStatusPayload()
-  const shopByAccountId = new Map(
-    shopPayload.shops.filter((s) => s.accountId).map((s) => [s.accountId!, s]),
-  )
-
+  const shopHealthList = await getAllShopCookieHealth(options)
   const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
   const rowById = new Map(rows.map((r) => [r.id, r]))
+  const rowByShopKey = new Map<string, (typeof rows)[number]>()
+  for (const row of rows) {
+    if (isOfficialShopPlatformName(row.platformName)) {
+      rowByShopKey.set(row.platformName, row)
+    }
+  }
 
-  const enrichedAccounts = accounts.map((account) => {
-    const shop = shopByAccountId.get(account.id)
-    if (shop) {
-      return {
-        ...account,
-        canSyncOrders: shop.canSyncOrders,
-        syncReason: shop.reason,
-        cookieStatus: (shop.canSyncOrders ? 'valid' : 'invalid') as CookieHealthStatus,
-        cookieLastErrorMessage: shop.canSyncOrders ? null : shop.reason,
-        statusLevel: deriveStatusLevel(shop.canSyncOrders, shop.hasCookie, shop.status),
-        cookieDisplayStatus: shop.status,
-      }
-    }
-    const row = rowById.get(account.id)
-    const derived = deriveCookieSyncState(
-      row
-        ? {
-            cookieEncrypted: row.cookieEncrypted,
-            cookieStatus: row.cookieStatus,
-            cookieLastCheckedAt: row.cookieLastCheckedAt,
-            cookieLastErrorMessage: row.cookieLastErrorMessage,
-            cookieLastErrorCode: row.cookieLastErrorCode,
-            updatedAt: row.updatedAt,
-          }
-        : null,
-    )
-    return {
-      ...account,
-      canSyncOrders: derived.canSyncOrders,
-      syncReason: derived.reason,
-      statusLevel: derived.statusLevel,
-      cookieDisplayStatus: derived.status,
-    }
-  })
+  const enrichedAccounts: LiveAccountPublicView[] = []
+
+  for (const health of shopHealthList) {
+    const row = health.accountId
+      ? rowById.get(health.accountId) ?? rowByShopKey.get(health.shopCode) ?? null
+      : rowByShopKey.get(health.shopCode) ?? null
+    enrichedAccounts.push(mapShopHealthToPublicView(health, row))
+  }
+
+  for (const row of rows) {
+    if (isOfficialShopPlatformName(row.platformName)) continue
+    if (isLegacyDuplicateShopAccountRow(row)) continue
+    enrichedAccounts.push(toPublicView(row))
+  }
 
   const enabled = enrichedAccounts.filter((a) => a.enabled)
   const shopSummary = buildShopCookieSummary(
-    shopPayload.shops.map((s) => {
-      const row = s.accountId ? rowById.get(s.accountId) : undefined
-      return {
-        hasCookie: s.hasCookie,
-        canSyncOrders: s.canSyncOrders,
-        reason: s.reason,
-        status: s.status,
-        cookieLastErrorCode: row?.cookieLastErrorCode ?? null,
-      }
-    }),
+    shopHealthList.map((h) => ({
+      hasCookie: h.hasCookie,
+      canSyncOrders: h.ok,
+      reason: h.reason,
+      status: h.status,
+      cookieLastErrorCode: null,
+    })),
   )
   const summary: CookieHealthSummary = {
     enabledCount: enabled.length,
     validCount: enabled.filter((a) => a.canSyncOrders === true).length,
-    invalidCount: enabled.filter((a) => a.canSyncOrders !== true).length,
+    invalidCount: enabled.filter(
+      (a) => a.healthStatus && isCookieHealthBlocking(a.healthStatus as ShopCookieHealthStatus),
+    ).length,
     suspectedCount: 0,
-    unknownCount: enabled.filter((a) => a.canSyncOrders !== true && a.cookieStatus === 'unknown').length,
+    unknownCount: enabled.filter((a) => a.healthStatus === 'unknown').length,
     canSyncCount: enabled.filter((a) => a.canSyncOrders === true).length,
-    cannotSyncCount: enabled.filter((a) => a.canSyncOrders === false).length,
+    cannotSyncCount: enabled.filter(
+      (a) => a.healthStatus && isCookieHealthBlocking(a.healthStatus as ShopCookieHealthStatus),
+    ).length,
     missingCookieCount: shopSummary.missingCookieCount,
     missingA1Count: shopSummary.missingA1Count,
     missingArkCount: shopSummary.missingArkCount,

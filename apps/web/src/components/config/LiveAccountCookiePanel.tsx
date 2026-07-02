@@ -5,9 +5,11 @@ import {
   cookieAvailableTone,
   cookieStatusLabel,
   getAccountDisplayName,
+  isCookieHealthBlocking,
   partitionLiveAccounts,
   resolveAccountCookieAvailable,
-  resolveAccountCookieFriendlyReason,
+  resolveHealthFriendlyLabel,
+  clearCookieExpiredModalShownKeys,
   type CookieHealthStatus,
   type LiveAccountPublic,
 } from '../../lib/live-account'
@@ -541,6 +543,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         }))
       }
       showToast(res.testResult?.ok ? 'ok' : 'err', res.message ?? 'Cookie 已更新')
+      clearCookieExpiredModalShownKeys()
       await refreshAccounts({ silent: true })
     } catch (e) {
       showToast('err', e instanceof Error ? e.message : '更新失败')
@@ -619,12 +622,15 @@ export const LiveAccountCookiePanel: React.FC = () => {
 
   const stats = useMemo(() => {
     const available = activeAccounts.filter(
-      (a) => a.enabled && resolveAccountCookieAvailable(a, testResults[a.id]),
+      (a) => a.enabled && (a.healthStatus === 'ok' || (!a.healthStatus && resolveAccountCookieAvailable(a, testResults[a.id]))),
     ).length
     const unavailable = activeAccounts.filter(
-      (a) => a.enabled && !resolveAccountCookieAvailable(a, testResults[a.id]),
+      (a) => a.enabled && a.healthStatus && isCookieHealthBlocking(a.healthStatus),
     ).length
-    return { available, unavailable }
+    const checking = activeAccounts.filter(
+      (a) => a.enabled && a.healthStatus === 'unknown',
+    ).length
+    return { available, unavailable, checking }
   }, [activeAccounts, testResults])
 
   const renderTestResultBlock = (account: LiveAccountPublic) => {
@@ -659,11 +665,11 @@ export const LiveAccountCookiePanel: React.FC = () => {
               {formatTime(showSessionResult ? latest!.checkedAt : account.cookieLastCheckedAt)}
             </span>
           </div>
-          {!available && resolveAccountCookieFriendlyReason(account, latest) ? (
+          {!available ? (
             <div className="sm:col-span-2">
-              <span className="text-slate-400">不可用原因：</span>
+              <span className="text-slate-400">状态说明：</span>
               <span className="text-rose-700">
-                {resolveAccountCookieFriendlyReason(account, latest)}
+                {resolveHealthFriendlyLabel(account, latest)}
               </span>
             </div>
           ) : null}
@@ -706,7 +712,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
       const accountExpanded = expandedAccountId === account.id
       const latestTest = testResults[account.id]
       const cookieAvailable = resolveAccountCookieAvailable(account, latestTest)
-      const cookieReason = resolveAccountCookieFriendlyReason(account, latestTest)
+      const cookieReason = resolveHealthFriendlyLabel(account, latestTest)
       const displayName = getAccountDisplayName(account)
       const isLegacy = options?.legacy === true
 
@@ -995,9 +1001,9 @@ export const LiveAccountCookiePanel: React.FC = () => {
       </div>
 
       {!loading && activeAccounts.length > 0 ? (
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4 grid grid-cols-3 gap-2">
           <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
-            <p className="text-[10px] text-emerald-700">Cookie 可用</p>
+            <p className="text-[10px] text-emerald-700">校验通过</p>
             <p className="mt-0.5 text-lg font-semibold text-emerald-800">{stats.available}</p>
           </div>
           <div
@@ -1008,7 +1014,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
             }`}
           >
             <p className={`text-[10px] ${stats.unavailable > 0 ? 'text-rose-700' : 'text-slate-500'}`}>
-              Cookie 不可用
+              需要处理
             </p>
             <p
               className={`mt-0.5 text-lg font-semibold ${
@@ -1017,6 +1023,10 @@ export const LiveAccountCookiePanel: React.FC = () => {
             >
               {stats.unavailable}
             </p>
+          </div>
+          <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2">
+            <p className="text-[10px] text-indigo-700">正在校验</p>
+            <p className="mt-0.5 text-lg font-semibold text-indigo-800">{stats.checking}</p>
           </div>
         </div>
       ) : null}

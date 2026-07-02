@@ -24,7 +24,7 @@ export const CookieExpiredModal: React.FC<Props> = ({ open, accounts, onDismiss 
       panelClassName="w-full max-w-md overflow-visible p-5"
     >
       <h3 id="cookie-expired-title" className="text-base font-semibold text-slate-900">
-        {single ? '直播号 Cookie 暂不可同步' : `${accounts.length} 个直播号 Cookie 暂不可同步`}
+        {single ? '直播号登录状态需处理' : `${accounts.length} 个直播号登录状态需处理`}
       </h3>
       <div className="mt-3 space-y-2 text-sm text-slate-700">
         {single ? (

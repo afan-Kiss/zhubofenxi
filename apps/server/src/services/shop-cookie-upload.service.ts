@@ -16,6 +16,10 @@ import {
   type ShopCookieStatusSummary,
 } from '../utils/cookie-sync-status.util'
 import {
+  clearShopCookieHealthCache,
+  type ShopCookieHealthResult,
+} from './shop-cookie-health.service'
+import {
   resolveOfficialShopAccountForStatus,
   upsertOfficialShopAccountCookie,
 } from './official-shop-account.service'
@@ -268,6 +272,7 @@ export async function uploadShopCookies(params: {
   }
 
   clearSessionCookieCache()
+  clearShopCookieHealthCache()
   await refreshLiveAccountRowMapperContext()
 
   const successCount = results.filter((r) => r.success).length
@@ -293,46 +298,28 @@ export async function getShopCookieStatusPayload(): Promise<{
   shopsByKey: Record<string, ShopCookieStatusItem>
   summary: ShopCookieStatusSummary
   checkedAt: string
+  health?: ShopCookieHealthResult[]
 }> {
-  const shops = await Promise.all(
-    GOOD_REVIEW_SHOPS.map(async (def) => {
-      const row = await resolveOfficialShopAccountForStatus(def.shopKey)
-      const hasCookie = Boolean(row?.cookieEncrypted?.trim())
-      let cookiePreview: string | null = null
-      let plain: string | null = null
-      if (hasCookie && row) {
-        try {
-          plain = decryptText(row.cookieEncrypted).trim()
-          cookiePreview = plain ? maskCookiePreview(plain) : '已保存'
-        } catch {
-          if (row.cookieEncrypted.includes(';')) {
-            plain = row.cookieEncrypted.trim()
-            cookiePreview = maskCookiePreview(row.cookieEncrypted)
-          } else {
-            cookiePreview = '已保存'
-          }
-        }
-      }
-      const derived = buildCookieReason(row ?? null, plain)
-      return {
-        shopKey: def.shopKey,
-        shopName: def.shopName,
-        liveRoomName: def.shopName,
-        accountId: row?.id ?? null,
-        accountDisplayName: row?.displayName?.trim() || row?.platformName || null,
-        hasCookie,
-        cookiePreview,
-        cookieStatus: row?.cookieStatus ?? 'unknown',
-        status: derived.status,
-        reason: derived.reason,
-        lastUploadAt: hasCookie ? row!.updatedAt.toISOString() : null,
-        lastValidateAt: row?.cookieLastCheckedAt?.toISOString() ?? null,
-        canSyncOrders: derived.canSyncOrders,
-        cookieUpdatedAt: hasCookie ? row!.updatedAt.toISOString() : null,
-        statusLevel: derived.statusLevel,
-      }
-    }),
+  const healthPayload = await import('./shop-cookie-health.service').then((m) =>
+    m.getShopCookieHealthPayload({ fresh: false }),
   )
+  const shops: ShopCookieStatusItem[] = healthPayload.shops.map((health) => ({
+    shopKey: health.shopCode,
+    shopName: health.shopName,
+    liveRoomName: health.shopName,
+    accountId: health.accountId,
+    accountDisplayName: health.displayName,
+    hasCookie: health.hasCookie,
+    cookiePreview: health.hasCookie ? '已保存' : null,
+    cookieStatus: health.status === 'ok' ? 'valid' : health.status === 'unknown' ? 'unknown' : 'invalid',
+    status: health.status,
+    reason: health.reason,
+    lastUploadAt: health.updatedAt,
+    lastValidateAt: health.checkedAt,
+    canSyncOrders: health.ok,
+    cookieUpdatedAt: health.updatedAt,
+    statusLevel: health.ok ? 'ok' : health.status === 'unknown' ? 'warning' : 'error',
+  }))
 
   const summary = buildShopCookieSummary(
     shops.map((s) => ({
@@ -354,7 +341,8 @@ export async function getShopCookieStatusPayload(): Promise<{
     shops,
     shopsByKey,
     summary,
-    checkedAt: new Date().toISOString(),
+    checkedAt: healthPayload.checkedAt,
+    health: healthPayload.shops,
   }
 }
 

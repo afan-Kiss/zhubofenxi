@@ -25,6 +25,7 @@ import {
   matchLiveSessionToBestScheduleRow,
   type LiveSessionScheduleMatchResult,
 } from './daily-report-live-schedule-match.service'
+import { dedupeOverlappingLiveSessionsByShopDay } from './live-session-overlap-dedupe.util'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
 import { SHOP_SESSION_ANCHOR_CUTOFF_MS } from './anchor-performance-attribution.service'
 import type { AnalyzedOrderView } from '../types/analysis'
@@ -119,7 +120,9 @@ export function dedupeDailyReportLiveSessions(
       byKey.set(key, session)
     }
   }
-  return [...byKey.values()].sort((a, b) => a.startTime.localeCompare(b.startTime))
+  return dedupeOverlappingLiveSessionsByShopDay(
+    [...byKey.values()].sort((a, b) => a.startTime.localeCompare(b.startTime)),
+  )
 }
 
 function logLiveSessionRow(params: {
@@ -350,5 +353,7 @@ export async function resolveAssignedRealLiveSessionsForAnchor(params: {
     assigned.push(session)
   }
 
-  return assigned.sort((a, b) => a.startTime.localeCompare(b.startTime))
+  return dedupeOverlappingLiveSessionsByShopDay(
+    assigned.sort((a, b) => a.startTime.localeCompare(b.startTime)),
+  )
 }

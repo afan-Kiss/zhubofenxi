@@ -5,11 +5,14 @@
 import assert from 'node:assert/strict'
 import type { EffectiveScheduleRow } from '../src/services/anchor-daily-schedule.service'
 import type { DailyReportLiveSession } from '../src/services/daily-report-live-sessions.service'
+import type { GoodReviewShopKey } from '../src/config/good-review-shops.constants'
+import { getGoodReviewShopName } from '../src/config/good-review-shops.constants'
 import {
   assignDailyReportLiveSessionsToAnchors,
   buildDailyReportLiveSessionDedupeKey,
   dedupeDailyReportLiveSessions,
 } from '../src/services/daily-report-live-sessions.service'
+import { dedupeOverlappingLiveSessionsByShopDay } from '../src/services/live-session-overlap-dedupe.util'
 import {
   buildDailyReportLiveScheduleFields,
   buildLiveSessionCountSummary,
@@ -93,16 +96,20 @@ function harSession(params: {
   sellerRealIncomeAmtYuan: number
   dealOrderCnt: number
   refundAmtYuan: number
+  sourceShopCode?: GoodReviewShopKey
+  sourceShopName?: string
 }): DailyReportLiveSession {
+  const shopKey = params.sourceShopCode ?? 'shiyuju'
+  const shopName = params.sourceShopName ?? '拾玉居和田玉'
   return {
     liveId: params.liveId,
-    liveName: '拾玉居和田玉',
+    liveName: shopName,
     startTime: params.liveStart,
     endTime: params.liveEnd,
     durationMinutes: params.durationMinutes,
     durationText: `${Math.floor(params.durationMinutes / 60)}小时${params.durationMinutes % 60}分`,
-    sourceShopCode: 'shiyuju',
-    sourceShopName: '拾玉居和田玉',
+    sourceShopCode: shopKey,
+    sourceShopName: shopName,
     sellerRealIncomeAmtYuan: params.sellerRealIncomeAmtYuan,
     dealOrderCnt: params.dealOrderCnt,
     refundAmtYuan: params.refundAmtYuan,
@@ -267,6 +274,15 @@ const titleMatch = matchLiveSessionToBestScheduleRow(broadcastTitleSession, SCHE
 assert.equal(titleMatch.scheduleRow?.anchorName, '子杰', 'broadcast title must not break shop match')
 console.log('PASS broadcast title uses sourceShopName for schedule match')
 
+// 同店同日重叠场次（不同 liveId）应合并为一场
+const overlapMerged = dedupeOverlappingLiveSessionsByShopDay([
+  SHIYUJU_REAL_SESSIONS[0]!,
+  PSEUDO_SESSIONS[0]!,
+])
+assert.equal(overlapMerged.length, 1, 'overlap sessions same shop/day should merge to 1')
+assert.equal(overlapMerged[0]!.liveId, '570343544189288405', 'keep longer real session')
+console.log('PASS overlap dedupe merges 09:44~14:12 and 09:55~13:57')
+
 const assignment = assignDailyReportLiveSessionsToAnchors(dedupedReal, SCHEDULES, DATE)
 const zijieSessions = assignment.byAnchor.get('子杰') ?? []
 const feiyunSessions = assignment.byAnchor.get('飞云') ?? []
@@ -292,20 +308,16 @@ assertAnchorSessions('飞云', feiyunSessions, {
 
 // 若误混入伪场次，子杰不应出现 4 场
 const polluted = dedupeDailyReportLiveSessions([...SHIYUJU_REAL_SESSIONS, ...PSEUDO_SESSIONS])
-assert.equal(polluted.length, 5, 'polluted input has 5 distinct liveIds')
+assert.equal(polluted.length, 4, 'polluted input merges overlap pseudo-0955 into real morning session')
 const pollutedAssignment = assignDailyReportLiveSessionsToAnchors(polluted, SCHEDULES, DATE)
 const pollutedZijie = pollutedAssignment.byAnchor.get('子杰') ?? []
-// 伪场次 14:19/14:20 与早场排班无重叠，不应归子杰；09:55 伪场次若存在会误归子杰
-// 验收重点：仅真实 HAR 两场时子杰=1；伪场次不应让子杰变成 4 场
-assert.ok(
-  pollutedZijie.length < 4,
-  `子杰 must not show 4 sessions when pseudo data mixed in, got ${pollutedZijie.length}`,
-)
-console.log(`PASS polluted mix: 子杰 has ${pollutedZijie.length} sessions (not 4)`)
+assert.equal(pollutedZijie.length, 1, `子杰 must stay 1 session when pseudo overlap mixed in, got ${pollutedZijie.length}`)
+console.log(`PASS polluted mix: 子杰 has ${pollutedZijie.length} session`)
 
 // 全系统合并：四店各 2 场 → 合计 8（模拟，非写死全系统=2）
 const allShopsMock: DailyReportLiveSession[] = []
 for (const shopKey of ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu'] as const) {
+  const shopName = getGoodReviewShopName(shopKey)
   allShopsMock.push(
     harSession({
       liveId: `${shopKey}-morning`,
@@ -315,27 +327,20 @@ for (const shopKey of ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu'] as const
       sellerRealIncomeAmtYuan: 100,
       dealOrderCnt: 1,
       refundAmtYuan: 0,
-    }),
-    {
-      ...harSession({
-        liveId: `${shopKey}-evening`,
-        liveStart: `${DATE}T18:35:00+08:00`,
-        liveEnd: `${DATE}T23:09:00+08:00`,
-        durationMinutes: 274,
-        sellerRealIncomeAmtYuan: 200,
-        dealOrderCnt: 2,
-        refundAmtYuan: 0,
-      }),
       sourceShopCode: shopKey,
-      sourceShopName:
-        shopKey === 'shiyuju'
-          ? '拾玉居和田玉'
-          : shopKey === 'hetianyayu'
-            ? '和田雅玉'
-            : shopKey === 'xiangyu'
-              ? '祥钰珠宝'
-              : 'XY祥钰珠宝',
-    },
+      sourceShopName: shopName,
+    }),
+    harSession({
+      liveId: `${shopKey}-evening`,
+      liveStart: `${DATE}T18:35:00+08:00`,
+      liveEnd: `${DATE}T23:09:00+08:00`,
+      durationMinutes: 274,
+      sellerRealIncomeAmtYuan: 200,
+      dealOrderCnt: 2,
+      refundAmtYuan: 0,
+      sourceShopCode: shopKey,
+      sourceShopName: shopName,
+    }),
   )
 }
 const allDeduped = dedupeDailyReportLiveSessions(allShopsMock)

@@ -28,6 +28,7 @@ import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.consta
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import { sessionOverlapsEffectiveScheduleRow } from '../utils/anchor-attendance-status.util'
 import { shouldUsePerShopRealLiveSessions } from './daily-report-live-sessions.service'
+import { dedupeOverlappingLiveSessionsByShopDay } from './live-session-overlap-dedupe.util'
 
 const NEW_SCHEDULE_START_MS = Date.parse(`${ANCHOR_NEW_SCHEDULE_START_DATE}T00:00:00+08:00`)
 
@@ -499,7 +500,7 @@ function dedupeLiveSessionBriefs(sessions: AnchorLiveSessionBrief[]): AnchorLive
       byKey.set(key, session)
     }
   }
-  return [...byKey.values()]
+  return dedupeOverlappingLiveSessionsByShopDay([...byKey.values()])
 }
 
 export function formatAnchorLiveSessionsSummary(sessions: AnchorLiveSessionBrief[]): string {

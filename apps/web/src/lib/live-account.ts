@@ -47,6 +47,11 @@ export interface CookieHealthPayload {
 }
 
 export function accountCookieAvailable(account: LiveAccountPublic): boolean {
+  if (!account.hasCookie) return false
+  // 以最近一次 Cookie 检测结果为准（与「检测」按钮口径一致）
+  if (account.cookieLastCheckedAt) {
+    return account.cookieStatus === 'valid'
+  }
   return accountCanSyncOrders(account)
 }
 
@@ -70,7 +75,8 @@ export function cookieAvailableTone(available: boolean): string {
 
 export function accountCookieReason(account: LiveAccountPublic): string | null {
   if (accountCookieAvailable(account)) return null
-  return account.syncReason?.trim() || account.cookieLastErrorMessage?.trim() || null
+  const msg = account.cookieLastErrorMessage?.trim() || account.syncReason?.trim()
+  return msg || 'Cookie 不可用，请重新提交或点击检测查看原因'
 }
 
 export function accountCanSyncOrders(account: LiveAccountPublic): boolean {

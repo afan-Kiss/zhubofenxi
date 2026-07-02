@@ -99,6 +99,22 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
   return ok
 }
 
+function applyTestResultToAccount(
+  account: LiveAccountPublic,
+  result: CookieTestResult,
+): LiveAccountPublic {
+  const available = result.ok
+  return {
+    ...account,
+    cookieStatus: available ? 'valid' : 'invalid',
+    canSyncOrders: available,
+    cookieLastCheckedAt: result.checkedAt,
+    cookieLastErrorMessage: available ? null : result.message,
+    syncReason: available ? 'Cookie 已验证有效，可同步订单' : result.message,
+    statusLevel: available ? 'ok' : 'error',
+    cookieDisplayStatus: available ? 'valid' : 'invalid',
+  }
+}
 function parseTestResponse(
   res: {
     ok: boolean
@@ -324,6 +340,9 @@ export const LiveAccountCookiePanel: React.FC = () => {
       }>(`/api/settings/live-accounts/${account.id}/test-cookie`, { method: 'POST' })
       const result = parseTestResponse(res, account)
       setTestResults((prev) => ({ ...prev, [account.id]: result }))
+      setAccounts((prev) =>
+        prev.map((a) => (a.id === account.id ? applyTestResultToAccount(a, result) : a)),
+      )
       return result
     } catch (e) {
       const result: CookieTestResult = {
@@ -336,6 +355,9 @@ export const LiveAccountCookiePanel: React.FC = () => {
         status: 'invalid',
       }
       setTestResults((prev) => ({ ...prev, [account.id]: result }))
+      setAccounts((prev) =>
+        prev.map((a) => (a.id === account.id ? applyTestResultToAccount(a, result) : a)),
+      )
       return result
     } finally {
       setTestingIds((prev) => {
@@ -631,6 +653,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
           <h3 className="text-sm font-semibold text-slate-800">直播号 Cookie 管理</h3>
           <p className="mt-1 text-xs text-slate-500">
             各直播号独立保存 Cookie，启用后参与经营数据同步。支持本页手动维护，也支持外部程序调用上传接口自动更新。
+            「检测」验证本页保存的 Cookie；经营同步可能另行使用千帆总控 Cookie，两者结果可能不一致。
           </p>
         </div>
         <button
@@ -692,21 +715,33 @@ export const LiveAccountCookiePanel: React.FC = () => {
         <div
           className={`mt-4 rounded-lg border px-3 py-2 text-xs ${
             batchProgress.done
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              ? batchProgress.failed > 0
+                ? batchProgress.success > 0
+                  ? 'border-amber-200 bg-amber-50 text-amber-900'
+                  : 'border-rose-200 bg-rose-50 text-rose-900'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-900'
               : 'border-indigo-200 bg-indigo-50 text-indigo-900'
           }`}
         >
           {batchProgress.done ? (
-            <p>
-              检测完成：成功 {batchProgress.success} 个，失败 {batchProgress.failed} 个（共{' '}
-              {batchProgress.total} 个）
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p>
+                检测完成：可用 {batchProgress.success} 个，不可用 {batchProgress.failed} 个（共{' '}
+                {batchProgress.total} 个）
+              </p>
+              <button
+                type="button"
+                onClick={() => setBatchProgress(null)}
+                className="shrink-0 rounded border border-current/20 px-2 py-0.5 text-[11px] hover:bg-white/60"
+              >
+                关闭
+              </button>
+            </div>
           ) : (
             <>
               <p>
-                正在检测：{batchProgress.current} / {batchProgress.total}
-                <span className="ml-3">成功：{batchProgress.success}</span>
-                <span className="ml-2">失败：{batchProgress.failed}</span>
+                正在检测 {batchProgress.current}/{batchProgress.total}，可用 {batchProgress.success}{' '}
+                个，不可用 {batchProgress.failed} 个
               </p>
               <p className="mt-1 text-indigo-700">正在检测「{batchProgress.currentName}」…</p>
             </>

@@ -395,8 +395,8 @@ export async function markCookieCheckResult(
     data: {
       cookieStatus: result.status,
       cookieLastCheckedAt: now,
-      cookieLastSuccessAt: isSuccess ? now : undefined,
-      cookieLastFailedAt: isSuccess ? undefined : now,
+      cookieLastSuccessAt: isSuccess ? now : null,
+      cookieLastFailedAt: isSuccess ? null : now,
       cookieLastErrorCode: isSuccess ? null : result.errorCode ?? null,
       cookieLastErrorMessage: isSuccess ? null : result.errorMessage ?? null,
       cookieLastFailedApi: isSuccess ? null : result.failedApi ?? null,
@@ -405,18 +405,13 @@ export async function markCookieCheckResult(
   })
 }
 
+/** 经营同步成功：只更新最近同步时间，不覆盖 Cookie 检测结果（同步可能走千帆，与库内 Cookie 不是同一份） */
 export async function markLiveAccountSyncSuccess(id: string): Promise<void> {
   const now = new Date()
   await prisma.platformCredential.update({
     where: { id },
     data: {
       lastSyncSuccessAt: now,
-      cookieStatus: 'valid',
-      cookieLastSuccessAt: now,
-      cookieLastCheckedAt: now,
-      cookieLastErrorCode: null,
-      cookieLastErrorMessage: null,
-      cookieLastFailedApi: null,
       affectedBusinessSync: false,
     },
   })

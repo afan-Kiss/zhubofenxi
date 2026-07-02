@@ -35,6 +35,12 @@ export interface DailyReportLiveScheduleFields {
   primaryScheduleRow: EffectiveScheduleRow | null
 }
 
+/** 排班店铺匹配：优先用按店加载的 sourceShopName，避免用直播标题误判 */
+function resolveSessionShopLabelForScheduleMatch(session: AnchorLiveSessionBrief): string {
+  const extended = session as AnchorLiveSessionBrief & { sourceShopName?: string }
+  return extended.sourceShopName?.trim() || session.liveName?.trim() || ''
+}
+
 function formatClockFromIso(iso: string): string {
   return iso.slice(11, 16)
 }
@@ -93,7 +99,7 @@ export function matchLiveSessionToBestScheduleRow(
   session: AnchorLiveSessionBrief,
   scheduleRows: EffectiveScheduleRow[],
 ): LiveSessionScheduleMatchResult {
-  const liveName = session.liveName?.trim() || ''
+  const liveName = resolveSessionShopLabelForScheduleMatch(session)
   const startMs = parseLiveSessionTimeMs(session.startTime)
   const endMs = resolveSessionEndMs(session)
 

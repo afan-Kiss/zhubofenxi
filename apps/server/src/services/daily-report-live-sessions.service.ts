@@ -81,7 +81,8 @@ function normalizedToDailyReportSession(
   return {
     ...extractLiveSessionTrafficFromSession(session),
     liveId: session.liveId.trim(),
-    liveName: session.liveName?.trim() || shopName,
+    // 按店加载的场次：排班匹配用店铺名，不用直播标题（如「和田玉手镯专场」）
+    liveName: shopName,
     startTime,
     endTime,
     durationMinutes: session.durationMinutes,

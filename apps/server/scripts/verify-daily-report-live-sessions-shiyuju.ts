@@ -14,6 +14,7 @@ import {
   buildDailyReportLiveScheduleFields,
   buildLiveSessionCountSummary,
   buildPerSessionLivePeriodText,
+  matchLiveSessionToBestScheduleRow,
 } from '../src/services/daily-report-live-schedule-match.service'
 
 const DATE = '2026-07-01'
@@ -247,6 +248,24 @@ const key2 = buildDailyReportLiveSessionDedupeKey({
 })
 assert.notEqual(key1, key2, 'dedupe key must include shop code')
 console.log('PASS dedupe key = sourceShopCode + liveId')
+
+// 直播标题（如「和田玉手镯专场」）不能用于排班店铺匹配
+const broadcastTitleSession: DailyReportLiveSession = {
+  ...harSession({
+    liveId: '570343544189288405',
+    liveStart: `${DATE}T09:44:18+08:00`,
+    liveEnd: `${DATE}T14:12:55+08:00`,
+    durationMinutes: 269,
+    sellerRealIncomeAmtYuan: 7179,
+    dealOrderCnt: 5,
+    refundAmtYuan: 0,
+  }),
+  liveName: '和田玉手镯专场99漏',
+  sourceShopName: '拾玉居和田玉',
+}
+const titleMatch = matchLiveSessionToBestScheduleRow(broadcastTitleSession, SCHEDULES)
+assert.equal(titleMatch.scheduleRow?.anchorName, '子杰', 'broadcast title must not break shop match')
+console.log('PASS broadcast title uses sourceShopName for schedule match')
 
 const assignment = assignDailyReportLiveSessionsToAnchors(dedupedReal, SCHEDULES, DATE)
 const zijieSessions = assignment.byAnchor.get('子杰') ?? []

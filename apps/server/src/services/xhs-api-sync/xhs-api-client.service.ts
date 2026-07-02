@@ -247,26 +247,6 @@ export async function requestXhsApi<T = unknown>(
 
     let result = await executeOnce(cookie)
 
-    if (result.authError && params.liveAccountId && accountName) {
-      const {
-        refreshShopCookieFromControl,
-        resolveLocalFallbackCookie,
-      } = await import('../qianfan-cookie-resolver.service')
-
-      const refreshed = await refreshShopCookieFromControl(accountName)
-      if (refreshed && refreshed !== cookie) {
-        cookie = refreshed
-        result = await executeOnce(cookie)
-      }
-
-      if (result.authError) {
-        const localFallback = await resolveLocalFallbackCookie(params.liveAccountId, accountName)
-        if (localFallback && localFallback !== cookie) {
-          result = await executeOnce(localFallback)
-        }
-      }
-    }
-
     return result
   })
 }

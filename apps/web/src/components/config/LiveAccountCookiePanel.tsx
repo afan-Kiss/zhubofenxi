@@ -156,10 +156,11 @@ function mergeAccounts(
     if (!next) return a
     const prevCookie = resolveAccountCookie(a)
     const nextCookie = resolveAccountCookie(next)
+    const cookie = nextCookie || prevCookie || null
     return {
       ...next,
-      cookie: nextCookie || prevCookie || (next.cookie ?? null),
-      cookieText: nextCookie || prevCookie || (next.cookieText ?? null),
+      cookie,
+      cookieText: cookie,
     }
   })
   const prevIds = new Set(prev.map((a) => a.id))
@@ -170,8 +171,13 @@ function resolveAccountCookie(account: LiveAccountPublic): string {
   return (account.cookieText ?? account.cookie ?? '').trim()
 }
 
-async function hydrateAccountCookies(accounts: LiveAccountPublic[]): Promise<LiveAccountPublic[]> {
-  const needFetch = accounts.filter((a) => a.hasCookie && !resolveAccountCookie(a))
+async function hydrateAccountCookies(
+  accounts: LiveAccountPublic[],
+  options?: { force?: boolean },
+): Promise<LiveAccountPublic[]> {
+  const needFetch = accounts.filter(
+    (a) => a.hasCookie && (options?.force || !resolveAccountCookie(a)),
+  )
   if (needFetch.length === 0) return accounts
 
   const cookieById = new Map<string, string>()
@@ -247,7 +253,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         options?.silent && accountsRef.current.length > 0
           ? mergeAccounts(accountsRef.current, res.accounts)
           : res.accounts
-      nextAccounts = await hydrateAccountCookies(nextAccounts)
+      nextAccounts = await hydrateAccountCookies(nextAccounts, { force: true })
       setAccounts(nextAccounts)
       const hints: Record<string, { orderApiStatus: string; qualityApiHint: string }> = {}
       for (const h of health.qualityBadCaseSync?.perAccountHints ?? []) {
@@ -271,6 +277,12 @@ export const LiveAccountCookiePanel: React.FC = () => {
 
   useEffect(() => {
     void refreshAccounts()
+  }, [refreshAccounts])
+
+  useEffect(() => {
+    const onFocus = () => void refreshAccounts({ silent: true })
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
   }, [refreshAccounts])
 
   const patchAccount = useCallback((account: LiveAccountPublic) => {
@@ -646,8 +658,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-slate-800">直播号 Cookie 管理</h3>
           <p className="mt-1 text-xs text-slate-500">
-            各直播号独立保存 Cookie，启用后参与经营数据同步。支持本页手动维护，也支持外部程序调用上传接口自动更新。
-            「检测」验证本页保存的 Cookie；经营同步可能另行使用千帆总控 Cookie，两者结果可能不一致。
+            各直播号仅保存一份 Cookie（本页编辑、外部接口上传共用同一存储）。检测、同步、日报均使用此处 Cookie。
           </p>
         </div>
         <button

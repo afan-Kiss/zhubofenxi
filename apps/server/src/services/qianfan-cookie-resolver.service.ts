@@ -155,7 +155,7 @@ async function resolveShopCookieInternal(
   }
 }
 
-/** 180 分钟任务开始前：预拉四店 Cookie 并输出摘要 */
+/** 180 分钟任务开始前：检查各店是否已在系统设置保存 Cookie */
 export async function bootstrapQianfanCookiesForSync(): Promise<CookieBootstrapSummary> {
   clearSessionCookieCache()
 
@@ -176,51 +176,45 @@ export async function bootstrapQianfanCookiesForSync(): Promise<CookieBootstrapS
   const shops: ShopCookieState[] = []
   for (const shopName of QIANFAN_SHOPS) {
     const accountId = accountByShop.get(shopName)
-    shops.push(await resolveShopCookieInternal(shopName, accountId, { forceControl: true }))
+    const sqlite = accountId ? await readSqliteCookieByAccountId(accountId) : null
+    if (sqlite) {
+      cacheEntry(shopName, accountId, { cookie: sqlite, source: 'sqlite' })
+      shops.push({ shopName, source: 'sqlite' })
+    } else {
+      shops.push({
+        shopName,
+        source: 'missing',
+        failureReason: '系统设置未保存 Cookie',
+      })
+    }
   }
 
   const summary: CookieBootstrapSummary = {
     at: new Date().toISOString(),
-    controlOk: shops.filter((s) => s.source === 'control').length,
-    envFallback: shops.filter((s) => s.source === 'env').length,
+    controlOk: 0,
+    envFallback: 0,
     sqliteFallback: shops.filter((s) => s.source === 'sqlite').length,
     missing: shops.filter((s) => s.source === 'missing').length,
-    staleShops: shops.filter((s) => s.staleWarning).map((s) => s.shopName),
+    staleShops: [],
     shops,
   }
 
   lastBootstrapSummary = summary
   logInfo(
-    '千帆Cookie',
-    `任务开始前 Cookie 摘要：总控=${summary.controlOk} 本地env=${summary.envFallback} 本地sqlite=${summary.sqliteFallback} 缺失=${summary.missing}${
-      summary.staleShops.length ? ` 超时未更新=${summary.staleShops.join('、')}` : ''
-    }`,
+    'Cookie',
+    `同步前 Cookie 检查（系统设置）：已配置=${summary.sqliteFallback} 缺失=${summary.missing}`,
   )
   return summary
 }
 
-/** 按直播号 ID 解析 Cookie（总控 → env → sqlite） */
+/** 按直播号 ID 读取 Cookie（仅系统设置 / 外部上传落库的记录） */
 export async function resolveLiveAccountCookie(
   accountId: string,
-  displayName?: string,
+  _displayName?: string,
 ): Promise<string | null> {
   const cached = sessionByAccountId.get(accountId)
   if (cached?.cookie) return cached.cookie
-
-  const row = await prisma.platformCredential.findUnique({ where: { id: accountId } })
-  const name = displayName?.trim() || row?.displayName?.trim() || row?.platformName || ''
-  const shop = resolveCanonicalShopName(name)
-
-  if (shop) {
-    const state = await resolveShopCookieInternal(shop, accountId)
-    if (state.source !== 'missing') {
-      const entry = sessionByShop.get(shop)
-      if (entry?.cookie) return entry.cookie
-    }
-  }
-
-  const sqlite = await readSqliteCookieByAccountId(accountId)
-  return sqlite
+  return readSqliteCookieByAccountId(accountId)
 }
 
 /** 401/403 等失效后：强制从总控重拉该店 Cookie */

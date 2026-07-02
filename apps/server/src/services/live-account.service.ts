@@ -202,7 +202,12 @@ export async function listLiveAccountsForSettings(): Promise<LiveAccountPublicVi
 }
 
 export async function getLiveAccountCookiePlaintext(id: string): Promise<string> {
-  const row = await prisma.platformCredential.findUnique({ where: { id } })
+  return getStoredLiveAccountCookiePlaintext(id)
+}
+
+/** 唯一 Cookie 来源：系统设置 / 外部上传写入 PlatformCredential 的记录 */
+export async function getStoredLiveAccountCookiePlaintext(accountId: string): Promise<string> {
+  const row = await prisma.platformCredential.findUnique({ where: { id: accountId } })
   if (!row?.cookieEncrypted?.trim()) {
     throw new Error('尚未配置 Cookie')
   }
@@ -211,6 +216,10 @@ export async function getLiveAccountCookiePlaintext(id: string): Promise<string>
     throw new Error('Cookie 解密失败，请重新保存 Cookie')
   }
   return plain
+}
+
+export async function getDecryptedCookieByAccountId(accountId: string): Promise<string> {
+  return getStoredLiveAccountCookiePlaintext(accountId)
 }
 
 export async function listEnabledLiveAccountsWithCookie(): Promise<
@@ -244,18 +253,6 @@ export async function listEnabledLiveAccountsWithCookie(): Promise<
 
 export async function getLiveAccountById(id: string) {
   return prisma.platformCredential.findUnique({ where: { id } })
-}
-
-export async function getDecryptedCookieByAccountId(accountId: string): Promise<string> {
-  const row = await prisma.platformCredential.findUnique({ where: { id: accountId } })
-  const displayName = row?.displayName?.trim() || row?.platformName
-  const { resolveLiveAccountCookie } = await import('./qianfan-cookie-resolver.service')
-  const resolved = await resolveLiveAccountCookie(accountId, displayName)
-  if (resolved) return resolved
-  if (!row?.cookieEncrypted?.trim()) {
-    throw new Error('尚未配置该直播号 Cookie')
-  }
-  return decryptText(row.cookieEncrypted)
 }
 
 function slugFromName(name: string): string {

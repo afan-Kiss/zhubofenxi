@@ -197,6 +197,11 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
 
   const isSingleDay = startDate.trim() === endDate.trim() && Boolean(startDate.trim())
 
+  const handleShipmentImagesChange = useCallback((images: DailyReportImageItem[]) => {
+    setShipmentPhotos(images)
+    void prefetchShipmentPhotoDataUrls(images).then(setShipmentPhotoDataUrls)
+  }, [])
+
   const closePreview = useCallback(() => {
     setPreviewOpen(false)
   }, [])
@@ -337,10 +342,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
         </div>
         <DailyReportShipmentPhotos
           reportDate={startDate}
-          onImagesChange={(images) => {
-            setShipmentPhotos(images)
-            void prefetchShipmentPhotoDataUrls(images).then(setShipmentPhotoDataUrls)
-          }}
+          onImagesChange={handleShipmentImagesChange}
         />
       </div>
 

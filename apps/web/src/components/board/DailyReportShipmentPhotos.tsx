@@ -56,17 +56,19 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
   )
 
   const lastSyncedIdsRef = useRef('')
+  const onImagesChangeRef = useRef(onImagesChange)
 
-  const syncImages = useCallback(
-    (next: DailyReportImageItem[]) => {
-      setImages(next)
-      const ids = next.map((item) => item.id).join(',')
-      if (ids === lastSyncedIdsRef.current) return
-      lastSyncedIdsRef.current = ids
-      onImagesChange?.(next)
-    },
-    [onImagesChange],
-  )
+  useEffect(() => {
+    onImagesChangeRef.current = onImagesChange
+  }, [onImagesChange])
+
+  const syncImages = useCallback((next: DailyReportImageItem[]) => {
+    setImages(next)
+    const ids = next.map((item) => item.id).join(',')
+    if (ids === lastSyncedIdsRef.current) return
+    lastSyncedIdsRef.current = ids
+    onImagesChangeRef.current?.(next)
+  }, [])
 
   const loadImages = useCallback(async (options?: { silent?: boolean }) => {
     if (!reportDate) return
@@ -88,7 +90,7 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
   useEffect(() => {
     lastSyncedIdsRef.current = ''
     void loadImages()
-  }, [loadImages])
+  }, [reportDate, loadImages])
 
   const handleUpload = async (files: FileList | null) => {
     if (!files?.length || uploading) return

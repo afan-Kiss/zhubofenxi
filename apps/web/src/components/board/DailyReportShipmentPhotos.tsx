@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { API_PREFIX, apiRequest } from '../../lib/api'
 import { DailyReportImageThumb } from './DailyReportImageThumb'
 import { DailyReportImagePreview } from './DailyReportImagePreview'
+import { DailyReportMobileUploadQr } from './DailyReportMobileUploadQr'
 import { fetchDailyReportImageBlobUrl } from '../../lib/daily-report-image-url'
 
 export interface DailyReportImageItem {
@@ -30,6 +31,7 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
   const [captionDraft, setCaptionDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null)
+  const [qrOpen, setQrOpen] = useState(false)
   const previewBlobRef = useRef<string | null>(null)
 
   const closePreview = useCallback(() => {
@@ -171,6 +173,14 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
           <button
             type="button"
             disabled={uploading || loading}
+            onClick={() => setQrOpen(true)}
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+          >
+            手机扫码上传
+          </button>
+          <button
+            type="button"
+            disabled={uploading || loading}
             onClick={() => fileInputRef.current?.click()}
             className="rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
           >
@@ -224,6 +234,13 @@ export const DailyReportShipmentPhotos: React.FC<Props> = ({ reportDate, onImage
         src={preview?.src ?? null}
         alt={preview?.alt ?? '发货前照片'}
         onClose={closePreview}
+      />
+
+      <DailyReportMobileUploadQr
+        open={qrOpen}
+        reportDate={reportDate}
+        onClose={() => setQrOpen(false)}
+        onRefresh={loadImages}
       />
     </div>
   )

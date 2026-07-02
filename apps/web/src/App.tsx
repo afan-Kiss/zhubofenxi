@@ -8,6 +8,7 @@ import { BuyerRankingTab } from './pages/board/BuyerRankingTab'
 import { SettingsTab } from './pages/board/SettingsTab'
 import { OperationsReportPage } from './pages/operations/OperationsReportPage'
 import { GoodReviewsPage } from './pages/good-reviews/GoodReviewsPage'
+import { DailyReportMobileUploadPage } from './pages/mobile/DailyReportMobileUploadPage'
 import { LoginPage } from './pages/auth/LoginPage'
 import { RegisterPage } from './pages/auth/RegisterPage'
 import { RequireAuth } from './components/auth/RequireAuth'
@@ -26,6 +27,7 @@ const App: React.FC = () => {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/mobile/daily-report-upload" element={<DailyReportMobileUploadPage />} />
             <Route element={<RequireAuth />}>
               <Route element={<Layout />}>
                 <Route index element={<OverviewTab />} />

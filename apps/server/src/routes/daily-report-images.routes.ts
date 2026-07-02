@@ -10,15 +10,18 @@ import {
   patchDailyReportImage,
   uploadDailyReportImage,
 } from '../services/daily-report-image.service'
+import {
+  createDailyReportUploadToken,
+  validateDailyReportUploadToken,
+} from '../services/daily-report-upload-token.service'
 import { sendFail, sendOk } from '../utils/response'
 
 export const dailyReportImagesRouter = Router()
 
-dailyReportImagesRouter.use(attachRequestUser, requireAuth)
-
 async function parseMultipartUpload(req: Request): Promise<{
   reportDate: string
   caption: string
+  uploadToken: string
   buffer: Buffer
   originalName: string
   mimeType: string
@@ -30,6 +33,7 @@ async function parseMultipartUpload(req: Request): Promise<{
     })
     let reportDate = ''
     let caption = ''
+    let uploadToken = String(req.headers['x-daily-report-upload-token'] ?? '').trim()
     let fileBuffer: Buffer | null = null
     let originalName = 'upload.jpg'
     let mimeType = 'application/octet-stream'
@@ -37,6 +41,7 @@ async function parseMultipartUpload(req: Request): Promise<{
     busboy.on('field', (name, value) => {
       if (name === 'reportDate') reportDate = String(value).trim()
       if (name === 'caption') caption = String(value)
+      if (name === 'uploadToken') uploadToken = String(value).trim()
     })
 
     busboy.on('file', (_name, file, info) => {
@@ -60,12 +65,50 @@ async function parseMultipartUpload(req: Request): Promise<{
         reject(new Error('请上传图片文件'))
         return
       }
-      resolve({ reportDate, caption, buffer: fileBuffer, originalName, mimeType })
+      resolve({ reportDate, caption, uploadToken, buffer: fileBuffer, originalName, mimeType })
     })
 
     req.pipe(busboy)
   })
 }
+
+/** 手机扫码上传（无需登录，凭短期 token） */
+dailyReportImagesRouter.post('/mobile', async (req, res) => {
+  try {
+    const parsed = await parseMultipartUpload(req)
+    if (!validateDailyReportUploadToken(parsed.uploadToken, parsed.reportDate)) {
+      sendFail(res, '上传链接无效或已过期，请在电脑端重新扫码', 403)
+      return
+    }
+    const image = await uploadDailyReportImage({
+      reportDate: parsed.reportDate,
+      buffer: parsed.buffer,
+      originalName: parsed.originalName,
+      mimeType: parsed.mimeType,
+      caption: parsed.caption,
+      uploadedBy: 'mobile-upload',
+    })
+    sendOk(res, { image }, 201)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '上传失败', 400)
+  }
+})
+
+dailyReportImagesRouter.use(attachRequestUser, requireAuth)
+
+dailyReportImagesRouter.get('/upload-token', async (req, res) => {
+  try {
+    const date = String(req.query.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date 参数', 400)
+      return
+    }
+    const payload = createDailyReportUploadToken(date, req.user?.username)
+    sendOk(res, payload)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '生成上传链接失败', 400)
+  }
+})
 
 dailyReportImagesRouter.get('/', async (req, res, next) => {
   try {

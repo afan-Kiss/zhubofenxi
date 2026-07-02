@@ -13,6 +13,11 @@ import {
   getDailyReportImagesDir,
   DAILY_REPORT_IMAGE_TTL_MS,
 } from '../src/services/daily-report-image.service'
+import {
+  clearDailyReportUploadTokensForTest,
+  createDailyReportUploadToken,
+  validateDailyReportUploadToken,
+} from '../src/services/daily-report-upload-token.service'
 import { getDataDir } from '../src/config/env'
 import { prisma } from '../src/lib/prisma'
 
@@ -38,6 +43,31 @@ async function run(): Promise<void> {
 
   assert(uploaded.publicUrl.includes(uploaded.id), 'publicUrl 应包含 id', issues)
   assert(uploaded.caption === '测试', 'caption 应保存', issues)
+
+  clearDailyReportUploadTokensForTest()
+  const tokenPayload = createDailyReportUploadToken(reportDate, 'verify')
+  assert(tokenPayload.token.length >= 16, 'upload token 应生成', issues)
+  assert(
+    validateDailyReportUploadToken(tokenPayload.token, reportDate),
+    '有效 token 应通过校验',
+    issues,
+  )
+  assert(
+    !validateDailyReportUploadToken(tokenPayload.token, '2099-01-02'),
+    '错误日期 token 应拒绝',
+    issues,
+  )
+  assert(!validateDailyReportUploadToken('bad-token', reportDate), '无效 token 应拒绝', issues)
+
+  const mobileUploaded = await uploadDailyReportImage({
+    reportDate,
+    buffer: pngHeader,
+    originalName: 'mobile.png',
+    mimeType: 'image/png',
+    uploadedBy: 'mobile-upload',
+  })
+  assert(mobileUploaded.originalName === 'mobile.png', '手机上传路径应复用同一落库逻辑', issues)
+  await deleteDailyReportImage(mobileUploaded.id)
 
   const listed = await listDailyReportImages(reportDate)
   assert(listed.length >= 1, '应按日期列出图片', issues)

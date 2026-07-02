@@ -89,7 +89,6 @@ export const DailyReportMobileUploadPage: React.FC = () => {
           ref={fileInputRef}
           type="file"
           accept="image/jpeg,image/png,image/webp,image/*"
-          capture="environment"
           multiple
           className="hidden"
           onChange={(e) => void handleUpload(e.target.files)}
@@ -101,11 +100,11 @@ export const DailyReportMobileUploadPage: React.FC = () => {
           onClick={handlePick}
           className="mt-5 w-full rounded-xl bg-rose-600 px-4 py-3.5 text-base font-semibold text-white hover:bg-rose-700 disabled:opacity-60"
         >
-          {uploading ? '上传中…' : '拍照 / 选择图片'}
+          {uploading ? '上传中…' : '选择或拍摄照片'}
         </button>
 
         <p className="mt-3 text-center text-xs text-slate-500">
-          支持 jpg / png / webp，单张不超过 10MB
+          可拍照，也可从相册一次多选。jpg / png / webp，单张不超过 10MB
         </p>
 
         {message ? (

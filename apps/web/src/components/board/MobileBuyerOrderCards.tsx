@@ -19,6 +19,7 @@ import {
 } from '../../lib/derive-after-sale-display'
 import { MetricInfoTooltip } from './MetricInfoTooltip'
 import { getMetricExplain } from '../../lib/metricExplain'
+import { QianfanOrderDetailButton } from './QianfanOrderDetailButton'
 
 interface Props {
   rows: BoardDrillOrderRow[]
@@ -112,13 +113,16 @@ export const MobileBuyerOrderCards: React.FC<Props> = ({
                   {displayCell(orderNo)}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => copyOrderNo(orderNo)}
-                className="shrink-0 rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-[10px] font-medium text-rose-700"
-              >
-                复制
-              </button>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <button
+                  type="button"
+                  onClick={() => copyOrderNo(orderNo)}
+                  className="rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-[10px] font-medium text-rose-700"
+                >
+                  复制
+                </button>
+                <QianfanOrderDetailButton orderNo={orderNo} compact />
+              </div>
             </div>
 
             <div className="mt-2 flex flex-wrap gap-2 text-[10px]">

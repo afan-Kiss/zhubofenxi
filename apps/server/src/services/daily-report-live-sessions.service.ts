@@ -27,6 +27,10 @@ import {
 } from './daily-report-live-schedule-match.service'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
 import { SHOP_SESSION_ANCHOR_CUTOFF_MS } from './anchor-performance-attribution.service'
+import type { AnalyzedOrderView } from '../types/analysis'
+import { parseViewPayTimeMs } from './anchor-performance-attribution.service'
+import { resolveSessionEndMs } from './daily-report-live-schedule-match.service'
+import { parseLiveSessionTimeMs } from '../utils/business-timezone'
 
 export function shouldUsePerShopRealLiveSessions(startDate: string, endDate: string): boolean {
   const start = startDate.trim()
@@ -289,12 +293,28 @@ export function sumUniqueDailyReportLiveDurationMinutes(
   return sessions.reduce((sum, s) => sum + Math.max(0, s.durationMinutes), 0)
 }
 
+function sessionOverlapsAnchorOrders(
+  session: DailyReportLiveSession,
+  orders: AnalyzedOrderView[],
+): boolean {
+  if (orders.length === 0) return false
+  const startMs = parseLiveSessionTimeMs(session.startTime)
+  const endMs = resolveSessionEndMs(session)
+  if (startMs == null || endMs == null) return false
+  for (const view of orders) {
+    const payMs = parseViewPayTimeMs(view)
+    if (payMs != null && payMs >= startMs && payMs <= endMs) return true
+  }
+  return false
+}
+
 /** 主播业绩/订单明细：按店真实场次 + 排班重叠归属某主播（每场只归一人） */
 export async function resolveAssignedRealLiveSessionsForAnchor(params: {
   preset?: string
   startDate: string
   endDate: string
   anchorName: string
+  anchorOrders?: AnalyzedOrderView[]
 }): Promise<DailyReportLiveSession[]> {
   const anchorName = params.anchorName.trim()
   if (!anchorName || anchorName === '未归属') return []
@@ -308,6 +328,7 @@ export async function resolveAssignedRealLiveSessionsForAnchor(params: {
 
   const scheduleCache = new Map<string, EffectiveScheduleRow[]>()
   const assigned: DailyReportLiveSession[] = []
+  const assignedKeys = new Set<string>()
 
   for (const session of sessions) {
     const dateKey = session.startTime.slice(0, 10)
@@ -317,10 +338,15 @@ export async function resolveAssignedRealLiveSessionsForAnchor(params: {
       scheduleRows = table.rows
       scheduleCache.set(dateKey, scheduleRows)
     }
+    const dedupeKey = buildDailyReportLiveSessionDedupeKey(session)
     const match = matchLiveSessionToBestScheduleRow(session, scheduleRows)
-    if (match.scheduleRow && anchorNamesMatch(match.scheduleRow.anchorName, anchorName)) {
-      assigned.push(session)
-    }
+    const scheduleHit =
+      match.scheduleRow && anchorNamesMatch(match.scheduleRow.anchorName, anchorName)
+    const orderHit = sessionOverlapsAnchorOrders(session, params.anchorOrders ?? [])
+    if (!scheduleHit && !orderHit) continue
+    if (assignedKeys.has(dedupeKey)) continue
+    assignedKeys.add(dedupeKey)
+    assigned.push(session)
   }
 
   return assigned.sort((a, b) => a.startTime.localeCompare(b.startTime))

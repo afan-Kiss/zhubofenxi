@@ -332,6 +332,7 @@ export async function resolveAnchorLiveSessionsWithTrafficForRange(params: {
       startDate: params.startDate,
       endDate: params.endDate,
       anchorName: target.anchorName,
+      anchorOrders: params.anchorOrders,
     })
   }
 

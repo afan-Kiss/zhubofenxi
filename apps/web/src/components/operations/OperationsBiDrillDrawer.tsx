@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react'
-import { apiRequest } from '../../lib/api'
+import { openQianfanOrderDetail } from '../../lib/qianfan-order-detail'
 import {
   formatIntegerMoney,
   formatOrderCount,
@@ -18,11 +18,7 @@ interface Props {
 }
 
 async function openQianfanDetail(orderNo: string) {
-  const res = await apiRequest<{ openUrl: string }>('/api/board/qianfan-order-detail-ticket', {
-    method: 'POST',
-    body: JSON.stringify({ orderNo }),
-  })
-  window.open(res.openUrl, '_blank', 'noopener,noreferrer')
+  await openQianfanOrderDetail(orderNo)
 }
 
 function displayDash(value: string | null | undefined): string {

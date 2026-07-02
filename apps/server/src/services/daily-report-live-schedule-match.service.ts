@@ -62,7 +62,7 @@ export function buildLiveSessionCountSummary(sessions: AnchorLiveSessionBrief[])
   return `直播 ${sessions.length} 场 · 合计 ${formatLiveDurationMinutes(totalMin)}`
 }
 
-function resolveSessionEndMs(session: AnchorLiveSessionBrief): number | null {
+export function resolveSessionEndMs(session: AnchorLiveSessionBrief): number | null {
   const startMs = parseLiveSessionTimeMs(session.startTime)
   if (session.endTime && session.endTime !== '—') {
     let endMs = parseLiveSessionTimeMs(session.endTime)

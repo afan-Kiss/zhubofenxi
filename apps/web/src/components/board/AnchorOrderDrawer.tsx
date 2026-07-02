@@ -9,6 +9,28 @@ import { Pagination } from '../ui/Pagination'
 import { showDrawerSignQualityMetrics, showAnchorDrillSignedTab } from '../../lib/board-rate-display'
 import { BoardDrawerShell } from './BoardDrawerShell'
 import { BoardDrillOrderTable, type BoardDrillOrderRow } from './BoardDrillOrderTable'
+import { anchorRowLivePeriodText } from '../../lib/anchor-leaderboard-row'
+
+function formatSessionClock(time: string): string {
+  const t = time.trim()
+  if (!t || t === '—') return '—'
+  if (t.length >= 16 && (t[10] === ' ' || t[10] === 'T')) {
+    return t.slice(11, 16)
+  }
+  const hit = /\d{2}:\d{2}/.exec(t)
+  return hit ? hit[0] : '—'
+}
+
+function formatSessionLine(session: {
+  liveId: string
+  startTime: string
+  endTime: string
+  durationText: string
+}): string {
+  const start = formatSessionClock(session.startTime)
+  const end = formatSessionClock(session.endTime)
+  return `${start}~${end}（${session.durationText}）`
+}
 
 const DRAWER_STAT_FONT =
   "font-['Microsoft_YaHei','微软雅黑',sans-serif] text-sm leading-relaxed text-slate-700"
@@ -253,6 +275,11 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
 
   const liveSessions = data?.liveSessions ?? []
   const hasLiveSessions = liveSessions.length > 0
+  const snapshotLivePeriod = rowSnapshot ? anchorRowLivePeriodText(rowSnapshot) : null
+  const liveSummaryLine =
+    data?.liveSummaryText?.trim() ||
+    (snapshotLivePeriod ? `直播 ${snapshotLivePeriod.replace(/\n/g, ' / ')}` : '')
+  const showLiveBlock = hasLiveSessions || Boolean(liveSummaryLine)
 
   const headerStatItems: Array<{ key: string; text: string }> = [
     {
@@ -332,30 +359,29 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
                 </span>
               ))}
             </div>
-            {hasLiveSessions ? (
+            {showLiveBlock ? (
               <div className="rounded-xl border border-rose-100/80 bg-white/70">
                 <button
                   type="button"
-                  onClick={() => setLiveSessionsOpen((v) => !v)}
-                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-rose-50/60"
+                  onClick={() => hasLiveSessions && setLiveSessionsOpen((v) => !v)}
+                  className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm text-slate-700 transition ${hasLiveSessions ? 'hover:bg-rose-50/60' : ''}`}
                 >
-                  <span className={DRAWER_STAT_FONT}>
-                    {data?.liveSummaryText ?? `直播 ${liveSessions.length} 场`}
+                  <span className={`${DRAWER_STAT_FONT}${liveSummaryLine.includes('\n') ? ' whitespace-pre-line' : ''}`}>
+                    {liveSummaryLine || `直播 ${liveSessions.length} 场`}
                   </span>
-                  <span className="shrink-0 text-xs text-slate-400">
-                    {liveSessionsOpen ? '收起' : '展开场次'}
-                  </span>
+                  {hasLiveSessions ? (
+                    <span className="shrink-0 text-xs text-slate-400">
+                      {liveSessionsOpen ? '收起' : '展开场次'}
+                    </span>
+                  ) : null}
                 </button>
-                {liveSessionsOpen ? (
+                {hasLiveSessions && liveSessionsOpen ? (
                   <ul className="max-h-36 space-y-1 overflow-y-auto border-t border-rose-50 px-3 py-2 text-xs text-slate-600">
-                    {liveSessions.map((session) => {
-                      const start = session.startTime.slice(11, 16)
-                      const end = session.endTime.slice(11, 16)
-                      const line = `${start}~${end}（${session.durationText}）`
-                      return (
-                        <li key={`${session.liveId}-${session.startTime}`}>{line}</li>
-                      )
-                    })}
+                    {liveSessions.map((session) => (
+                      <li key={`${session.liveId}-${session.startTime}`}>
+                        {formatSessionLine(session)}
+                      </li>
+                    ))}
                   </ul>
                 ) : null}
               </div>

@@ -24,6 +24,7 @@ import { normalizeBuyerDrawerOrderRow } from '../../lib/buyer-drawer-order-row'
 import { formatRefundSourceLabel } from '../../lib/refund-source-label'
 import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
 import { OrderAnchorAssignControl } from './OrderAnchorAssignControl'
+import { QianfanOrderDetailButton } from './QianfanOrderDetailButton'
 
 export type { BoardDrillOrderRow }
 
@@ -235,7 +236,10 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                     key={`${boardRowDisplayOrderNo(r)}-${idx}`}
                     className={`border-t ${rowBlocked ? 'bg-red-50/40' : 'border-slate-50 hover:bg-rose-50/30'}`}
                   >
-                    <td className="px-2 py-1.5 font-mono">{displayCell(boardRowDisplayOrderNo(r))}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="font-mono">{displayCell(boardRowDisplayOrderNo(r))}</div>
+                      <QianfanOrderDetailButton orderNo={boardRowDisplayOrderNo(r)} compact />
+                    </td>
                     <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.orderTime)}</td>
                     <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.liveAccountName)}</td>
                     <td className="px-2 py-1.5">{displayCell(r.anchorName)}</td>
@@ -330,8 +334,9 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
           key={`${boardRowDisplayOrderNo(r)}-${idx}`}
           className="border-t border-slate-50 hover:bg-rose-50/30"
         >
-          <td className="sticky left-0 z-10 min-w-[180px] bg-white px-2 py-1.5 font-mono text-[10px] group-hover:bg-rose-50/30">
-            {displayCell(boardRowDisplayOrderNo(r))}
+          <td className="sticky left-0 z-10 min-w-[180px] bg-white px-2 py-1.5 text-[10px] group-hover:bg-rose-50/30">
+            <div className="font-mono">{displayCell(boardRowDisplayOrderNo(r))}</div>
+            <QianfanOrderDetailButton orderNo={boardRowDisplayOrderNo(r)} compact />
           </td>
           <td className="px-2 py-1.5 text-right text-[12px] font-bold text-rose-900 tabular-nums">
             {formatMoney(earned)}

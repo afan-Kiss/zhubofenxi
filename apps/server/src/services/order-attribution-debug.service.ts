@@ -55,11 +55,13 @@ function mapAttributionSource(source: ScheduleAttributionSource): string {
   if (source === 'manual_schedule' || source === 'default_schedule' || source === 'template_virtual') {
     return 'effective_schedule'
   }
+  if (source === 'manual_override') return 'manual_override'
   const map: Record<ScheduleAttributionSource, string> = {
     manual_schedule: 'effective_schedule',
     default_schedule: 'effective_schedule',
     template_virtual: 'effective_schedule',
     legacy_rule: 'legacy_rule',
+    manual_override: 'manual_override',
     unmatched: 'unmatched',
   }
   return map[source] ?? source

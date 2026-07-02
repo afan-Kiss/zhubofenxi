@@ -11,12 +11,16 @@ import { isPayTimeInSchedule, scheduleDateFromPayMs } from '../utils/anchor-sche
 import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
 import { ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE } from '../config/anchor-schedule.constants'
 import { matchTimeRule } from './anchor-rules.service'
+import {
+  resolveManualAnchorOverrideForView,
+} from './order-anchor-manual-override.service'
 
 export type ScheduleAttributionSource =
   | 'manual_schedule'
   | 'default_schedule'
   | 'template_virtual'
   | 'legacy_rule'
+  | 'manual_override'
   | 'unmatched'
 
 export interface ScheduleAttributionResult {
@@ -108,6 +112,17 @@ function buildEffectiveExplain(
 export async function resolveAnchorWithScheduleOverlay(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
 ): Promise<ScheduleAttributionResult> {
+  const manual = resolveManualAnchorOverrideForView(view)
+  if (manual) {
+    return {
+      anchorId: manual.anchorId,
+      anchorName: manual.anchorName,
+      attributionSource: 'manual_override',
+      attributionExplain: `手动指定归属：${manual.anchorName}`,
+      scheduleConfirmed: false,
+    }
+  }
+
   const payMs = parseViewPayTimeMs(view)
   if (payMs == null) {
     return {
@@ -219,6 +234,10 @@ export async function remapViewsWithScheduleOverlay(
     scheduleConfirmed?: boolean
   })[]
 > {
+  const { ensureManualAnchorOverrideCache } = await import(
+    './order-anchor-manual-override.service'
+  )
+  await ensureManualAnchorOverrideCache()
   const out: (AnalyzedOrderView & {
     scheduleAttributionExplain?: string
     scheduleAttributionSource?: ScheduleAttributionSource

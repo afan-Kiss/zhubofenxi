@@ -24,6 +24,7 @@ import {
   resolveDailyReportAnchorsForDate,
 } from './anchor-performance-attribution.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
+import { ensureManualAnchorOverrideCache } from './order-anchor-manual-override.service'
 import {
   countDailyReportOrders,
   roundMinutes,
@@ -227,6 +228,7 @@ export async function buildDailyReport(params: {
   username?: string
 }): Promise<DailyReportPayload> {
   const scoped = await getBoardScopedViewsForRange(params)
+  await ensureManualAnchorOverrideCache()
   const config = getAnchorConfigSync()
   const anchorRows: DailyReportAnchorRow[] = []
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)

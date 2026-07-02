@@ -769,3 +769,16 @@ model DailyReportImage {
 
   @@index([reportDate, sortOrder])
 }
+
+/// 未归属订单手动指定主播（按 P 单号持久化）
+model OrderAnchorManualOverride {
+  id          String   @id @default(cuid())
+  orderKey    String   @unique
+  anchorName  String
+  anchorId    String?
+  assignedBy  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([anchorName])
+}

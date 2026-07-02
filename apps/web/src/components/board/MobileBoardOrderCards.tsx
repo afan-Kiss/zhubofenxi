@@ -7,12 +7,18 @@ import {
   type BoardDrillOrderRow,
 } from '../../lib/board-order-row'
 import { BuyerDisplay } from './BuyerDisplay'
+import { OrderAnchorAssignControl } from './OrderAnchorAssignControl'
 
 interface Props {
   rows: BoardDrillOrderRow[]
   emptyText?: string
   blacklistedBuyerIds?: string[]
   className?: string
+  manualAnchorAssign?: {
+    anchorOptions: Array<{ id: string; name: string }>
+    assigningOrderNo?: string | null
+    onAssign: (orderNo: string, anchorName: string) => void
+  }
 }
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
@@ -62,6 +68,7 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
   emptyText = '暂无明细',
   blacklistedBuyerIds = [],
   className = 'block md:hidden',
+  manualAnchorAssign,
 }) => {
   const { formatMoney } = useAmountDisplay()
   const blacklistSet = new Set(blacklistedBuyerIds)
@@ -150,6 +157,17 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
               <FieldRow label="品退标记">
                 <QualityReturnBadge isQuality={Boolean(r.isQualityReturn)} />
               </FieldRow>
+              {manualAnchorAssign ? (
+                <FieldRow label="指定主播">
+                  <OrderAnchorAssignControl
+                    orderNo={orderNo}
+                    anchorOptions={manualAnchorAssign.anchorOptions}
+                    assigningOrderNo={manualAnchorAssign.assigningOrderNo}
+                    onAssign={manualAnchorAssign.onAssign}
+                    compact
+                  />
+                </FieldRow>
+              ) : null}
             </div>
           </article>
         )

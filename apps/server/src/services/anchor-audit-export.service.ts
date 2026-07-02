@@ -115,6 +115,7 @@ const SOURCE_LABEL: Record<ScheduleAttributionSource, string> = {
   default_schedule: '默认排班',
   template_virtual: '模板补齐',
   legacy_rule: '旧规则',
+  manual_override: '手动指定',
   unmatched: '未归属',
 }
 

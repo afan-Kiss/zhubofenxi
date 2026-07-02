@@ -1,6 +1,7 @@
 import type { AnchorConfig, AnalyzedOrderView } from '../types/analysis'
 import { findAnchorByName } from './anchor-rules.service'
 import { getAnchorConfigSync } from './anchor.service'
+import { applyManualAnchorOverrideToView } from './order-anchor-manual-override.service'
 import { getTimeMinutes } from '../utils/time'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import {
@@ -298,12 +299,13 @@ export function remapViewsForAnchorPerformance(
 ): AnalyzedOrderView[] {
   const config = getAnchorConfigSync()
   return views.map((view) => {
-    const resolved = resolveAnchorForPerformanceAttribution(view, config)
-    if (resolved.anchorId === view.anchorId && resolved.anchorName === view.anchorName) {
-      return view
+    const withManual = applyManualAnchorOverrideToView(view)
+    const resolved = resolveAnchorForPerformanceAttribution(withManual, config)
+    if (resolved.anchorId === withManual.anchorId && resolved.anchorName === withManual.anchorName) {
+      return withManual
     }
     return {
-      ...view,
+      ...withManual,
       anchorId: resolved.anchorId,
       anchorName: resolved.anchorName,
     }

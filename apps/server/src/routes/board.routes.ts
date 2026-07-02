@@ -214,6 +214,28 @@ boardRouter.post('/anchor-pocket-summary/recalculate', async (req, res) => {
   }
 })
 
+boardRouter.post('/order-anchor-manual-assign', async (req, res) => {
+  try {
+    const orderNo = String(req.body?.orderNo ?? req.body?.orderKey ?? '').trim()
+    const anchorName = String(req.body?.anchorName ?? '').trim()
+    if (!orderNo || !anchorName) {
+      sendFail(res, '请提供 orderNo 与 anchorName', 400)
+      return
+    }
+    const { assignOrderAnchorManualOverride } = await import(
+      '../services/order-anchor-manual-override.service'
+    )
+    const result = await assignOrderAnchorManualOverride({
+      orderKey: orderNo,
+      anchorName,
+      assignedBy: req.user!.username,
+    })
+    sendOk(res, { ok: true, ...result })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '指定主播失败', 500)
+  }
+})
+
 boardRouter.get('/anchor-drill', async (req, res) => {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : ''

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import {
   buildAnchorDrawerSummaryText,
@@ -66,8 +66,12 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
   const [copyDone, setCopyDone] = useState(false)
   const [liveSessionsOpen, setLiveSessionsOpen] = useState(false)
   const [orderTab, setOrderTab] = useState<'signed' | 'all'>('signed')
+  const [anchorOptions, setAnchorOptions] = useState<Array<{ id: string; name: string }>>([])
+  const [assigningOrderNo, setAssigningOrderNo] = useState<string | null>(null)
+  const [assignError, setAssignError] = useState<string | null>(null)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pageSize = 20
+  const isUnassignedDrawer = anchorName?.trim() === '未归属' || anchorId?.trim() === '未归属'
 
   useEffect(() => {
     if (!open) {
@@ -82,7 +86,30 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
     setCopyDone(false)
     setLiveSessionsOpen(false)
     setOrderTab('signed')
+    setAssignError(null)
+    setAssigningOrderNo(null)
   }, [open, anchorName, anchorId, startDate, endDate, preset])
+
+  useEffect(() => {
+    if (!open || !isUnassignedDrawer) {
+      setAnchorOptions([])
+      return
+    }
+    const controller = new AbortController()
+    void (async () => {
+      try {
+        const res = await apiRequest<{ anchors: Array<{ id: string; name: string }> }>(
+          '/api/anchors/options',
+          { signal: controller.signal },
+        )
+        if (controller.signal.aborted) return
+        setAnchorOptions(res.anchors ?? [])
+      } catch {
+        if (!controller.signal.aborted) setAnchorOptions([])
+      }
+    })()
+    return () => controller.abort()
+  }, [open, isUnassignedDrawer])
 
   useEffect(() => {
     return () => {
@@ -197,6 +224,26 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
       copyTimerRef.current = setTimeout(() => setCopyDone(false), 2000)
     })
   }
+
+  const handleManualAssign = useCallback(
+    async (orderNo: string, targetAnchorName: string) => {
+      if (!orderNo || !targetAnchorName) return
+      setAssignError(null)
+      setAssigningOrderNo(orderNo)
+      try {
+        await apiRequest('/api/board/order-anchor-manual-assign', {
+          method: 'POST',
+          body: JSON.stringify({ orderNo, anchorName: targetAnchorName }),
+        })
+        setReloadNonce((n) => n + 1)
+      } catch (e) {
+        setAssignError(e instanceof Error ? e.message : '指定主播失败')
+      } finally {
+        setAssigningOrderNo(null)
+      }
+    },
+    [],
+  )
 
   const liveSessions = data?.liveSessions ?? []
   const hasLiveSessions = liveSessions.length > 0
@@ -367,7 +414,19 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
             emptyText={
               orderTab === 'signed' ? '当前范围暂无实际签收订单' : '当前范围暂无该主播订单'
             }
+            manualAnchorAssign={
+              isUnassignedDrawer && anchorOptions.length > 0
+                ? {
+                    anchorOptions,
+                    assigningOrderNo,
+                    onAssign: (orderNo, targetAnchorName) => {
+                      void handleManualAssign(orderNo, targetAnchorName)
+                    },
+                  }
+                : undefined
+            }
           />
+          {assignError ? <p className="mt-2 text-xs text-red-600">{assignError}</p> : null}
           {summaryText ? (
             <div
               className={`mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-rose-100/80 bg-rose-50/40 px-4 py-3 ${DRAWER_STAT_FONT}`}

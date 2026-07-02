@@ -23,10 +23,12 @@ import { MobileBoardOrderCards } from './MobileBoardOrderCards'
 import { normalizeBuyerDrawerOrderRow } from '../../lib/buyer-drawer-order-row'
 import { formatRefundSourceLabel } from '../../lib/refund-source-label'
 import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
+import { OrderAnchorAssignControl } from './OrderAnchorAssignControl'
 
 export type { BoardDrillOrderRow }
 
 const BOARD_COLUMN_COUNT = 17
+const BOARD_COLUMN_COUNT_WITH_ASSIGN = 18
 const BUYER_COLUMN_COUNT = 7
 
 interface Props {
@@ -38,6 +40,11 @@ interface Props {
   /** 买家 Drawer 明细表：拆分金额列 */
   variant?: 'board' | 'buyer'
   headerRefundOrderCount?: number
+  manualAnchorAssign?: {
+    anchorOptions: Array<{ id: string; name: string }>
+    assigningOrderNo?: string | null
+    onAssign: (orderNo: string, anchorName: string) => void
+  }
 }
 
 function refundSourceLabel(
@@ -68,11 +75,17 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
   listKey,
   variant = 'board',
   headerRefundOrderCount,
+  manualAnchorAssign,
 }) => {
   const { formatMoney } = useAmountDisplay()
   const blacklistSet = useMemo(() => new Set(blacklistedBuyerIds), [blacklistedBuyerIds])
   const isBuyer = variant === 'buyer'
-  const columnCount = isBuyer ? BUYER_COLUMN_COUNT : BOARD_COLUMN_COUNT
+  const showManualAssign = Boolean(manualAnchorAssign)
+  const columnCount = isBuyer
+    ? BUYER_COLUMN_COUNT
+    : showManualAssign
+      ? BOARD_COLUMN_COUNT_WITH_ASSIGN
+      : BOARD_COLUMN_COUNT
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
 
   const showCardsOnDesktop = viewMode === 'cards'
@@ -138,6 +151,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
         emptyText={emptyText}
         blacklistedBuyerIds={blacklistedBuyerIds}
         className={cardClass}
+        manualAnchorAssign={manualAnchorAssign}
       />
       <div className={tableWrapClass}>{renderBoardTable()}</div>
     </div>
@@ -193,6 +207,9 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
               <th className="whitespace-nowrap px-2 py-2">销售状态</th>
               <th className="whitespace-nowrap px-2 py-2">状态说明</th>
               <th className="whitespace-nowrap px-2 py-2">品退标记</th>
+              {showManualAssign ? (
+                <th className="min-w-[140px] whitespace-nowrap px-2 py-2">指定主播</th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -256,6 +273,16 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                     <td className="px-2 py-1.5">
                       <QualityReturnBadge isQuality={Boolean(r.isQualityReturn)} />
                     </td>
+                    {showManualAssign && manualAnchorAssign ? (
+                      <td className="px-2 py-1.5">
+                        <OrderAnchorAssignControl
+                          orderNo={boardRowDisplayOrderNo(r)}
+                          anchorOptions={manualAnchorAssign.anchorOptions}
+                          assigningOrderNo={manualAnchorAssign.assigningOrderNo}
+                          onAssign={manualAnchorAssign.onAssign}
+                        />
+                      </td>
+                    ) : null}
                   </tr>
                 )
               })

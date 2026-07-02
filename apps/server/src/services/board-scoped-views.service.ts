@@ -10,6 +10,7 @@ import {
 import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { filterViewsForStaffScope } from './staff-anchor-scope.service'
+import { ensureManualAnchorOverrideCache } from './order-anchor-manual-override.service'
 
 export interface BoardScopedViewsBundle {
   views: AnalyzedOrderView[]
@@ -86,6 +87,7 @@ export async function getAnchorPerformanceViews(
   anchorName?: string,
 ): Promise<AnalyzedOrderView[]> {
   const normalized = normalizeAnchorDrillQuery({ anchorId, anchorName })
+  await ensureManualAnchorOverrideCache()
   const withRaw = attachRawByMatchToViews(scopedViews, rawByMatch)
   const remapped = await remapViewsWithScheduleOverlay(withRaw)
   const base =

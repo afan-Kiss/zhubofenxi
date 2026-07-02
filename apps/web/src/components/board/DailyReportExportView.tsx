@@ -1,12 +1,15 @@
 import React from 'react'
 import './daily-report-export.css'
 import {
+  formatDensity,
   formatDuration,
   formatHourly,
+  formatIntegerMoney,
   formatMoney,
   formatOrderCount,
   formatPeopleCount,
   formatPercent,
+  formatRatePercent,
 } from './dailyReportFormatters'
 import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
 import {
@@ -105,12 +108,52 @@ function ExportAnchorCard({
             真实发货 {formatMoney(row.shippedAmountYuan)}
           </span>
           <span className="text-slate-400"> · </span>
-          卖出 {formatOrderCount(row.soldOrderCount)}
-          <span className="text-slate-400"> · </span>
-          <span className={row.invalidOrderCount > 0 ? 'font-medium text-red-600' : ''}>
-            关闭/退货 {formatOrderCount(row.invalidOrderCount)}
-          </span>
+          时长 {row.liveDurationText || formatDuration(row.liveDurationMinutes)}
         </p>
+        <div className="daily-report-export-metrics">
+          <div className="daily-report-export-metric">
+            <span className="daily-report-export-metric-label">真实卖出</span>
+            <span className="daily-report-export-metric-value">{formatOrderCount(row.soldOrderCount)}</span>
+          </div>
+          <div className="daily-report-export-metric">
+            <span className="daily-report-export-metric-label">客单价</span>
+            <span className="daily-report-export-metric-value">{formatIntegerMoney(row.avgOrderAmountYuan)}</span>
+          </div>
+          <div className="daily-report-export-metric">
+            <span className="daily-report-export-metric-label">时均产出</span>
+            <span className="daily-report-export-metric-value">{formatHourly(row.hourlyAmountYuan)}</span>
+          </div>
+          <div className="daily-report-export-metric">
+            <span className="daily-report-export-metric-label">场观</span>
+            <span className="daily-report-export-metric-value">{formatPeopleCount(row.viewSessionCount)}</span>
+          </div>
+          <div className="daily-report-export-metric">
+            <span className="daily-report-export-metric-label">进房</span>
+            <span className="daily-report-export-metric-value">{formatPeopleCount(row.joinUserCount)}</span>
+          </div>
+          <div className="daily-report-export-metric">
+            <span className="daily-report-export-metric-label">成交密度</span>
+            <span className="daily-report-export-metric-value">{formatDensity(row.dealDensityMinutes)}</span>
+          </div>
+          <div className="daily-report-export-metric">
+            <span className="daily-report-export-metric-label">新增粉丝</span>
+            <span className="daily-report-export-metric-value">{formatPeopleCount(row.newFollowerCount)}</span>
+          </div>
+          <div className="daily-report-export-metric">
+            <span className="daily-report-export-metric-label">成交率</span>
+            <span className="daily-report-export-metric-value">{formatRatePercent(row.dealConversionRate)}</span>
+          </div>
+          <div className="daily-report-export-metric">
+            <span className="daily-report-export-metric-label">关闭/退货</span>
+            <span
+              className={`daily-report-export-metric-value${
+                row.invalidOrderCount > 0 ? ' daily-report-export-metric-value--alert' : ''
+              }`}
+            >
+              {formatOrderCount(row.invalidOrderCount)}
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   )

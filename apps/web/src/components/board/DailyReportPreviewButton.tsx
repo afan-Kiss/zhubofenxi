@@ -2,10 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { toPng } from 'html-to-image'
 import { apiRequest } from '../../lib/api'
-import {
-  DailyReportImageSheet,
-  type DailyReportPayload,
-} from './DailyReportImageSheet'
+import { type DailyReportPayload } from './DailyReportImageSheet'
+import { DailyReportExportView } from './DailyReportExportView'
 import {
   DailyReportShipmentPhotos,
   type DailyReportImageItem,
@@ -40,51 +38,6 @@ async function waitForImagesReady(root: HTMLElement): Promise<void> {
     ),
   )
   await Promise.all(imgs.map((img) => img.decode?.().catch(() => undefined) ?? Promise.resolve()))
-}
-
-const CAPTURE_SHEET_WIDTH_PX = 1080
-const CAPTURE_PHOTO_HEIGHT_PX = 520
-
-/** 截图前临时拉大画布与照片区域，避免 html-to-image 按小尺寸栅格化 */
-async function prepareCaptureLayout(root: HTMLElement): Promise<() => void> {
-  const restores: Array<() => void> = []
-  const sheet = root.querySelector('[data-daily-report-sheet]') as HTMLElement | null
-  if (sheet) {
-    const prev = sheet.style.cssText
-    sheet.style.width = `${CAPTURE_SHEET_WIDTH_PX}px`
-    sheet.style.maxWidth = `${CAPTURE_SHEET_WIDTH_PX}px`
-    restores.push(() => {
-      sheet.style.cssText = prev
-    })
-  }
-  for (const cell of Array.from(root.querySelectorAll('[data-shipment-photo-cell]'))) {
-    const el = cell as HTMLElement
-    const prev = el.style.cssText
-    el.style.minHeight = `${CAPTURE_PHOTO_HEIGHT_PX}px`
-    el.style.height = `${CAPTURE_PHOTO_HEIGHT_PX}px`
-    restores.push(() => {
-      el.style.cssText = prev
-    })
-  }
-  for (const img of Array.from(root.querySelectorAll('[data-shipment-photo-img]'))) {
-    const el = img as HTMLImageElement
-    await el.decode().catch(() => undefined)
-    const prev = el.style.cssText
-    const natural = el.naturalWidth
-    const targetWidth = natural > 0 ? Math.min(natural, CAPTURE_SHEET_WIDTH_PX - 48) : CAPTURE_SHEET_WIDTH_PX - 48
-    el.style.width = `${targetWidth}px`
-    el.style.height = 'auto'
-    el.style.maxWidth = '100%'
-    el.style.maxHeight = `${CAPTURE_PHOTO_HEIGHT_PX - 16}px`
-    el.style.objectFit = 'contain'
-    restores.push(() => {
-      el.style.cssText = prev
-    })
-  }
-  await waitForNextPaint()
-  return () => {
-    for (const restore of restores) restore()
-  }
 }
 
 async function waitForSheetRef(
@@ -211,14 +164,12 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     const node = await waitForSheetRef(sheetRef)
     await waitForImagesReady(node)
     const restoreImages = await inlineSheetImages(node)
-    const restoreLayout = await prepareCaptureLayout(node)
     try {
       await waitForNextPaint()
-      await new Promise((resolve) => window.setTimeout(resolve, 160))
+      await new Promise((resolve) => window.setTimeout(resolve, 120))
       const dataUrl = await renderSheetToPng(node)
       setImageDataUrl(dataUrl)
     } finally {
-      restoreLayout()
       restoreImages()
     }
   }, [])
@@ -306,7 +257,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     report
       ? createPortal(
           <div aria-hidden className="pointer-events-none fixed left-[-9999px] top-0">
-            <DailyReportImageSheet
+            <DailyReportExportView
               ref={sheetRef}
               data={report}
               showAttendanceStatus={showAttendanceStatus}
@@ -357,7 +308,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
           open={previewOpen}
           onClose={closePreview}
           zIndexClass="z-[10000]"
-          panelClassName="flex max-h-[min(92dvh,calc(100dvh-2rem))] w-[min(760px,calc(100vw-1.5rem))] flex-col overflow-hidden p-4"
+          panelClassName="flex max-h-[min(92dvh,calc(100dvh-2rem))] w-[min(1200px,calc(100vw-1.5rem))] flex-col overflow-hidden p-4"
           backdropClassName="bg-black/55"
         >
           <div className="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3">

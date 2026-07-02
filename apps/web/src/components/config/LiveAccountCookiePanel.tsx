@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import {
+  accountCookieAvailable,
+  accountCookieReason,
+  cookieAvailableLabel,
+  cookieAvailableTone,
   cookieStatusLabel,
   cookieStatusTone,
   type CookieHealthStatus,
@@ -35,9 +39,7 @@ function formatTime(iso: string | null): string {
 
 function mapCookieStatus(status: CookieHealthStatus): CookieTestStatus {
   if (status === 'valid') return 'valid'
-  if (status === 'invalid') return 'invalid'
-  if (status === 'suspected') return 'limited'
-  return 'unknown'
+  return 'invalid'
 }
 
 function testStatusLabel(status: CookieTestStatus | undefined): string {
@@ -45,9 +47,7 @@ function testStatusLabel(status: CookieTestStatus | undefined): string {
     case 'valid':
       return '可用'
     case 'invalid':
-      return '失效'
-    case 'limited':
-      return '限流/风控'
+      return '不可用'
     case 'testing':
       return '检测中'
     default:
@@ -61,8 +61,6 @@ function testStatusTone(status: CookieTestStatus | undefined): string {
       return 'text-emerald-700 bg-emerald-50'
     case 'invalid':
       return 'text-rose-700 bg-rose-50'
-    case 'limited':
-      return 'text-amber-800 bg-amber-50'
     case 'testing':
       return 'text-indigo-700 bg-indigo-50'
     default:
@@ -555,22 +553,20 @@ export const LiveAccountCookiePanel: React.FC = () => {
 
   const stats = useMemo(() => {
     const enabled = accounts.filter((a) => a.enabled).length
-    const valid = accounts.filter((a) => a.cookieStatus === 'valid').length
-    const needsAttention = accounts.filter(
-      (a) => a.enabled && (a.cookieStatus === 'suspected' || a.cookieStatus === 'invalid' || a.cookieStatus === 'unknown'),
-    ).length
+    const available = accounts.filter((a) => a.enabled && accountCookieAvailable(a)).length
+    const unavailable = accounts.filter((a) => a.enabled && !accountCookieAvailable(a)).length
     return {
       total: accounts.length,
       enabled,
-      valid,
-      needsAttention,
+      available,
+      unavailable,
     }
   }, [accounts])
 
   const renderTestResultBlock = (account: LiveAccountPublic) => {
     const latest = testResults[account.id]
     const isTesting = testingIds.has(account.id)
-    const recentStatus = mapCookieStatus(account.cookieStatus)
+    const recentStatus = accountCookieAvailable(account) ? 'valid' : 'invalid'
     const thisStatus: CookieTestStatus | undefined = isTesting
       ? 'testing'
       : latest?.status
@@ -594,10 +590,10 @@ export const LiveAccountCookiePanel: React.FC = () => {
             <span className="text-slate-400">最近检测接口：</span>
             <span className="text-slate-700">{apiLabel(account.cookieLastFailedApi ?? 'order_list')}</span>
           </div>
-          {account.cookieLastErrorMessage && account.cookieStatus !== 'valid' && (
+          {accountCookieReason(account) && (
             <div className="sm:col-span-2">
-              <span className="text-slate-400">最近失败原因：</span>
-              <span className="text-rose-700">{account.cookieLastErrorMessage}</span>
+              <span className="text-slate-400">不可用原因：</span>
+              <span className="text-rose-700">{accountCookieReason(account)}</span>
             </div>
           )}
         </div>
@@ -659,24 +655,24 @@ export const LiveAccountCookiePanel: React.FC = () => {
           </div>
           <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
             <p className="text-[10px] text-emerald-700">Cookie 正常</p>
-            <p className="mt-0.5 text-lg font-semibold text-emerald-800">{stats.valid}</p>
+            <p className="mt-0.5 text-lg font-semibold text-emerald-800">{stats.available}</p>
           </div>
           <div
             className={`rounded-lg border px-3 py-2 ${
-              stats.needsAttention > 0
-                ? 'border-amber-100 bg-amber-50/70'
+              stats.unavailable > 0
+                ? 'border-rose-100 bg-rose-50/70'
                 : 'border-slate-100 bg-slate-50'
             }`}
           >
-            <p className={`text-[10px] ${stats.needsAttention > 0 ? 'text-amber-700' : 'text-slate-500'}`}>
-              需关注
+            <p className={`text-[10px] ${stats.unavailable > 0 ? 'text-rose-700' : 'text-slate-500'}`}>
+              Cookie 不可用
             </p>
             <p
               className={`mt-0.5 text-lg font-semibold ${
-                stats.needsAttention > 0 ? 'text-amber-800' : 'text-slate-900'
+                stats.unavailable > 0 ? 'text-rose-800' : 'text-slate-900'
               }`}
             >
-              {stats.needsAttention}
+              {stats.unavailable}
             </p>
           </div>
         </div>
@@ -766,13 +762,13 @@ export const LiveAccountCookiePanel: React.FC = () => {
                       <td className="px-3 py-2.5">
                         <div className="space-y-1">
                           <span
-                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieStatusTone(account.cookieStatus)}`}
+                            className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${cookieAvailableTone(accountCookieAvailable(account))}`}
                           >
-                            {cookieStatusLabel(account.cookieStatus)}
+                            {cookieAvailableLabel(accountCookieAvailable(account))}
                           </span>
-                          {account.cookieStatus !== 'valid' && account.cookieLastErrorMessage ? (
-                            <p className="max-w-[220px] text-[10px] leading-snug text-amber-800">
-                              {account.cookieLastErrorMessage}
+                          {accountCookieReason(account) ? (
+                            <p className="max-w-[220px] text-[10px] leading-snug text-rose-700">
+                              {accountCookieReason(account)}
                             </p>
                           ) : null}
                           {isTesting ? (

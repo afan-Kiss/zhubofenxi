@@ -125,15 +125,18 @@ export function extractCookieFromShopEntry(raw: unknown): {
   return { cookie: '', fieldUsed: null }
 }
 
-function buildCookieReason(row: {
-  cookieEncrypted: string | null
-  cookieStatus: string
-  cookieLastCheckedAt: Date | null
-  cookieLastErrorMessage: string | null
-  cookieLastErrorCode: string | null
-  updatedAt: Date
-} | null): ReturnType<typeof deriveCookieSyncState> {
-  return deriveCookieSyncState(row)
+function buildCookieReason(
+  row: {
+    cookieEncrypted: string | null
+    cookieStatus: string
+    cookieLastCheckedAt: Date | null
+    cookieLastErrorMessage: string | null
+    cookieLastErrorCode: string | null
+    updatedAt: Date
+  } | null,
+  plainCookie?: string | null,
+): ReturnType<typeof deriveCookieSyncState> {
+  return deriveCookieSyncState(row, { plainCookie })
 }
 
 async function findAccountIdForShop(shopKey: GoodReviewShopKey): Promise<string | null> {
@@ -366,19 +369,21 @@ export async function getShopCookieStatusPayload(): Promise<{
     const row = accountByShop.get(def.shopKey)
     const hasCookie = Boolean(row?.cookieEncrypted?.trim())
     let cookiePreview: string | null = null
+    let plain: string | null = null
     if (hasCookie && row) {
       try {
-        const plain = decryptText(row.cookieEncrypted).trim()
+        plain = decryptText(row.cookieEncrypted).trim()
         cookiePreview = plain ? maskCookiePreview(plain) : '已保存'
       } catch {
         if (row.cookieEncrypted.includes(';')) {
+          plain = row.cookieEncrypted.trim()
           cookiePreview = maskCookiePreview(row.cookieEncrypted)
         } else {
           cookiePreview = '已保存'
         }
       }
     }
-    const derived = buildCookieReason(row ?? null)
+    const derived = buildCookieReason(row ?? null, plain)
     return {
       shopKey: def.shopKey,
       shopName: def.shopName,

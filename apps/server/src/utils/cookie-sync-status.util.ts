@@ -36,15 +36,17 @@ function includesMissingArk(code: string | null | undefined, msg: string | null 
   return c === 'cookie_missing_access_token' || /access-token-ark|订单同步 token/i.test(m)
 }
 
+export function cookieContainsA1(cookie: string): boolean {
+  return /(?:^|;\s*)a1=[^;]+/i.test(cookie.trim())
+}
+
 export function deriveStatusLevel(
   canSyncOrders: boolean,
   hasCookie: boolean,
-  status: string,
+  _status: string,
 ): CookieStatusLevel {
   if (!hasCookie) return 'error'
-  if (canSyncOrders) return 'ok'
-  if (status === 'uploaded' || status === 'unknown' || status === 'pending_validate') return 'warning'
-  return 'error'
+  return canSyncOrders ? 'ok' : 'error'
 }
 
 export function deriveCookieSyncState(
@@ -56,11 +58,22 @@ export function deriveCookieSyncState(
     cookieLastErrorCode: string | null
     updatedAt: Date
   } | null,
+  options?: { plainCookie?: string | null },
 ): CookieSyncDerived {
   if (!row?.cookieEncrypted?.trim()) {
     return {
       status: 'missing',
       reason: '未收到 Cookie',
+      canSyncOrders: false,
+      statusLevel: 'error',
+    }
+  }
+
+  const plain = options?.plainCookie?.trim() ?? ''
+  if (plain && !cookieContainsA1(plain)) {
+    return {
+      status: 'invalid',
+      reason: 'Cookie 缺少 a1，请从已登录的小红书商家后台重新复制完整 Cookie。',
       canSyncOrders: false,
       statusLevel: 'error',
     }
@@ -81,10 +94,10 @@ export function deriveCookieSyncState(
 
   if (st === 'unknown') {
     return {
-      status: 'uploaded',
-      reason: '已收到 Cookie，等待验证结果',
+      status: 'invalid',
+      reason: msg || 'Cookie 尚未验证通过，请检测或重新提交',
       canSyncOrders: false,
-      statusLevel: 'warning',
+      statusLevel: 'error',
     }
   }
 
@@ -118,10 +131,10 @@ export function deriveCookieSyncState(
 
   if (st === 'suspected') {
     return {
-      status: 'suspected',
-      reason: msg || 'Cookie 部分能力异常，请检查后再用于同步',
+      status: 'invalid',
+      reason: msg || 'Cookie 验证未通过，请重新提交或检测',
       canSyncOrders: false,
-      statusLevel: 'warning',
+      statusLevel: 'error',
     }
   }
 

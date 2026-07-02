@@ -5,7 +5,11 @@ import { resolveDateRange } from '../utils/date-range'
 import { requestXhsApi } from './xhs-api-sync/xhs-api-client.service'
 import { buildOrderListBody } from './xhs-api-sync/xhs-order-sync.service'
 import { classifyXhsErrorMessage } from '../utils/xhs-auth.util'
-import { deriveCookieSyncState, deriveStatusLevel, buildShopCookieSummary } from '../utils/cookie-sync-status.util'
+import {
+  deriveCookieSyncState,
+  deriveStatusLevel,
+  buildShopCookieSummary,
+} from '../utils/cookie-sync-status.util'
 import { probeQualityBadcaseSignForAccount } from './quality-badcase-sign.service'
 
 const DEFAULT_PLATFORM = 'xiaohongshu'
@@ -105,6 +109,17 @@ function toPublicView(
   } else if (hasCookie) {
     cookiePreview = '已保存'
   }
+  const derived = deriveCookieSyncState(
+    {
+      cookieEncrypted: row.cookieEncrypted,
+      cookieStatus: row.cookieStatus,
+      cookieLastCheckedAt: row.cookieLastCheckedAt,
+      cookieLastErrorMessage: row.cookieLastErrorMessage,
+      cookieLastErrorCode: row.cookieLastErrorCode,
+      updatedAt: row.updatedAt,
+    },
+    { plainCookie: plain },
+  )
   return {
     id: row.id,
     name: row.displayName?.trim() || row.platformName,
@@ -114,15 +129,19 @@ function toPublicView(
     cookieText: cookie,
     cookiePreview,
     cookieUpdatedAt: hasCookie ? row.updatedAt.toISOString() : null,
-    cookieStatus: (row.cookieStatus as CookieHealthStatus) || 'unknown',
+    cookieStatus: derived.canSyncOrders ? 'valid' : 'invalid',
     cookieLastCheckedAt: row.cookieLastCheckedAt?.toISOString() ?? null,
     cookieLastSuccessAt: row.cookieLastSuccessAt?.toISOString() ?? null,
     cookieLastFailedAt: row.cookieLastFailedAt?.toISOString() ?? null,
     cookieLastErrorCode: row.cookieLastErrorCode,
-    cookieLastErrorMessage: row.cookieLastErrorMessage,
+    cookieLastErrorMessage: derived.canSyncOrders ? null : derived.reason || row.cookieLastErrorMessage,
     cookieLastFailedApi: row.cookieLastFailedApi,
     affectedBusinessSync: row.affectedBusinessSync,
     lastSyncSuccessAt: row.lastSyncSuccessAt?.toISOString() ?? null,
+    canSyncOrders: derived.canSyncOrders,
+    syncReason: derived.reason,
+    statusLevel: derived.statusLevel,
+    cookieDisplayStatus: derived.status,
   }
 }
 
@@ -462,7 +481,7 @@ export async function testLiveAccountCookie(id: string): Promise<{
       : 'Cookie 订单接口可用，但品退签名失败（请检查 Python / xhshow）'
 
     if (signIssue || qualityApiIssue) {
-      const status: CookieHealthStatus = 'suspected'
+      const status: CookieHealthStatus = 'invalid'
       const errorCode = signIssue
         ? qualityProbe.errorReason ?? 'quality_sign_failed'
         : qualityProbe.errorReason ?? 'quality_api_failed'
@@ -548,6 +567,8 @@ export async function getCookieHealthPayload(): Promise<{
         ...account,
         canSyncOrders: shop.canSyncOrders,
         syncReason: shop.reason,
+        cookieStatus: shop.canSyncOrders ? 'valid' : 'invalid',
+        cookieLastErrorMessage: shop.canSyncOrders ? null : shop.reason,
         statusLevel: deriveStatusLevel(shop.canSyncOrders, shop.hasCookie, shop.status),
         cookieDisplayStatus: shop.status,
       }
@@ -589,10 +610,10 @@ export async function getCookieHealthPayload(): Promise<{
   )
   const summary: CookieHealthSummary = {
     enabledCount: enabled.length,
-    validCount: enabled.filter((a) => a.cookieStatus === 'valid').length,
-    invalidCount: enabled.filter((a) => a.cookieStatus === 'invalid').length,
-    suspectedCount: enabled.filter((a) => a.cookieStatus === 'suspected').length,
-    unknownCount: enabled.filter((a) => a.cookieStatus === 'unknown').length,
+    validCount: enabled.filter((a) => a.canSyncOrders === true).length,
+    invalidCount: enabled.filter((a) => a.canSyncOrders !== true).length,
+    suspectedCount: 0,
+    unknownCount: enabled.filter((a) => a.canSyncOrders !== true && a.cookieStatus === 'unknown').length,
     canSyncCount: enabled.filter((a) => a.canSyncOrders === true).length,
     cannotSyncCount: enabled.filter((a) => a.canSyncOrders === false).length,
     missingCookieCount: shopSummary.missingCookieCount,

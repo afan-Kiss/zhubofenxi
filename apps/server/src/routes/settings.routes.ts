@@ -309,13 +309,9 @@ settingsRouter.post('/live-accounts/:id/test-cookie', async (req, res) => {
       checkedAt: new Date().toISOString(),
       apiName: '订单接口',
       status:
-        result.cookieStatus === 'valid'
+        result.cookieStatus === 'valid' && result.ok
           ? 'valid'
-          : result.cookieStatus === 'suspected'
-            ? 'limited'
-            : result.cookieStatus === 'invalid'
-              ? 'invalid'
-              : 'unknown',
+          : 'invalid',
     })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : 'Cookie 测试失败')

@@ -46,30 +46,31 @@ export interface CookieHealthPayload {
   summary: CookieHealthSummary
 }
 
+export function accountCookieAvailable(account: LiveAccountPublic): boolean {
+  return accountCanSyncOrders(account)
+}
+
 export function cookieStatusLabel(status: CookieHealthStatus): string {
-  switch (status) {
-    case 'valid':
-      return '正常'
-    case 'invalid':
-      return '暂不可同步'
-    case 'suspected':
-      return '需检查'
-    default:
-      return '未检测'
-  }
+  if (status === 'valid') return '正常'
+  return '不可用'
 }
 
 export function cookieStatusTone(status: CookieHealthStatus): string {
-  switch (status) {
-    case 'valid':
-      return 'bg-emerald-50 text-emerald-700'
-    case 'invalid':
-      return 'bg-rose-50 text-rose-700'
-    case 'suspected':
-      return 'bg-amber-50 text-amber-800'
-    default:
-      return 'bg-slate-100 text-slate-600'
-  }
+  if (status === 'valid') return 'bg-emerald-50 text-emerald-700'
+  return 'bg-rose-50 text-rose-700'
+}
+
+export function cookieAvailableLabel(available: boolean): string {
+  return available ? '正常' : '不可用'
+}
+
+export function cookieAvailableTone(available: boolean): string {
+  return available ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'
+}
+
+export function accountCookieReason(account: LiveAccountPublic): string | null {
+  if (accountCookieAvailable(account)) return null
+  return account.syncReason?.trim() || account.cookieLastErrorMessage?.trim() || null
 }
 
 export function accountCanSyncOrders(account: LiveAccountPublic): boolean {

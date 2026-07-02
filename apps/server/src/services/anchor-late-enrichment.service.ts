@@ -1,5 +1,10 @@
 import type { AnchorLiveSessionBrief } from './anchor-live-sessions.service'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
+import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
+import {
+  getAssignedSessionsForAnchor,
+  loadAndAssignDailyReportLiveSessions,
+} from './daily-report-live-sessions.service'
 import { resolveAnchorLiveSessionsForRange } from './anchor-live-sessions.service'
 import {
   earliestSessionStart,
@@ -78,6 +83,27 @@ function resolveAttendancePayload(
   )
 }
 
+async function resolveLiveSessionsForAnchorRow(params: {
+  preset?: string
+  startDate: string
+  endDate: string
+  anchorId: string
+  anchorName: string
+  liveAssignment?: Awaited<ReturnType<typeof loadAndAssignDailyReportLiveSessions>>
+}): Promise<AnchorLiveSessionBrief[]> {
+  if (params.endDate.trim() >= ANCHOR_NEW_SCHEDULE_START_DATE && params.liveAssignment) {
+    return getAssignedSessionsForAnchor(params.liveAssignment, params.anchorName)
+  }
+  return resolveAnchorLiveSessionsForRange({
+    preset: params.preset,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    anchorId: params.anchorId,
+    anchorName: params.anchorName,
+    anchorOrders: [],
+  })
+}
+
 export async function enrichAnchorLeaderboardWithLateStatus(
   rows: Array<Record<string, unknown>>,
   params: { startDate: string; endDate: string; preset?: string },
@@ -85,6 +111,16 @@ export async function enrichAnchorLeaderboardWithLateStatus(
   if (!isSingleDayRange(params.startDate, params.endDate)) return rows
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
+  const liveAssignment =
+    params.endDate.trim() >= ANCHOR_NEW_SCHEDULE_START_DATE
+      ? await loadAndAssignDailyReportLiveSessions({
+          reportDate: params.startDate,
+          preset: params.preset,
+          startDate: params.startDate,
+          endDate: params.endDate,
+          scheduleRows: scheduleTable.rows,
+        })
+      : undefined
 
   type WorkItem = {
     index: number
@@ -104,13 +140,13 @@ export async function enrichAnchorLeaderboardWithLateStatus(
         return { index, row, anchorName, shopName: '', sessions: [], actualStartMs: null, sessionName: '' }
       }
 
-      const sessions = await resolveAnchorLiveSessionsForRange({
+      const sessions = await resolveLiveSessionsForAnchorRow({
         preset: params.preset,
         startDate: params.startDate,
         endDate: params.endDate,
         anchorId,
         anchorName,
-        anchorOrders: [],
+        liveAssignment,
       })
       const actual = earliestSessionStart(sessions)
       const shopName =
@@ -185,6 +221,16 @@ export async function enrichPocketRowsWithLateStatus(
   }
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
+  const liveAssignment =
+    params.endDate.trim() >= ANCHOR_NEW_SCHEDULE_START_DATE
+      ? await loadAndAssignDailyReportLiveSessions({
+          reportDate: params.startDate,
+          preset: params.preset,
+          startDate: params.startDate,
+          endDate: params.endDate,
+          scheduleRows: scheduleTable.rows,
+        })
+      : undefined
 
   type WorkItem = {
     index: number
@@ -198,12 +244,13 @@ export async function enrichPocketRowsWithLateStatus(
 
   const prefetched: WorkItem[] = await Promise.all(
     rows.map(async (row, index) => {
-      const sessions = await resolveAnchorLiveSessionsForRange({
+      const sessions = await resolveLiveSessionsForAnchorRow({
         preset: params.preset,
         startDate: params.startDate,
         endDate: params.endDate,
+        anchorId: '',
         anchorName: row.anchorName,
-        anchorOrders: [],
+        liveAssignment,
       })
       const actual = earliestSessionStart(sessions)
       const shopName =

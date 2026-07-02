@@ -123,3 +123,25 @@ export function formatClockShanghai(date: Date): string {
   const p = shanghaiTimeParts(date)
   return `${p.hour}:${p.minute}`
 }
+
+const LIVE_SESSION_TIME_RE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/
+
+/** 解析直播场次时间文本为毫秒（统一按 Asia/Shanghai） */
+export function parseLiveSessionTimeMs(text: string | null | undefined): number | null {
+  const raw = text?.trim()
+  if (!raw || raw === '—') return null
+  if (/[zZ]$/.test(raw) || /[+-]\d{2}:\d{2}$/.test(raw)) {
+    const ms = Date.parse(raw)
+    return Number.isFinite(ms) ? ms : null
+  }
+  const m = LIVE_SESSION_TIME_RE.exec(raw)
+  if (!m) {
+    const ms = Date.parse(raw)
+    return Number.isFinite(ms) ? ms : null
+  }
+  const ms = Date.parse(
+    `${m[1]}-${m[2]}-${m[3]}T${m[4] ?? '00'}:${m[5] ?? '00'}:${m[6] ?? '00'}+08:00`,
+  )
+  return Number.isFinite(ms) ? ms : null
+}

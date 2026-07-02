@@ -4,6 +4,7 @@ import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.consta
 import { anchorNamesMatch } from './anchor-name-normalize.util'
 import { orderLiveRoomMatchesSchedule } from './shop-name-normalize.util'
 import { isPayTimeInSchedule } from './anchor-schedule-time.util'
+import { formatClockShanghai, parseLiveSessionTimeMs } from './business-timezone'
 
 export interface AnchorAttendanceStatus {
   hasSchedule: boolean
@@ -65,7 +66,10 @@ const NO_SCHEDULE: AnchorAttendanceStatus = {
 }
 
 function formatClockFromIso(iso: string): string {
-  return iso.slice(11, 16)
+  const ms = parseLiveSessionTimeMs(iso)
+  if (ms != null) return formatClockShanghai(new Date(ms))
+  const hit = /\d{2}:\d{2}/.exec(iso)
+  return hit ? hit[0] : '—'
 }
 
 function parseClockMinutes(clock: string): number {
@@ -253,18 +257,18 @@ export function matchManualSchedule(
 }
 
 function resolveSessionEndMs(session: AnchorLiveSessionBrief): number | null {
-  const startMs = session.startTime && session.startTime !== '—' ? new Date(session.startTime).getTime() : NaN
+  const startMs = parseLiveSessionTimeMs(session.startTime)
 
   if (session.endTime && session.endTime !== '—') {
-    let endMs = new Date(session.endTime).getTime()
-    if (!Number.isFinite(endMs)) return null
-    if (Number.isFinite(startMs) && endMs < startMs) {
+    let endMs = parseLiveSessionTimeMs(session.endTime)
+    if (endMs == null) return null
+    if (startMs != null && endMs < startMs) {
       endMs += 24 * 60 * 60_000
     }
     return endMs
   }
 
-  if (Number.isFinite(startMs) && session.durationMinutes > 0) {
+  if (startMs != null && session.durationMinutes > 0) {
     return startMs + session.durationMinutes * 60_000
   }
 
@@ -284,8 +288,8 @@ export function earliestSessionStart(sessions: AnchorLiveSessionBrief[]): {
   const valid = sessions.filter((s) => s.startTime && s.startTime !== '—')
   if (valid.length === 0) return null
   const earliest = valid.reduce((min, s) => (s.startTime < min.startTime ? s : min), valid[0]!)
-  const startMs = new Date(earliest.startTime).getTime()
-  if (!Number.isFinite(startMs)) return null
+  const startMs = parseLiveSessionTimeMs(earliest.startTime)
+  if (startMs == null) return null
   return { startAt: earliest.startTime, startMs, session: earliest }
 }
 
@@ -364,7 +368,7 @@ export function calculateAnchorAttendanceStatus(
   const scheduledStartMs = new Date(scheduledStartAt).getTime()
   const scheduledEndMs = new Date(scheduledEndAt).getTime()
 
-  if (actualStartMs == null || !actualStartAt) {
+  if (actualStartMs == null || !actualStartAt || !Number.isFinite(actualStartMs)) {
     return {
       hasSchedule: true,
       hasActualStartTime: false,

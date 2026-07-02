@@ -4,13 +4,16 @@ import { formatLiveDurationMinutes } from './anchor-live-sessions.service'
 import {
   calculateAnchorAttendanceStatus,
   deriveSessionLabelFromSchedule,
+  earliestSessionStart,
   formatDisplaySessionLabel,
+  pickLatestValidSessionEnd,
   resolveShopNameFromSchedule,
   toAttendanceStatusPayload,
   type AnchorAttendanceStatusPayload,
 } from '../utils/anchor-attendance-status.util'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
 import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
+import { parseLiveSessionTimeMs } from '../utils/business-timezone'
 
 export interface LiveSessionScheduleMatchResult {
   session: AnchorLiveSessionBrief
@@ -60,18 +63,17 @@ export function buildLiveSessionCountSummary(sessions: AnchorLiveSessionBrief[])
 }
 
 function resolveSessionEndMs(session: AnchorLiveSessionBrief): number | null {
-  const startMs =
-    session.startTime && session.startTime !== '—' ? new Date(session.startTime).getTime() : NaN
+  const startMs = parseLiveSessionTimeMs(session.startTime)
   if (session.endTime && session.endTime !== '—') {
-    let endMs = new Date(session.endTime).getTime()
-    if (!Number.isFinite(endMs)) return null
-    if (Number.isFinite(startMs) && endMs < startMs) endMs += 24 * 60 * 60_000
+    let endMs = parseLiveSessionTimeMs(session.endTime)
+    if (endMs == null) return null
+    if (startMs != null && endMs < startMs) endMs += 24 * 60 * 60_000
     return endMs
   }
-  if (Number.isFinite(startMs) && session.durationMinutes > 0) {
+  if (startMs != null && session.durationMinutes > 0) {
     return startMs + session.durationMinutes * 60_000
   }
-  return Number.isFinite(startMs) ? startMs : null
+  return startMs
 }
 
 export function computeScheduleOverlapMinutes(
@@ -92,11 +94,10 @@ export function matchLiveSessionToBestScheduleRow(
   scheduleRows: EffectiveScheduleRow[],
 ): LiveSessionScheduleMatchResult {
   const liveName = session.liveName?.trim() || ''
-  const startMs =
-    session.startTime && session.startTime !== '—' ? new Date(session.startTime).getTime() : NaN
+  const startMs = parseLiveSessionTimeMs(session.startTime)
   const endMs = resolveSessionEndMs(session)
 
-  if (!Number.isFinite(startMs) || endMs == null) {
+  if (startMs == null || endMs == null) {
     return {
       session,
       scheduleRow: null,
@@ -162,39 +163,34 @@ export function matchAllLiveSessionsToSchedule(
   return sessions.map((session) => matchLiveSessionToBestScheduleRow(session, scheduleRows))
 }
 
-/** 日报：某主播行 — 真实场次时间 + 排班归属（不混用排班时间作直播时间） */
+/** 日报：某主播行 — 真实场次时间 + 排班归属（allSessions 已为该主播归属后的场次） */
 export function buildDailyReportLiveScheduleFields(params: {
   anchorName: string
   allSessions: AnchorLiveSessionBrief[]
   scheduleRows: EffectiveScheduleRow[]
   usedScheduleRowIds?: Set<string>
 }): DailyReportLiveScheduleFields & { scheduleAttendance: AnchorAttendanceStatusPayload } {
-  const matches = matchAllLiveSessionsToSchedule(params.allSessions, params.scheduleRows)
-  const matchedForAnchor = matches.filter(
+  const matchedSessions = [...params.allSessions].sort((a, b) =>
+    a.startTime.localeCompare(b.startTime),
+  )
+
+  const matchResults = matchedSessions.map((session) =>
+    matchLiveSessionToBestScheduleRow(session, params.scheduleRows),
+  )
+  const anchorMatches = matchResults.filter(
     (m) => m.scheduleRow && anchorNamesMatch(m.scheduleRow.anchorName, params.anchorName),
   )
 
-  const matchedSessions = matchedForAnchor.map((m) => m.session)
-
   const livePeriodText = buildPerSessionLivePeriodText(matchedSessions)
-  const start = matchedSessions.length
-    ? matchedForAnchor
-        .map((m) => m.session)
-        .filter((s) => s.startTime && s.startTime !== '—')
-        .sort((a, b) => a.startTime.localeCompare(b.startTime))[0]?.startTime ?? null
-    : null
-  const endMsList = matchedSessions
-    .map((s) => resolveSessionEndMs(s))
-    .filter((ms): ms is number => ms != null)
-  const end =
-    endMsList.length > 0
-      ? new Date(Math.max(...endMsList)).toISOString()
-      : null
+  const actualStart = earliestSessionStart(matchedSessions)
+  const actualEnd = pickLatestValidSessionEnd(matchedSessions)
+  const start = actualStart?.startAt ?? null
+  const end = actualEnd?.endAt ?? null
 
   let primaryScheduleRow: EffectiveScheduleRow | null = null
   let scheduleMatchReason: string | null = null
-  if (matchedForAnchor.length > 0) {
-    const best = matchedForAnchor.reduce((a, b) =>
+  if (anchorMatches.length > 0) {
+    const best = anchorMatches.reduce((a, b) =>
       b.overlapMinutes > a.overlapMinutes ? b : a,
     )
     primaryScheduleRow = best.scheduleRow
@@ -206,27 +202,38 @@ export function buildDailyReportLiveScheduleFields(params: {
     ? `${primaryScheduleRow.startTime}–${primaryScheduleRow.endTime}`
     : null
 
-  const scheduleAttendance = primaryScheduleRow
-    ? (() => {
-        const earliest = matchedSessions
-          .filter((s) => s.startTime && s.startTime !== '—')
-          .sort((a, b) => a.startTime.localeCompare(b.startTime))[0]
-        const latestEndMs = endMsList.length ? Math.max(...endMsList) : null
-        const actualStartMs = earliest ? new Date(earliest.startTime).getTime() : null
-        const actualEndAt = latestEndMs != null ? new Date(latestEndMs).toISOString() : null
-        return toAttendanceStatusPayload(
-          calculateAnchorAttendanceStatus(
-            primaryScheduleRow,
-            actualStartMs,
-            earliest?.startTime ?? null,
-            latestEndMs,
-            actualEndAt,
-          ),
-        )
-      })()
-    : toAttendanceStatusPayload(
-        calculateAnchorAttendanceStatus(undefined, null, null, null, null),
+  const scheduleAttendance = (() => {
+    if (primaryScheduleRow && actualStart) {
+      return toAttendanceStatusPayload(
+        calculateAnchorAttendanceStatus(
+          primaryScheduleRow,
+          actualStart.startMs,
+          actualStart.startAt,
+          actualEnd?.endMs ?? null,
+          actualEnd?.endAt ?? null,
+        ),
       )
+    }
+    if (actualStart) {
+      return toAttendanceStatusPayload(
+        calculateAnchorAttendanceStatus(
+          undefined,
+          actualStart.startMs,
+          actualStart.startAt,
+          actualEnd?.endMs ?? null,
+          actualEnd?.endAt ?? null,
+        ),
+      )
+    }
+    if (primaryScheduleRow) {
+      return toAttendanceStatusPayload(
+        calculateAnchorAttendanceStatus(primaryScheduleRow, null, null, null, null),
+      )
+    }
+    return toAttendanceStatusPayload(
+      calculateAnchorAttendanceStatus(undefined, null, null, null, null),
+    )
+  })()
 
   const sessionLabel = primaryScheduleRow
     ? formatDisplaySessionLabel(

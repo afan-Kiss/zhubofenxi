@@ -667,25 +667,14 @@ export async function resolveCookieForShopStrict(shopKeyOrName: string): Promise
   if (!shopKey) return null
 
   const shopName = getGoodReviewShopName(shopKey)
-  const targetCanonical = resolveCanonicalShopName(shopName)
-  if (!targetCanonical) return null
+  const { resolveOfficialShopAccountForStatus } = await import('./official-shop-account.service')
+  const official = await resolveOfficialShopAccountForStatus(shopKey)
+  if (!official) return null
 
-  const accounts = await prisma.platformCredential.findMany({
-    where: { enabled: true },
-    orderBy: { createdAt: 'asc' },
-  })
-
-  const matched = accounts.find((row) => {
-    const name = row.displayName?.trim() || row.platformName
-    return resolveCanonicalShopName(name) === targetCanonical
-  })
-  if (!matched) return null
-
-  const displayName = matched.displayName?.trim() || matched.platformName
-  const cookie = await resolveLiveAccountCookie(matched.id, displayName)
+  const cookie = await resolveLiveAccountCookie(official.id, shopName)
   if (!cookie?.trim()) return null
 
-  return { cookie, shopKey, shopName, accountId: matched.id }
+  return { cookie, shopKey, shopName, accountId: official.id }
 }
 
 export async function buildGoodReviewArkOrderDetail(params: {

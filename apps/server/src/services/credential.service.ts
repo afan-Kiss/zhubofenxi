@@ -1,5 +1,10 @@
 import { prisma } from '../lib/prisma'
 import { encryptText, decryptText } from '../utils/crypto'
+import { resolveGoodReviewShopKey } from '../config/good-review-shops.constants'
+import {
+  listActiveLiveAccountsWithCookie,
+  resolveOfficialShopAccountForStatus,
+} from './official-shop-account.service'
 import { listEnabledLiveAccountsWithCookie } from './live-account.service'
 
 const DEFAULT_PLATFORM = 'xiaohongshu'
@@ -76,20 +81,27 @@ export async function listPlatformCredentialsWithCookie(): Promise<string[]> {
 }
 
 export async function getDecryptedCookie(platformName = DEFAULT_PLATFORM): Promise<string> {
+  const { getStoredLiveAccountCookiePlaintext } = await import('./live-account.service')
+
+  const shopKey = resolveGoodReviewShopKey(platformName)
+  if (shopKey) {
+    const official = await resolveOfficialShopAccountForStatus(shopKey)
+    if (official?.cookieEncrypted?.trim()) {
+      return getStoredLiveAccountCookiePlaintext(official.id)
+    }
+    throw new Error('尚未配置平台 Cookie，请先在系统设置保存')
+  }
+
   const row = await prisma.platformCredential.findUnique({
     where: { platformName },
   })
   if (row?.cookieEncrypted?.trim()) {
-    const { getStoredLiveAccountCookiePlaintext } = await import('./live-account.service')
     return getStoredLiveAccountCookiePlaintext(row.id)
   }
-  const fallback = await prisma.platformCredential.findFirst({
-    where: { NOT: { cookieEncrypted: '' } },
-    orderBy: { createdAt: 'asc' },
-  })
-  if (fallback?.cookieEncrypted?.trim()) {
-    const { getStoredLiveAccountCookiePlaintext } = await import('./live-account.service')
-    return getStoredLiveAccountCookiePlaintext(fallback.id)
+
+  const active = await listActiveLiveAccountsWithCookie()
+  if (active.length > 0) {
+    return getStoredLiveAccountCookiePlaintext(active[0]!.id)
   }
   throw new Error('尚未配置平台 Cookie，请先在系统设置保存')
 }

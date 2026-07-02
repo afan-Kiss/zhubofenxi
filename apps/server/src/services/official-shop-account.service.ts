@@ -41,6 +41,16 @@ export function resolveShopKeyFromAccountName(name: string): GoodReviewShopKey |
   return resolveGoodReviewShopKey(name)
 }
 
+/** 历史重复账号行：displayName/别名匹配四店，但 platformName 不是官方 shopKey */
+export function isLegacyDuplicateShopAccountRow(row: {
+  platformName: string
+  displayName: string | null
+}): boolean {
+  if (isOfficialShopPlatformName(row.platformName)) return false
+  const label = row.displayName?.trim() || row.platformName
+  return resolveShopKeyFromAccountName(label) != null
+}
+
 /** 历史重复账号：displayName/别名匹配四店，但 platformName 不是官方 shopKey */
 export async function findLegacyDuplicateShopAccounts(
   shopKey: GoodReviewShopKey,
@@ -176,4 +186,43 @@ export async function resolveOfficialShopAccountForStatus(
   if (duplicates.length === 0) return null
 
   return ensureOfficialShopAccount(shopKey, 'shop-status-migrate')
+}
+
+export async function resolveOfficialShopAccountByKeyOrName(
+  shopKeyOrName: string,
+  options?: { ensureForRead?: boolean },
+): Promise<{
+  shopKey: GoodReviewShopKey
+  shopName: QianfanShopName
+  account: PlatformCredentialRow
+} | null> {
+  const shopKey = resolveGoodReviewShopKey(shopKeyOrName)
+  if (!shopKey) return null
+  const shopName = getGoodReviewShopName(shopKey)
+  const account =
+    options?.ensureForRead === false
+      ? await resolveOfficialShopAccount(shopKey)
+      : await resolveOfficialShopAccountForStatus(shopKey)
+  if (!account) return null
+  return { shopKey, shopName, account }
+}
+
+/** 同步/BI/品退/任务：启用且有 Cookie，排除四店历史重复账号 */
+export async function listActiveLiveAccountsWithCookie(): Promise<
+  Array<{ id: string; name: string; platformName: string }>
+> {
+  const rows = await prisma.platformCredential.findMany({
+    where: { enabled: true, NOT: { cookieEncrypted: '' } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, displayName: true, platformName: true },
+  })
+  return rows
+    .filter((row) => !isLegacyDuplicateShopAccountRow(row))
+    .map((row) => ({
+      id: row.id,
+      name: isOfficialShopPlatformName(row.platformName)
+        ? getGoodReviewShopName(row.platformName)
+        : row.displayName?.trim() || row.platformName,
+      platformName: row.platformName,
+    }))
 }

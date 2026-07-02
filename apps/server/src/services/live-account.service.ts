@@ -240,30 +240,23 @@ export async function getDecryptedCookieByAccountId(accountId: string): Promise<
 export async function listEnabledLiveAccountsWithCookie(): Promise<
   Array<{ id: string; name: string; platformName: string }>
 > {
-  const rows = await prisma.platformCredential.findMany({
-    where: { enabled: true, NOT: { cookieEncrypted: '' } },
-    orderBy: { createdAt: 'asc' },
+  const { listActiveLiveAccountsWithCookie } = await import('./official-shop-account.service')
+  const active = await listActiveLiveAccountsWithCookie()
+  if (active.length > 0) return active
+
+  const fallback = await prisma.platformCredential.findFirst({
+    where: { platformName: DEFAULT_PLATFORM },
   })
-  if (rows.length === 0) {
-    const fallback = await prisma.platformCredential.findFirst({
-      where: { platformName: DEFAULT_PLATFORM },
-    })
-    if (fallback?.cookieEncrypted) {
-      return [
-        {
-          id: fallback.id,
-          name: fallback.displayName?.trim() || '默认',
-          platformName: fallback.platformName,
-        },
-      ]
-    }
-    return []
+  if (fallback?.cookieEncrypted) {
+    return [
+      {
+        id: fallback.id,
+        name: fallback.displayName?.trim() || '默认',
+        platformName: fallback.platformName,
+      },
+    ]
   }
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.displayName?.trim() || r.platformName,
-    platformName: r.platformName,
-  }))
+  return []
 }
 
 export async function getLiveAccountById(id: string) {

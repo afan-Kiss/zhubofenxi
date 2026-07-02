@@ -217,11 +217,8 @@ export async function refreshShopCookieFromControl(shopName: string): Promise<st
   const officialRow = shopKey ? await resolveOfficialShopAccountForStatus(shopKey) : null
   const accountId = officialRow?.id ?? null
 
-  const accounts = await prisma.platformCredential.findMany({ where: { enabled: true } })
-  for (const row of accounts) {
-    if (accountId && row.id === accountId) {
-      sessionByAccountId.delete(row.id)
-    }
+  if (accountId) {
+    sessionByAccountId.delete(accountId)
   }
 
   const envFallback = readEnvFallbackCookie(canonical)

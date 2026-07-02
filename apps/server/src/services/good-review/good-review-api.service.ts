@@ -1,5 +1,6 @@
-import { prisma } from '../../lib/prisma'
+import { resolveGoodReviewShopKey } from '../../config/good-review-shops.constants'
 import { resolveLiveAccountCookie } from '../qianfan-cookie-resolver.service'
+import { resolveOfficialShopAccountForStatus } from '../official-shop-account.service'
 import { requestXhsJson } from '../xhs-http.service'
 import { enqueueXhsRequest } from '../xhs-api-sync/xhs-rate-limiter.service'
 import type { GoodReviewShopDefinition } from '../../config/good-review-shops.constants'
@@ -22,18 +23,10 @@ const MAX_REVIEW_PAGES = 100
 const REVIEW_API_SOURCE = 0
 
 async function resolveAccountIdForShop(shopName: string): Promise<string | undefined> {
-  const rows = await prisma.platformCredential.findMany({
-    where: { enabled: true },
-    orderBy: { createdAt: 'asc' },
-  })
-  const { resolveCanonicalShopName } = await import('../../config/qianfan-shops.constants')
-  for (const row of rows) {
-    const name = row.displayName?.trim() || row.platformName
-    if (resolveCanonicalShopName(name) === resolveCanonicalShopName(shopName)) {
-      return row.id
-    }
-  }
-  return undefined
+  const shopKey = resolveGoodReviewShopKey(shopName)
+  if (!shopKey) return undefined
+  const account = await resolveOfficialShopAccountForStatus(shopKey)
+  return account?.id
 }
 
 async function postGoodReviewApi<T>(

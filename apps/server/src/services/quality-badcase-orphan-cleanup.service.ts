@@ -1,5 +1,9 @@
 import { prisma } from '../lib/prisma'
 import { LEGACY_LIVE_ACCOUNT_ID } from '../utils/live-account-cache-key.util'
+import {
+  isLegacyDuplicateShopAccountRow,
+  listActiveLiveAccountsWithCookie,
+} from './official-shop-account.service'
 import { appendQualityBadCaseSyncLog } from './quality-badcase-sync-log.service'
 
 export type OrphanQualityBadCaseTaskSource =
@@ -52,7 +56,10 @@ export async function cleanupOrphanQualityBadCaseSyncJobs(options?: {
   })
 
   const enabledWithCookie = allAccounts.filter(
-    (a) => a.enabled && Boolean(a.cookieEncrypted?.trim()),
+    (a) =>
+      a.enabled &&
+      Boolean(a.cookieEncrypted?.trim()) &&
+      !isLegacyDuplicateShopAccountRow(a),
   )
   const accountById = new Map(allAccounts.map((a) => [a.id, a]))
 
@@ -146,16 +153,7 @@ export async function cleanupOrphanQualityBadCaseSyncJobs(options?: {
 export async function listOfficialQualitySyncCandidateAccounts(): Promise<
   Array<{ id: string; name: string; platformName: string }>
 > {
-  const rows = await prisma.platformCredential.findMany({
-    where: { enabled: true, NOT: { cookieEncrypted: '' } },
-    orderBy: { createdAt: 'asc' },
-    select: { id: true, displayName: true, platformName: true },
-  })
-  return rows.map((r) => ({
-    id: r.id,
-    name: r.displayName?.trim() || r.platformName,
-    platformName: r.platformName,
-  }))
+  return listActiveLiveAccountsWithCookie()
 }
 
 export function isOrphanLiveAccountId(

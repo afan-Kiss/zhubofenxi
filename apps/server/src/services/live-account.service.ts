@@ -567,7 +567,7 @@ export async function getCookieHealthPayload(): Promise<{
         ...account,
         canSyncOrders: shop.canSyncOrders,
         syncReason: shop.reason,
-        cookieStatus: shop.canSyncOrders ? 'valid' : 'invalid',
+        cookieStatus: (shop.canSyncOrders ? 'valid' : 'invalid') as CookieHealthStatus,
         cookieLastErrorMessage: shop.canSyncOrders ? null : shop.reason,
         statusLevel: deriveStatusLevel(shop.canSyncOrders, shop.hasCookie, shop.status),
         cookieDisplayStatus: shop.status,

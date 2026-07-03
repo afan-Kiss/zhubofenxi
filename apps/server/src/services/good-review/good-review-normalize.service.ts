@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto'
+
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
 }
@@ -190,14 +192,29 @@ function parseReviewTime(raw: Record<string, unknown>): { date: Date | null; tex
   return { date: null, text }
 }
 
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value)
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  const obj = value as Record<string, unknown>
+  const keys = Object.keys(obj).sort()
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`
+}
+
 export function buildGoodReviewDedupeKey(
   shopKey: string,
   reviewId: string | null,
   orderId: string | null,
   createTime: string | null,
+  rawFallback?: Record<string, unknown>,
 ): string {
   if (reviewId) return `${shopKey}::${reviewId}`
-  return `${shopKey}::${orderId ?? 'unknown'}::${createTime ?? 'unknown'}`
+  const oid = orderId?.trim() || null
+  const ct = createTime?.trim() || null
+  if (oid && ct) return `${shopKey}::${oid}::${ct}`
+  if (oid || ct) return `${shopKey}::${oid ?? 'unknown'}::${ct ?? 'unknown'}`
+  const raw = rawFallback ?? {}
+  const hash = createHash('sha1').update(stableStringify(raw)).digest('hex').slice(0, 16)
+  return `${shopKey}::hash::${hash}`
 }
 
 export function normalizeGoodReviewRow(
@@ -225,7 +242,7 @@ export function normalizeGoodReviewRow(
     create_time: pickString(reviewData ?? raw, ['create_time', 'createTime']),
     createTime: pickString(reviewData ?? raw, ['create_time', 'createTime']),
   })
-  const dedupeKey = buildGoodReviewDedupeKey(shopKey, reviewId, orderId, text)
+  const dedupeKey = buildGoodReviewDedupeKey(shopKey, reviewId, orderId, text, raw)
 
   const reviewText =
     pickString(content ?? reviewData ?? raw, [

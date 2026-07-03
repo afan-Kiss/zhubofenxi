@@ -1,10 +1,11 @@
 /**
  * 运营报表成品缓存：日报 / 周报 / 月报 / 榜单中心
  * 仅加速读取，不改变报表构建口径。
- * 当前系统无登录和权限区分，所有人共用一份本地看板缓存（local_viewer / 本地看板）。
+ * 有登录用户时按 role / username 分缓存；本地免登录模式 fallback 到 local_viewer。
  */
 import { BUSINESS_SYNC_INTERVAL_MINUTES } from '../config/business-sync.constants'
 import { LOCAL_VIEWER_USER } from '../constants/local-viewer'
+import type { SessionUser } from '../types/auth'
 import type { UserRole } from '../types/roles'
 import {
   addDaysShanghai,
@@ -67,12 +68,29 @@ const pendingBuilds = new Map<string, Promise<OperationsReportCacheEntry>>()
 let prewarmRunning = false
 let prewarmPromise: Promise<{ warmed: number; failed: number; totalMs: number }> | null = null
 
-/** 运营报表缓存统一身份：无登录权限时全员共用 */
+/** 本地免登录看板固定身份 */
 export function getLocalViewerCacheIdentity(): { role: UserRole; username: string } {
   return { role: LOCAL_VIEWER_USER.role, username: LOCAL_VIEWER_USER.username }
 }
 
+/** 请求上下文身份：有登录用户用真实身份，否则 fallback 本地看板 */
+export function resolveRequestCacheIdentity(
+  user?: Pick<SessionUser, 'role' | 'username'> | null,
+): { role: UserRole; username: string } {
+  const role = user?.role?.trim()
+  const username = user?.username?.trim()
+  if (role && username) {
+    return { role: role as UserRole, username }
+  }
+  return getLocalViewerCacheIdentity()
+}
+
 function normalizeCacheKeyInput(input: OperationsReportCacheKeyInput): OperationsReportCacheKeyInput {
+  const role = input.role?.trim()
+  const username = input.username?.trim()
+  if (role && username) {
+    return { ...input, role, username }
+  }
   const identity = getLocalViewerCacheIdentity()
   return {
     ...input,

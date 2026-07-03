@@ -116,14 +116,17 @@ export async function queryGoodReviews(params?: {
   const shopKey = params?.shop?.trim()
   const limit = Math.min(Math.max(params?.limit ?? 200, 1), 500)
 
-  const [lastSyncedAt, snapshotRows, reviewRows] = await Promise.all([
+  const reviewWhere = shopKey ? { shopKey } : undefined
+
+  const [lastSyncedAt, snapshotRows, reviewRows, totalReviewCount] = await Promise.all([
     getGoodReviewLastSyncedAt(),
     prisma.goodReviewShopSnapshot.findMany({ orderBy: { shopKey: 'asc' } }),
     prisma.goodReview.findMany({
-      where: shopKey ? { shopKey } : undefined,
+      where: reviewWhere,
       orderBy: [{ reviewTime: 'desc' }, { syncedAt: 'desc' }],
       take: limit,
     }),
+    prisma.goodReview.count({ where: reviewWhere }),
   ])
 
   const snapshotByKey = new Map(snapshotRows.map((row) => [row.shopKey, row]))
@@ -152,6 +155,7 @@ export async function queryGoodReviews(params?: {
     lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
     shops,
     reviews: reviewRows.map(rowToReviewView),
-    totalReviewCount: reviewRows.length,
+    totalReviewCount,
+    returnedReviewCount: reviewRows.length,
   }
 }

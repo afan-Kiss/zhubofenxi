@@ -363,10 +363,10 @@ boardRouter.get('/operations-report/daily', async (req, res) => {
     const { buildDailyOperationsReport } = await import(
       '../services/daily-operations-report.service'
     )
-    const { getOrBuildOperationsReportCache, getLocalViewerCacheIdentity } = await import(
+    const { getOrBuildOperationsReportCache, resolveRequestCacheIdentity } = await import(
       '../services/operations-report-cache.service'
     )
-    const viewer = getLocalViewerCacheIdentity()
+    const viewer = resolveRequestCacheIdentity(req.user)
     const result = await getOrBuildOperationsReportCache(
       {
         kind: 'daily',
@@ -416,10 +416,10 @@ boardRouter.get('/operations-rankings', async (req, res) => {
       : 'custom'
     const sections = req.query.sections ? String(req.query.sections).split(',') : undefined
     const { getOperationsRankings } = await import('../services/operations-rankings.service')
-    const { getOrBuildOperationsReportCache, getLocalViewerCacheIdentity } = await import(
+    const { getOrBuildOperationsReportCache, resolveRequestCacheIdentity } = await import(
       '../services/operations-report-cache.service'
     )
-    const viewer = getLocalViewerCacheIdentity()
+    const viewer = resolveRequestCacheIdentity(req.user)
     const result = await getOrBuildOperationsReportCache(
       {
         kind: 'rankings',
@@ -548,10 +548,10 @@ boardRouter.get('/operations-report/weekly', async (req, res) => {
     const { buildWeeklyOperationsReport } = await import(
       '../services/weekly-operations-report.service'
     )
-    const { getOrBuildOperationsReportCache, getLocalViewerCacheIdentity } = await import(
+    const { getOrBuildOperationsReportCache, resolveRequestCacheIdentity } = await import(
       '../services/operations-report-cache.service'
     )
-    const viewer = getLocalViewerCacheIdentity()
+    const viewer = resolveRequestCacheIdentity(req.user)
     const result = await getOrBuildOperationsReportCache(
       {
         kind: 'weekly',
@@ -596,9 +596,9 @@ boardRouter.get('/operations-monthly-report', async (req, res) => {
     const {
       getOrBuildOperationsReportCache,
       resolveMonthlyCacheKeyInput,
-      getLocalViewerCacheIdentity,
+      resolveRequestCacheIdentity,
     } = await import('../services/operations-report-cache.service')
-    const viewer = getLocalViewerCacheIdentity()
+    const viewer = resolveRequestCacheIdentity(req.user)
     const cacheKeyInput = resolveMonthlyCacheKeyInput({
       month,
       startDate,
@@ -668,6 +668,10 @@ boardRouter.get('/operations-bi-drill', async (req, res) => {
     const pageSize = Number.isFinite(rawLimit)
       ? Math.min(Math.max(Math.round(rawLimit), 1), 100)
       : 20
+    const { resolveRequestCacheIdentity } = await import(
+      '../services/operations-report-cache.service'
+    )
+    const viewer = resolveRequestCacheIdentity(req.user)
     const data = await buildOperationsBiDrill({
       source: String(req.query.source ?? '') as import('../services/operations-bi-drill.types').OperationsBiDrillSource,
       target: String(req.query.target ?? '') as import('../services/operations-bi-drill.types').OperationsBiDrillTarget,
@@ -680,6 +684,7 @@ boardRouter.get('/operations-bi-drill', async (req, res) => {
       page: req.query.page ? Number(req.query.page) : 1,
       pageSize,
       sort: req.query.sort ? String(req.query.sort) : undefined,
+      ...viewer,
       anchorId: req.query.anchorId ? String(req.query.anchorId) : undefined,
       anchorName: req.query.anchorName ? String(req.query.anchorName) : undefined,
       productKey: req.query.productKey ? String(req.query.productKey) : undefined,

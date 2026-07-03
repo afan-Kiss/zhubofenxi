@@ -11,13 +11,18 @@ import {
 import {
   extractReviewList,
   extractReviewTotal,
+  normalizeGoodReviewRow,
   parseReviewManagerEnvelope,
 } from './good-review-normalize.service'
 import type { NormalizedGoodReview } from './good-review.types'
-import { normalizeGoodReviewRow } from './good-review-normalize.service'
 
 const REVIEW_PAGE_SIZE = 20
-const MAX_REVIEW_PAGES = 100
+
+function resolveMaxReviewSyncCount(): number {
+  const raw = process.env.GOOD_REVIEW_SYNC_MAX?.trim()
+  const n = raw ? Number(raw) : 10_000
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 10_000
+}
 
 /** HAR：review_manager / review_list_count_detail 使用 source: 0 */
 const REVIEW_API_SOURCE = 0
@@ -110,14 +115,22 @@ export async function fetchReviewManagerPage(
 export async function fetchAllGoodReviews(shop: GoodReviewShopDefinition): Promise<{
   reviews: NormalizedGoodReview[]
   totalReviewCount: number | null
+  fetchedReviewCount: number
+  syncedReviewCount: number
+  truncated: boolean
+  warning?: string
   managerEnvelope: ReturnType<typeof parseReviewManagerEnvelope> | null
 }> {
   const all: NormalizedGoodReview[] = []
   const seen = new Set<string>()
   let total: number | null = null
   let lastEnvelope: ReturnType<typeof parseReviewManagerEnvelope> | null = null
+  const maxReviews = resolveMaxReviewSyncCount()
+  const maxPages = Math.ceil(maxReviews / REVIEW_PAGE_SIZE)
+  let truncated = false
+  let warning: string | undefined
 
-  for (let page = 1; page <= MAX_REVIEW_PAGES; page++) {
+  for (let page = 1; page <= maxPages; page++) {
     const pageResult = await fetchReviewManagerPage(shop, page)
     lastEnvelope = pageResult.envelope
     if (total == null && pageResult.total != null) total = pageResult.total
@@ -127,15 +140,35 @@ export async function fetchAllGoodReviews(shop: GoodReviewShopDefinition): Promi
       if (seen.has(item.dedupeKey)) continue
       seen.add(item.dedupeKey)
       all.push(item)
+      if (all.length >= maxReviews) {
+        truncated = true
+        warning = `已达同步上限 ${maxReviews} 条，平台可能还有更多评价未拉取`
+        break
+      }
     }
 
+    if (truncated) break
     if (pageResult.items.length < REVIEW_PAGE_SIZE) break
     if (total != null && all.length >= total) break
+    if (page >= maxPages && (total == null || all.length < total)) {
+      truncated = true
+      warning = warning ?? `已达同步页数上限 ${maxPages} 页，平台可能还有更多评价未拉取`
+      break
+    }
+  }
+
+  if (!truncated && total != null && all.length < total) {
+    truncated = true
+    warning = `已拉取 ${all.length} 条，平台显示共 ${total} 条，可能未全部同步`
   }
 
   return {
     reviews: all,
     totalReviewCount: total ?? all.length,
+    fetchedReviewCount: all.length,
+    syncedReviewCount: all.length,
+    truncated,
+    warning,
     managerEnvelope: lastEnvelope,
   }
 }

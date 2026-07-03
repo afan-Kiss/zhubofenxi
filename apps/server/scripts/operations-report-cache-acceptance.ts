@@ -261,110 +261,63 @@ async function main() {
   assert(keyStr.includes('daily'), 'cache key 应含 kind', issues)
   assert(keyStr.includes(dailyDate), 'cache key 应含日期', issues)
 
-  // 16 单看板缓存：无登录权限，统一 local_viewer / 本地看板
-  invalidateOperationsReportCache('单看板验收')
-  const viewer = getLocalViewerCacheIdentity()
-  assert(viewer.role === LOCAL_VIEWER_USER.role, '身份应为 local_viewer', issues)
-  assert(viewer.username === LOCAL_VIEWER_USER.username, '身份应为 本地看板', issues)
+  // 16 登录身份分缓存：admin / staff 不共用；未传身份时 fallback local_viewer
+  invalidateOperationsReportCache('身份分缓存验收')
+  const adminIdentity = { role: 'super_admin' as const, username: 'admin' }
+  const staffIdentity = { role: 'staff' as const, username: 'staff1' }
 
-  await getOrBuildOperationsReportCache(dailyKey, () =>
+  const adminDailyKey = { ...dailyKey, ...adminIdentity }
+  const staffDailyKey = { ...dailyKey, ...staffIdentity }
+
+  await getOrBuildOperationsReportCache(adminDailyKey, () =>
     buildDailyOperationsReport({
       preset: 'custom',
       startDate: dailyDate,
       endDate: dailyDate,
-      ...viewer,
+      ...adminIdentity,
     }),
   )
-  const dailyAlt = await getOrBuildOperationsReportCache(
-    {
-      kind: 'daily',
+  const staffDaily = await getOrBuildOperationsReportCache(staffDailyKey, () =>
+    buildDailyOperationsReport({
+      preset: 'custom',
       startDate: dailyDate,
       endDate: dailyDate,
-      preset: 'custom',
-      scope: 'daily',
-      role: 'super_admin',
-      username: 'admin',
-    },
-    async () => {
-      issues.push('不应因 super_admin 身份重新构建日报')
-      return buildDailyOperationsReport({
-        preset: 'custom',
-        startDate: dailyDate,
-        endDate: dailyDate,
-        role: 'super_admin',
-        username: 'admin',
-      })
-    },
+      ...staffIdentity,
+    }),
   )
-  assert(dailyAlt.cache.hit === true, '不同身份应命中同一份日报缓存', issues)
-  const dailyKeys = listOperationsReportCacheKeys().filter((k) => k.startsWith('daily|'))
-  assert(dailyKeys.length === 1, `日报应只有 1 份缓存，实际 ${dailyKeys.length}`, issues)
+  assert(staffDaily.cache.hit === false, '不同身份应使用不同缓存 key', issues)
 
-  await getOrBuildOperationsReportCache(weeklyKey, () =>
-    buildWeeklyOperationsReport({ weekStart, weekEnd, preset: 'custom', ...viewer }),
-  )
-  const weeklyAlt = await getOrBuildOperationsReportCache(
-    {
-      kind: 'weekly',
-      startDate: weekStart,
-      endDate: weekEnd,
-      preset: 'custom',
-      scope: 'weekly',
-      role: 'boss',
-      username: 'boss',
-    },
-    async () => {
-      issues.push('不应因 boss 身份重新构建周报')
-      return buildWeeklyOperationsReport({
-        weekStart,
-        weekEnd,
-        preset: 'custom',
-        role: 'boss',
-        username: 'boss',
-      })
-    },
-  )
-  assert(weeklyAlt.cache.hit === true, '不同身份应命中同一份周报缓存', issues)
-  const weeklyKeys = listOperationsReportCacheKeys().filter((k) => k.startsWith('weekly|'))
-  assert(weeklyKeys.length === 1, `周报应只有 1 份缓存，实际 ${weeklyKeys.length}`, issues)
+  const adminKeyStr = buildOperationsReportCacheKey(adminDailyKey)
+  const staffKeyStr = buildOperationsReportCacheKey(staffDailyKey)
+  assert(adminKeyStr !== staffKeyStr, 'admin 与 staff 缓存 key 必须不同', issues)
+  assert(adminKeyStr.includes('admin'), 'admin 缓存 key 应含 admin', issues)
+  assert(staffKeyStr.includes('staff1'), 'staff 缓存 key 应含 staff1', issues)
 
-  await getOrBuildOperationsReportCache(monthlyKey, () =>
-    getMonthlyOperationsReport({ month, preset: 'custom', ...viewer }),
-  )
-  const monthlyAlt = await getOrBuildOperationsReportCache(
-    {
-      kind: 'monthly',
-      startDate: monthlyKey.startDate,
-      endDate: monthlyKey.endDate,
-      month: monthlyKey.month,
-      preset: 'custom',
-      scope: 'monthly',
-      role: 'staff',
-      username: 'staff',
-    },
-    async () => {
-      issues.push('不应因 staff 身份重新构建月报')
-      return getMonthlyOperationsReport({ month, preset: 'custom', role: 'staff', username: 'staff' })
-    },
-  )
-  assert(monthlyAlt.cache.hit === true, '不同身份应命中同一份月报缓存', issues)
-  const monthlyKeys = listOperationsReportCacheKeys().filter((k) => k.startsWith('monthly|'))
-  assert(monthlyKeys.length === 1, `月报应只有 1 份缓存，实际 ${monthlyKeys.length}`, issues)
+  const preservedAdmin = buildOperationsReportCacheKey({
+    kind: 'daily',
+    startDate: dailyDate,
+    endDate: dailyDate,
+    preset: 'custom',
+    scope: 'daily',
+    role: 'super_admin',
+    username: 'admin',
+  })
+  assert(preservedAdmin.includes('super_admin'), '真实登录身份不应被覆盖为 local_viewer', issues)
+  assert(!preservedAdmin.includes('local_viewer'), '真实登录身份不应被覆盖为 local_viewer', issues)
 
-  const forbiddenRoles = ['super_admin', 'boss', 'staff', 'operator', 'anchor']
-  for (const key of listOperationsReportCacheKeys()) {
-    for (const role of forbiddenRoles) {
-      if (key.includes(`|${role}|`)) {
-        issues.push(`缓存 key 含非本地看板角色：${key}`)
-      }
-    }
-    if (!key.includes('local_viewer')) {
-      issues.push(`缓存 key 未使用 local_viewer：${key}`)
-    }
-    if (!key.includes('本地看板')) {
-      issues.push(`缓存 key 未使用 本地看板：${key}`)
-    }
-  }
+  const viewer = getLocalViewerCacheIdentity()
+  assert(viewer.role === LOCAL_VIEWER_USER.role, '本地看板身份应为 local_viewer', issues)
+  assert(viewer.username === LOCAL_VIEWER_USER.username, '本地看板身份应为 本地看板', issues)
+
+  const localOnlyKey = buildOperationsReportCacheKey({
+    kind: 'daily',
+    startDate: dailyDate,
+    endDate: dailyDate,
+    preset: 'custom',
+    scope: 'daily',
+  })
+  assert(localOnlyKey.includes('local_viewer'), '未传身份时应 fallback local_viewer', issues)
+  assert(localOnlyKey.includes('本地看板'), '未传身份时应 fallback 本地看板', issues)
 
   // HTTP 状态/预热（维护工具开启时）
   try {

@@ -8,7 +8,7 @@ import {
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { isValidRevenueOrder, resolveValidRevenueAmountCent } from './valid-revenue-order.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
-import { getLocalViewerCacheIdentity } from './operations-report-cache.service'
+import { resolveRequestCacheIdentity } from './operations-report-cache.service'
 import {
   pickItemIdFromRaw,
   pickProductNameFromRaw,
@@ -355,7 +355,9 @@ export async function buildOperationsBiDrill(
     MAX_PAGE_SIZE,
   )
   const page = Math.max(input.page ?? 1, 1)
-  const viewer = getLocalViewerCacheIdentity()
+  const viewer = resolveRequestCacheIdentity(
+    input.role && input.username ? { role: input.role as import('../types/roles').UserRole, username: input.username } : null,
+  )
 
   if (TRAFFIC_ONLY_TARGETS.has(input.target)) {
     return {

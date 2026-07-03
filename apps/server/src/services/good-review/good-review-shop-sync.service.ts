@@ -61,6 +61,9 @@ export async function syncGoodReviewsForShop(
   let reviewPayload: Awaited<ReturnType<typeof fetchAllGoodReviews>> = {
     reviews: [],
     totalReviewCount: null,
+    fetchedReviewCount: 0,
+    syncedReviewCount: 0,
+    truncated: false,
     managerEnvelope: null,
   }
   let managerError: string | undefined
@@ -129,12 +132,19 @@ export async function syncGoodReviewsForShop(
     partialErrors.push(`统计已同步（${stats.goodReviewCount} 条好评），明细同步失败：${managerError ?? '未知原因'}`)
   }
 
+  if (reviewPayload.truncated && reviewPayload.warning) {
+    partialErrors.push(reviewPayload.warning)
+  }
+
   return {
     shopKey: shop.shopKey,
     shopName: shop.shopName,
     success: true,
     syncedReviewCount: managerSyncedCount,
+    fetchedReviewCount: reviewPayload.fetchedReviewCount,
     totalReviewCount: stats.goodReviewCount || stats.totalReviewCount,
+    truncated: reviewPayload.truncated,
+    warning: reviewPayload.warning,
     latestReviewTime: latest?.toISOString(),
     shopScoreSuccess,
     countSuccess,

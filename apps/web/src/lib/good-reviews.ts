@@ -45,6 +45,7 @@ export interface GoodReviewPagePayload {
   shops: GoodReviewShopView[]
   reviews: GoodReviewItemView[]
   totalReviewCount: number
+  returnedReviewCount?: number
 }
 
 export interface GoodReviewSyncShopResult {
@@ -52,7 +53,10 @@ export interface GoodReviewSyncShopResult {
   shopName: string
   success: boolean
   syncedReviewCount?: number
+  fetchedReviewCount?: number
   totalReviewCount?: number
+  truncated?: boolean
+  warning?: string
   latestReviewTime?: string
   error?: string
   shopScoreSuccess?: boolean
@@ -80,9 +84,12 @@ export function formatGoodReviewSyncMessage(result: GoodReviewSyncResult): {
   text: string
 } {
   const detailLines = result.shops
-    .filter((s) => s.error || s.managerError)
+    .filter((s) => s.error || s.managerError || s.warning)
     .map((s) => {
       const parts: string[] = []
+      if (s.truncated && s.warning) {
+        parts.push(`${s.shopName}：${s.warning}`)
+      }
       if (s.managerSuccess === false && s.managerError) {
         parts.push(`${s.shopName}明细失败：${s.managerError}`)
       } else if (s.error) {

@@ -173,19 +173,63 @@ export function closeGoodReviewImageSession(sessionId: string): void {
 }
 
 async function downloadImage(sourceUrl: string): Promise<{ buffer: Buffer; contentType: string }> {
-  const res = await fetch(sourceUrl, {
-    headers: {
-      'User-Agent': USER_AGENT,
-      Referer: REFERER,
-      Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-    },
-    redirect: 'follow',
-  })
-  if (!res.ok) throw new Error(`下载图片失败 HTTP ${res.status}`)
-  const contentType = res.headers.get('content-type') ?? 'image/jpeg'
-  const buffer = Buffer.from(await res.arrayBuffer())
-  if (buffer.length <= 0) throw new Error('图片为空')
-  return { buffer, contentType }
+  const maxBytesRaw = process.env.GOOD_REVIEW_IMAGE_MAX_BYTES?.trim()
+  const parsedMax = maxBytesRaw ? Number(maxBytesRaw) : 10 * 1024 * 1024
+  const maxBytes =
+    Number.isFinite(parsedMax) && parsedMax > 0 ? Math.round(parsedMax) : 10 * 1024 * 1024
+
+  let currentUrl = sourceUrl
+  for (let hop = 0; hop <= 5; hop++) {
+    const res = await fetch(currentUrl, {
+      headers: {
+        'User-Agent': USER_AGENT,
+        Referer: REFERER,
+        Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+      },
+      redirect: 'manual',
+    })
+
+    if ([301, 302, 303, 307, 308].includes(res.status)) {
+      const location = res.headers.get('location')
+      if (!location) throw new Error('图片跳转地址无效')
+      currentUrl = new URL(location, currentUrl).href
+      if (!isAllowedGoodReviewImageUrl(currentUrl)) {
+        throw new Error('跳转后的图片地址不在允许范围')
+      }
+      continue
+    }
+
+    if (!res.ok) throw new Error(`下载图片失败 HTTP ${res.status}`)
+
+    const contentType = (res.headers.get('content-type') ?? '').split(';')[0]?.trim().toLowerCase()
+    if (!contentType.startsWith('image/')) {
+      throw new Error(`不是图片文件（${contentType || '未知类型'}）`)
+    }
+
+    const contentLength = res.headers.get('content-length')
+    if (contentLength) {
+      const len = Number(contentLength)
+      if (Number.isFinite(len) && len > maxBytes) {
+        throw new Error(`图片超过大小限制（${Math.round(maxBytes / 1024 / 1024)}MB）`)
+      }
+    }
+
+    const chunks: Buffer[] = []
+    let total = 0
+    if (!res.body) throw new Error('图片响应为空')
+    for await (const chunk of res.body as AsyncIterable<Uint8Array>) {
+      total += chunk.length
+      if (total > maxBytes) {
+        throw new Error(`图片超过大小限制（${Math.round(maxBytes / 1024 / 1024)}MB）`)
+      }
+      chunks.push(Buffer.from(chunk))
+    }
+    const buffer = Buffer.concat(chunks)
+    if (buffer.length <= 0) throw new Error('图片为空')
+    return { buffer, contentType }
+  }
+
+  throw new Error('图片跳转次数过多')
 }
 
 export async function proxyGoodReviewImage(params: {

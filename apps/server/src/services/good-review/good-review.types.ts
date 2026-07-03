@@ -12,7 +12,10 @@ export interface GoodReviewSyncShopResult {
   shopName: string
   success: boolean
   syncedReviewCount?: number
+  fetchedReviewCount?: number
   totalReviewCount?: number
+  truncated?: boolean
+  warning?: string
   latestReviewTime?: string
   error?: string
   shopScoreSuccess?: boolean
@@ -125,5 +128,8 @@ export interface GoodReviewPagePayload {
   lastSyncedAt: string | null
   shops: GoodReviewShopView[]
   reviews: GoodReviewItemView[]
+  /** 数据库真实评价总数（不受 limit 影响） */
   totalReviewCount: number
+  /** 本次接口返回的评价条数 */
+  returnedReviewCount: number
 }

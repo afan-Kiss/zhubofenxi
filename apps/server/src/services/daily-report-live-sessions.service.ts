@@ -10,7 +10,7 @@ import {
   type NormalizedLiveSession,
 } from './xhs-api-sync/xhs-json-normalizer.service'
 import { resolveDateRange } from '../utils/date-range'
-import { formatDateTimeShanghai } from '../utils/business-timezone'
+import { formatDateTimeShanghai, parseLiveSessionTimeMs } from '../utils/business-timezone'
 import {
   extractLiveSessionTrafficFromSession,
   type LiveSessionTrafficMetrics,
@@ -268,8 +268,8 @@ export async function loadPerShopDailyReportLiveSessions(params: {
         row.liveAccountName?.trim(),
       )
       if (!brief) continue
-      const startMs = new Date(brief.startTime).getTime()
-      if (!Number.isFinite(startMs)) continue
+      const startMs = parseLiveSessionTimeMs(brief.startTime)
+      if (startMs == null) continue
       if (startMs < range.startTimeMs || startMs > range.endTimeMs) continue
       inRange.push(brief)
     }

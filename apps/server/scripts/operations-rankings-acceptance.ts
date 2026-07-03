@@ -84,6 +84,7 @@ function mockAnchor(overrides: Partial<DailyOperationsAnchorRow> & { anchorName:
     liveDurationMinutes: overrides.liveDurationMinutes ?? 60,
     validAmountYuan: overrides.validAmountYuan ?? 0,
     soldOrderCount: overrides.soldOrderCount ?? 0,
+    paidOrderCount: overrides.paidOrderCount ?? overrides.soldOrderCount ?? 0,
     invalidOrderCount: 0,
     returnOrderCount: overrides.returnOrderCount ?? 0,
     returnOrderRate: null,

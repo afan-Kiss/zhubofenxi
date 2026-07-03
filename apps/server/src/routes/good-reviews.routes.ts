@@ -23,7 +23,7 @@ import fs from 'node:fs'
 
 export const goodReviewsRouter = Router()
 
-goodReviewsRouter.get('/image-proxy', attachRequestUser, async (req, res, next) => {
+goodReviewsRouter.get('/image-proxy', attachRequestUser, requireAuth, async (req, res, next) => {
   try {
     const rawUrl = String(req.query.url ?? '').trim()
     const sessionId = String(req.query.sessionId ?? '').trim() || undefined

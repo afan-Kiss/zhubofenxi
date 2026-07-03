@@ -69,6 +69,10 @@ export interface OperationsBiDrillRequest {
   insightType?: string
 
   metricKey?: string
+
+  /** 登录用户身份，用于数据范围过滤 */
+  role?: string
+  username?: string
 }
 
 export interface OperationsBiDrillOrderRow {

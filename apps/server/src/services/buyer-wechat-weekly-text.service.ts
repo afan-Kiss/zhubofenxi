@@ -22,11 +22,7 @@ import {
   isStableSignedTagBuyer,
   type BuyerValueProfile,
 } from './buyer-value-profile.service'
-import { isQualityRankingBuyer, isSpendRankingBuyer } from './buyer-ranking-tab-filters'
-
-function formatMoneyYuanFull(yuan: number): string {
-  return `¥${yuan.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
+import { isSpendRankingBuyer } from './buyer-ranking-tab-filters'
 
 export type WechatWeeklyRankingKind = 'highValue' | 'spend' | 'stableSigned' | 'highAov'
 
@@ -34,14 +30,35 @@ export interface WechatWeeklyTextRow {
   rank: number
   buyerDisplayName: string
   amountYuan: number
+  scoreText: string
   signedOrderCount: number
-  refundOrderCount: number
+  completedOrderCount: number
+  afterSaleOrderCount: number
   mainTag: string
   shopLabel: string
 }
 
+/** 金额不带 .00（整数时） */
+export function formatMoneyYuanCompact(yuan: number): string {
+  const rounded = Math.round(yuan * 100) / 100
+  if (Math.abs(rounded - Math.round(rounded)) < 0.001) {
+    return `¥${Math.round(rounded).toLocaleString('zh-CN')}`
+  }
+  return `¥${rounded.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+export function formatWechatWeeklyBlock(row: WechatWeeklyTextRow): string {
+  return [
+    `${row.rank}. ${row.buyerDisplayName}`,
+    `消费：${formatMoneyYuanCompact(row.amountYuan)}｜价值分：${row.scoreText}`,
+    `签收：${row.signedOrderCount} 单｜完成：${row.completedOrderCount} 单｜售后：${row.afterSaleOrderCount} 单`,
+    `标签：${row.mainTag}｜店铺：${row.shopLabel}`,
+  ].join('\n')
+}
+
+/** @deprecated 使用 formatWechatWeeklyBlock */
 export function formatWechatWeeklyLine(row: WechatWeeklyTextRow): string {
-  return `${row.rank}. ${row.buyerDisplayName}｜消费 ${formatMoneyYuanFull(row.amountYuan)}｜签收 ${row.signedOrderCount} 单｜退货 ${row.refundOrderCount} 单｜${row.mainTag}｜${row.shopLabel}`
+  return formatWechatWeeklyBlock(row)
 }
 
 export function composeWechatWeeklyText(params: {
@@ -52,14 +69,14 @@ export function composeWechatWeeklyText(params: {
   if (params.rows.length === 0) {
     return `${params.title}\n时间：${params.dateRangeLabel}\n\n本期暂时没有符合条件的客户，不代表没有值得跟进的买家，可以换个周期再看看。`
   }
-  const lines = params.rows.map(formatWechatWeeklyLine)
+  const blocks = params.rows.map(formatWechatWeeklyBlock)
   return [
     params.title,
     `时间：${params.dateRangeLabel}`,
     '',
-    ...lines,
+    blocks.join('\n\n'),
     '',
-    '说明：按本期真实成交金额、签收、退货综合排序。高价值不代表一定马上成交，主播跟进时注意真诚维护。',
+    '说明：价值分按成交金额、签收、复购、客单价和售后情况综合计算。高价值不代表一定马上成交，主播跟进时注意真诚维护。',
   ].join('\n')
 }
 
@@ -188,13 +205,13 @@ export async function buildWechatWeeklyBuyerRankingText(params: {
     rank: idx + 1,
     buyerDisplayName: item.buyerDisplayName ?? item.nickname ?? '未知买家',
     amountYuan: profile.realDealAmountYuan,
+    scoreText: profile.scoreText,
     signedOrderCount: profile.signedOrderCount,
-    refundOrderCount: profile.refundOrderCount,
+    completedOrderCount: profile.completedOrderCount,
+    afterSaleOrderCount: profile.afterSaleOrderCount,
     mainTag: profile.mainTag,
     shopLabel: profile.shopLabel,
   }))
-
-  const lines = rows.map(formatWechatWeeklyLine)
 
   const text = composeWechatWeeklyText({ title, dateRangeLabel, rows })
 

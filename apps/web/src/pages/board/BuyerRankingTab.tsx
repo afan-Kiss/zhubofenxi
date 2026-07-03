@@ -13,7 +13,6 @@ import { getMetricExplain } from '../../lib/metricExplain'
 import { BuyerOrderDrawer } from '../../components/board/BuyerOrderDrawer'
 import {
   buyerCardEarnedAmount,
-  buyerCardRefundTimes,
   buyerDisplayLabel,
   buyerRankingTabEmptyMessage,
   isLowPriceBrushBuyerRow,
@@ -40,6 +39,7 @@ import {
 } from '../../lib/buyer-ranking-ui'
 import { AnimatedTabs } from '../../components/ui/AnimatedTabs'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
+import { ViewportModal, FloatingToast } from '../../components/ui/ViewportModal'
 import { copyTextFromTextarea, copyTextToClipboard } from '../../lib/copy-to-clipboard'
 
 const RANKING_TABS: Array<{ key: string; label: string }> = [
@@ -207,7 +207,7 @@ export const BuyerRankingTab: React.FC = () => {
     }
     const okFromTextarea = ta ? copyTextFromTextarea(ta) : false
     const ok = okFromTextarea || (await copyTextToClipboard(text))
-    setWechatToast(ok ? '已复制，可以粘贴到微信群' : '复制失败，请长按文本全选后手动复制')
+    setWechatToast(ok ? '已复制，可以粘贴到微信群' : '复制失败，可手动复制下方文案')
   }, [wechatModalText])
 
   useEffect(() => {
@@ -377,11 +377,9 @@ export const BuyerRankingTab: React.FC = () => {
                 onClick={() => void handleWechatCopy()}
                 data-testid="copy-wechat-weekly-ranking"
               >
-                {wechatCopyBusy ? '正在生成微信群榜单…' : '复制微信群榜单'}
+                {wechatCopyBusy ? '正在生成微信群榜单…' : '复制本周微信群榜单'}
               </button>
-              {wechatToast ? (
-                <p className="text-center text-xs font-medium text-emerald-800">{wechatToast}</p>
-              ) : (
+              {wechatToast ? null : (
                 <p className="text-center text-[10px] leading-relaxed text-slate-500">
                   生成后弹出文案，点「一键复制」粘贴到微信群
                 </p>
@@ -528,7 +526,9 @@ export const BuyerRankingTab: React.FC = () => {
             const displayLabel = buyerDisplayLabel(rowRec)
             const earnedAmount = buyerCardEarnedAmount(rowRec)
             const signedCount = Number(vp.signedOrderCount ?? rowRec.signedOrderCount ?? 0)
-            const refundCount = Number(vp.refundOrderCount ?? buyerCardRefundTimes(rowRec))
+            const scoreText = String(vp.scoreText ?? '')
+            const completedCount = Number(vp.completedOrderCount ?? rowRec.completedOrderCount ?? 0)
+            const afterSaleCount = Number(vp.afterSaleOrderCount ?? rowRec.afterSaleCount ?? 0)
             const averageOrderValue = Number(vp.averageOrderValueYuan ?? 0)
             const shopLabel = String(rowRec.shopLabel ?? vp.shopLabel ?? rowRec.mainShopName ?? '未知店铺')
             const suggestion = String(vp.suggestion ?? rowRec.suggestion ?? '—')
@@ -539,50 +539,44 @@ export const BuyerRankingTab: React.FC = () => {
                 role="button"
                 tabIndex={0}
                 style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
-                className="board-list-row-enter flex cursor-pointer flex-col rounded-2xl border border-rose-100/50 bg-white p-3 shadow-sm transition active:bg-rose-50/30 sm:p-4 sm:hover:-translate-y-0.5 sm:hover:shadow-md"
+                className="board-list-row-enter flex cursor-pointer flex-col gap-2 rounded-2xl border border-rose-100/50 bg-white p-3 shadow-sm transition active:bg-rose-50/30 sm:p-4 sm:hover:-translate-y-0.5 sm:hover:shadow-md"
                 onClick={() => setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))
                 }}
               >
-                <div className="flex flex-col gap-2 sm:flex-row sm:gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-base font-semibold leading-snug text-slate-900">
-                        {displayLabel}
-                      </p>
-                      <span className="shrink-0 rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold text-white">
-                        #{rank}
-                      </span>
-                    </div>
-                    {mainTag ? (
-                      <div className="mt-2">
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${TAG_COLORS[mainTag] ?? 'bg-slate-100 text-slate-700'}`}
-                        >
-                          {mainTag}
-                        </span>
-                      </div>
-                    ) : null}
-                    <p className="mt-1 text-[10px] text-slate-500">建议：{suggestion}</p>
-                  </div>
-                  <div className="flex items-baseline justify-between border-t border-rose-50 pt-2 sm:block sm:border-0 sm:pt-0 sm:text-right">
-                    <div className="inline-flex items-center gap-0.5 text-[10px] text-slate-400 sm:justify-end">
-                      累计成交
-                      <MetricInfoTooltip text={getMetricExplain('earnedAmount')} />
-                    </div>
-                    <div className="text-lg font-bold tabular-nums text-rose-900 sm:mt-0">
-                      {formatMoney(earnedAmount)}
-                    </div>
-                  </div>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-base font-semibold leading-snug text-slate-900">{displayLabel}</p>
+                  <span className="shrink-0 rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold text-white">
+                    #{rank}
+                  </span>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-600">
-                  <span>签收 {formatCount(signedCount)} 单</span>
-                  <span>退货 {formatCount(refundCount)} 单</span>
-                  <span>平均客单价 {formatMoney(averageOrderValue)}</span>
-                  <span className="truncate">店铺：{shopLabel}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {mainTag ? (
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${TAG_COLORS[mainTag] ?? 'bg-slate-100 text-slate-700'}`}
+                    >
+                      {mainTag}
+                    </span>
+                  ) : null}
+                  {scoreText ? (
+                    <span className="text-[11px] font-semibold text-emerald-700">价值分 {scoreText}</span>
+                  ) : null}
                 </div>
-                <div className="mt-3 flex justify-end border-t border-rose-50 pt-3 text-[11px] text-rose-600">
+                <div>
+                  <p className="text-[10px] text-slate-400">累计成交</p>
+                  <p className="text-xl font-bold tabular-nums text-rose-900">{formatMoney(earnedAmount)}</p>
+                </div>
+                <p className="text-[11px] text-slate-600">
+                  签收 {formatCount(signedCount)} 单｜完成 {formatCount(completedCount)} 单｜售后{' '}
+                  {formatCount(afterSaleCount)} 单
+                </p>
+                <p className="text-[11px] text-slate-600">
+                  平均客单价 {formatMoney(averageOrderValue)}
+                </p>
+                <p className="truncate text-[11px] text-slate-600">店铺：{shopLabel}</p>
+                <p className="text-[10px] text-slate-500">建议：{suggestion}</p>
+                <div className="mt-1 flex justify-end border-t border-rose-50 pt-2 text-[11px] text-rose-600">
                   查看这个买家的订单 →
                 </div>
               </article>
@@ -608,51 +602,49 @@ export const BuyerRankingTab: React.FC = () => {
         onClose={() => setOrderDrawerBuyer(null)}
         buyer={orderDrawerBuyer}
       />
-      {wechatModalText != null ? (
-        <div
-          className="fixed inset-0 z-50 flex flex-col justify-end bg-black/50 sm:items-center sm:justify-center sm:p-4"
-          onClick={() => setWechatModalText(null)}
-        >
-          <div
-            className="flex max-h-[92vh] w-full flex-col rounded-t-2xl bg-white shadow-xl sm:max-w-lg sm:rounded-2xl"
-            onClick={(e) => e.stopPropagation()}
+      <ViewportModal
+        open={wechatModalText != null}
+        onClose={() => setWechatModalText(null)}
+        panelClassName="max-h-[min(88dvh,calc(100dvh-1rem))] w-[min(640px,calc(100vw-1rem))]"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <h3 id="wechat-ranking-modal-title" className="text-sm font-semibold text-slate-900">
+            微信群榜单文案
+          </h3>
+          <button
+            type="button"
+            className="min-h-[44px] min-w-[44px] text-sm text-slate-500"
+            onClick={() => setWechatModalText(null)}
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <h3 className="text-sm font-semibold text-slate-900">微信群榜单文案</h3>
-              <button
-                type="button"
-                className="min-h-[44px] min-w-[44px] text-sm text-slate-500"
-                onClick={() => setWechatModalText(null)}
-              >
-                关闭
-              </button>
-            </div>
-            <textarea
-              ref={wechatTextareaRef}
-              className="min-h-[40vh] flex-1 resize-none border-0 p-4 text-sm leading-relaxed text-slate-800 focus:outline-none focus:ring-0 sm:min-h-[280px]"
-              value={wechatModalText}
-              onChange={(e) => setWechatModalText(e.target.value)}
-            />
-            <div className="flex gap-2 border-t border-slate-100 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-              <button
-                type="button"
-                className="min-h-[44px] flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700"
-                onClick={() => setWechatModalText(null)}
-              >
-                关闭
-              </button>
-              <button
-                type="button"
-                className="min-h-[44px] flex-[2] rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white active:bg-emerald-800"
-                onClick={() => void handleWechatModalCopy()}
-                data-testid="wechat-modal-copy"
-              >
-                一键复制
-              </button>
-            </div>
-          </div>
+            关闭
+          </button>
         </div>
-      ) : null}
+        <textarea
+          ref={wechatTextareaRef}
+          aria-labelledby="wechat-ranking-modal-title"
+          className="min-h-[50dvh] flex-1 resize-none overflow-y-auto border-0 p-4 text-sm leading-relaxed text-slate-800 focus:outline-none focus:ring-0 sm:min-h-[320px]"
+          value={wechatModalText ?? ''}
+          onChange={(e) => setWechatModalText(e.target.value)}
+        />
+        <div className="flex gap-2 border-t border-slate-100 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <button
+            type="button"
+            className="min-h-[44px] flex-1 rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700"
+            onClick={() => setWechatModalText(null)}
+          >
+            关闭
+          </button>
+          <button
+            type="button"
+            className="min-h-[44px] flex-[2] rounded-xl bg-emerald-600 px-3 py-2.5 text-sm font-medium text-white active:bg-emerald-800"
+            onClick={() => void handleWechatModalCopy()}
+            data-testid="wechat-modal-copy"
+          >
+            一键复制
+          </button>
+        </div>
+      </ViewportModal>
+      <FloatingToast message={wechatToast} className="bg-emerald-700 text-white" />
     </div>
   )
 }

@@ -84,8 +84,10 @@ export interface WechatWeeklyBuyerTextData {
     rank: number
     buyerDisplayName: string
     amountYuan: number
+    scoreText: string
     signedOrderCount: number
-    refundOrderCount: number
+    completedOrderCount: number
+    afterSaleOrderCount: number
     mainTag: string
     shopLabel: string
   }>

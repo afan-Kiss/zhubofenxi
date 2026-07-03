@@ -21,6 +21,7 @@ import { isDailyReportShippedOrder } from '../src/services/daily-report-order.ut
 import { isLowPriceBrushOrderView } from '../src/services/low-price-brush-order.service'
 import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
 import { buildPerSessionLivePeriodText } from '../src/services/daily-report-live-schedule-match.service'
+import { shouldUsePerShopRealLiveSessions } from '../src/services/daily-report-live-sessions.service'
 
 const dateKey = process.argv[2]?.trim() || '2026-07-01'
 const issues: string[] = []
@@ -51,6 +52,19 @@ function scheduleRangesForAnchor(
 }
 
 async function main(): Promise<void> {
+  expect(
+    shouldUsePerShopRealLiveSessions('2026-06-29', '2026-07-03'),
+    'custom 多日 6.29~7.3 应走按店真实场次归属',
+  )
+  expect(
+    shouldUsePerShopRealLiveSessions('2026-07-01', '2026-07-01'),
+    'custom 单日 7.1 仍应走按店真实场次归属',
+  )
+  expect(
+    !shouldUsePerShopRealLiveSessions('2026-06-01', '2026-06-05'),
+    '6.13 前范围不应走按店真实场次',
+  )
+
   console.log(`[verify-daily-report-live-session-attribution] date=${dateKey}`)
 
   const report = await buildDailyReport({

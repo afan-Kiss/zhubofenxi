@@ -28,14 +28,18 @@ import {
 } from './daily-report-live-schedule-match.service'
 import { dedupeOverlappingLiveSessionsByShopDay } from './live-session-overlap-dedupe.util'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
-import { SHOP_SESSION_ANCHOR_CUTOFF_MS } from './anchor-performance-attribution.service'
+import { addDaysShanghai } from '../utils/business-timezone'
+import { isReportDateOnOrAfterShopSessionCutoff } from './anchor-performance-attribution.service'
 
+/** 6.13 起：单日或多日 custom 范围均走「按店真实场次 + 排班重叠」（与日报一致） */
 export function shouldUsePerShopRealLiveSessions(startDate: string, endDate: string): boolean {
   const start = startDate.trim()
   const end = endDate.trim()
-  if (!start || start !== end) return false
-  const ms = Date.parse(`${start}T00:00:00+08:00`)
-  return Number.isFinite(ms) && ms >= SHOP_SESSION_ANCHOR_CUTOFF_MS
+  if (!start || !end || start > end) return false
+  return (
+    isReportDateOnOrAfterShopSessionCutoff(start) &&
+    isReportDateOnOrAfterShopSessionCutoff(end)
+  )
 }
 
 const RAW_LIVE_RANGE_DB_BUFFER_MS = 1 * 24 * 60 * 60 * 1000
@@ -474,6 +478,18 @@ export async function resolveAssignedRealLiveSessionsForAnchor(params: {
   if (!anchorName || anchorName === '未归属') return []
   if (!shouldUsePerShopRealLiveSessions(params.startDate, params.endDate)) return []
 
-  const assignment = await resolveDailyReportLiveSessionAssignments(params.startDate)
-  return getAssignedSessionsForAnchor(assignment, anchorName)
+  const start = params.startDate.trim()
+  const end = params.endDate.trim()
+  const byLiveId = new Map<string, DailyReportLiveSession>()
+  let dateKey = start
+  while (dateKey <= end) {
+    const assignment = await resolveDailyReportLiveSessionAssignments(dateKey)
+    for (const session of getAssignedSessionsForAnchor(assignment, anchorName)) {
+      const key = `${session.liveId}|${session.startTime}`
+      if (!byLiveId.has(key)) byLiveId.set(key, session)
+    }
+    if (dateKey === end) break
+    dateKey = addDaysShanghai(dateKey, 1)
+  }
+  return [...byLiveId.values()].sort((a, b) => a.startTime.localeCompare(b.startTime))
 }

@@ -20,9 +20,9 @@ import {
 import {
   ANCHOR_SESSION_DISPLAY_FROM_0613,
   isReportDateOnOrAfterShopSessionCutoff,
-  remapViewsForAnchorPerformance,
   resolveDailyReportAnchorsForDate,
 } from './anchor-performance-attribution.service'
+import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { ensureManualAnchorOverrideCache } from './order-anchor-manual-override.service'
 import {
@@ -260,7 +260,7 @@ export async function buildDailyReport(params: {
   const config = getAnchorConfigSync()
   const anchorRows: DailyReportAnchorRow[] = []
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)
-  const remappedAll = remapViewsForAnchorPerformance(
+  const remappedAll = await remapViewsWithScheduleOverlay(
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
 

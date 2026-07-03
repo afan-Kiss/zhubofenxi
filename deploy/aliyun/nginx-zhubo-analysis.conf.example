@@ -10,6 +10,15 @@ server {
 
     client_max_body_size 20m;
 
+    # 主播分析正式入口 /zhubofenxi/（旧根路径与书签跳转）
+    location = / {
+        return 302 /zhubofenxi/;
+    }
+
+    location ~ ^/(anchors|login|register|buyers|settings|operations-report|good-reviews|mobile|anchor-schedules|admin|dashboard|buyer-ranking|orders|billing)(/|$) {
+        return 302 /zhubofenxi$request_uri;
+    }
+
     # 健康检查可单独放行（若启用 Basic Auth）
     location = /api/health {
         proxy_pass http://127.0.0.1:4723;

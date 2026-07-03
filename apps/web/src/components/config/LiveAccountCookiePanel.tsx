@@ -4,8 +4,8 @@ import {
   cookieAvailableLabel,
   cookieAvailableTone,
   cookieStatusLabel,
+  cookieUploadSourceLabel,
   getAccountDisplayName,
-  isCookieHealthBlocking,
   partitionLiveAccounts,
   resolveAccountCookieAvailable,
   resolveHealthFriendlyLabel,
@@ -105,6 +105,7 @@ function applyTestResultToAccount(
     ...account,
     cookieStatus: available ? 'valid' : 'invalid',
     canSyncOrders: available,
+    healthStatus: available ? 'ok' : account.healthStatus === 'unknown' ? 'invalid' : account.healthStatus,
     cookieLastCheckedAt: result.checkedAt,
     cookieLastErrorMessage: available ? null : result.message,
     syncReason: available ? 'Cookie 已验证有效，可同步订单' : result.message,
@@ -651,17 +652,17 @@ export const LiveAccountCookiePanel: React.FC = () => {
   }
 
   const stats = useMemo(() => {
-    const available = activeAccounts.filter(
-      (a) => a.enabled && (a.healthStatus === 'ok' || (!a.healthStatus && resolveAccountCookieAvailable(a, testResults[a.id]))),
-    ).length
-    const unavailable = activeAccounts.filter(
-      (a) => a.enabled && a.healthStatus && isCookieHealthBlocking(a.healthStatus),
-    ).length
-    const checking = activeAccounts.filter(
-      (a) => a.enabled && a.healthStatus === 'unknown',
-    ).length
+    const enabled = activeAccounts.filter((a) => a.enabled)
+    const available = enabled.filter((a) => resolveAccountCookieAvailable(a, testResults[a.id])).length
+    const checking = enabled.filter((a) => {
+      const test = testResults[a.id]
+      if (test?.status === 'testing' || testingIds.has(a.id)) return true
+      if (resolveAccountCookieAvailable(a, test)) return false
+      return a.healthStatus === 'unknown' && !a.cookieLastCheckedAt
+    }).length
+    const unavailable = Math.max(0, enabled.length - available - checking)
     return { available, unavailable, checking }
-  }, [activeAccounts, testResults])
+  }, [activeAccounts, testResults, testingIds])
 
   const renderTestResultBlock = (account: LiveAccountPublic) => {
     const latest = testResults[account.id]
@@ -785,8 +786,10 @@ export const LiveAccountCookiePanel: React.FC = () => {
                 >
                   {cookieAvailableLabel(cookieAvailable)}
                 </span>
-                {cookieReason ? (
+                {cookieReason && !cookieAvailable ? (
                   <p className="max-w-[260px] text-[10px] leading-snug text-rose-700">{cookieReason}</p>
+                ) : cookieAvailable ? (
+                  <p className="max-w-[260px] text-[10px] leading-snug text-emerald-700">校验通过</p>
                 ) : null}
                 {isTesting ? (
                   <span className="block text-[10px] text-indigo-600">检测中</span>
@@ -797,7 +800,20 @@ export const LiveAccountCookiePanel: React.FC = () => {
               {formatTime(account.lastSyncSuccessAt)}
             </td>
             <td className="px-3 py-2.5 text-slate-600">
-              {formatTime(account.cookieUpdatedAt)}
+              <div className="space-y-0.5">
+                <span
+                  className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                    account.cookieUploadSource === 'api'
+                      ? 'bg-indigo-50 text-indigo-700'
+                      : account.cookieUploadSource === 'manual'
+                        ? 'bg-slate-100 text-slate-700'
+                        : 'bg-slate-50 text-slate-400'
+                  }`}
+                >
+                  {cookieUploadSourceLabel(account.cookieUploadSource)}
+                </span>
+                <p className="text-[10px] text-slate-500">{formatTime(account.cookieUpdatedAt)}</p>
+              </div>
             </td>
             <td className="px-3 py-2.5">
               <div className="flex flex-wrap justify-end gap-1.5">
@@ -936,6 +952,10 @@ export const LiveAccountCookiePanel: React.FC = () => {
                           <dd>{formatTime(account.lastSyncSuccessAt)}</dd>
                         </div>
                         <div>
+                          <dt className="text-slate-400">Cookie 来源</dt>
+                          <dd>{cookieUploadSourceLabel(account.cookieUploadSource)}</dd>
+                        </div>
+                        <div>
                           <dt className="text-slate-400">Cookie 更新时间</dt>
                           <dd>{formatTime(account.cookieUpdatedAt)}</dd>
                         </div>
@@ -1002,7 +1022,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
             <th className="px-3 py-2 font-medium">启用</th>
             <th className="px-3 py-2 font-medium">Cookie 状态</th>
             <th className="px-3 py-2 font-medium">最近同步</th>
-            <th className="px-3 py-2 font-medium">Cookie 更新</th>
+            <th className="px-3 py-2 font-medium">Cookie 来源 / 时间</th>
             <th className="px-3 py-2 font-medium text-right">操作</th>
           </tr>
         </thead>

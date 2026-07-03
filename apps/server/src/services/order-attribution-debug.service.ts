@@ -52,11 +52,13 @@ async function findRawOrder(orderNo: string) {
 }
 
 function mapAttributionSource(source: ScheduleAttributionSource): string {
+  if (source === 'live_session') return 'live_session'
   if (source === 'manual_schedule' || source === 'default_schedule' || source === 'template_virtual') {
     return 'effective_schedule'
   }
   if (source === 'manual_override') return 'manual_override'
   const map: Record<ScheduleAttributionSource, string> = {
+    live_session: 'live_session',
     manual_schedule: 'effective_schedule',
     default_schedule: 'effective_schedule',
     template_virtual: 'effective_schedule',

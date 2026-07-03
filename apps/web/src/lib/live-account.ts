@@ -1,5 +1,17 @@
 export type CookieHealthStatus = 'valid' | 'invalid' | 'suspected' | 'unknown'
 export type CookieStatusLevel = 'ok' | 'warning' | 'error'
+export type CookieUploadSource = 'manual' | 'api' | 'unknown'
+
+export function cookieUploadSourceLabel(source: CookieUploadSource | undefined): string {
+  switch (source) {
+    case 'api':
+      return 'API 上传'
+    case 'manual':
+      return '手动上传'
+    default:
+      return '—'
+  }
+}
 
 export type ShopCookieHealthStatus =
   | 'ok'
@@ -38,6 +50,8 @@ export interface LiveAccountPublic {
   cookieText?: string | null
   cookiePreview: string | null
   cookieUpdatedAt: string | null
+  cookieUpdatedBy?: string | null
+  cookieUploadSource?: CookieUploadSource
   cookieStatus: CookieHealthStatus
   cookieLastCheckedAt: string | null
   cookieLastSuccessAt: string | null
@@ -157,8 +171,8 @@ export function resolveHealthFriendlyLabel(
   sessionTest?: CookieSessionTest | null,
 ): string {
   if (sessionTest?.status === 'testing') return '正在校验 Cookie'
+  if (resolveAccountCookieAvailable(account, sessionTest)) return '校验通过'
   if (account.healthStatus === 'ok') return '校验通过'
-  if (account.healthStatus === 'unknown') return '正在校验 Cookie'
   if (account.healthStatus === 'missing') {
     return `${getAccountDisplayName(account)}尚未收到 Cookie，请推送或粘贴`
   }
@@ -171,6 +185,7 @@ export function resolveHealthFriendlyLabel(
   if (account.healthStatus === 'invalid') {
     return account.syncReason?.trim() || `${getAccountDisplayName(account)}登录状态校验失败，可能需要重新推送 Cookie`
   }
+  if (account.healthStatus === 'unknown') return '正在校验 Cookie'
   if (resolveAccountCookieAvailable(account, sessionTest)) return '校验通过'
   return resolveAccountCookieFriendlyReason(account, sessionTest) ?? 'Cookie 状态待确认'
 }
@@ -178,12 +193,12 @@ export function resolveHealthFriendlyLabel(
 export function accountCookieAvailable(account: LiveAccountPublic): boolean {
   if (account.healthStatus === 'ok') return true
   if (account.healthStatus && isCookieHealthBlocking(account.healthStatus)) return false
-  if (account.healthStatus === 'unknown') return false
   if (!account.hasCookie) return false
-  // 以最近一次 Cookie 检测结果为准（与「检测」按钮口径一致）
+  // 以最近一次 Cookie 检测结果为准（与「检测」按钮、DB cookieStatus 一致）
   if (account.cookieLastCheckedAt) {
     return account.cookieStatus === 'valid'
   }
+  if (account.healthStatus === 'unknown') return false
   return accountCanSyncOrders(account)
 }
 

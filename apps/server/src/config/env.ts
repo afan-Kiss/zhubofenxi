@@ -67,6 +67,14 @@ export function getListenHost(): string {
   return '0.0.0.0'
 }
 
+/** 生产子路径入口，如 /zhubofenxi；空字符串表示根路径 / */
+export function getWebBasePath(): string {
+  const raw = (process.env.WEB_BASE_PATH ?? process.env.PUBLIC_BASE_PATH ?? '').trim()
+  if (!raw || raw === '/') return ''
+  const withSlash = raw.startsWith('/') ? raw : `/${raw}`
+  return withSlash.replace(/\/+$/, '')
+}
+
 /** session=须登录；local=免登录本地看板（开发默认） */
 export function getAuthMode(): 'session' | 'local' {
   const raw = process.env.AUTH_MODE?.trim().toLowerCase()

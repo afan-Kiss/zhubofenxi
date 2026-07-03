@@ -163,10 +163,11 @@ async function run(): Promise<void> {
   })
   const resolved = await resolveAnchorWithScheduleOverlay(viewXb)
   assert(
-    resolved.anchorName === '小白' ||
-      resolved.attributionSource === 'default_schedule' ||
-      resolved.attributionSource === 'template_virtual',
-    `虚拟默认排班应归小白，实际=${resolved.anchorName}/${resolved.attributionSource}`,
+    resolved.anchorName === '小白' &&
+      (resolved.attributionSource === 'live_session' ||
+        resolved.attributionSource === 'default_schedule' ||
+        resolved.attributionSource === 'template_virtual'),
+    `应归小白（真实直播或排班回退），实际=${resolved.anchorName}/${resolved.attributionSource}`,
     issues,
   )
 

@@ -9,7 +9,7 @@
   "desktopStartCommand": "npm run dev",
   "localWebUrl": "http://127.0.0.1:5173",
   "localHealthUrl": "http://127.0.0.1:4723/api/health",
-  "publicUrl": "http://8.137.126.18/",
+  "publicUrl": "http://8.137.126.18/zhubofenxi/",
   "healthType": "http",
   "ports": [
     4723,

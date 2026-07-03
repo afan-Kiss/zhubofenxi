@@ -111,6 +111,7 @@ export async function getAnchorAuditExportMeta(params?: {
 }
 
 const SOURCE_LABEL: Record<ScheduleAttributionSource, string> = {
+  live_session: '真实直播时段',
   manual_schedule: '人工排班',
   default_schedule: '默认排班',
   template_virtual: '模板补齐',

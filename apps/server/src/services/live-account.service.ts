@@ -25,6 +25,10 @@ import {
   type ShopCookieHealthResult,
   type ShopCookieHealthStatus,
 } from './shop-cookie-health.service'
+import {
+  resolveCookieUploadSource,
+  type CookieUploadSource,
+} from '../utils/cookie-upload-source.util'
 
 const DEFAULT_PLATFORM = 'xiaohongshu'
 
@@ -39,6 +43,10 @@ export interface LiveAccountPublicView {
   cookieText: string | null
   cookiePreview: string | null
   cookieUpdatedAt: string | null
+  /** 最近一次 Cookie 写入操作者（用户 id 或 shop-cookie-upload） */
+  cookieUpdatedBy: string | null
+  /** 手动上传 / API 上传 */
+  cookieUploadSource: CookieUploadSource
   cookieStatus: CookieHealthStatus
   cookieLastCheckedAt: string | null
   cookieLastSuccessAt: string | null
@@ -114,6 +122,7 @@ function toPublicView(
     cookieLastFailedApi: string | null
     affectedBusinessSync: boolean
     lastSyncSuccessAt: Date | null
+    updatedBy: string | null
   },
   options?: { includeCookie?: boolean },
 ): LiveAccountPublicView {
@@ -154,6 +163,8 @@ function toPublicView(
     cookieText: cookie,
     cookiePreview,
     cookieUpdatedAt: hasCookie ? row.updatedAt.toISOString() : null,
+    cookieUpdatedBy: hasCookie ? row.updatedBy ?? null : null,
+    cookieUploadSource: hasCookie ? resolveCookieUploadSource(row.updatedBy) : 'unknown',
     cookieStatus: (row.cookieStatus as CookieHealthStatus) || 'unknown',
     cookieLastCheckedAt: row.cookieLastCheckedAt?.toISOString() ?? null,
     cookieLastSuccessAt: row.cookieLastSuccessAt?.toISOString() ?? null,
@@ -441,6 +452,15 @@ export async function markCookieCheckResult(
       affectedBusinessSync: result.affectedBusinessSync ?? !isSuccess,
     },
   })
+  const row = await prisma.platformCredential.findUnique({
+    where: { id },
+    select: { platformName: true },
+  })
+  if (row && isOfficialShopPlatformName(row.platformName)) {
+    clearShopCookieHealthCache(row.platformName as import('../config/good-review-shops.constants').GoodReviewShopKey)
+  } else {
+    clearShopCookieHealthCache()
+  }
 }
 
 /** 经营同步成功：只更新最近同步时间，不覆盖 Cookie 检测结果（同步可能走千帆，与库内 Cookie 不是同一份） */
@@ -597,6 +617,7 @@ function mapShopHealthToPublicView(
     cookieLastFailedApi: string | null
     affectedBusinessSync: boolean
     lastSyncSuccessAt: Date | null
+    updatedBy: string | null
   } | null,
   options?: { includeCookie?: boolean },
 ): LiveAccountPublicView {
@@ -634,6 +655,10 @@ function mapShopHealthToPublicView(
     cookieText,
     cookiePreview,
     cookieUpdatedAt: health.updatedAt,
+    cookieUpdatedBy: health.hasCookie ? row?.updatedBy ?? null : null,
+    cookieUploadSource: health.hasCookie
+      ? resolveCookieUploadSource(row?.updatedBy)
+      : 'unknown',
     cookieStatus,
     cookieLastCheckedAt: health.checkedAt,
     cookieLastSuccessAt: row?.cookieLastSuccessAt?.toISOString() ?? null,

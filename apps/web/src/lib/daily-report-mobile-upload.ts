@@ -11,7 +11,8 @@ export function buildDailyReportMobileUploadUrl(reportDate: string, token: strin
     date: reportDate.trim(),
     token: token.trim(),
   })
-  return `${window.location.origin}/mobile/daily-report-upload?${params.toString()}`
+  const base = import.meta.env.BASE_URL.replace(/\/?$/, '/')
+  return `${window.location.origin}${base}mobile/daily-report-upload?${params.toString()}`
 }
 
 export interface DailyReportUploadTokenPayload {

@@ -14,8 +14,10 @@ import { matchTimeRule } from './anchor-rules.service'
 import {
   resolveManualAnchorOverrideForView,
 } from './order-anchor-manual-override.service'
+import { clearLiveSessionOrderAttributionCache } from './anchor-live-session-order-attribution.service'
 
 export type ScheduleAttributionSource =
+  | 'live_session'
   | 'manual_schedule'
   | 'default_schedule'
   | 'template_virtual'
@@ -38,6 +40,7 @@ const confirmCacheByDate = new Map<string, boolean>()
 export function clearScheduleAttributionCache(): void {
   scheduleCacheByDate.clear()
   confirmCacheByDate.clear()
+  clearLiveSessionOrderAttributionCache()
 }
 
 async function loadSchedules(dateKey: string) {
@@ -140,6 +143,31 @@ export async function resolveAnchorWithScheduleOverlay(
   const onOrAfter613 = payMs >= SHOP_SESSION_ANCHOR_CUTOFF_MS
 
   if (onOrAfter613) {
+    const { resolveAnchorByLiveSessionPayTime, shopHasLiveSessionDataForPayTime } = await import(
+      './anchor-live-session-order-attribution.service'
+    )
+    const liveHit = await resolveAnchorByLiveSessionPayTime(view, payMs)
+    if (liveHit) {
+      return {
+        anchorId: liveHit.anchorId,
+        anchorName: liveHit.anchorName,
+        attributionSource: 'live_session',
+        attributionExplain: liveHit.explain,
+        scheduleConfirmed: dateConfirmed,
+      }
+    }
+
+    const hasLiveForShop = await shopHasLiveSessionDataForPayTime(view, payMs)
+    if (hasLiveForShop) {
+      return {
+        anchorId: '',
+        anchorName: '未归属',
+        attributionSource: 'unmatched',
+        attributionExplain: `${dateKey} 支付时间未落在该直播号当日真实直播时段内`,
+        scheduleConfirmed: dateConfirmed,
+      }
+    }
+
     const manualHit = matchScheduleRow(view, payMs, buckets.manual)
     if (manualHit) {
       return {

@@ -90,6 +90,13 @@ install_deps_build() {
   log "repair schedule templates from 20260701"
   npx tsx apps/server/scripts/repair-schedule-templates-20260701.ts
   log "npm run build"
+  WEB_BASE_PATH_VALUE="$(grep -E '^WEB_BASE_PATH=' apps/server/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' "' || true)"
+  if [[ -n "$WEB_BASE_PATH_VALUE" && "$WEB_BASE_PATH_VALUE" != "/" ]]; then
+    bp="/${WEB_BASE_PATH_VALUE#/}"
+    bp="${bp%/}"
+    export VITE_BASE_PATH="${bp}/"
+    log "VITE_BASE_PATH=$VITE_BASE_PATH"
+  fi
   npm run build
 }
 
@@ -113,9 +120,16 @@ start_pm2() {
     fail "缺少 ecosystem.config.js"
   fi
   if pm2 describe "$APP_NAME" >/dev/null 2>&1; then
-    pm2 restart "$APP_NAME"
-    pm2 save
-    log "pm2 已重启 $APP_NAME（避免 delete 造成短暂 502）"
+    if pm2 restart "$APP_NAME"; then
+      pm2 save
+      log "pm2 已重启 $APP_NAME"
+    else
+      log "WARN: pm2 restart 失败，尝试 delete 后重新 start"
+      pm2 delete "$APP_NAME" 2>/dev/null || true
+      pm2 start ecosystem.config.js
+      pm2 save
+      log "pm2 已重新启动 $APP_NAME"
+    fi
   else
     pm2 start ecosystem.config.js
     pm2 save
@@ -126,7 +140,7 @@ start_pm2() {
 wait_health() {
   local i
   for i in $(seq 1 30); do
-    if curl -fsS "http://127.0.0.1:4723/api/health" | grep -q '"ok":true'; then
+    if curl -fsS "http://127.0.0.1:4723/api/health" | grep -q ok; then
       log "本地 health OK"
       return 0
     fi

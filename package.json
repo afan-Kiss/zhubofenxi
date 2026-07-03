@@ -29,6 +29,7 @@
     "accept:anchor-metrics-fix": "tsx apps/server/scripts/anchor-metrics-fix-acceptance.ts",
     "verify:anchor-pocket": "tsx apps/server/scripts/verify-anchor-pocket.ts",
     "verify:anchor-schedules": "tsx apps/server/scripts/verify-anchor-schedules.ts",
+    "verify:live-session-order-attribution": "tsx apps/server/scripts/verify-live-session-order-attribution.ts",
     "verify:anchor-export": "tsx apps/server/scripts/verify-anchor-export.ts",
     "verify:anchor-schedule-effective": "tsx apps/server/scripts/verify-anchor-schedule-effective.ts",
     "verify:good-review-images": "tsx apps/server/scripts/verify-good-review-images.ts",

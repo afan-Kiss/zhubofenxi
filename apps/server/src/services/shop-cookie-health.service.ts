@@ -291,7 +291,15 @@ export async function getShopCookieHealth(
   if (!fresh) {
     const cached = healthCache.get(shopKey)
     if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-      return { ...cached.result, source: 'cache' }
+      const rowForCache = await resolveOfficialShopAccountForStatus(shopKey)
+      const dbCheckedMs = rowForCache?.cookieLastCheckedAt?.getTime() ?? 0
+      const cachedCheckedMs = cached.result.checkedAt
+        ? Date.parse(cached.result.checkedAt)
+        : 0
+      if (!dbCheckedMs || dbCheckedMs <= cachedCheckedMs) {
+        return { ...cached.result, source: 'cache' }
+      }
+      healthCache.delete(shopKey)
     }
   }
 

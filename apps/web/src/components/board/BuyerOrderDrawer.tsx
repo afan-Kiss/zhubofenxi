@@ -3,7 +3,7 @@ import { apiRequest } from '../../lib/api'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { Pagination } from '../ui/Pagination'
 import { buyerDisplayNameFromRow } from '../../lib/buyer-profile'
-import type { AnchorWeeklyOrderScope } from '../../lib/anchor-weekly-ranking'
+import type { BuyerOrderDateScope } from '../../lib/anchor-weekly-ranking'
 import { resolveDisplayEarnedAmountCent } from '../../lib/buyer-earned-amount'
 import { BoardDrawerShell } from './BoardDrawerShell'
 import { BoardDrillOrderTable, type BoardDrillOrderRow } from './BoardDrillOrderTable'
@@ -86,7 +86,7 @@ interface Props {
   open: boolean
   onClose: () => void
   buyer: BuyerOrderDrawerBuyer | null
-  scope?: AnchorWeeklyOrderScope
+  scope?: BuyerOrderDateScope
 }
 
 function centToYuan(cent: number): number {
@@ -148,11 +148,13 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer, scope 
         pageSize: String(pageSize),
         tab,
       })
-      if (scope?.source === 'anchor_weekly_ranking') {
+      if (scope?.source === 'anchor_weekly_ranking' || scope?.source === 'bad_buyer_ranking') {
         qs.set('source', scope.source)
         qs.set('startDate', scope.startDate)
         qs.set('endDate', scope.endDate)
-        if (scope.anchorName) qs.set('anchorName', scope.anchorName)
+        if (scope.source === 'anchor_weekly_ranking' && scope.anchorName) {
+          qs.set('anchorName', scope.anchorName)
+        }
       }
       const res = await apiRequest<{
         buyerKey: string
@@ -212,7 +214,14 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer, scope 
       setBuyerSummary(null)
       setError(null)
     }
-  }, [open, buyer?.buyerKey, scope?.startDate, scope?.endDate, scope?.anchorName])
+  }, [
+    open,
+    buyer?.buyerKey,
+    scope?.startDate,
+    scope?.endDate,
+    scope?.source,
+    scope?.source === 'anchor_weekly_ranking' ? scope.anchorName : undefined,
+  ])
 
   useEffect(() => {
     void load()
@@ -268,15 +277,16 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer, scope 
     buyer.nickname ??
     buyerDisplayNameFromRow(buyer as unknown as Record<string, unknown>)
 
-  const isWeeklyScope = scope?.source === 'anchor_weekly_ranking'
-  const periodLabel = isWeeklyScope
+  const isRangeScope =
+    scope?.source === 'anchor_weekly_ranking' || scope?.source === 'bad_buyer_ranking'
+  const periodLabel = isRangeScope
     ? `${scope.startDate} 至 ${scope.endDate} 订单明细`
     : '历史累计订单明细（全量，不按日期筛选）'
 
   const emptyText =
     tabs.find((t) => t.key === tab)?.emptyText ??
     data?.emptyText ??
-    (isWeeklyScope ? '该买家在本周期内暂无订单' : '该买家暂无历史订单')
+    (isRangeScope ? '该买家在本周期内暂无订单' : '该买家暂无历史订单')
 
   return (
     <BoardDrawerShell
@@ -290,22 +300,22 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer, scope 
           className="mt-2 animate-in fade-in duration-300"
         >
           <p className="text-[10px] text-slate-500">{periodLabel}</p>
-          {!isWeeklyScope ? (
+          {!isRangeScope ? (
             <p className="mt-1 text-[10px] text-slate-400">
               售后数据来自最近一次自动同步；如有延迟，将在后续自动同步中更新
             </p>
           ) : null}
           <div className="mt-3 rounded-2xl border border-rose-100/80 bg-gradient-to-br from-white to-rose-50/40 px-4 py-3">
             <div className="inline-flex items-center gap-1 text-[11px] text-slate-500">
-              {isWeeklyScope ? '本周成交金额' : '赚到金额'}
+              {isRangeScope ? '周期成交金额' : '赚到金额'}
               <MetricInfoTooltip text={getMetricExplain('earnedAmount')} />
             </div>
             <p className="mt-1 text-3xl font-bold tabular-nums text-rose-900">
               {formatMoney(headerSummary.earnedAmount)}
             </p>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-              {isWeeklyScope
-                ? '仅统计当前周期、当前主播范围内的订单，不是历史全量客户画像。'
+              {isRangeScope
+                ? '仅统计当前周期范围内的订单，不是历史全量客户画像。'
                 : '这个客户最终留下的真实成交金额，不是利润，不扣成本'}
             </p>
           </div>

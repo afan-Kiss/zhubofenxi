@@ -15,6 +15,9 @@ export type BuyerRankingPreset =
   | 'lastWeek'
   | 'thisMonth'
   | 'lastMonth'
+  | 'recent7'
+  | 'recent15'
+  | 'recent30'
   | 'all'
   | 'custom'
 
@@ -109,6 +112,18 @@ export function resolveBuyerRankingDateRange(
       endDate = endOfMonthKey(prev.y, prev.m)
       break
     }
+    case 'recent7':
+      startDate = addDaysShanghai(todayKey, -6)
+      endDate = todayKey
+      break
+    case 'recent15':
+      startDate = addDaysShanghai(todayKey, -14)
+      endDate = todayKey
+      break
+    case 'recent30':
+      startDate = addDaysShanghai(todayKey, -29)
+      endDate = todayKey
+      break
     case 'custom':
     default: {
       const sd = customStart?.trim()
@@ -132,6 +147,9 @@ export function resolveBuyerRankingDateRange(
     'lastWeek',
     'thisMonth',
     'lastMonth',
+    'recent7',
+    'recent15',
+    'recent30',
   ]
   return {
     preset: known.includes(preset as BuyerRankingPreset)
@@ -171,6 +189,9 @@ export const BUYER_RANKING_PRESET_LABELS: Record<BuyerRankingPreset, string> = {
   lastWeek: '上周',
   thisMonth: '本月',
   lastMonth: '上月',
+  recent7: '最近7天',
+  recent15: '最近15天',
+  recent30: '最近30天',
   all: '全部',
   custom: '自定义',
 }

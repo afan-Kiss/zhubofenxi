@@ -905,22 +905,49 @@ boardRouter.get('/anchor-buyer-weekly-ranking', async (req, res) => {
   }
 })
 
-boardRouter.get('/buyer-ranking/wechat-weekly-text', async (req, res) => {
+boardRouter.get('/buyer-ranking/bad-buyers', async (req, res) => {
   try {
-    const { buildWechatWeeklyBuyerRankingText } = await import(
-      '../services/buyer-wechat-weekly-text.service'
-    )
-    const preset = req.query.preset ? String(req.query.preset) : 'thisWeek'
+    const { buildBadBuyerRanking } = await import('../services/bad-buyer-ranking.service')
+    const preset = req.query.preset ? String(req.query.preset) : 'recent30'
     const startDate = req.query.startDate ? String(req.query.startDate) : undefined
     const endDate = req.query.endDate ? String(req.query.endDate) : undefined
     const limit = req.query.limit ? Number(req.query.limit) : 10
-    const ranking = req.query.ranking ? String(req.query.ranking) : 'highValue'
 
     if (preset === 'custom' && (!startDate?.trim() || !endDate?.trim())) {
       sendFail(res, '自定义范围必须提供 startDate 与 endDate', 400)
       return
     }
 
+    const data = await buildBadBuyerRanking({ preset, startDate, endDate, limit })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取垃圾客户榜单失败', 500)
+  }
+})
+
+boardRouter.get('/buyer-ranking/wechat-weekly-text', async (req, res) => {
+  try {
+    const ranking = req.query.ranking ? String(req.query.ranking) : 'highValue'
+    const preset = req.query.preset ? String(req.query.preset) : ranking === 'badBuyer' ? 'recent30' : 'thisWeek'
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined
+    const limit = req.query.limit ? Number(req.query.limit) : 10
+
+    if (preset === 'custom' && (!startDate?.trim() || !endDate?.trim())) {
+      sendFail(res, '自定义范围必须提供 startDate 与 endDate', 400)
+      return
+    }
+
+    if (ranking === 'badBuyer') {
+      const { buildBadBuyerWechatText } = await import('../services/bad-buyer-ranking.service')
+      const data = await buildBadBuyerWechatText({ preset, startDate, endDate, limit })
+      sendOk(res, data)
+      return
+    }
+
+    const { buildWechatWeeklyBuyerRankingText } = await import(
+      '../services/buyer-wechat-weekly-text.service'
+    )
     const data = await buildWechatWeeklyBuyerRankingText({
       preset,
       startDate,
@@ -1082,7 +1109,13 @@ boardRouter.get('/buyer-profile/:buyerKey/orders', async (req, res) => {
             anchorName: weeklyAnchor,
             source: 'anchor_weekly_ranking' as const,
           }
-        : undefined
+        : weeklySource === 'bad_buyer_ranking' && weeklyStart && weeklyEnd
+          ? {
+              startDate: weeklyStart,
+              endDate: weeklyEnd,
+              source: 'bad_buyer_ranking' as const,
+            }
+          : undefined
 
     const data = await buildBuyerProfileDrill({
       buyerId: buyerKey,

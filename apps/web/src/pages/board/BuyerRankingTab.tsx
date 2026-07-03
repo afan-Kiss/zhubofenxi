@@ -18,10 +18,12 @@ import {
   isLowPriceBrushBuyerRow,
 } from '../../lib/board-orders-filter'
 import {
+  fetchBadBuyerRanking,
   fetchBuyerProfile,
   fetchWechatWeeklyBuyerText,
   refreshBuyerProfile,
   rowToDrawerBuyer,
+  type BadBuyerRankingData,
   type BuyerProfileData,
   type BuyerProfileSummary,
 } from '../../lib/buyer-profile'
@@ -47,11 +49,21 @@ const RANKING_TABS: Array<{ key: string; label: string }> = [
   { key: 'highAov', label: '高客单榜' },
   { key: 'stableSigned', label: '稳定签收榜' },
   { key: 'repurchase', label: '复购榜' },
-  { key: 'afterSale', label: '售后关注榜' },
+  { key: 'badBuyer', label: '垃圾客户榜单' },
   { key: 'quality', label: '品退榜' },
 ]
 
 const WECHAT_PRESET_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'thisWeek', label: '本周' },
+  { key: 'lastWeek', label: '上周' },
+  { key: 'thisMonth', label: '本月' },
+  { key: 'custom', label: '自定义' },
+]
+
+const BAD_BUYER_PRESET_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'recent7', label: '最近7天' },
+  { key: 'recent15', label: '最近15天' },
+  { key: 'recent30', label: '最近30天' },
   { key: 'thisWeek', label: '本周' },
   { key: 'lastWeek', label: '上周' },
   { key: 'thisMonth', label: '本月' },
@@ -82,6 +94,10 @@ const TAG_COLORS: Record<string, string> = {
   品退偏多: 'bg-red-100 text-red-800',
 }
 
+function badBuyerProfileFromRow(row: Record<string, unknown>) {
+  return (row.badBuyerProfile ?? {}) as Record<string, unknown>
+}
+
 function valueProfileFromRow(row: Record<string, unknown>) {
   return (row.valueProfile ?? {}) as Record<string, unknown>
 }
@@ -107,11 +123,15 @@ export const BuyerRankingTab: React.FC = () => {
   const { cookieHealth, syncMeta } = useBoardLiveQuery()
 
   const [profile, setProfile] = useState<BuyerProfileData | null>(null)
+  const [badBuyerData, setBadBuyerData] = useState<BadBuyerRankingData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshBusy, setRefreshBusy] = useState(false)
   const [rankingTab, setRankingTab] = useState('highValue')
   const [page, setPage] = useState(1)
+  const [badBuyerPreset, setBadBuyerPreset] = useState('recent30')
+  const [badBuyerCustomStart, setBadBuyerCustomStart] = useState('')
+  const [badBuyerCustomEnd, setBadBuyerCustomEnd] = useState('')
   const [wechatPreset, setWechatPreset] = useState('thisWeek')
   const [wechatCustomStart, setWechatCustomStart] = useState('')
   const [wechatCustomEnd, setWechatCustomEnd] = useState('')
@@ -123,11 +143,42 @@ export const BuyerRankingTab: React.FC = () => {
   const [orderDrawerBuyer, setOrderDrawerBuyer] = useState<ReturnType<
     typeof rowToDrawerBuyer
   > | null>(null)
+  const [orderDrawerScope, setOrderDrawerScope] = useState<{
+    startDate: string
+    endDate: string
+    source: 'bad_buyer_ranking'
+  } | null>(null)
   const pageSize = 20
 
   const buyerProfileStatus = syncMeta?.buyerProfileStatus
+  const isBadBuyerTab = rankingTab === 'badBuyer'
 
   const load = useCallback(async (tab: string, pageNo: number) => {
+    if (tab === 'badBuyer') {
+      if (badBuyerPreset === 'custom' && (!badBuyerCustomStart.trim() || !badBuyerCustomEnd.trim())) {
+        setBadBuyerData(null)
+        setLoading(false)
+        return
+      }
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await fetchBadBuyerRanking({
+          preset: badBuyerPreset,
+          startDate: badBuyerPreset === 'custom' ? badBuyerCustomStart : undefined,
+          endDate: badBuyerPreset === 'custom' ? badBuyerCustomEnd : undefined,
+          limit: 10,
+        })
+        setBadBuyerData(data)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '加载垃圾客户榜单失败')
+        setBadBuyerData(null)
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
     setLoading(true)
     setError(null)
     try {
@@ -145,7 +196,7 @@ export const BuyerRankingTab: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [pageSize])
+  }, [pageSize, badBuyerPreset, badBuyerCustomStart, badBuyerCustomEnd])
 
   useEffect(() => {
     void load(rankingTab, page)
@@ -172,11 +223,20 @@ export const BuyerRankingTab: React.FC = () => {
     isBusinessSyncing,
     isProfileRebuilding,
   })
-  const showRankingContent = shouldShowBuyerRankingItems(profile, buyerProfileStatus)
-  const displayProfile = showRankingContent ? profile : null
+  const showRankingContent =
+    isBadBuyerTab || shouldShowBuyerRankingItems(profile, buyerProfileStatus)
+  const displayProfile = showRankingContent && !isBadBuyerTab ? profile : null
+
+  const activeWechatPreset = isBadBuyerTab ? badBuyerPreset : wechatPreset
+  const activeWechatCustomStart = isBadBuyerTab ? badBuyerCustomStart : wechatCustomStart
+  const activeWechatCustomEnd = isBadBuyerTab ? badBuyerCustomEnd : wechatCustomEnd
+  const wechatPresetOptions = isBadBuyerTab ? BAD_BUYER_PRESET_OPTIONS : WECHAT_PRESET_OPTIONS
 
   const handleWechatCopy = useCallback(async () => {
-    if (wechatPreset === 'custom' && (!wechatCustomStart.trim() || !wechatCustomEnd.trim())) {
+    if (
+      activeWechatPreset === 'custom' &&
+      (!activeWechatCustomStart.trim() || !activeWechatCustomEnd.trim())
+    ) {
       setWechatToast('请先选择自定义日期范围')
       return
     }
@@ -184,11 +244,11 @@ export const BuyerRankingTab: React.FC = () => {
     setWechatToast(null)
     try {
       const result = await fetchWechatWeeklyBuyerText({
-        preset: wechatPreset,
-        startDate: wechatPreset === 'custom' ? wechatCustomStart : undefined,
-        endDate: wechatPreset === 'custom' ? wechatCustomEnd : undefined,
+        preset: activeWechatPreset,
+        startDate: activeWechatPreset === 'custom' ? activeWechatCustomStart : undefined,
+        endDate: activeWechatPreset === 'custom' ? activeWechatCustomEnd : undefined,
         limit: 10,
-        ranking: 'highValue',
+        ranking: isBadBuyerTab ? 'badBuyer' : 'highValue',
       })
       setWechatModalText(result.text)
     } catch (e) {
@@ -196,7 +256,12 @@ export const BuyerRankingTab: React.FC = () => {
     } finally {
       setWechatCopyBusy(false)
     }
-  }, [wechatCustomEnd, wechatCustomStart, wechatPreset])
+  }, [
+    activeWechatCustomEnd,
+    activeWechatCustomStart,
+    activeWechatPreset,
+    isBadBuyerTab,
+  ])
 
   const handleWechatModalCopy = useCallback(async () => {
     const ta = wechatTextareaRef.current
@@ -252,11 +317,15 @@ export const BuyerRankingTab: React.FC = () => {
   const sampleMeta = displayProfile?.sampleMeta ?? null
   const highValueDef = displayProfile?.highValueCustomerDefinition ?? null
 
-  const items = (displayProfile?.items ?? []).filter(
-    (row) => !isLowPriceBrushBuyerRow(row as Record<string, unknown>),
-  )
-  const listBusy = loading && !profile
-  const total = displayProfile?.pagination?.total ?? items.length
+  const items = isBadBuyerTab
+    ? (badBuyerData?.items ?? []).filter(
+        (row) => !isLowPriceBrushBuyerRow(row as Record<string, unknown>),
+      )
+    : (displayProfile?.items ?? []).filter(
+        (row) => !isLowPriceBrushBuyerRow(row as Record<string, unknown>),
+      )
+  const listBusy = loading && (isBadBuyerTab ? !badBuyerData : !profile)
+  const total = isBadBuyerTab ? items.length : (displayProfile?.pagination?.total ?? items.length)
 
   const summaryCount = (key: BuyerSummaryKey) => {
     if (!summary) return 0
@@ -282,7 +351,9 @@ export const BuyerRankingTab: React.FC = () => {
             全量客户画像（历史累计）· 不随经营看板日期切换 · 不按主播区分
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500">
-            售后关注不是拉黑客户，只是提醒发货前多确认圈口、颜色、瑕疵和预期。
+            {isBadBuyerTab
+              ? '垃圾客户榜单用于提醒主播发货前多确认，不代表不能成交。'
+              : '售后关注不是拉黑客户，只是提醒发货前多确认圈口、颜色、瑕疵和预期。'}
           </p>
 
           {headerHint === 'rebuilding_with_cache' ? (
@@ -338,46 +409,79 @@ export const BuyerRankingTab: React.FC = () => {
           ) : null}
         </div>
         <div className="w-full shrink-0 lg:max-w-sm">
-          <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-3">
-            <p className="mb-2 text-xs font-medium text-emerald-900">微信群榜单文案</p>
+          <div
+            className={`rounded-2xl border p-3 ${
+              isBadBuyerTab
+                ? 'border-amber-200 bg-amber-50/50'
+                : 'border-emerald-100 bg-emerald-50/40'
+            }`}
+          >
+            <p
+              className={`mb-2 text-xs font-medium ${
+                isBadBuyerTab ? 'text-amber-900' : 'text-emerald-900'
+              }`}
+            >
+              微信群榜单文案
+            </p>
             <div className="flex flex-col gap-2">
               <select
                 className="min-h-[44px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                value={wechatPreset}
-                onChange={(e) => setWechatPreset(e.target.value)}
+                value={activeWechatPreset}
+                onChange={(e) => {
+                  const v = e.target.value
+                  if (isBadBuyerTab) {
+                    setBadBuyerPreset(v)
+                  } else {
+                    setWechatPreset(v)
+                  }
+                }}
                 data-testid="wechat-weekly-preset"
               >
-                {WECHAT_PRESET_OPTIONS.map((o) => (
+                {wechatPresetOptions.map((o) => (
                   <option key={o.key} value={o.key}>
                     {o.label}
                   </option>
                 ))}
               </select>
-              {wechatPreset === 'custom' ? (
+              {activeWechatPreset === 'custom' ? (
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
                   <input
                     type="date"
                     className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    value={wechatCustomStart}
-                    onChange={(e) => setWechatCustomStart(e.target.value)}
+                    value={activeWechatCustomStart}
+                    onChange={(e) => {
+                      if (isBadBuyerTab) setBadBuyerCustomStart(e.target.value)
+                      else setWechatCustomStart(e.target.value)
+                    }}
                   />
                   <span className="hidden text-center text-xs text-slate-400 sm:block">至</span>
                   <input
                     type="date"
                     className="min-h-[44px] w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                    value={wechatCustomEnd}
-                    onChange={(e) => setWechatCustomEnd(e.target.value)}
+                    value={activeWechatCustomEnd}
+                    onChange={(e) => {
+                      if (isBadBuyerTab) setBadBuyerCustomEnd(e.target.value)
+                      else setWechatCustomEnd(e.target.value)
+                    }}
                   />
                 </div>
               ) : null}
               <button
                 type="button"
-                className="min-h-[44px] w-full rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition active:bg-emerald-800 disabled:opacity-60"
+                className={`min-h-[44px] w-full rounded-xl px-4 py-2.5 text-sm font-medium text-white transition disabled:opacity-60 ${
+                  isBadBuyerTab
+                    ? 'bg-amber-600 active:bg-amber-800'
+                    : 'bg-emerald-600 active:bg-emerald-800'
+                }`}
                 disabled={wechatCopyBusy}
                 onClick={() => void handleWechatCopy()}
                 data-testid="copy-wechat-weekly-ranking"
               >
-                {wechatCopyBusy ? '正在生成微信群榜单…' : '复制本周微信群榜单'}
+                {wechatCopyBusy
+                  ? '正在生成微信群榜单…'
+                  : isBadBuyerTab
+                    ? '复制垃圾客户榜单文案'
+                    : '复制本周微信群榜单'}
               </button>
               {wechatToast ? null : (
                 <p className="text-center text-[10px] leading-relaxed text-slate-500">
@@ -389,13 +493,13 @@ export const BuyerRankingTab: React.FC = () => {
         </div>
       </div>
 
-      {buyerUiState === 'loading' ? (
+      {buyerUiState === 'loading' && !isBadBuyerTab ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-center text-sm text-slate-500">
           正在加载买家画像…
         </div>
       ) : null}
 
-      {error && !hasCache && buyerUiState !== 'failed' ? (
+      {error && (!hasCache || isBadBuyerTab) && buyerUiState !== 'failed' ? (
         <div className="rounded-2xl border border-red-200 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {error}
           <button
@@ -408,7 +512,7 @@ export const BuyerRankingTab: React.FC = () => {
         </div>
       ) : null}
 
-      {mainCardVariant ? (
+      {mainCardVariant && !isBadBuyerTab ? (
         <BuyerRankingProgressCard
           variant={mainCardVariant}
           progress={buyerProfileStatus?.progress}
@@ -418,7 +522,7 @@ export const BuyerRankingTab: React.FC = () => {
         />
       ) : null}
 
-      {!showRankingContent && hasCache && (isProfileRebuilding || !cacheCompatible) ? (
+      {!showRankingContent && hasCache && !isBadBuyerTab && (isProfileRebuilding || !cacheCompatible) ? (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           买家画像正在更新，旧版排行数据已隐藏，完成后将自动刷新。
         </p>
@@ -443,7 +547,7 @@ export const BuyerRankingTab: React.FC = () => {
         </div>
       </div>
 
-      {summary && !error && (
+      {summary && !error && !isBadBuyerTab && (
         <>
         <MetricGridTransition transitionKey={`summary-${profile?.updatedAt ?? 'empty'}`}>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
@@ -488,6 +592,54 @@ export const BuyerRankingTab: React.FC = () => {
         </>
       )}
 
+      {isBadBuyerTab ? (
+        <div className="rounded-2xl border border-amber-100 bg-amber-50/40 px-3 py-2.5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-amber-900">
+              按支付时间统计 · 不按主播区分 · 最多展示 10 人
+              {badBuyerData?.range ? (
+                <span className="ml-1 font-medium">
+                  （{badBuyerData.range.presetLabel}：{badBuyerData.range.startDate} 至{' '}
+                  {badBuyerData.range.endDate}）
+                </span>
+              ) : null}
+            </p>
+            <select
+              className="min-h-[40px] rounded-lg border border-amber-200 bg-white px-3 py-1.5 text-sm text-slate-700"
+              value={badBuyerPreset}
+              onChange={(e) => {
+                setBadBuyerPreset(e.target.value)
+                setPage(1)
+              }}
+              data-testid="bad-buyer-date-preset"
+            >
+              {BAD_BUYER_PRESET_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {badBuyerPreset === 'custom' ? (
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+              <input
+                type="date"
+                className="min-h-[40px] w-full rounded-lg border border-amber-200 px-3 py-1.5 text-sm"
+                value={badBuyerCustomStart}
+                onChange={(e) => setBadBuyerCustomStart(e.target.value)}
+              />
+              <span className="hidden text-center text-xs text-slate-400 sm:block">至</span>
+              <input
+                type="date"
+                className="min-h-[40px] w-full rounded-lg border border-amber-200 px-3 py-1.5 text-sm"
+                value={badBuyerCustomEnd}
+                onChange={(e) => setBadBuyerCustomEnd(e.target.value)}
+              />
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       <MetricGridTransition transitionKey={`list-${rankingTab}-${page}`}>
       <div
         className={`grid gap-3 md:grid-cols-2 ${
@@ -521,6 +673,75 @@ export const BuyerRankingTab: React.FC = () => {
         ) : (
           items.map((row, idx) => {
             const rowRec = row as Record<string, unknown>
+            const rank = isBadBuyerTab ? idx + 1 : (page - 1) * pageSize + idx + 1
+
+            if (isBadBuyerTab) {
+              const bp = badBuyerProfileFromRow(rowRec)
+              const displayLabel = buyerDisplayLabel(rowRec)
+              const riskScoreText = String(bp.riskScoreText ?? '')
+              const qc = Number(bp.qualityRefundOrderCount ?? 0)
+              const rr = Number(bp.returnRefundOrderCount ?? 0)
+              const afterSale = Number(bp.afterSaleOrderCount ?? 0)
+              const refundRate = bp.refundRate as number | null
+              const refundRateLabel =
+                refundRate != null ? `${Math.round(refundRate * 100)}%` : '—'
+              const refundAmount = Number(bp.refundAmountYuan ?? 0)
+              const shopLabel = String(bp.shopLabel ?? bp.mainShopName ?? '未知店铺')
+              const reasonText = String(bp.reasonText ?? '—')
+              const suggestionText = String(bp.suggestionText ?? '—')
+              const range = badBuyerData?.range
+              const openDrawer = () => {
+                setOrderDrawerScope(
+                  range
+                    ? {
+                        startDate: range.startDate,
+                        endDate: range.endDate,
+                        source: 'bad_buyer_ranking',
+                      }
+                    : null,
+                )
+                setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))
+              }
+              return (
+                <article
+                  key={`badBuyer-${String(rowRec.buyerKey ?? rowRec.buyerId)}`}
+                  role="button"
+                  tabIndex={0}
+                  style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
+                  className="board-list-row-enter flex cursor-pointer flex-col gap-2 rounded-2xl border border-amber-200/70 bg-gradient-to-br from-amber-50/80 to-red-50/30 p-3 shadow-sm transition active:bg-amber-100/40 sm:p-4 sm:hover:-translate-y-0.5 sm:hover:shadow-md"
+                  onClick={openDrawer}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') openDrawer()
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-base font-semibold leading-snug text-slate-900">
+                      {displayLabel}
+                    </p>
+                    <span className="shrink-0 rounded-full bg-amber-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                      #{rank}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-semibold text-red-700">
+                    垃圾风险分：{riskScoreText}
+                  </p>
+                  <p className="text-[11px] text-slate-700">
+                    品退：{formatCount(qc)} 单｜退货：{formatCount(rr)} 单｜售后：{' '}
+                    {formatCount(afterSale)} 单
+                  </p>
+                  <p className="text-[11px] text-slate-700">
+                    退款率：{refundRateLabel}｜退款金额：{formatMoney(refundAmount)}
+                  </p>
+                  <p className="truncate text-[11px] text-slate-600">店铺：{shopLabel}</p>
+                  <p className="text-[11px] text-amber-900">原因：{reasonText}</p>
+                  <p className="text-[10px] text-slate-600">建议：{suggestionText}</p>
+                  <div className="mt-1 flex justify-end border-t border-amber-100 pt-2 text-[11px] text-amber-700">
+                    查看这个买家的订单 →
+                  </div>
+                </article>
+              )
+            }
+
             const vp = valueProfileFromRow(rowRec)
             const mainTag = String(vp.mainTag ?? '').trim()
             const displayLabel = buyerDisplayLabel(rowRec)
@@ -532,7 +753,6 @@ export const BuyerRankingTab: React.FC = () => {
             const averageOrderValue = Number(vp.averageOrderValueYuan ?? 0)
             const shopLabel = String(rowRec.shopLabel ?? vp.shopLabel ?? rowRec.mainShopName ?? '未知店铺')
             const suggestion = String(vp.suggestion ?? rowRec.suggestion ?? '—')
-            const rank = (page - 1) * pageSize + idx + 1
             return (
               <article
                 key={`${rankingTab}-${String(rowRec.buyerKey ?? rowRec.buyerId)}`}
@@ -540,9 +760,15 @@ export const BuyerRankingTab: React.FC = () => {
                 tabIndex={0}
                 style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
                 className="board-list-row-enter flex cursor-pointer flex-col gap-2 rounded-2xl border border-rose-100/50 bg-white p-3 shadow-sm transition active:bg-rose-50/30 sm:p-4 sm:hover:-translate-y-0.5 sm:hover:shadow-md"
-                onClick={() => setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))}
+                onClick={() => {
+                  setOrderDrawerScope(null)
+                  setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))
+                }}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))
+                  if (e.key === 'Enter') {
+                    setOrderDrawerScope(null)
+                    setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))
+                  }
                 }}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -585,7 +811,9 @@ export const BuyerRankingTab: React.FC = () => {
         )}
       </div>
       </MetricGridTransition>
-      {total > 0 && <Pagination page={page} total={total} pageSize={pageSize} onPage={setPage} />}
+      {total > 0 && !isBadBuyerTab && (
+        <Pagination page={page} total={total} pageSize={pageSize} onPage={setPage} />
+      )}
       </>
       )}
       <BuyerSummaryDrawer
@@ -599,8 +827,12 @@ export const BuyerRankingTab: React.FC = () => {
       />
       <BuyerOrderDrawer
         open={orderDrawerBuyer !== null}
-        onClose={() => setOrderDrawerBuyer(null)}
+        onClose={() => {
+          setOrderDrawerBuyer(null)
+          setOrderDrawerScope(null)
+        }}
         buyer={orderDrawerBuyer}
+        scope={orderDrawerScope ?? undefined}
       />
       <ViewportModal
         open={wechatModalText != null}

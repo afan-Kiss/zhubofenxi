@@ -66,6 +66,25 @@ function main() {
     issues,
   )
 
+  const recent7 = resolveBuyerRankingDateRange('recent7', undefined, undefined, fri)
+  assert(
+    recent7.startDate === '2026-06-27' && recent7.endDate === '2026-07-03',
+    `2026-07-03 recent7 应为 2026-06-27~2026-07-03，实际 ${recent7.startDate}~${recent7.endDate}`,
+    issues,
+  )
+  const recent15 = resolveBuyerRankingDateRange('recent15', undefined, undefined, fri)
+  assert(
+    recent15.startDate === '2026-06-19' && recent15.endDate === '2026-07-03',
+    `2026-07-03 recent15 应为 2026-06-19~2026-07-03，实际 ${recent15.startDate}~${recent15.endDate}`,
+    issues,
+  )
+  const recent30 = resolveBuyerRankingDateRange('recent30', undefined, undefined, fri)
+  assert(
+    recent30.startDate === '2026-06-04' && recent30.endDate === '2026-07-03',
+    `2026-07-03 recent30 应为 2026-06-04~2026-07-03，实际 ${recent30.startDate}~${recent30.endDate}`,
+    issues,
+  )
+
   if (issues.length > 0) {
     console.error('[verify:buyer-ranking-week-range] FAIL')
     for (const i of issues) console.error(' -', i)

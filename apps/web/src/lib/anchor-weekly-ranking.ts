@@ -61,6 +61,14 @@ export interface AnchorWeeklyOrderScope {
   source: 'anchor_weekly_ranking'
 }
 
+export interface BadBuyerOrderScope {
+  startDate: string
+  endDate: string
+  source: 'bad_buyer_ranking'
+}
+
+export type BuyerOrderDateScope = AnchorWeeklyOrderScope | BadBuyerOrderScope
+
 export async function fetchAnchorWeeklyRanking(params: {
   preset?: AnchorWeeklyRankingPreset
   startDate?: string

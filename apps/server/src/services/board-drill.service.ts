@@ -226,10 +226,12 @@ export async function buildBuyerProfileDrill(params: {
     startDate: string
     endDate: string
     anchorName?: string
-    source?: 'anchor_weekly_ranking'
+    source?: 'anchor_weekly_ranking' | 'bad_buyer_ranking'
   }
 }) {
   const isWeeklyScope = params.weeklyScope?.source === 'anchor_weekly_ranking'
+  const isBadBuyerScope = params.weeklyScope?.source === 'bad_buyer_ranking'
+  const isRangeScope = isWeeklyScope || isBadBuyerScope
 
   if (isWeeklyScope && params.role && params.username) {
     const scope = resolveAnchorWeeklyRankingScope(
@@ -244,15 +246,15 @@ export async function buildBuyerProfileDrill(params: {
     throw new Error(STAFF_UNBOUND_MESSAGE)
   }
 
-  const profile = isWeeklyScope ? null : await getBuyerRankingProfile()
+  const profile = isRangeScope ? null : await getBuyerRankingProfile()
   const buyerKey = (params.buyerKey ?? params.buyerId).trim()
-  const cachedStats: BuyerRankingItem | null = isWeeklyScope
+  const cachedStats: BuyerRankingItem | null = isRangeScope
     ? null
     : (profile?.items.find((i) => i.buyerKey === buyerKey) ??
       profile?.items.find((i) => i.buyerId === buyerKey) ??
       null)
 
-  const bundle = isWeeklyScope
+  const bundle = isRangeScope
     ? await buildRawAnalyzeBundle(
         buyerRankingRangeToAnalysisRange(
           resolveBuyerRankingDateRange(
@@ -426,11 +428,14 @@ export async function buildBuyerProfileDrill(params: {
     buyerIdentityCode: identityCode,
     buyerShortCode: identityCode,
     stats,
-    source: (isWeeklyScope ? 'anchor_weekly_ranking' : 'buyer_profile_cache') as
+    source: (isRangeScope
+      ? params.weeklyScope!.source ?? 'anchor_weekly_ranking'
+      : 'buyer_profile_cache') as
       | 'buyer_profile_cache'
-      | 'anchor_weekly_ranking',
+      | 'anchor_weekly_ranking'
+      | 'bad_buyer_ranking',
     profileUpdatedAt: profile?.updatedAt ?? null,
-    weeklyScope: isWeeklyScope ? params.weeklyScope : undefined,
+    weeklyScope: isRangeScope ? params.weeklyScope : undefined,
     blacklistedBuyerIds: [...blacklist],
     needAfterSalesSync,
     pendingAfterSalesOrderNos,

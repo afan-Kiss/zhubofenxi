@@ -289,6 +289,12 @@ export function buyerRankingTabEmptyMessage(tab: string): { title: string; subti
   if (tab === 'repurchase') {
     return { title: '当前范围暂无复购客户' }
   }
+  if (tab === 'badBuyer') {
+    return {
+      title: '当前范围暂无需要重点确认的客户',
+      subtitle: '品退、退货、售后纠纷或高退款率的买家会出现在此榜，用于发货前提醒。',
+    }
+  }
   if (tab === 'refund') {
     return { title: '当前范围暂无退款客户' }
   }

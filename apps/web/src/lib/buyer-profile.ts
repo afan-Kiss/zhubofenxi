@@ -95,6 +95,34 @@ export interface WechatWeeklyBuyerTextData {
   dataNote: string
 }
 
+export interface BadBuyerRankingData {
+  items: Array<Record<string, unknown>>
+  range: {
+    preset: string
+    presetLabel: string
+    startDate: string
+    endDate: string
+  }
+  limit: number
+  empty: boolean
+  dataNote: string
+}
+
+export async function fetchBadBuyerRanking(params?: {
+  preset?: string
+  startDate?: string
+  endDate?: string
+  limit?: number
+}): Promise<BadBuyerRankingData> {
+  const qs = new URLSearchParams()
+  if (params?.preset) qs.set('preset', params.preset)
+  if (params?.startDate) qs.set('startDate', params.startDate)
+  if (params?.endDate) qs.set('endDate', params.endDate)
+  if (params?.limit != null) qs.set('limit', String(params.limit))
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return apiRequest<BadBuyerRankingData>(`/api/board/buyer-ranking/bad-buyers${suffix}`)
+}
+
 export async function fetchBuyerProfile(
   params?: { rankingTab?: string; page?: number; pageSize?: number },
   signal?: AbortSignal,

@@ -2,6 +2,8 @@
  * 微信群买家榜单文案验收
  * 用法: npm run verify:buyer-ranking-wechat-text
  */
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   composeWechatWeeklyText,
   formatWechatWeeklyLine,
@@ -10,6 +12,8 @@ import {
 import { buildBuyerValueProfile, isHighValueTagBuyer } from '../src/services/buyer-value-profile.service'
 import { formatShopLabelForWechat } from '../src/services/buyer-shop-aggregate.service'
 import type { BuyerRankingItem } from '../src/services/buyer-ranking.service'
+
+const REPO_ROOT = join(import.meta.dirname, '..', '..', '..')
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -43,6 +47,20 @@ function mockBuyer(partial: Partial<BuyerRankingItem> & { buyerKey: string }): B
   }
 }
 
+function assertNoIdentityLeak(text: string, context: string, issues: string[]) {
+  assert(!text.includes('#A1B2C3'), `${context} 不应含 #A1B2C3 识别码`, issues)
+  assert(!text.includes('识别码'), `${context} 不应含「识别码」`, issues)
+  assert(!text.includes('buyerShortCode'), `${context} 不应含 buyerShortCode`, issues)
+  assert(!text.includes('buyerIdentityCode'), `${context} 不应含 buyerIdentityCode`, issues)
+  assert(!text.includes('buyerKey'), `${context} 不应含 buyerKey`, issues)
+  assert(!/1[3-9]\d{9}/.test(text), `${context} 不应含手机号`, issues)
+  assert(
+    !text.includes('省') && !text.includes('市') && !text.includes('区'),
+    `${context} 不应含地址`,
+    issues,
+  )
+}
+
 function main() {
   const issues: string[] = []
 
@@ -50,7 +68,6 @@ function main() {
     {
       rank: 1,
       buyerDisplayName: '小鹿鹿',
-      buyerShortCode: 'A1B2C3',
       amountYuan: 8260,
       signedOrderCount: 3,
       refundOrderCount: 0,
@@ -60,7 +77,6 @@ function main() {
     {
       rank: 2,
       buyerDisplayName: '爱玉姐姐',
-      buyerShortCode: 'D4E5F6',
       amountYuan: 5980,
       signedOrderCount: 2,
       refundOrderCount: 0,
@@ -68,6 +84,8 @@ function main() {
       shopLabel: '云上珠宝',
     },
   ]
+
+  assert(!('buyerShortCode' in rows[0]!), 'WechatWeeklyTextRow 不应含 buyerShortCode 字段', issues)
 
   const text = composeWechatWeeklyText({
     title: '【本周高价值买家榜】',
@@ -78,15 +96,14 @@ function main() {
   const lines = text.split('\n').filter((l) => /^\d+\./.test(l))
   assert(lines.length === 2, `应按 1、2 换行排列，实际 ${lines.length} 行`, issues)
 
+  assertNoIdentityLeak(text, '微信群文案', issues)
+
   for (const line of lines) {
     assert(line.includes('｜消费 ¥'), `行应含消费金额: ${line}`, issues)
     assert(line.includes('签收'), `行应含签收: ${line}`, issues)
     assert(line.includes('退货'), `行应含退货: ${line}`, issues)
     assert(line.includes('高价值') || line.includes('普通维护') || line.includes('高客单'), `行应含标签: ${line}`, issues)
     assert(line.includes('珠宝'), `行应含店铺: ${line}`, issues)
-    assert(!line.includes('buyerKey'), `不应含完整 buyerId: ${line}`, issues)
-    assert(!/1[3-9]\d{9}/.test(line), `不应含手机号: ${line}`, issues)
-    assert(!line.includes('省') && !line.includes('市') && !line.includes('区'), `不应含地址: ${line}`, issues)
   }
 
   const multiShop = formatShopLabelForWechat({
@@ -134,6 +151,29 @@ function main() {
 
   const sampleLine = formatWechatWeeklyLine(rows[0]!)
   assert(sampleLine.startsWith('1. 小鹿鹿'), `行格式不正确: ${sampleLine}`, issues)
+  assert(!sampleLine.includes('#'), '行内不应含 # 识别码', issues)
+
+  const buyerRankingTabSrc = readFileSync(
+    join(REPO_ROOT, 'apps/web/src/pages/board/BuyerRankingTab.tsx'),
+    'utf8',
+  )
+  assert(
+    !buyerRankingTabSrc.includes('buyerShortCode') &&
+      !buyerRankingTabSrc.includes('buyerIdentityCode') &&
+      !buyerRankingTabSrc.includes('#{shortCode}'),
+    'BuyerRankingTab 卡片不应展示识别码相关字段',
+    issues,
+  )
+
+  const buyerOrderDrawerSrc = readFileSync(
+    join(REPO_ROOT, 'apps/web/src/components/board/BuyerOrderDrawer.tsx'),
+    'utf8',
+  )
+  assert(
+    !buyerOrderDrawerSrc.includes('买家识别码'),
+    'BuyerOrderDrawer 不应展示「买家识别码」',
+    issues,
+  )
 
   if (issues.length > 0) {
     console.error('[verify:buyer-ranking-wechat-text] FAIL')

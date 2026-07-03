@@ -33,7 +33,6 @@ export type WechatWeeklyRankingKind = 'highValue' | 'spend' | 'stableSigned' | '
 export interface WechatWeeklyTextRow {
   rank: number
   buyerDisplayName: string
-  buyerShortCode: string
   amountYuan: number
   signedOrderCount: number
   refundOrderCount: number
@@ -188,7 +187,6 @@ export async function buildWechatWeeklyBuyerRankingText(params: {
   const rows: WechatWeeklyTextRow[] = top.map(({ item, profile }, idx) => ({
     rank: idx + 1,
     buyerDisplayName: item.buyerDisplayName ?? item.nickname ?? '未知买家',
-    buyerShortCode: item.buyerShortCode ?? item.buyerIdentityCode ?? '—',
     amountYuan: profile.realDealAmountYuan,
     signedOrderCount: profile.signedOrderCount,
     refundOrderCount: profile.refundOrderCount,

@@ -83,7 +83,6 @@ export interface WechatWeeklyBuyerTextData {
   rows: Array<{
     rank: number
     buyerDisplayName: string
-    buyerShortCode: string
     amountYuan: number
     signedOrderCount: number
     refundOrderCount: number

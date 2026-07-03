@@ -267,11 +267,6 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer, scope 
     data?.nickname ??
     buyer.nickname ??
     buyerDisplayNameFromRow(buyer as unknown as Record<string, unknown>)
-  const shortCode =
-    data?.buyerShortCode ??
-    buyer.buyerShortCode ??
-    buyer.buyerIdentityCode ??
-    ''
 
   const isWeeklyScope = scope?.source === 'anchor_weekly_ranking'
   const periodLabel = isWeeklyScope
@@ -289,7 +284,6 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer, scope 
       onClose={onClose}
       testId="buyer-order-drawer"
       title={displayName}
-      subtitle={shortCode && shortCode !== '—' ? `买家识别码：${shortCode}` : undefined}
       headerExtra={
         <div
           key={data?.buyerKey ?? buyer.buyerKey}

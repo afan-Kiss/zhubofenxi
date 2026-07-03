@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { Pagination } from '../../components/ui/Pagination'
-import { BuyerDisplay } from '../../components/board/BuyerDisplay'
 import { OfficialQualitySyncNote } from '../../components/board/OfficialQualitySyncNote'
 import { clearBuyerProfileCache } from '../../lib/buyer-profile-cache'
 import {
@@ -262,6 +261,9 @@ export const BuyerRankingTab: React.FC = () => {
           <p className="mt-0.5 text-[11px] text-slate-400">
             全量客户画像（历史累计）· 不随经营看板日期切换 · 不按主播区分
           </p>
+          <p className="mt-0.5 text-[11px] text-slate-500">
+            售后关注不是拉黑客户，只是提醒发货前多确认圈口、颜色、瑕疵和预期。
+          </p>
 
           {headerHint === 'rebuilding_with_cache' ? (
             <p className="mt-1 text-[11px] font-medium text-amber-700">
@@ -493,7 +495,6 @@ export const BuyerRankingTab: React.FC = () => {
             const vp = valueProfileFromRow(rowRec)
             const mainTag = String(vp.mainTag ?? '').trim()
             const displayLabel = buyerDisplayLabel(rowRec)
-            const shortCode = String(rowRec.buyerShortCode ?? rowRec.buyerIdentityCode ?? '').trim()
             const earnedAmount = buyerCardEarnedAmount(rowRec)
             const signedCount = Number(vp.signedOrderCount ?? rowRec.signedOrderCount ?? 0)
             const refundCount = Number(vp.refundOrderCount ?? buyerCardRefundTimes(rowRec))
@@ -516,11 +517,8 @@ export const BuyerRankingTab: React.FC = () => {
                 <div className="flex gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-base font-semibold text-slate-900" title="同名买家已按识别码区分">
+                      <p className="text-base font-semibold text-slate-900">
                         {displayLabel}
-                        {shortCode && shortCode !== '—' ? (
-                          <span className="ml-1 text-sm font-normal text-slate-400">#{shortCode}</span>
-                        ) : null}
                       </p>
                       <span className="shrink-0 rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold text-white">
                         #{rank}
@@ -539,7 +537,7 @@ export const BuyerRankingTab: React.FC = () => {
                   </div>
                   <div className="text-right text-[10px]">
                     <div className="inline-flex items-center justify-end gap-0.5 text-slate-400">
-                      累计消费
+                      累计成交
                       <MetricInfoTooltip text={getMetricExplain('earnedAmount')} />
                     </div>
                     <div className="text-lg font-bold text-rose-900">{formatMoney(earnedAmount)}</div>
@@ -552,7 +550,7 @@ export const BuyerRankingTab: React.FC = () => {
                   <span className="truncate">店铺：{shopLabel}</span>
                 </div>
                 <div className="mt-3 flex justify-end border-t border-rose-50 pt-3 text-[11px] text-rose-600">
-                  点击查看历史订单 →
+                  查看这个买家的订单 →
                 </div>
               </article>
             )

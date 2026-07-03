@@ -148,11 +148,6 @@ export const BuyerSummaryDrawer: React.FC<Props> = ({
                       nickname={String(
                         row.buyerDisplayName ?? row.buyerNickname ?? row.nickname ?? '',
                       )}
-                      identityCode={
-                        String(row.buyerShortCode ?? row.buyerIdentityCode ?? '').trim() ||
-                        undefined
-                      }
-                      buyerId={String(row.buyerId)}
                       isBlacklisted={blocked}
                     />
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-slate-600">

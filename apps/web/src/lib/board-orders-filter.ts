@@ -274,6 +274,18 @@ export function buyerRankingTabEmptyMessage(tab: string): { title: string; subti
         '品退榜优先统计官方品质负反馈明细，并与售后商品问题逻辑交叉印证；尺码不合适、多拍拍错、不想要等普通原因不计入品退。',
     }
   }
+  if (tab === 'highValue') {
+    return { title: '当前暂无综合高价值客户', subtitle: '有真实成交的客户会按价值分排序展示。' }
+  }
+  if (tab === 'highAov') {
+    return { title: '当前暂无高客单客户' }
+  }
+  if (tab === 'stableSigned') {
+    return { title: '当前暂无稳定签收客户' }
+  }
+  if (tab === 'afterSale') {
+    return { title: '当前暂无需要售后关注的客户' }
+  }
   if (tab === 'repurchase') {
     return { title: '当前范围暂无复购客户' }
   }

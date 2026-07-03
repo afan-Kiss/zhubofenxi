@@ -16,7 +16,6 @@ const ALLOWED_PRIMARY_ROUTES = new Set([
   '/anchors',
   '/anchor-schedules',
   '/buyers',
-  '/anchor-weekly-ranking',
   '/operations-report',
   '/good-reviews',
   '/settings',
@@ -31,6 +30,7 @@ const REDIRECT_ONLY_ROUTES = new Set([
   '/billing',
   '/dashboard',
   '/buyer-ranking',
+  '/anchor-weekly-ranking',
   '/admin',
   '/anchors/:anchorId',
 ])
@@ -155,7 +155,7 @@ function checkMainNav(): string[] {
   const toMatches = [...navBlock.matchAll(/to:\s*['"]([^'"]+)['"]/g)].map((m) => m[1]!)
   for (const to of toMatches) {
     if (!ALLOWED_PRIMARY_ROUTES.has(to)) {
-      issues.push(`Layout.tsx 主菜单链接 ${to} 不在允许列表（/、/anchors、/buyers、/anchor-weekly-ranking、/settings 等）`)
+      issues.push(`Layout.tsx 主菜单链接 ${to} 不在允许列表（/、/anchors、/buyers、/settings 等）`)
     }
   }
 

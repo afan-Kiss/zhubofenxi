@@ -905,6 +905,35 @@ boardRouter.get('/anchor-buyer-weekly-ranking', async (req, res) => {
   }
 })
 
+boardRouter.get('/buyer-ranking/wechat-weekly-text', async (req, res) => {
+  try {
+    const { buildWechatWeeklyBuyerRankingText } = await import(
+      '../services/buyer-wechat-weekly-text.service'
+    )
+    const preset = req.query.preset ? String(req.query.preset) : 'thisWeek'
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined
+    const limit = req.query.limit ? Number(req.query.limit) : 10
+    const ranking = req.query.ranking ? String(req.query.ranking) : 'highValue'
+
+    if (preset === 'custom' && (!startDate?.trim() || !endDate?.trim())) {
+      sendFail(res, '自定义范围必须提供 startDate 与 endDate', 400)
+      return
+    }
+
+    const data = await buildWechatWeeklyBuyerRankingText({
+      preset,
+      startDate,
+      endDate,
+      limit,
+      ranking,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '生成微信群榜单文案失败', 500)
+  }
+})
+
 boardRouter.get('/buyer-profile', async (req, res) => {
   try {
     const { buildQualityFeedbackPublicStatus } =
@@ -922,7 +951,7 @@ boardRouter.get('/buyer-profile', async (req, res) => {
     )
     const page = req.query.page ? Number(req.query.page) : 1
     const pageSize = req.query.pageSize ? Number(req.query.pageSize) : 20
-    const rankingTab = req.query.rankingTab ? String(req.query.rankingTab) : 'spend'
+    const rankingTab = req.query.rankingTab ? String(req.query.rankingTab) : 'highValue'
 
     if (!filtered) {
       sendOk(res, {

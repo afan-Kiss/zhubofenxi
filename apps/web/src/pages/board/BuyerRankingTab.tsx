@@ -13,17 +13,15 @@ import { MetricInfoTooltip } from '../../components/board/MetricInfoTooltip'
 import { getMetricExplain } from '../../lib/metricExplain'
 import { BuyerOrderDrawer } from '../../components/board/BuyerOrderDrawer'
 import {
-  buyerCardPendingAfterSaleCount,
   buyerCardEarnedAmount,
-  buyerCardQualityReturnCount,
   buyerCardRefundTimes,
-  buyerCardRealDealOrderCount,
   buyerDisplayLabel,
   buyerRankingTabEmptyMessage,
   isLowPriceBrushBuyerRow,
 } from '../../lib/board-orders-filter'
 import {
   fetchBuyerProfile,
+  fetchWechatWeeklyBuyerText,
   refreshBuyerProfile,
   rowToDrawerBuyer,
   type BuyerProfileData,
@@ -45,10 +43,19 @@ import { AnimatedTabs } from '../../components/ui/AnimatedTabs'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
 
 const RANKING_TABS: Array<{ key: string; label: string }> = [
-  { key: 'spend', label: '消费排行' },
-  { key: 'repurchase', label: '复购排行' },
-  { key: 'refund', label: '退款排行' },
-  { key: 'quality', label: '品退排行' },
+  { key: 'highValue', label: '综合高价值榜' },
+  { key: 'highAov', label: '高客单榜' },
+  { key: 'stableSigned', label: '稳定签收榜' },
+  { key: 'repurchase', label: '复购榜' },
+  { key: 'afterSale', label: '售后关注榜' },
+  { key: 'quality', label: '品退榜' },
+]
+
+const WECHAT_PRESET_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'thisWeek', label: '本周' },
+  { key: 'lastWeek', label: '上周' },
+  { key: 'thisMonth', label: '本月' },
+  { key: 'custom', label: '自定义' },
 ]
 
 const SUMMARY_CARDS: Array<{
@@ -63,14 +70,21 @@ const SUMMARY_CARDS: Array<{
 ]
 
 const TAG_COLORS: Record<string, string> = {
-  优质客户: 'bg-emerald-100 text-emerald-800',
+  高价值: 'bg-emerald-100 text-emerald-800',
+  高客单: 'bg-sky-100 text-sky-800',
+  稳定签收: 'bg-teal-100 text-teal-800',
   复购客户: 'bg-pink-100 text-pink-800',
+  售后关注: 'bg-amber-100 text-amber-800',
+  普通维护: 'bg-slate-100 text-slate-700',
+  优质客户: 'bg-emerald-100 text-emerald-800',
   售后偏多: 'bg-amber-100 text-amber-800',
   品退: 'bg-red-100 text-red-800',
   品退偏多: 'bg-red-100 text-red-800',
 }
 
-const ALLOWED_TAGS = new Set(['优质客户', '复购客户', '售后偏多', '品退', '品退偏多'])
+function valueProfileFromRow(row: Record<string, unknown>) {
+  return (row.valueProfile ?? {}) as Record<string, unknown>
+}
 
 const SUMMARY_FIELD_MAP: Record<BuyerSummaryKey, keyof BuyerProfileSummary> = {
   highValue: 'highValueCount',
@@ -96,8 +110,14 @@ export const BuyerRankingTab: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshBusy, setRefreshBusy] = useState(false)
-  const [rankingTab, setRankingTab] = useState('spend')
+  const [rankingTab, setRankingTab] = useState('highValue')
   const [page, setPage] = useState(1)
+  const [wechatPreset, setWechatPreset] = useState('thisWeek')
+  const [wechatCustomStart, setWechatCustomStart] = useState('')
+  const [wechatCustomEnd, setWechatCustomEnd] = useState('')
+  const [wechatCopyBusy, setWechatCopyBusy] = useState(false)
+  const [wechatToast, setWechatToast] = useState<string | null>(null)
+  const [wechatModalText, setWechatModalText] = useState<string | null>(null)
   const [summaryDrawer, setSummaryDrawer] = useState<BuyerSummaryKey | null>(null)
   const [orderDrawerBuyer, setOrderDrawerBuyer] = useState<ReturnType<
     typeof rowToDrawerBuyer
@@ -154,6 +174,35 @@ export const BuyerRankingTab: React.FC = () => {
   const showRankingContent = shouldShowBuyerRankingItems(profile, buyerProfileStatus)
   const displayProfile = showRankingContent ? profile : null
 
+  const handleWechatCopy = useCallback(async () => {
+    if (wechatPreset === 'custom' && (!wechatCustomStart.trim() || !wechatCustomEnd.trim())) {
+      setWechatToast('请先选择自定义日期范围')
+      return
+    }
+    setWechatCopyBusy(true)
+    setWechatToast(null)
+    try {
+      const result = await fetchWechatWeeklyBuyerText({
+        preset: wechatPreset,
+        startDate: wechatPreset === 'custom' ? wechatCustomStart : undefined,
+        endDate: wechatPreset === 'custom' ? wechatCustomEnd : undefined,
+        limit: 10,
+        ranking: 'highValue',
+      })
+      setWechatModalText(result.text)
+      try {
+        await navigator.clipboard.writeText(result.text)
+        setWechatToast('已复制，可以粘贴到微信群')
+      } catch {
+        setWechatToast('复制失败，可手动复制')
+      }
+    } catch (e) {
+      setWechatToast(e instanceof Error ? e.message : '生成微信群榜单失败')
+    } finally {
+      setWechatCopyBusy(false)
+    }
+  }, [wechatCustomEnd, wechatCustomStart, wechatPreset])
+
   const handleRebuild = useCallback(async () => {
     setRefreshBusy(true)
     setError(null)
@@ -206,9 +255,12 @@ export const BuyerRankingTab: React.FC = () => {
       <CookieHealthBanner cookieHealth={cookieHealth} />
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
-          <h2 className="text-xl font-semibold text-slate-900">买家排行</h2>
+          <h2 className="text-xl font-semibold text-slate-900">买家榜单</h2>
           <p className="mt-0.5 text-sm text-slate-500">
-            全量客户画像（历史累计）· 不随经营看板日期切换
+            所有主播共用的客户池：看哪些买家值得维护，哪些买家签收稳、客单高、退货少。
+          </p>
+          <p className="mt-0.5 text-[11px] text-slate-400">
+            全量客户画像（历史累计）· 不随经营看板日期切换 · 不按主播区分
           </p>
 
           {headerHint === 'rebuilding_with_cache' ? (
@@ -261,6 +313,51 @@ export const BuyerRankingTab: React.FC = () => {
                 showLastUpdated
               />
             </>
+          ) : null}
+        </div>
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <select
+              className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700"
+              value={wechatPreset}
+              onChange={(e) => setWechatPreset(e.target.value)}
+              data-testid="wechat-weekly-preset"
+            >
+              {WECHAT_PRESET_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            {wechatPreset === 'custom' ? (
+              <>
+                <input
+                  type="date"
+                  className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                  value={wechatCustomStart}
+                  onChange={(e) => setWechatCustomStart(e.target.value)}
+                />
+                <span className="text-xs text-slate-400">至</span>
+                <input
+                  type="date"
+                  className="rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                  value={wechatCustomEnd}
+                  onChange={(e) => setWechatCustomEnd(e.target.value)}
+                />
+              </>
+            ) : null}
+            <button
+              type="button"
+              className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-emerald-700 disabled:opacity-60"
+              disabled={wechatCopyBusy}
+              onClick={() => void handleWechatCopy()}
+              data-testid="copy-wechat-weekly-ranking"
+            >
+              {wechatCopyBusy ? '正在生成微信群榜单…' : '复制本周微信群榜单'}
+            </button>
+          </div>
+          {wechatToast ? (
+            <p className="text-[11px] font-medium text-emerald-700">{wechatToast}</p>
           ) : null}
         </div>
       </div>
@@ -392,94 +489,67 @@ export const BuyerRankingTab: React.FC = () => {
           })()
         ) : (
           items.map((row, idx) => {
-            const tags = (Array.isArray(row.customerTags) ? row.customerTags : [])
-              .map(String)
-              .filter((t) => ALLOWED_TAGS.has(t))
-            const displayLabel = buyerDisplayLabel(row)
-            const shortCode = String(row.buyerShortCode ?? row.buyerIdentityCode ?? '').trim()
-            const earnedAmount = buyerCardEarnedAmount(row)
-            const realDealOrderCount = buyerCardRealDealOrderCount(row)
-            const refundCount = buyerCardRefundTimes(row)
-            const qualityReturnCount = buyerCardQualityReturnCount(row)
-            const pendingAfterSaleCount = buyerCardPendingAfterSaleCount(row)
-            const orderCount = Number(row.orderCount ?? 0)
-            const refundRate =
-              orderCount > 0 ? `${Math.round((refundCount / orderCount) * 100)}%` : '—'
-            const qualityRate =
-              orderCount > 0 ? `${Math.round((qualityReturnCount / orderCount) * 100)}%` : '—'
+            const rowRec = row as Record<string, unknown>
+            const vp = valueProfileFromRow(rowRec)
+            const mainTag = String(vp.mainTag ?? '').trim()
+            const displayLabel = buyerDisplayLabel(rowRec)
+            const shortCode = String(rowRec.buyerShortCode ?? rowRec.buyerIdentityCode ?? '').trim()
+            const earnedAmount = buyerCardEarnedAmount(rowRec)
+            const signedCount = Number(vp.signedOrderCount ?? rowRec.signedOrderCount ?? 0)
+            const refundCount = Number(vp.refundOrderCount ?? buyerCardRefundTimes(rowRec))
+            const averageOrderValue = Number(vp.averageOrderValueYuan ?? 0)
+            const shopLabel = String(rowRec.shopLabel ?? vp.shopLabel ?? rowRec.mainShopName ?? '未知店铺')
+            const suggestion = String(vp.suggestion ?? rowRec.suggestion ?? '—')
             const rank = (page - 1) * pageSize + idx + 1
             return (
               <article
-                key={`${rankingTab}-${String(row.buyerKey ?? row.buyerId)}`}
+                key={`${rankingTab}-${String(rowRec.buyerKey ?? rowRec.buyerId)}`}
                 role="button"
                 tabIndex={0}
                 style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
                 className="board-list-row-enter flex cursor-pointer flex-col rounded-2xl border border-rose-100/50 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-                onClick={() => setOrderDrawerBuyer(rowToDrawerBuyer(row))}
+                onClick={() => setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter') setOrderDrawerBuyer(rowToDrawerBuyer(row))
+                  if (e.key === 'Enter') setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))
                 }}
               >
                 <div className="flex gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
-                      <p
-                        className="text-base font-semibold text-slate-900"
-                        title="同名买家已按买家ID区分"
-                      >
+                      <p className="text-base font-semibold text-slate-900" title="同名买家已按识别码区分">
                         {displayLabel}
+                        {shortCode && shortCode !== '—' ? (
+                          <span className="ml-1 text-sm font-normal text-slate-400">#{shortCode}</span>
+                        ) : null}
                       </p>
                       <span className="shrink-0 rounded-full bg-rose-500 px-2 py-0.5 text-[10px] font-bold text-white">
                         #{rank}
                       </span>
                     </div>
-                    {shortCode && shortCode !== '—' ? (
-                      <p className="truncate text-[10px] text-slate-400">
-                        识别码 {shortCode}
-                      </p>
-                    ) : null}
-                    {tags.length > 0 ? (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {tags.map((t) => (
-                          <span
-                            key={t}
-                            className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${TAG_COLORS[t] ?? ''}`}
-                          >
-                            {t}
-                          </span>
-                        ))}
+                    {mainTag ? (
+                      <div className="mt-2">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${TAG_COLORS[mainTag] ?? 'bg-slate-100 text-slate-700'}`}
+                        >
+                          {mainTag}
+                        </span>
                       </div>
                     ) : null}
-                    <p className="mt-1 text-[10px] text-slate-500">
-                      建议：{String(row.suggestion ?? '—')}
-                    </p>
+                    <p className="mt-1 text-[10px] text-slate-500">建议：{suggestion}</p>
                   </div>
                   <div className="text-right text-[10px]">
                     <div className="inline-flex items-center justify-end gap-0.5 text-slate-400">
-                      赚到金额
+                      累计消费
                       <MetricInfoTooltip text={getMetricExplain('earnedAmount')} />
                     </div>
-                    <div className="text-lg font-bold text-rose-900">
-                      {formatMoney(earnedAmount)}
-                    </div>
-                    {rankingTab === 'repurchase' ? (
-                      <div className="mt-1 text-slate-500">
-                        成交 {formatCount(realDealOrderCount)} 单
-                      </div>
-                    ) : null}
+                    <div className="text-lg font-bold text-rose-900">{formatMoney(earnedAmount)}</div>
                   </div>
                 </div>
                 <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] text-slate-600">
-                  <span>成交订单数 {formatCount(realDealOrderCount)}</span>
-                  <span>退款订单数 {formatCount(refundCount)}</span>
-                  <span>品退订单数 {formatCount(qualityReturnCount)}</span>
-                  <span>退款率 {refundRate}</span>
-                  {rankingTab === 'quality' ? (
-                    <span>品退率 {qualityRate}</span>
-                  ) : null}
-                  {pendingAfterSaleCount > 0 ? (
-                    <span>售后中 {formatCount(pendingAfterSaleCount)}</span>
-                  ) : null}
+                  <span>签收 {formatCount(signedCount)} 单</span>
+                  <span>退货 {formatCount(refundCount)} 单</span>
+                  <span>平均客单价 {formatMoney(averageOrderValue)}</span>
+                  <span className="truncate">店铺：{shopLabel}</span>
                 </div>
                 <div className="mt-3 flex justify-end border-t border-rose-50 pt-3 text-[11px] text-rose-600">
                   点击查看历史订单 →
@@ -507,6 +577,48 @@ export const BuyerRankingTab: React.FC = () => {
         onClose={() => setOrderDrawerBuyer(null)}
         buyer={orderDrawerBuyer}
       />
+      {wechatModalText != null ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-4 shadow-xl">
+            <div className="mb-2 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">微信群榜单文案</h3>
+              <button
+                type="button"
+                className="text-xs text-slate-500 hover:text-slate-800"
+                onClick={() => setWechatModalText(null)}
+              >
+                关闭
+              </button>
+            </div>
+            <textarea
+              className="h-64 w-full resize-y rounded-lg border border-slate-200 p-3 text-xs leading-relaxed text-slate-800"
+              value={wechatModalText}
+              onChange={(e) => setWechatModalText(e.target.value)}
+            />
+            <div className="mt-3 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs text-slate-700"
+                onClick={() => setWechatModalText(null)}
+              >
+                关闭
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"
+                onClick={() => {
+                  void navigator.clipboard.writeText(wechatModalText).then(
+                    () => setWechatToast('已复制，可以粘贴到微信群'),
+                    () => setWechatToast('复制失败，可手动复制'),
+                  )
+                }}
+              >
+                再次复制
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

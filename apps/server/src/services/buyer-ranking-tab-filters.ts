@@ -1,6 +1,13 @@
 import type { BuyerRankingItem } from './buyer-ranking.service'
 import { isHighValueBuyer, isRepurchaseBuyer } from './buyer-ranking-classification'
 import { centToYuan } from '../utils/money'
+import {
+  isAfterSaleFocusTagBuyer,
+  isHighAovTagBuyer,
+  isHighValueTagBuyer,
+  isRepurchaseTagBuyer,
+  isStableSignedTagBuyer,
+} from './buyer-value-profile.service'
 
 function standardizedRefundOrderCount(item: BuyerRankingItem): number {
   return item.buyerSummary?.refundOrderCount ?? item.refundCount ?? 0
@@ -72,8 +79,16 @@ export function filterBuyerRankingByTab(
   tab?: string,
 ): BuyerRankingItem[] {
   switch (tab) {
+    case 'highValue':
+      return items.filter((i) => isHighValueTagBuyer(i) || isSpendRankingBuyer(i))
+    case 'highAov':
+      return items.filter((i) => isHighAovTagBuyer(i))
+    case 'stableSigned':
+      return items.filter((i) => isStableSignedTagBuyer(i))
+    case 'afterSale':
+      return items.filter((i) => isAfterSaleFocusTagBuyer(i))
     case 'repurchase':
-      return items.filter((i) => isRepurchaseBuyer(i))
+      return items.filter((i) => isRepurchaseTagBuyer(i) || isRepurchaseBuyer(i))
     case 'refund':
       return items.filter((i) => isRefundRankingBuyer(i))
     case 'quality':
@@ -81,6 +96,7 @@ export function filterBuyerRankingByTab(
     case 'blacklist':
       return items.filter((i) => isBlacklistRankingBuyer(i))
     case 'spend':
+      return items.filter((i) => isSpendRankingBuyer(i))
     default:
       return items.filter((i) => isSpendRankingBuyer(i))
   }

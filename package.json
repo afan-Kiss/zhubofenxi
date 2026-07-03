@@ -42,6 +42,7 @@
     "diagnose:order-pay-time-gap": "tsx apps/server/scripts/diagnose-order-pay-time-prefilter-gap.ts",
     "verify:monthly-close-month": "tsx apps/server/scripts/verify-monthly-close-month.ts",
     "verify:buyer-ranking-week-range": "tsx apps/server/scripts/verify-buyer-ranking-week-range.ts",
+    "verify:buyer-ranking-wechat-text": "tsx apps/server/scripts/verify-buyer-ranking-wechat-text.ts",
     "verify:anchor-buyer-weekly-ranking": "tsx apps/server/scripts/verify-anchor-buyer-weekly-ranking.ts",
     "verify:daily-report-images": "tsx apps/server/scripts/verify-daily-report-images.ts",
     "verify:daily-report-live-sessions": "tsx apps/server/scripts/verify-daily-report-live-sessions-shiyuju.ts",

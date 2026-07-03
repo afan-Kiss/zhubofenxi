@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Menu, Settings, Users, UserCircle, X, FileText, LogOut, ThumbsUp, CalendarDays } from 'lucide-react'
+import { LayoutDashboard, Menu, Settings, Users, UserCircle, X, FileText, LogOut, ThumbsUp } from 'lucide-react'
 import { PageRequestStatusBar } from './board/PageRequestStatusBar'
 import { CookieHealthWatcher } from './board/CookieHealthWatcher'
 import { BoardLiveQueryProvider } from '../providers/BoardLiveQueryProvider'
@@ -34,14 +34,8 @@ const ALL_NAV: Array<{
   },
   {
     to: '/buyers',
-    label: (<><Users size={14} /> 买家排行</>),
+    label: (<><Users size={14} /> 买家榜单</>),
     dataTestId: 'tab-buyers',
-    permission: 'buyers',
-  },
-  {
-    to: '/anchor-weekly-ranking',
-    label: (<><CalendarDays size={14} /> 主播周榜</>),
-    dataTestId: 'tab-anchor-weekly-ranking',
     permission: 'buyers',
   },
   {

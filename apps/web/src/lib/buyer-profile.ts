@@ -57,6 +57,43 @@ export interface BuyerProfileData {
   }
 }
 
+export async function fetchWechatWeeklyBuyerText(params?: {
+  preset?: string
+  startDate?: string
+  endDate?: string
+  limit?: number
+  ranking?: string
+}): Promise<WechatWeeklyBuyerTextData> {
+  const qs = new URLSearchParams()
+  if (params?.preset) qs.set('preset', params.preset)
+  if (params?.startDate) qs.set('startDate', params.startDate)
+  if (params?.endDate) qs.set('endDate', params.endDate)
+  if (params?.limit != null) qs.set('limit', String(params.limit))
+  if (params?.ranking) qs.set('ranking', params.ranking)
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return apiRequest<WechatWeeklyBuyerTextData>(
+    `/api/board/buyer-ranking/wechat-weekly-text${suffix}`,
+  )
+}
+
+export interface WechatWeeklyBuyerTextData {
+  title: string
+  dateRangeLabel: string
+  text: string
+  rows: Array<{
+    rank: number
+    buyerDisplayName: string
+    buyerShortCode: string
+    amountYuan: number
+    signedOrderCount: number
+    refundOrderCount: number
+    mainTag: string
+    shopLabel: string
+  }>
+  empty: boolean
+  dataNote: string
+}
+
 export async function fetchBuyerProfile(
   params?: { rankingTab?: string; page?: number; pageSize?: number },
   signal?: AbortSignal,

@@ -22,6 +22,7 @@ import {
   filterViewsForBuyerRanking,
 } from './low-price-brush-order.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
+import { buildBuyerShopMapFromViews } from './buyer-shop-aggregate.service'
 
 const CACHE_ID = 'default'
 
@@ -30,7 +31,7 @@ export const BUYER_RANKING_BUILDING_STALE_MS = 30 * 60 * 1000
 
 /** 买家排行缓存版本：字段或身份规则变更时递增 */
 export const BUYER_RANKING_CACHE_VERSION =
-  'buyer_summary_unified_refund_v13_low_price_filter'
+  'buyer_summary_unified_refund_v14_buyer_value_shop'
 
 export interface BuyerRankingProfilePayload {
   source: 'buyer_profile_cache'
@@ -401,6 +402,15 @@ async function executeRebuildBuyerRankingCache(
   const viewsWithRaw = attachRawByMatchToViews(artifacts?.views ?? [], rawByMatch)
   const buyerRankingViews = filterViewsForBuyerRanking(filterViewsForCoreMetrics(viewsWithRaw))
   const { items, summary } = buildBuyerRankingSummaryFromViews(buyerRankingViews)
+  const shopMap = buildBuyerShopMapFromViews(buyerRankingViews)
+  const itemsWithShop = items.map((item) => {
+    const shop = shopMap.get(item.buyerKey)
+    return {
+      ...item,
+      mainShopName: shop?.mainShopName ?? '未知店铺',
+      shopNames: shop?.shopNames ?? [],
+    }
+  })
   const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(buyerRankingViews)]
   const now = new Date()
   const sampleMeta = buildBuyerRankingSampleMetaFromViews(
@@ -419,7 +429,7 @@ async function executeRebuildBuyerRankingCache(
     where: { id: CACHE_ID },
     create: {
       id: CACHE_ID,
-      itemsJson: JSON.stringify(items),
+      itemsJson: JSON.stringify(itemsWithShop),
       summaryJson: JSON.stringify({ ...summary, ...payloadMeta }),
       blacklistedBuyerIdsJson: JSON.stringify(blacklistedBuyerIds),
       orderCount: sampleMeta.sampleOrderCount,
@@ -429,7 +439,7 @@ async function executeRebuildBuyerRankingCache(
       lastTrigger: `${triggeredBy}:${BUYER_RANKING_CACHE_VERSION}`,
     },
     update: {
-      itemsJson: JSON.stringify(items),
+      itemsJson: JSON.stringify(itemsWithShop),
       summaryJson: JSON.stringify({ ...summary, ...payloadMeta }),
       blacklistedBuyerIdsJson: JSON.stringify(blacklistedBuyerIds),
       orderCount: sampleMeta.sampleOrderCount,
@@ -441,7 +451,7 @@ async function executeRebuildBuyerRankingCache(
 
   logInfo(
     '买家排行',
-    `重建完成：${items.length} 位买家，${buyerRankingViews.length} 单，用时 ${Date.now() - started}ms`,
+    `重建完成：${itemsWithShop.length} 位买家，${buyerRankingViews.length} 单，用时 ${Date.now() - started}ms`,
   )
 
   return {

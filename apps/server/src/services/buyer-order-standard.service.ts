@@ -98,6 +98,8 @@ export interface BuyerOrderSummary {
   realDealOrderCount: number
   refundOrderCount: number
   qualityRefundOrderCount: number
+  /** 退货退款订单数（按订单去重；品退默认归入此类，除非明确仅退款） */
+  returnRefundOrderCount: number
   /** 售后中/待同步且 refundAmountCent=0 的订单数（不计入退款统计） */
   pendingAfterSaleOrderCount: number
 }
@@ -376,10 +378,13 @@ export function resolveBuyerOrderQualityRefund(v: AnalyzedOrderView): {
 
 export function resolveBuyerAfterSaleType(v: AnalyzedOrderView): BuyerAfterSaleType {
   const refundCent = v.buyerProductRefundAmountCent ?? 0
+  const quality = resolveBuyerOrderQualityRefund(v)
   if (v.isFreightRefundOnly && (v.freightRefundAmountCent ?? 0) > 0) return 'shipping_compensation'
-  if (v.afterSaleClosedNoRefund && refundCent === 0) return 'none'
+  if (v.afterSaleClosedNoRefund && refundCent === 0 && !quality.isQualityRefund) return 'none'
   if (v.isFreightRefundOnly && refundCent > 0) return 'shipping_compensation'
-  if (v.isReturnRefund && refundCent > 0) return 'return_refund'
+  if (v.isReturnRefund) return 'return_refund'
+  // 品退默认归入退货退款（与高风险客户榜 / Drawer 汇总口径一致）
+  if (quality.isQualityRefund) return 'return_refund'
   if (v.isRefundOnly && !v.isFreightRefundOnly && refundCent > 0) return 'refund_only'
   if (refundCent > 0 || v.isRealProductRefund) return 'other_after_sale'
   return 'none'
@@ -561,6 +566,7 @@ export function buildBuyerOrderSummary(rows: BuyerOrderStandardRow[]): BuyerOrde
   const realDealNos = new Set<string>()
   const refundNos = new Set<string>()
   const qualityNos = new Set<string>()
+  const returnRefundNos = new Set<string>()
   const pendingNos = new Set<string>()
   let receivableAmountCent = 0
   let payAmountCent = 0
@@ -579,10 +585,13 @@ export function buildBuyerOrderSummary(rows: BuyerOrderStandardRow[]): BuyerOrde
     realDealAmountCent += r.realDealAmountCent
     if (r.isPaid && r.payAmountCent > 0) paidNos.add(r.orderNo)
     if (r.isRealDealOrder) realDealNos.add(r.orderNo)
-    if (r.refundAmountCent > 0 && r.afterSaleType !== 'shipping_compensation') {
+    if (r.isQualityRefund) {
+      qualityNos.add(r.orderNo)
+      refundNos.add(r.orderNo)
+    } else if (r.refundAmountCent > 0 && r.afterSaleType !== 'shipping_compensation') {
       refundNos.add(r.orderNo)
     }
-    if (r.isQualityRefund) qualityNos.add(r.orderNo)
+    if (r.afterSaleType === 'return_refund' || r.isQualityRefund) returnRefundNos.add(r.orderNo)
     if (r.refundAmountPending === true && r.refundAmountCent === 0) pendingNos.add(r.orderNo)
   }
 
@@ -602,6 +611,7 @@ export function buildBuyerOrderSummary(rows: BuyerOrderStandardRow[]): BuyerOrde
     realDealOrderCount: realDealNos.size,
     refundOrderCount: refundNos.size,
     qualityRefundOrderCount: qualityNos.size,
+    returnRefundOrderCount: returnRefundNos.size,
     pendingAfterSaleOrderCount: pendingNos.size,
   }
 }

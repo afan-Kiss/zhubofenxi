@@ -114,9 +114,14 @@ export function qualityRefundOrderCount(item: BuyerRankingItem): number {
   return item.buyerSummary?.qualityRefundOrderCount ?? item.qualityReturnCount ?? 0
 }
 
-/** 退货退款单数（不含纯运费补偿） */
+/** 退货退款单数（不含纯运费补偿；品退默认计入，与 Drawer 口径一致） */
 export function returnRefundOrderCount(item: BuyerRankingItem): number {
-  return item.returnRefundCount ?? 0
+  const base =
+    item.buyerSummary?.returnRefundOrderCount ??
+    item.returnRefundCount ??
+    0
+  const qc = qualityRefundOrderCount(item)
+  return Math.max(base, qc)
 }
 
 /** 售后申请次数（可大于订单数；不等于退款订单数） */
@@ -171,17 +176,19 @@ export function extractBadBuyerCustomerStats(
   const signedCount = hasSignedData ? (item.signedOrderCount ?? 0) : null
   const signedAmountCent = Math.round((item.signedAmount ?? 0) * 100)
 
+  const qualityRefundCount = qualityRefundOrderCount(item)
   const summaryRefundOrders = summary?.refundOrderCount ?? 0
   const behaviorRefundOrders =
     (item.returnRefundCount ?? 0) + (item.refundOnlyCount ?? 0)
-  const rawRefundOrders =
+  let rawRefundOrders =
     summaryRefundOrders > 0 ? summaryRefundOrders : behaviorRefundOrders
+  if (rawRefundOrders <= 0 && qualityRefundCount > 0) {
+    rawRefundOrders = qualityRefundCount
+  }
   const refundOrderCount = capBadBuyerCount(rawRefundOrders, paidCount)
 
   const refundAmountCent =
     summary?.refundAmountCent ?? Math.round(productRefundAmountYuan(item) * 100)
-
-  const qualityRefundCount = qualityRefundOrderCount(item)
   const returnRefundCount = returnRefundOrderCount(item)
   const aftersaleCount = aftersaleApplyCount(item, options?.aftersaleApplyCount)
   const unsignedCount = hasSignedData ? (item.unsignedOrderCount ?? 0) : 0
@@ -529,11 +536,9 @@ export function formatBadBuyerWechatBlock(row: BadBuyerWechatTextRow): string {
   return [
     `${row.rank}. ${name}`,
     `支付：${row.paidCount} 单｜签收：${row.signedLine}｜签收率：${row.signedRateLabel}`,
-    `退款：${row.refundOrderCount} 单｜退款率：${row.refundRateLabel}｜退款金额：${formatMoneyYuanCompact(row.refundAmountYuan)}`,
-    `品退：${row.qualityRefundOrderCount} 单｜退货退款：${row.returnRefundOrderCount} 单｜售后申请：${row.aftersaleCount} 次`,
+    `退款：${row.refundOrderCount} 单｜退款金额：${formatMoneyYuanCompact(row.refundAmountYuan)}`,
+    `品退：${row.qualityRefundOrderCount} 单｜退货退款：${row.returnRefundOrderCount} 单`,
     `店铺：${row.shopLabel}`,
-    `原因：${row.reasonText}`,
-    `建议：${row.suggestionText}`,
   ].join('\n')
 }
 

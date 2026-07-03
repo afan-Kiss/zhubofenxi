@@ -127,9 +127,7 @@ export function buildBadBuyerDrawerAuditMetrics(params: {
   const rows = rankingViews.map((v) => mapViewToBuyerOrderStandard(v))
   const summary = buildBuyerOrderSummary(rows)
 
-  const returnRefundOrderCount = new Set(
-    rows.filter((r) => r.afterSaleType === 'return_refund').map((r) => r.orderNo),
-  ).size
+  const returnRefundOrderCount = summary.returnRefundOrderCount
 
   let aftersaleApplyCount = 0
   let aftersaleOrderCount = 0

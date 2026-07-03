@@ -258,7 +258,7 @@ function toItem(agg: BuyerAgg): BuyerRankingItem {
     signedOrderCount: agg.signedOrderCount,
     unsignedOrderCount: agg.unsignedOrderCount,
     completedOrderCount: agg.completedOrderCount,
-    returnRefundCount: agg.returnRefundCount,
+    returnRefundCount: summary.returnRefundOrderCount,
     refundOnlyCount: agg.refundOnlyCount,
     freightRefundCount: agg.freightRefundCount,
     afterSaleClosedNoRefundCount: agg.afterSaleClosedNoRefundCount,
@@ -306,6 +306,7 @@ function emptyBuyerSummary(): BuyerOrderSummary {
     realDealOrderCount: 0,
     refundOrderCount: 0,
     qualityRefundOrderCount: 0,
+    returnRefundOrderCount: 0,
     pendingAfterSaleOrderCount: 0,
   }
 }

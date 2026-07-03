@@ -913,15 +913,10 @@ export const BuyerRankingTab: React.FC = () => {
                   ? '—'
                   : `${Math.round((Number(bp.signedRate ?? signedCount / paidCount) || 0) * 100)}%`
               const refundOrderCount = Number(bp.refundOrderCount ?? 0)
-              const refundRate = Number(bp.refundRate ?? 0)
-              const refundRateLabel = `${Math.round(Math.min(refundRate, 1) * 100)}%`
               const refundAmount = Number(bp.refundAmountYuan ?? 0)
               const qc = Number(bp.qualityRefundOrderCount ?? 0)
               const rr = Number(bp.returnRefundOrderCount ?? 0)
-              const aftersaleCount = Number(bp.aftersaleCount ?? bp.afterSaleOrderCount ?? 0)
               const shopLabel = String(bp.shopLabel ?? bp.mainShopName ?? '未知店铺')
-              const reasonText = String(bp.reasonText ?? '—')
-              const suggestionText = String(bp.suggestionText ?? '—')
               const baseLabel = buyerDisplayLabel(rowRec)
               const displayLabel = qc > 0 ? `【${baseLabel}】` : baseLabel
               const range = badBuyerData?.range
@@ -963,18 +958,14 @@ export const BuyerRankingTab: React.FC = () => {
                     支付：{formatCount(paidCount)} 单｜签收：{signedLine}｜签收率：{signedRateLabel}
                   </p>
                   <p className="text-[11px] text-slate-700">
-                    退款：{formatCount(refundOrderCount)} 单｜退款率：{refundRateLabel}｜退款金额：
-                    {formatMoney(refundAmount)}
+                    退款：{formatCount(refundOrderCount)} 单｜退款金额：{formatMoney(refundAmount)}
                   </p>
                   <p
                     className={`text-[11px] ${qc > 0 ? 'font-semibold text-red-700' : 'text-slate-700'}`}
                   >
-                    品退：{formatCount(qc)} 单｜退货退款：{formatCount(rr)} 单｜售后申请：
-                    {formatCount(aftersaleCount)} 次
+                    品退：{formatCount(qc)} 单｜退货退款：{formatCount(rr)} 单
                   </p>
                   <p className="truncate text-[11px] text-slate-600">店铺：{shopLabel}</p>
-                  <p className="text-[11px] text-amber-900">原因：{reasonText}</p>
-                  <p className="text-[10px] text-slate-600">建议：{suggestionText}</p>
                   <div className="mt-1 flex justify-end border-t border-amber-100 pt-2 text-[11px] text-amber-700">
                     查看这个买家的订单 →
                   </div>

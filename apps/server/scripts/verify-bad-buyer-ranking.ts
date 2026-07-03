@@ -98,6 +98,7 @@ async function main() {
       realDealOrderCount: 1,
       refundOrderCount: 1,
       qualityRefundOrderCount: 0,
+      returnRefundOrderCount: 0,
       pendingAfterSaleOrderCount: 0,
       receivableAmountCent: 100000,
       payAmountCent: 100000,
@@ -137,6 +138,7 @@ async function main() {
         realDealOrderCount: 2,
         refundOrderCount: 8,
         qualityRefundOrderCount: 0,
+        returnRefundOrderCount: 0,
         pendingAfterSaleOrderCount: 0,
         receivableAmountCent: 200000,
         payAmountCent: 200000,
@@ -175,6 +177,7 @@ async function main() {
       realDealOrderCount: 2,
       refundOrderCount: 0,
       qualityRefundOrderCount: 0,
+      returnRefundOrderCount: 0,
       pendingAfterSaleOrderCount: 0,
       receivableAmountCent: 200000,
       payAmountCent: 200000,
@@ -222,6 +225,7 @@ async function main() {
     qualityReturnCount: 1,
     buyerSummary: {
       qualityRefundOrderCount: 1,
+      returnRefundOrderCount: 1,
       refundOrderCount: 1,
       orderCount: 3,
       paidOrderCount: 3,
@@ -250,6 +254,7 @@ async function main() {
       paidOrderCount: 2,
       realDealOrderCount: 2,
       qualityRefundOrderCount: 0,
+      returnRefundOrderCount: 0,
       pendingAfterSaleOrderCount: 0,
       receivableAmountCent: 200000,
       payAmountCent: 200000,
@@ -275,6 +280,7 @@ async function main() {
       paidOrderCount: 4,
       realDealOrderCount: 3,
       qualityRefundOrderCount: 0,
+      returnRefundOrderCount: 0,
       pendingAfterSaleOrderCount: 0,
       receivableAmountCent: 400000,
       payAmountCent: 400000,
@@ -303,6 +309,7 @@ async function main() {
       productRefundAmount: 3260,
       buyerSummary: {
         qualityRefundOrderCount: 2,
+        returnRefundOrderCount: 3,
         refundOrderCount: 3,
         orderCount: 4,
         paidOrderCount: 4,
@@ -323,6 +330,123 @@ async function main() {
   assert(profile.riskLevel.length > 0, 'profile 应含 riskLevel', issues)
   assert(profile.paidCount === 4, 'profile paidCount 应正确', issues)
   assert(!profile.reasonText.includes('售后纠纷多'), '原因不应再使用「售后纠纷多」', issues)
+
+  // 品退 1 单、退款金额未同步时：品退应计入退货退款与退款单数
+  const qualityReturnRefund = mockBuyer({
+    buyerKey: 'qc-return',
+    orderCount: 1,
+    paidOrderCount: 1,
+    qualityReturnCount: 1,
+    returnRefundCount: 0,
+    buyerSummary: {
+      orderCount: 1,
+      paidOrderCount: 1,
+      realDealOrderCount: 1,
+      refundOrderCount: 1,
+      qualityRefundOrderCount: 1,
+      returnRefundOrderCount: 1,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 120000,
+      payAmountCent: 120000,
+      refundAmountCent: 0,
+      freightRefundAmountCent: 0,
+      netDealAmountCent: 120000,
+      realDealAmountCent: 120000,
+      displayEarnedAmountCent: 120000,
+    },
+  })
+  assert(
+    returnRefundOrderCount(qualityReturnRefund) === 1,
+    '品退单应计入退货退款单数',
+    issues,
+  )
+  assert(
+    extractBadBuyerCustomerStats(qualityReturnRefund).refundOrderCount === 1,
+    '品退单应计入退款单数',
+    issues,
+  )
+
+  const staleReturnRefund = mockBuyer({
+    buyerKey: 'qc-stale',
+    orderCount: 1,
+    paidOrderCount: 1,
+    qualityReturnCount: 1,
+    returnRefundCount: 0,
+    buyerSummary: {
+      orderCount: 1,
+      paidOrderCount: 1,
+      realDealOrderCount: 1,
+      refundOrderCount: 1,
+      qualityRefundOrderCount: 1,
+      returnRefundOrderCount: 0,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 120000,
+      payAmountCent: 120000,
+      refundAmountCent: 0,
+      freightRefundAmountCent: 0,
+      netDealAmountCent: 120000,
+      realDealAmountCent: 120000,
+      displayEarnedAmountCent: 120000,
+    },
+  })
+  assert(
+    returnRefundOrderCount(staleReturnRefund) === 1,
+    '汇总未更新时品退单仍应兜底计入退货退款',
+    issues,
+  )
+
+  const { buildBuyerOrderSummary } = await import('../src/services/buyer-order-standard.service')
+  const qualityRowSummary = buildBuyerOrderSummary([
+    {
+      orderNo: 'P-HEISHUINI',
+      buyerKey: 'buyer-1',
+      buyerNickname: '黑水泥',
+      buyerDisplayId: 'ABC123',
+      productName: '和田玉',
+      anchorName: '主播A',
+      orderTime: '2026-06-01 10:00:00',
+      payTime: '2026-06-01 10:00:00',
+      signTime: null,
+      afterSaleApplyTime: '2026-06-02 10:00:00',
+      afterSaleCompleteTime: null,
+      goodsAmountCent: 120000,
+      freightAmountCent: 0,
+      receivableAmountCent: 120000,
+      payAmountCent: 120000,
+      refundAmountCent: 0,
+      freightRefundAmountCent: 0,
+      netDealAmountCent: 120000,
+      realDealAmountCent: 120000,
+      earnedAmountCent: 120000,
+      orderStatusText: '已关闭',
+      orderStatusLabel: '已关闭',
+      afterSaleStatusText: '售后完成',
+      afterSaleStatusLabel: '商品问题售后',
+      afterSaleDisplayTone: 'quality',
+      hasEffectiveAfterSale: true,
+      afterSaleReason: '商品质量问题',
+      refundSourceText: '待同步',
+      afterSaleNo: 'AS001',
+      isPaid: true,
+      isSigned: false,
+      hasRefund: false,
+      hasAfterSale: true,
+      afterSaleType: 'return_refund',
+      afterSaleTypeLabel: '退货退款',
+      isQualityRefund: true,
+      strictQualityRefund: true,
+      qualityRefundReasonMatched: '商品质量问题',
+      cardStatusLabel: '已关闭',
+      isRealDealOrder: true,
+    },
+  ])
+  assert(
+    qualityRowSummary.qualityRefundOrderCount === 1 &&
+      qualityRowSummary.returnRefundOrderCount === 1 &&
+      qualityRowSummary.refundOrderCount === 1,
+    '品退且退款金额未同步时，汇总应同时计入品退/退货退款/退款单数',
+    issues,
+  )
 
   const block1 = formatBadBuyerWechatBlock({
     rank: 1,
@@ -382,7 +506,11 @@ async function main() {
     '有品退时应加【】',
     issues,
   )
-  assert(wechatText.includes('售后申请：'), '微信文案应含售后申请次数字段', issues)
+  assert(!wechatText.includes('退款率：'), '微信文案不应含退款率', issues)
+  assert(!wechatText.includes('售后申请：'), '微信文案不应含售后申请', issues)
+  assert(!wechatText.includes('原因：'), '微信文案不应含原因', issues)
+  assert(!wechatText.includes('建议：'), '微信文案不应含建议', issues)
+  assert(wechatText.includes('退货退款：'), '微信文案应含退货退款', issues)
   const sortSample = [
     { badBuyerProfile: { qualityRefundOrderCount: 0, riskScore: 9, refundOrderCount: 3 } },
     { badBuyerProfile: { qualityRefundOrderCount: 2, riskScore: 5, refundOrderCount: 2 } },

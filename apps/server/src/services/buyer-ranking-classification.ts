@@ -1,5 +1,5 @@
 import type { BuyerRankingItem } from './buyer-ranking.service'
-import { isTrueHighValueCustomer } from './buyer-value-ranking.service'
+import { isTrueHighValueCustomer } from './buyer-value-score.service'
 
 /** 高价值客户：实际签收金额 ≥ 1000 元 */
 export const HIGH_VALUE_MIN_SIGNED_YUAN = 1000

@@ -1,5 +1,5 @@
 import { getDecryptedCookieByAccountId } from './live-account.service'
-import { requestXhsJson } from './xhs-http.service'
+import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
 import { enqueueXhsRequest } from './xhs-api-sync/xhs-rate-limiter.service'
 import {
   QUALITY_BAD_CASE_API,
@@ -51,17 +51,25 @@ async function postQualityApi<T>(
 ): Promise<T> {
   return enqueueXhsRequest(async () => {
     const cookie = await getDecryptedCookieByAccountId(liveAccountId)
-    return requestXhsJson<T>({
+    return requestXhsJsonWithSyncAudit<T>({
+      shopId: liveAccountId,
+      shopName: accountName,
+      apiName: 'quality_badcase',
       method: 'POST',
-      url,
-      body,
-      cookie,
-      referer: QUALITY_BAD_CASE_REFERER,
-      needSign: true,
-      signLogContext: {
-        tag: 'quality-badcase-sign',
-        liveAccountId,
-        accountName,
+      urlKey: url.split('?')[0]!.slice(-80),
+      trigger: 'scheduled',
+      options: {
+        method: 'POST',
+        url,
+        body,
+        cookie,
+        referer: QUALITY_BAD_CASE_REFERER,
+        needSign: true,
+        signLogContext: {
+          tag: 'quality-badcase-sign',
+          liveAccountId,
+          accountName,
+        },
       },
     })
   })

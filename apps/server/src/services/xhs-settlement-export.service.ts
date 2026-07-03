@@ -8,7 +8,8 @@ import { writeOperationLog } from './audit.service'
 import { prisma } from '../lib/prisma'
 import { sanitizeUrlForLog } from '../utils/url-sanitize'
 import type { DownloadProgressContext } from '../types/download-batch'
-import { requestXhsJson, XHS_BROWSER_UA } from './xhs-http.service'
+import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
+import { XHS_BROWSER_UA } from './xhs-http.service'
 import {
   failedPhaseFromStep,
   initDownloadPipeline,
@@ -432,12 +433,18 @@ export async function exportSettlementBillByRange(params: {
       userAgent,
       downloadTaskId: downloadTask.id,
     })
-    const exportRes = await requestXhsJson<ExportBillResponse>({
+    const exportRes = await requestXhsJsonWithSyncAudit<ExportBillResponse>({
+      apiName: 'settlement_export_start',
       method: 'POST',
-      url: EXPORT_BILL_URL,
-      body: config.buildExportBody(startTime, endTime),
-      cookie,
-      audit: httpAudit,
+      urlKey: EXPORT_BILL_URL,
+      trigger: 'manual',
+      options: {
+        method: 'POST',
+        url: EXPORT_BILL_URL,
+        body: config.buildExportBody(startTime, endTime),
+        cookie,
+        audit: httpAudit,
+      },
     })
 
     const exportTaskId = exportRes.data?.taskId
@@ -457,12 +464,18 @@ export async function exportSettlementBillByRange(params: {
     let matchedRecord: ExportRecordItem | null = null
 
     while (Date.now() < pollDeadline) {
-      const listRes = await requestXhsJson<QueryExportListResponse>({
+      const listRes = await requestXhsJsonWithSyncAudit<QueryExportListResponse>({
+        apiName: 'settlement_export_list',
         method: 'POST',
-        url: QUERY_EXPORT_LIST_URL,
-        body: config.queryListBody,
-        cookie,
-        audit: httpAudit,
+        urlKey: QUERY_EXPORT_LIST_URL,
+        trigger: 'manual',
+        options: {
+          method: 'POST',
+          url: QUERY_EXPORT_LIST_URL,
+          body: config.queryListBody,
+          cookie,
+          audit: httpAudit,
+        },
       })
 
       const records = listRes.data?.exportRecordList ?? listRes.exportRecordList ?? []
@@ -495,12 +508,18 @@ export async function exportSettlementBillByRange(params: {
     const recordTaskId = String(matchedRecord.taskId)
 
     await progress?.setStep('get_download_url')
-    const urlRes = await requestXhsJson<GetDownloadUrlResponse>({
+    const urlRes = await requestXhsJsonWithSyncAudit<GetDownloadUrlResponse>({
+      apiName: 'settlement_export_download_url',
       method: 'POST',
-      url: GET_BILL_DOWNLOAD_URL,
-      body: { taskId: recordTaskId, billType: 'EXPORT_BILL' },
-      cookie,
-      audit: httpAudit,
+      urlKey: GET_BILL_DOWNLOAD_URL,
+      trigger: 'manual',
+      options: {
+        method: 'POST',
+        url: GET_BILL_DOWNLOAD_URL,
+        body: { taskId: recordTaskId, billType: 'EXPORT_BILL' },
+        cookie,
+        audit: httpAudit,
+      },
     })
 
     const downloadUrl = urlRes.data?.downloadUrl

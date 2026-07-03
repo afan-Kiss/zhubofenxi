@@ -19,6 +19,134 @@ import {
   filterViewsForBuyerRanking,
 } from './low-price-brush-order.service'
 
+export interface BuyerDrawerAuditMetrics {
+  summary: BuyerOrderSummary
+  signedOrderCount: number
+  completedOrderCount: number
+  afterSaleCount: number
+  sampleOrderIds: string[]
+}
+
+function buyerOrderProductRefundCent(v: AnalyzedOrderView): number {
+  return v.buyerProductRefundAmountCent ?? 0
+}
+
+function orderCountsAsBuyerRefundRelated(v: AnalyzedOrderView): boolean {
+  if (buyerOrderProductRefundCent(v) > 0) return true
+  if (v.isReturnRefund || v.isRefundOnly || v.isRealProductRefund) return true
+  if (v.afterSaleClosedNoRefund) return true
+  if (v.isQualityReturn) return true
+  if (v.includedInGmv && /取消|关闭/.test(v.orderStatusText ?? '')) return true
+  return false
+}
+
+/** 与 Drawer / buyer-profile orders 同口径：从订单明细 rows 汇总 */
+export function buildBuyerDrawerAuditMetrics(params: {
+  buyerKey: string
+  allViews: AnalyzedOrderView[]
+  rawByMatch: Map<string, Record<string, unknown>>
+}): BuyerDrawerAuditMetrics {
+  const buyerKey = params.buyerKey.trim()
+  const buyerViews = params.allViews.filter((v) => viewMatchesBuyerKey(v, buyerKey))
+  const rankingViews = filterViewsForBuyerRanking(
+    attachRawByMatchToViews(buyerViews, params.rawByMatch),
+  )
+  const rows = rankingViews.map((v) => mapViewToBuyerOrderStandard(v))
+  const summary = buildBuyerOrderSummary(rows)
+
+  let signedOrderCount = 0
+  let completedOrderCount = 0
+  let afterSaleCount = 0
+  for (const v of rankingViews) {
+    if (v.isEffectiveSigned) {
+      signedOrderCount += 1
+    } else if (v.isSigned || v.afterSaleClosedNoRefund) {
+      completedOrderCount += 1
+    }
+    if (orderCountsAsBuyerRefundRelated(v) && !v.isFreightRefundOnly) {
+      afterSaleCount += 1
+    }
+  }
+
+  return {
+    summary,
+    signedOrderCount,
+    completedOrderCount,
+    afterSaleCount,
+    sampleOrderIds: rows.slice(0, 5).map((r) => r.orderNo).filter(Boolean),
+  }
+}
+
+export interface BadBuyerDrawerAuditMetrics {
+  qualityRefundOrderCount: number
+  returnRefundOrderCount: number
+  aftersaleCount: number
+  refundAmountCent: number
+  refundOrderCount: number
+  paidCount: number
+  refundRate: number
+  sampleOrderIds: string[]
+}
+
+function countAftersaleAppliesForRow(row: BuyerOrderStandardRow, v: AnalyzedOrderView): number {
+  if (v.isFreightRefundOnly) return 0
+  if (row.afterSaleNo) {
+    const ids = row.afterSaleNo.split('、').map((s) => s.trim()).filter(Boolean)
+    if (ids.length > 0) return ids.length
+  }
+  if (
+    row.hasEffectiveAfterSale ||
+    row.refundAmountPending ||
+    row.refundAmountCent > 0 ||
+    v.isReturnRefund ||
+    v.isRefundOnly ||
+    v.afterSaleClosedNoRefund ||
+    v.isQualityReturn
+  ) {
+    return 1
+  }
+  return 0
+}
+
+/** 高风险售后客户 Drawer 口径：从订单明细逐单计算 */
+export function buildBadBuyerDrawerAuditMetrics(params: {
+  buyerKey: string
+  allViews: AnalyzedOrderView[]
+  rawByMatch: Map<string, Record<string, unknown>>
+}): BadBuyerDrawerAuditMetrics {
+  const buyerKey = params.buyerKey.trim()
+  const buyerViews = params.allViews.filter((v) => viewMatchesBuyerKey(v, buyerKey))
+  const rankingViews = filterViewsForBuyerRanking(
+    attachRawByMatchToViews(buyerViews, params.rawByMatch),
+  )
+  const rows = rankingViews.map((v) => mapViewToBuyerOrderStandard(v))
+  const summary = buildBuyerOrderSummary(rows)
+
+  const returnRefundOrderCount = new Set(
+    rows.filter((r) => r.afterSaleType === 'return_refund').map((r) => r.orderNo),
+  ).size
+
+  let aftersaleCount = 0
+  for (let i = 0; i < rankingViews.length; i += 1) {
+    aftersaleCount += countAftersaleAppliesForRow(rows[i]!, rankingViews[i]!)
+  }
+
+  const paidCount = summary.paidOrderCount
+  const refundOrderCount = summary.refundOrderCount
+  const refundRate = paidCount > 0 ? Math.min(refundOrderCount / paidCount, 1) : 0
+
+  return {
+    qualityRefundOrderCount: summary.qualityRefundOrderCount,
+    returnRefundOrderCount,
+    aftersaleCount,
+    refundAmountCent: summary.refundAmountCent,
+    refundOrderCount,
+    paidCount,
+    refundRate,
+    sampleOrderIds: rows.slice(0, 5).map((r) => r.orderNo).filter(Boolean),
+  }
+}
+
 function sortBuyerOrderRows(rows: BuyerOrderStandardRow[], sort: string): BuyerOrderStandardRow[] {
   const list = [...rows]
   if (sort === 'amount_desc') {

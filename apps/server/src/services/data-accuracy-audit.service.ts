@@ -9,30 +9,54 @@ import { getMonthlyOperationsReport } from './monthly-operations-report.service'
 import { aggregateWeeklySummaryForAcceptance } from './weekly-operations-report.service'
 import { sumValidRevenueFromViews } from './valid-revenue-order.service'
 import { computeOperationsRefundMetricsFromViews } from './operations-after-sale-order.util'
-import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
+import { resolveMetricOrderNo } from './calc-refund-rate.service'
 import type { AnalyzedOrderView } from '../types/analysis'
 import { resolveDateRange } from '../utils/date-range'
 import { buildBuyerRankingAllItems } from './buyer-ranking.service'
 import {
-  badBuyerRefundOrderCount,
   buildBadBuyerProfile,
+  capBadBuyerRate,
   isBadBuyerCandidate,
-  qualityRefundOrderCount,
-  returnRefundOrderCount,
 } from './bad-buyer-ranking.service'
 import { centToYuan } from '../utils/money'
 import { runPayTimePrefilterDiagnostic } from './order-pay-time-prefilter-diagnostic.service'
-import { loadNormalizedOrdersFromRaw } from './xhs-api-sync/xhs-json-normalizer.service'
+import { loadNormalizedOrdersFromRaw, buildOrderTimeDbWhere } from './xhs-api-sync/xhs-json-normalizer.service'
 import { prisma } from '../lib/prisma'
+import { buildRawAnalyzeBundle } from './xhs-api-sync/xhs-analysis-from-raw.service'
+import { prepareAnalysisArtifactsFromRaw } from './business-analysis.service'
+import {
+  attachRawByMatchToViews,
+  filterViewsForBuyerRanking,
+} from './low-price-brush-order.service'
+import {
+  buyerRankingRangeToAnalysisRange,
+  resolveBuyerRankingDateRange,
+} from '../utils/buyer-ranking-date-range'
+import {
+  buildBadBuyerDrawerAuditMetrics,
+  buildBuyerDrawerAuditMetrics,
+} from './buyer-profile-orders.service'
 import type {
   DataAccuracyAuditReport,
   DataAccuracyCheck,
   DataAccuracyStatus,
+  DuplicateOrderSample,
 } from './monthly-close-auto.types'
 
 function checkStatus(diffCent: number, diffCount: number): DataAccuracyStatus {
   if (diffCent !== 0 || diffCount !== 0) return 'danger'
   return 'pass'
+}
+
+export function dataAccuracyCheckStatus(diffCent: number, diffCount: number): DataAccuracyStatus {
+  return checkStatus(diffCent, diffCount)
+}
+
+export function duplicateSamplesFromRawViewsForTest(
+  views: AnalyzedOrderView[],
+  limit = 10,
+): { samples: DuplicateOrderSample[]; duplicateGroupCount: number } {
+  return duplicateSamplesFromRawViews(views, limit)
 }
 
 function pushCheck(
@@ -46,17 +70,67 @@ function pushCheck(
   else if (check.status === 'warning') warnings.push(`${check.title}：${check.note}`)
 }
 
-function duplicateSamples(views: AnalyzedOrderView[], limit = 5): string[] {
-  const map = new Map<string, number>()
-  for (const v of dedupeViewsByMetricOrderNo(views)) {
-    const id = resolveMetricOrderNo(v)
-    if (!id) continue
-    map.set(id, (map.get(id) ?? 0) + 1)
+function viewOrderId(v: AnalyzedOrderView): string {
+  return resolveMetricOrderNo(v) || v.displayOrderNo || v.matchOrderId || v.orderId
+}
+
+function duplicateSamplesFromRawViews(
+  views: AnalyzedOrderView[],
+  limit = 10,
+): { samples: DuplicateOrderSample[]; duplicateGroupCount: number } {
+  const keyTypes: Array<DuplicateOrderSample['keyType']> = [
+    'orderNo',
+    'packageId',
+    'dedupeKey',
+    'matchOrderId',
+  ]
+  const samples: DuplicateOrderSample[] = []
+
+  for (const keyType of keyTypes) {
+    const map = new Map<string, { count: number; orderIds: string[] }>()
+    for (const v of views) {
+      let key = ''
+      if (keyType === 'orderNo') key = resolveMetricOrderNo(v)
+      else if (keyType === 'packageId') key = (v.packageId ?? '').trim()
+      else if (keyType === 'matchOrderId') key = (v.matchOrderId ?? '').trim()
+      else {
+        const orderNo = resolveMetricOrderNo(v)
+        const pkg = (v.packageId ?? '').trim()
+        key = orderNo && pkg ? `${orderNo}::${pkg}` : orderNo || pkg || (v.matchOrderId ?? '').trim()
+      }
+      if (!key) continue
+      const oid = viewOrderId(v)
+      const prev = map.get(key) ?? { count: 0, orderIds: [] }
+      prev.count += 1
+      if (oid && prev.orderIds.length < 5) prev.orderIds.push(oid)
+      map.set(key, prev)
+    }
+    for (const [key, { count, orderIds }] of map.entries()) {
+      if (count <= 1) continue
+      samples.push({ keyType, key, count, sampleOrderIds: orderIds })
+    }
   }
-  return [...map.entries()]
-    .filter(([, c]) => c > 1)
-    .slice(0, limit)
-    .map(([id]) => id)
+
+  samples.sort((a, b) => b.count - a.count)
+  return { samples: samples.slice(0, limit), duplicateGroupCount: samples.length }
+}
+
+async function loadBuyerRankingPeriodContext(startDate: string, endDate: string): Promise<{
+  views: AnalyzedOrderView[]
+  rawByMatch: Map<string, Record<string, unknown>>
+}> {
+  const range = resolveBuyerRankingDateRange('custom', startDate, endDate)
+  const bundle = await buildRawAnalyzeBundle(buyerRankingRangeToAnalysisRange(range))
+  if (!bundle) return { views: [], rawByMatch: new Map() }
+  const artifacts = prepareAnalysisArtifactsFromRaw(bundle)
+  const rawByMatch = new Map<string, Record<string, unknown>>()
+  for (const o of artifacts?.dedupe.uniqueOrders ?? []) {
+    if (o.raw) rawByMatch.set(o.matchOrderId, o.raw as Record<string, unknown>)
+  }
+  const views = filterViewsForBuyerRanking(
+    attachRawByMatchToViews(artifacts?.views ?? [], rawByMatch),
+  )
+  return { views, rawByMatch }
 }
 
 export async function runDataAccuracyAudit(params: {
@@ -190,7 +264,11 @@ export async function runDataAccuracyAudit(params: {
           : '已归属主播有效成交金额应与经营总览一致',
       sampleOrderIds:
         unassignedOrders > 0
-          ? duplicateSamples(performanceViews.filter((v) => !v.anchorName?.trim()), 5)
+          ? performanceViews
+              .filter((v) => !v.anchorName?.trim())
+              .slice(0, 5)
+              .map(viewOrderId)
+              .filter(Boolean)
           : undefined,
     },
     blockers,
@@ -218,36 +296,64 @@ export async function runDataAccuracyAudit(params: {
     warnings,
   )
 
-  const dupSamples = duplicateSamples(coreViews)
+  const dupResult = duplicateSamplesFromRawViews(coreViews)
   pushCheck(
     checks,
     {
       key: 'duplicate_orders',
       title: '重复订单检查',
-      status: dupSamples.length > 0 ? 'danger' : 'pass',
+      status: dupResult.duplicateGroupCount > 0 ? 'danger' : 'pass',
       expectedCount: 0,
-      actualCount: dupSamples.length,
-      diffCount: dupSamples.length,
-      note: dupSamples.length > 0 ? `发现 ${dupSamples.length} 组重复样本` : '未发现重复订单号',
-      sampleOrderIds: dupSamples,
+      actualCount: dupResult.duplicateGroupCount,
+      diffCount: dupResult.duplicateGroupCount,
+      note:
+        dupResult.duplicateGroupCount > 0
+          ? `原始视图发现 ${dupResult.duplicateGroupCount} 组重复键（未先去重）`
+          : '原始视图未发现重复 orderNo/packageId/dedupeKey/matchOrderId',
+      duplicateSamples: dupResult.samples,
+      sampleOrderIds: dupResult.samples.flatMap((s) => s.sampleOrderIds).slice(0, 5),
     },
     blockers,
     warnings,
   )
 
-  const rawOrderCount = await prisma.xhsRawOrder.count()
   const rangeResolved = resolveDateRange('custom', startDate, endDate)
-  const normalized = await loadNormalizedOrdersFromRaw({ range: rangeResolved })
+  const rawOrderCountAll = await prisma.xhsRawOrder.count()
+  const rawOrderCountInRange = await prisma.xhsRawOrder.count({
+    where: buildOrderTimeDbWhere(rangeResolved),
+  })
+  const normalizedInRange = await loadNormalizedOrdersFromRaw({ range: rangeResolved })
+  const rangeDiff = rawOrderCountInRange - normalizedInRange.length
+
+  pushCheck(
+    checks,
+    {
+      key: 'raw_full_db_info',
+      title: 'raw 全库数量说明',
+      status: 'warning',
+      expectedCount: rawOrderCountAll,
+      actualCount: normalizedInRange.length,
+      diffCount: rawOrderCountAll - normalizedInRange.length,
+      excludeFromTotals: true,
+      note: `raw 全库共 ${rawOrderCountAll} 条；当前核对周期（${startDate}~${endDate}）标准订单 ${normalizedInRange.length} 条。全库数量包含历史各月订单，不能与单周期标准订单直接相等，此处仅作参考。`,
+    },
+    blockers,
+    warnings,
+  )
+
   pushCheck(
     checks,
     {
       key: 'raw_vs_normalized',
-      title: 'raw 订单 vs 标准订单',
-      status: 'pass',
-      expectedCount: rawOrderCount,
-      actualCount: normalized.length,
-      diffCount: rawOrderCount - normalized.length,
-      note: `raw 全库 ${rawOrderCount} 条；本周期标准订单 ${normalized.length} 条`,
+      title: '同周期 raw vs 标准订单',
+      status: rangeDiff !== 0 ? 'danger' : 'pass',
+      expectedCount: rawOrderCountInRange,
+      actualCount: normalizedInRange.length,
+      diffCount: rangeDiff,
+      note:
+        rangeDiff === 0
+          ? `周期 ${startDate}~${endDate}：raw ${rawOrderCountInRange} 条 = 标准订单 ${normalizedInRange.length} 条`
+          : `周期 ${startDate}~${endDate}：raw ${rawOrderCountInRange} 条，标准订单 ${normalizedInRange.length} 条，差 ${Math.abs(rangeDiff)} 条，需排查归一化或支付时间过滤`,
     },
     blockers,
     warnings,
@@ -284,25 +390,65 @@ export async function runDataAccuracyAudit(params: {
       endDate,
       type: 'all',
     })
+    const periodCtx = await loadBuyerRankingPeriodContext(startDate, endDate)
+
     let buyerDiff = 0
+    const buyerSampleKeys: string[] = []
+    const buyerSampleOrderIds: string[] = []
+
     for (const item of rankingItems.slice(0, 20)) {
+      const drawer = buildBuyerDrawerAuditMetrics({
+        buyerKey: item.buyerKey,
+        allViews: periodCtx.views,
+        rawByMatch: periodCtx.rawByMatch,
+      })
       const summary = item.buyerSummary
-      if (!summary) continue
-      const listCent = summary.displayEarnedAmountCent ?? summary.realDealAmountCent ?? 0
-      const earnedCent = Math.round((item.earnedAmount ?? 0) * 100)
-      if (listCent > 0 && earnedCent > 0 && listCent !== earnedCent) buyerDiff += 1
+      const listEarnedCent =
+        summary?.displayEarnedAmountCent ??
+        summary?.realDealAmountCent ??
+        Math.round((item.earnedAmount ?? 0) * 100)
+      const drawerEarnedCent = drawer.summary.displayEarnedAmountCent
+
+      const diffs: string[] = []
+      if (listEarnedCent !== drawerEarnedCent) diffs.push(`成交金额差 ${listEarnedCent - drawerEarnedCent} 分`)
+      if ((item.signedOrderCount ?? 0) !== drawer.signedOrderCount) {
+        diffs.push(`签收单差 ${(item.signedOrderCount ?? 0) - drawer.signedOrderCount}`)
+      }
+      if ((item.completedOrderCount ?? 0) !== drawer.completedOrderCount) {
+        diffs.push(`完成单差 ${(item.completedOrderCount ?? 0) - drawer.completedOrderCount}`)
+      }
+      if ((item.afterSaleCount ?? 0) !== drawer.afterSaleCount) {
+        diffs.push(`售后单差 ${(item.afterSaleCount ?? 0) - drawer.afterSaleCount}`)
+      }
+      const listRefund = summary?.refundOrderCount ?? item.refundCount ?? 0
+      if (listRefund !== drawer.summary.refundOrderCount) {
+        diffs.push(`退款单差 ${listRefund - drawer.summary.refundOrderCount}`)
+      }
+      const listQuality = summary?.qualityRefundOrderCount ?? item.qualityReturnCount ?? 0
+      if (listQuality !== drawer.summary.qualityRefundOrderCount) {
+        diffs.push(`品退单差 ${listQuality - drawer.summary.qualityRefundOrderCount}`)
+      }
+
+      if (diffs.length > 0) {
+        buyerDiff += 1
+        buyerSampleKeys.push(item.buyerKey)
+        buyerSampleOrderIds.push(...drawer.sampleOrderIds)
+      }
     }
+
     pushCheck(
       checks,
       {
         key: 'buyer_ranking_vs_drawer',
-        title: '买家榜金额 vs buyerSummary（抽样20）',
+        title: '买家榜 vs 订单明细 Drawer（抽样20）',
         status: buyerDiff === 0 ? 'pass' : 'danger',
         diffCount: buyerDiff,
         note:
           buyerDiff === 0
-            ? '抽样买家 list 与 buyerSummary 成交金额一致'
-            : `${buyerDiff} 个抽样买家 list 与 buyerSummary 不一致`,
+            ? '抽样买家榜单与订单明细逐单汇总一致（成交金额/签收/完成/售后/退款/品退）'
+            : `${buyerDiff} 个抽样买家榜单与订单明细不一致，差 1 分或 1 单即记为 danger`,
+        sampleBuyerKeys: buyerSampleKeys.slice(0, 5),
+        sampleOrderIds: buyerSampleOrderIds.slice(0, 5),
       },
       blockers,
       warnings,
@@ -310,29 +456,66 @@ export async function runDataAccuracyAudit(params: {
 
     const badItems = rankingItems.filter(isBadBuyerCandidate).slice(0, 10)
     let badDiff = 0
+    const badSampleKeys: string[] = []
+    const badSampleOrderIds: string[] = []
+
     for (const item of badItems) {
+      const drawer = buildBadBuyerDrawerAuditMetrics({
+        buyerKey: item.buyerKey,
+        allViews: periodCtx.views,
+        rawByMatch: periodCtx.rawByMatch,
+      })
       const profile = buildBadBuyerProfile(item)
-      if (profile.qualityRefundOrderCount !== qualityRefundOrderCount(item)) badDiff += 1
-      if (profile.returnRefundOrderCount !== returnRefundOrderCount(item)) badDiff += 1
-      if (profile.refundOrderCount !== badBuyerRefundOrderCount(item)) badDiff += 1
+      const listRefundRate = capBadBuyerRate(profile.refundOrderCount, profile.paidCount)
+
+      const diffs: string[] = []
+      if (profile.qualityRefundOrderCount !== drawer.qualityRefundOrderCount) {
+        diffs.push(`品退单差 ${profile.qualityRefundOrderCount - drawer.qualityRefundOrderCount}`)
+      }
+      if (profile.returnRefundOrderCount !== drawer.returnRefundOrderCount) {
+        diffs.push(`退货退款单差 ${profile.returnRefundOrderCount - drawer.returnRefundOrderCount}`)
+      }
+      if (profile.aftersaleCount !== drawer.aftersaleCount) {
+        diffs.push(`售后单差 ${profile.aftersaleCount - drawer.aftersaleCount}`)
+      }
+      if (Math.round(profile.refundAmountYuan * 100) !== drawer.refundAmountCent) {
+        diffs.push(
+          `退款金额差 ${Math.round(profile.refundAmountYuan * 100) - drawer.refundAmountCent} 分`,
+        )
+      }
+      if (profile.refundOrderCount !== drawer.refundOrderCount) {
+        diffs.push(`退款单差 ${profile.refundOrderCount - drawer.refundOrderCount}`)
+      }
+      if (Math.abs(listRefundRate - drawer.refundRate) > 0.0001) {
+        diffs.push(`退款率差 ${listRefundRate - drawer.refundRate}`)
+      }
+
+      if (diffs.length > 0) {
+        badDiff += 1
+        badSampleKeys.push(item.buyerKey)
+        badSampleOrderIds.push(...drawer.sampleOrderIds)
+      }
     }
+
     pushCheck(
       checks,
       {
         key: 'bad_buyer_vs_drawer',
-        title: '高风险售后客户提醒 vs 同口径 buyerSummary',
+        title: '高风险售后客户 vs 订单明细 Drawer（抽样10）',
         status: badDiff === 0 ? 'pass' : 'danger',
         diffCount: badDiff,
         note:
           badDiff === 0
-            ? '高风险售后客户提醒品退/退货/退款订单与 buyerSummary 一致'
-            : `${badDiff} 项指标与 buyerSummary 不一致`,
+            ? '抽样高风险售后客户与订单明细逐单汇总一致（纯运费补偿不计入退货退款）'
+            : `${badDiff} 项与订单明细不一致，差 1 单或 1 分即记为 danger`,
+        sampleBuyerKeys: badSampleKeys.slice(0, 5),
+        sampleOrderIds: badSampleOrderIds.slice(0, 5),
       },
       blockers,
       warnings,
     )
   } catch (err) {
-    warnings.push(`买家/高风险售后客户提醒核对跳过：${err instanceof Error ? err.message : String(err)}`)
+    warnings.push(`买家/高风险售后客户核对跳过：${err instanceof Error ? err.message : String(err)}`)
   }
 
   pushCheck(
@@ -350,8 +533,12 @@ export async function runDataAccuracyAudit(params: {
     warnings,
   )
 
-  const moneyDiffCentTotal = checks.reduce((s, c) => s + Math.abs(c.diffCent ?? 0), 0)
-  const orderDiffTotal = checks.reduce((s, c) => s + Math.abs(c.diffCount ?? 0), 0)
+  const moneyDiffCentTotal = checks
+    .filter((c) => !c.excludeFromTotals)
+    .reduce((s, c) => s + Math.abs(c.diffCent ?? 0), 0)
+  const orderDiffTotal = checks
+    .filter((c) => !c.excludeFromTotals)
+    .reduce((s, c) => s + Math.abs(c.diffCount ?? 0), 0)
   const dangerCount = checks.filter((c) => c.status === 'danger').length
   const score = Math.max(0, 100 - dangerCount * 15 - checks.filter((c) => c.status === 'warning').length * 5)
   let status: DataAccuracyStatus = 'pass'

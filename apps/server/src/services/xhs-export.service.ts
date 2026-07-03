@@ -7,7 +7,8 @@ import { writeOperationLog } from './audit.service'
 import { prisma } from '../lib/prisma'
 import { sanitizeUrlForLog } from '../utils/url-sanitize'
 import type { DownloadProgressContext } from '../types/download-batch'
-import { requestXhsJson, XHS_BROWSER_UA } from './xhs-http.service'
+import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
+import { XHS_BROWSER_UA } from './xhs-http.service'
 import {
   failedPhaseFromStep,
   initDownloadPipeline,
@@ -280,15 +281,21 @@ export async function exportXhsOrderByRange(params: {
       userAgent,
       downloadTaskId: downloadTask.id,
     })
-    const startRes = await requestXhsJson<Record<string, unknown>>({
+    const startRes = await requestXhsJsonWithSyncAudit<Record<string, unknown>>({
+      apiName: 'order_export_start',
       method: 'POST',
-      url: START_EXPORT_URL,
-      body: startBody,
-      cookie,
-      referer: ORDER_EXPORT_REFERER,
-      audit: httpAudit,
-      needSign: true,
-      parseEnvelope: false,
+      urlKey: START_EXPORT_URL,
+      trigger: 'manual',
+      options: {
+        method: 'POST',
+        url: START_EXPORT_URL,
+        body: startBody,
+        cookie,
+        referer: ORDER_EXPORT_REFERER,
+        audit: httpAudit,
+        needSign: true,
+        parseEnvelope: false,
+      },
     })
 
     const startDiag = parseStartExportEnvelope(startRes, requestBodySummary)
@@ -350,15 +357,21 @@ export async function exportXhsOrderByRange(params: {
       pollIndex++
       await progress?.setStep('poll_record')
 
-      const watchRes = await requestXhsJson<Record<string, unknown>>({
+      const watchRes = await requestXhsJsonWithSyncAudit<Record<string, unknown>>({
+        apiName: 'order_export_watch',
         method: 'POST',
-        url: WATCH_EXPORT_URL,
-        body: { task_id: exportTaskId },
-        cookie,
-        referer: ORDER_EXPORT_REFERER,
-        audit: httpAudit,
-        needSign: true,
-        parseEnvelope: false,
+        urlKey: WATCH_EXPORT_URL,
+        trigger: 'manual',
+        options: {
+          method: 'POST',
+          url: WATCH_EXPORT_URL,
+          body: { task_id: exportTaskId },
+          cookie,
+          referer: ORDER_EXPORT_REFERER,
+          audit: httpAudit,
+          needSign: true,
+          parseEnvelope: false,
+        },
       })
 
       const fileUrlNow = extractWatchFileUrl(watchRes)
@@ -679,14 +692,20 @@ export async function exportXhsLiveSessionsByMonth(params: {
       userAgent,
       downloadTaskId: downloadTask.id,
     })
-    const submitRes = await requestXhsJson<LiveTaskSubmitResponse>({
+    const submitRes = await requestXhsJsonWithSyncAudit<LiveTaskSubmitResponse>({
+      apiName: 'live_task_export_submit',
       method: 'POST',
-      url: LIVE_TASK_SUBMIT_URL,
-      body: submitBody,
-      cookie,
-      audit: httpAudit,
-      needSign: true,
-      parseEnvelope: false,
+      urlKey: LIVE_TASK_SUBMIT_URL,
+      trigger: 'manual',
+      options: {
+        method: 'POST',
+        url: LIVE_TASK_SUBMIT_URL,
+        body: submitBody,
+        cookie,
+        audit: httpAudit,
+        needSign: true,
+        parseEnvelope: false,
+      },
     })
 
     const exportTaskId =
@@ -710,13 +729,19 @@ export async function exportXhsLiveSessionsByMonth(params: {
       await progress?.setStep('poll_record')
 
       const detailUrl = `${LIVE_TASK_DETAIL_URL}?task_id=${encodeURIComponent(exportTaskId)}`
-      const detailRes = await requestXhsJson<LiveTaskDetailResponse>({
+      const detailRes = await requestXhsJsonWithSyncAudit<LiveTaskDetailResponse>({
+        apiName: 'live_task_export_detail',
         method: 'GET',
-        url: detailUrl,
-        cookie,
-        audit: httpAudit,
-        needSign: true,
-        parseEnvelope: false,
+        urlKey: LIVE_TASK_DETAIL_URL,
+        trigger: 'manual',
+        options: {
+          method: 'GET',
+          url: detailUrl,
+          cookie,
+          audit: httpAudit,
+          needSign: true,
+          parseEnvelope: false,
+        },
       })
 
       const payload = detailRes.data ?? detailRes

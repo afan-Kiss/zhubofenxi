@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma'
 import { getDecryptedCookie } from './credential.service'
 import { getDecryptedCookieByAccountId } from './live-account.service'
-import { requestXhsJson } from './xhs-http.service'
+import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
 import { enqueueXhsRequest } from './xhs-api-sync/xhs-rate-limiter.service'
 import { parseMoneyToCent } from '../utils/money'
 import {
@@ -208,16 +208,24 @@ function buildWorkbenchQuery(orderNo: string): string {
 async function fetchAfterSalesListByKeywords(
   keywords: string,
   cookie: string,
+  liveAccountId?: string,
 ): Promise<Record<string, unknown>[]> {
   const url = buildWorkbenchQueryKeywords(keywords)
   const payload = await enqueueXhsRequest(() =>
-    requestXhsJson<unknown>({
+    requestXhsJsonWithSyncAudit<unknown>({
+      shopId: liveAccountId,
+      apiName: 'after_sales_workbench',
       method: 'GET',
-      url,
-      cookie,
-      referer: WORKBENCH_REFERER,
-      needSign: true,
-      parseEnvelope: true,
+      urlKey: '/after-sales/workbench',
+      trigger: 'scheduled',
+      options: {
+        method: 'GET',
+        url,
+        cookie,
+        referer: WORKBENCH_REFERER,
+        needSign: true,
+        parseEnvelope: true,
+      },
     }),
   )
   return extractAfterSalesList(payload)
@@ -288,13 +296,17 @@ export async function fetchAfterSalesWorkbenchByOrderNo(
   }
 
   try {
-    let afterSales = await fetchAfterSalesListByKeywords(trimmed, cookie)
+    let afterSales = await fetchAfterSalesListByKeywords(trimmed, cookie, accountId)
     if (
       afterSales.length === 0 &&
       opts?.fallbackBuyerUserId?.trim() &&
       opts.fallbackBuyerUserId.trim() !== trimmed
     ) {
-      const byBuyer = await fetchAfterSalesListByKeywords(opts.fallbackBuyerUserId.trim(), cookie)
+      const byBuyer = await fetchAfterSalesListByKeywords(
+        opts.fallbackBuyerUserId.trim(),
+        cookie,
+        accountId,
+      )
       afterSales = byBuyer.filter((r) => recordMatchesOrderNo(r, trimmed))
     }
     const agg = aggregateWorkbenchRefund(afterSales, trimmed)

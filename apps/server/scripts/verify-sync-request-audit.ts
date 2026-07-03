@@ -1,10 +1,16 @@
 #!/usr/bin/env tsx
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { getDataDir } from '../src/config/env'
+import { formatDateKeyShanghai } from '../src/utils/business-timezone'
 import {
+  appendSyncRequestAudit,
+  buildSyncRiskStatus,
   buildXhsRequestHash,
   checkXhsRequestAllowed,
+  forceCircuitOpenForTests,
   resetSyncRequestAuditStateForTests,
   runXhsRequestWithAuditAndThrottle,
-  forceCircuitOpenForTests,
 } from '../src/services/sync-request-audit.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
@@ -62,6 +68,34 @@ async function main() {
     trigger: 'retry',
   })
   assert(circuit.status === 'circuit_open', '连续失败 >=5 应熔断', issues)
+
+  resetSyncRequestAuditStateForTests()
+  const startedAt = new Date().toISOString()
+  await appendSyncRequestAudit({
+    source: 'xhs',
+    apiName: 'order_list',
+    method: 'POST',
+    urlKey: '/verify',
+    requestHash: 'verify-jsonl-001',
+    startedAt,
+    finishedAt: startedAt,
+    durationMs: 12,
+    status: 'success',
+    trigger: 'scheduled',
+  })
+
+  const day = formatDateKeyShanghai(new Date(startedAt))
+  const jsonlPath = path.join(getDataDir(), 'sync-request-audit', `${day}.jsonl`)
+  const jsonlRaw = await fs.readFile(jsonlPath, 'utf8')
+  assert(jsonlRaw.includes('verify-jsonl-001'), 'JSONL 应写入审计记录', issues)
+
+  resetSyncRequestAuditStateForTests()
+  const riskAfterRestart = await buildSyncRiskStatus()
+  assert(
+    riskAfterRestart.requestCount24h >= 1,
+    '重置内存 buffer 后 buildSyncRiskStatus 仍应读到 JSONL 最近24小时数据',
+    issues,
+  )
 
   if (issues.length > 0) {
     console.error('[verify:sync-request-audit] FAIL')

@@ -3,6 +3,9 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import { getDataDir } from '../config/env'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
+import type { RequestXhsJsonOptions } from './xhs-http.service'
+import { requestXhsJson } from './xhs-http.service'
+import { logWarn } from '../utils/server-log'
 
 export type SyncRequestTrigger = 'manual' | 'scheduled' | 'page_open' | 'retry' | 'unknown'
 export type SyncRequestStatus =
@@ -42,8 +45,10 @@ export interface SyncRiskStatus {
     file: string
     line: number
     risk: 'low' | 'medium' | 'high'
-    note: string
+    reason: string
+    suggestion: string
   }>
+  jsonlReadWarning?: string
   note: string
 }
 
@@ -129,6 +134,108 @@ export async function appendSyncRequestAudit(item: SyncRequestAuditItem): Promis
   const dir = path.join(getDataDir(), 'sync-request-audit')
   await fs.mkdir(dir, { recursive: true })
   await fs.appendFile(path.join(dir, `${day}.jsonl`), `${JSON.stringify(item)}\n`, 'utf8')
+}
+
+function auditDedupeKey(item: SyncRequestAuditItem): string {
+  return `${item.startedAt}::${item.apiName}::${item.requestHash}::${item.status}::${item.trigger}`
+}
+
+async function loadRecentAuditItemsFromJsonl(sinceMs: number): Promise<SyncRequestAuditItem[]> {
+  const dir = path.join(getDataDir(), 'sync-request-audit')
+  const now = new Date()
+  const dayKeys = [
+    formatDateKeyShanghai(now),
+    formatDateKeyShanghai(new Date(now.getTime() - 24 * 60 * 60 * 1000)),
+  ]
+  const seen = new Set<string>()
+  const items: SyncRequestAuditItem[] = []
+
+  for (const day of [...new Set(dayKeys)]) {
+    const filePath = path.join(dir, `${day}.jsonl`)
+    let raw = ''
+    try {
+      raw = await fs.readFile(filePath, 'utf8')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      continue
+    }
+    for (const line of raw.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) continue
+      try {
+        const item = JSON.parse(trimmed) as SyncRequestAuditItem
+        if (Date.parse(item.startedAt) < sinceMs) continue
+        const key = auditDedupeKey(item)
+        if (seen.has(key)) continue
+        seen.add(key)
+        items.push(item)
+      } catch {
+        /* skip malformed line */
+      }
+    }
+  }
+  return items
+}
+
+function mergeAuditItems(
+  jsonlItems: SyncRequestAuditItem[],
+  bufferItems: SyncRequestAuditItem[],
+): SyncRequestAuditItem[] {
+  const seen = new Set<string>()
+  const merged: SyncRequestAuditItem[] = []
+  for (const item of [...jsonlItems, ...bufferItems]) {
+    const key = auditDedupeKey(item)
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(item)
+  }
+  return merged
+}
+
+/** 非 xhs-api-client 路径应使用此函数，统一审计与冷却 */
+export async function requestXhsJsonWithSyncAudit<T>(params: {
+  shopId?: string
+  shopName?: string
+  apiName: string
+  method: string
+  urlKey: string
+  trigger?: SyncRequestTrigger
+  requestHash?: string
+  pageNo?: number
+  options: RequestXhsJsonOptions
+}): Promise<T> {
+  const requestHash =
+    params.requestHash ??
+    buildXhsRequestHash({
+      apiName: params.apiName,
+      body: params.options.body,
+    })
+  const result = await runXhsRequestWithAuditAndThrottle<T>({
+    shopId: params.shopId,
+    shopName: params.shopName,
+    apiName: params.apiName,
+    method: params.method,
+    urlKey: params.urlKey,
+    requestHash,
+    trigger: params.trigger ?? 'scheduled',
+    pageNo: params.pageNo,
+    execute: async () => {
+      try {
+        const data = await requestXhsJson<T>(params.options)
+        return { ok: true, data, errorMessage: null }
+      } catch (err) {
+        return {
+          ok: false,
+          data: null,
+          errorMessage: err instanceof Error ? err.message : String(err),
+        }
+      }
+    },
+  })
+  if (!result.ok || result.data == null) {
+    throw new Error(result.errorMessage ?? '小红书接口请求失败')
+  }
+  return result.data
 }
 
 function recordFailure(shopId: string | undefined, apiName: string): void {
@@ -279,7 +386,18 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
 
 export async function buildSyncRiskStatus(): Promise<SyncRiskStatus> {
   const since = Date.now() - 24 * 60 * 60 * 1000
-  const items = recentAuditBuffer.filter((i) => Date.parse(i.startedAt) >= since)
+  let jsonlReadWarning: string | undefined
+  let jsonlItems: SyncRequestAuditItem[] = []
+  try {
+    jsonlItems = await loadRecentAuditItemsFromJsonl(since)
+  } catch (err) {
+    jsonlReadWarning = `读取 JSONL 审计日志失败：${err instanceof Error ? err.message : String(err)}`
+    logWarn('接口审计', jsonlReadWarning)
+  }
+
+  const bufferItems = recentAuditBuffer.filter((i) => Date.parse(i.startedAt) >= since)
+  const items = mergeAuditItems(jsonlItems, bufferItems)
+
   let requestCount24h = 0
   let throttledCount24h = 0
   let failedCount24h = 0
@@ -288,7 +406,7 @@ export async function buildSyncRiskStatus(): Promise<SyncRiskStatus> {
 
   for (const i of items) {
     if (i.status === 'success' || i.status === 'failed') requestCount24h += 1
-    if (i.status === 'throttled' || i.status === 'skipped') throttledCount24h += 1
+    if (i.status === 'throttled') throttledCount24h += 1
     if (i.status === 'failed') failedCount24h += 1
     if (i.status === 'circuit_open') circuitOpenCount24h += 1
     if (i.trigger === 'page_open') highRiskApis.add(i.apiName)
@@ -299,14 +417,17 @@ export async function buildSyncRiskStatus(): Promise<SyncRiskStatus> {
     const { scanDirectXhsRequestFindings } = await import('./xhs-sync-frequency-scan.util')
     directRequestFindings = scanDirectXhsRequestFindings()
     for (const f of directRequestFindings) {
-      if (f.risk === 'high') highRiskApis.add(f.file)
+      if (f.risk === 'high') highRiskApis.add(`${f.file}:${f.line}`)
     }
-  } catch {
-    directRequestFindings = []
+  } catch (err) {
+    jsonlReadWarning =
+      (jsonlReadWarning ? `${jsonlReadWarning}; ` : '') +
+      `扫描直连请求失败：${err instanceof Error ? err.message : String(err)}`
   }
 
-  const highCount = highRiskApis.size + directRequestFindings.filter((f) => f.risk === 'high').length
+  const highCount = directRequestFindings.filter((f) => f.risk === 'high').length
   let status: SyncRiskStatus['status'] = 'pass'
+  if (jsonlReadWarning) status = 'warning'
   if (failedCount24h >= 20 || circuitOpenCount24h > 0 || highCount > 0) status = 'danger'
   else if (requestCount24h >= 500 || throttledCount24h >= 50) status = 'warning'
 
@@ -318,11 +439,13 @@ export async function buildSyncRiskStatus(): Promise<SyncRiskStatus> {
     circuitOpenCount24h,
     highRiskApis: [...highRiskApis],
     directRequestFindings,
-    note:
-      status === 'pass'
-        ? '最近 24 小时接口请求在可控范围内'
+    jsonlReadWarning,
+    note: jsonlReadWarning
+      ? `最近 24 小时统计来自 JSONL+内存合并，但存在读取/扫描告警：${jsonlReadWarning}`
+      : status === 'pass'
+        ? '最近 24 小时接口请求在可控范围内（JSONL+内存合并）'
         : status === 'warning'
-          ? '请求频率偏高，请关注冷却与分页策略'
+          ? '请求频率偏高或日志读取有告警，请关注冷却与分页策略'
           : '存在熔断或高风险直连请求，请优先处理',
   }
 }

@@ -14,7 +14,7 @@ import {
   QUALITY_BAD_CASE_REFERER,
   QUALITY_SUMMARY_TIME_WINDOW_CODE,
 } from './quality-badcase.types'
-import { requestXhsJson } from './xhs-http.service'
+import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
 
 export interface QualityBadcaseSignCheckResult {
   accountName: string
@@ -116,24 +116,32 @@ export async function probeQualityBadcaseSignForAccount(params: {
   let qualityApiOk = false
   let qualityApiError: string | null = null
   try {
-    await requestXhsJson<unknown>({
+    await requestXhsJsonWithSyncAudit<unknown>({
+      shopId: params.liveAccountId,
+      shopName: params.accountName,
+      apiName: 'quality_badcase_sign_probe',
       method: 'POST',
-      url: QUALITY_BAD_CASE_API.summaryList,
-      body: {
-        pageNo: 1,
-        pageSize: 1,
-        negativePayPkgCntAsc: 0,
-        rectifySearch: 0,
-        controlFlowSearch: 0,
-        timeWindowCode: QUALITY_SUMMARY_TIME_WINDOW_CODE,
-      },
-      cookie: params.cookie,
-      referer: QUALITY_BAD_CASE_REFERER,
-      needSign: true,
-      signLogContext: {
-        tag: 'quality-badcase-sign',
-        accountName: params.accountName,
-        liveAccountId: params.liveAccountId,
+      urlKey: QUALITY_BAD_CASE_API.summaryList.split('?')[0]!.slice(-80),
+      trigger: 'manual',
+      options: {
+        method: 'POST',
+        url: QUALITY_BAD_CASE_API.summaryList,
+        body: {
+          pageNo: 1,
+          pageSize: 1,
+          negativePayPkgCntAsc: 0,
+          rectifySearch: 0,
+          controlFlowSearch: 0,
+          timeWindowCode: QUALITY_SUMMARY_TIME_WINDOW_CODE,
+        },
+        cookie: params.cookie,
+        referer: QUALITY_BAD_CASE_REFERER,
+        needSign: true,
+        signLogContext: {
+          tag: 'quality-badcase-sign',
+          accountName: params.accountName,
+          liveAccountId: params.liveAccountId,
+        },
       },
     })
     qualityApiOk = true

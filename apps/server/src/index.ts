@@ -90,6 +90,18 @@ async function main() {
   const { app, webMounted } = createApp()
   await listenHttp(app, webMounted)
 
+  try {
+    const { initMonthlyCloseScheduler } = await import('./services/monthly-close-scheduler.service')
+    initMonthlyCloseScheduler()
+    logInfo('月度结账调度', '月度结账调度已注册')
+  } catch (err) {
+    logError(
+      '月度结账调度',
+      `月度结账调度注册失败：${err instanceof Error ? err.message : String(err)}`,
+      err,
+    )
+  }
+
   startDeferredBootTasks()
 
   const { startGoodReviewImageCacheCleanupTimer } = await import(

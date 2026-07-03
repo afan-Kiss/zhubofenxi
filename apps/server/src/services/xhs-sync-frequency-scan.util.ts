@@ -10,32 +10,105 @@ export interface XhsSyncFrequencyFinding {
   hasAudit: boolean
   hasCooldown: boolean
   risk: 'low' | 'medium' | 'high'
+  reason: string
   suggestion: string
 }
 
 const REPO_ROOT = path.resolve(SERVER_ROOT, '..', '..')
 
-const HIGH_PATTERNS: Array<{ re: RegExp; note: string }> = [
-  { re: /requestXhsJson\s*\(/, note: '直接调用 requestXhsJson，可能绕过统一审计' },
-  { re: /fetch\s*\(\s*['"`]https?:\/\/[^'"`]*xiaohongshu/, note: '直接 fetch 小红书域名' },
-  { re: /fetch\s*\(\s*['"`]https?:\/\/[^'"`]*xhs/i, note: '直接 fetch xhs 域名' },
-  { re: /setInterval\s*\(/, note: '存在 setInterval 定时逻辑' },
-  { re: /while\s*\(\s*true\s*\)/, note: '存在 while(true) 循环' },
+const ALLOWED_REQUEST_XHS_JSON = new Set([
+  'apps/server/src/services/xhs-api-sync/xhs-api-client.service.ts',
+  'apps/server/src/services/xhs-http.service.ts',
+  'apps/server/src/services/sync-request-audit.service.ts',
+])
+
+const SKIP_PATH_PARTS = [
+  '/node_modules/',
+  '/dist/',
+  'verify-xhs-sync-throttle',
+  'diagnose-xhs-sync-frequency',
+  'xhs-sync-frequency-scan.util',
+  'apps/server/scripts/',
 ]
 
-const AUDITED_OK = /runXhsRequestWithAuditAndThrottle|requestXhsApi\s*\(/
+const SCAN_PATTERNS: Array<{
+  re: RegExp
+  reason: string
+  suggestion: string
+  defaultRisk: 'low' | 'medium' | 'high'
+}> = [
+  {
+    re: /requestXhsJson\s*\(/,
+    reason: '直接调用 requestXhsJson，可能绕过统一审计与冷却',
+    suggestion: '改为 requestXhsApi / runXhsRequestWithAuditAndThrottle / requestXhsJsonWithSyncAudit',
+    defaultRisk: 'high',
+  },
+  {
+    re: /requestXhsJsonWithSyncAudit\s*\(/,
+    reason: '经 requestXhsJsonWithSyncAudit 包装',
+    suggestion: '确认 trigger 与 apiName 正确',
+    defaultRisk: 'low',
+  },
+  {
+    re: /fetch\s*\(\s*['"`]https?:\/\/[^'"`]*xiaohongshu/i,
+    reason: '直接 fetch 小红书域名',
+    suggestion: '改为 requestXhsApi / requestXhsJsonWithSyncAudit',
+    defaultRisk: 'high',
+  },
+  {
+    re: /axios\.(?:get|post|request)\s*\(\s*['"`]https?:\/\/[^'"`]*xiaohongshu/i,
+    reason: 'axios 直连小红书域名',
+    suggestion: '改为 requestXhsApi / requestXhsJsonWithSyncAudit',
+    defaultRisk: 'high',
+  },
+  {
+    re: /setInterval\s*\(/,
+    reason: '存在 setInterval 定时逻辑',
+    suggestion: '确认频率与冷却，避免页面打开触发',
+    defaultRisk: 'medium',
+  },
+  {
+    re: /while\s*\(\s*true\s*\)/,
+    reason: '存在 while(true) 循环',
+    suggestion: '确认有 backoff 且不会高频请求小红书',
+    defaultRisk: 'high',
+  },
+]
 
-export function scanDirectXhsRequestFindings(root = REPO_ROOT): Array<{
-  file: string
-  line: number
-  risk: 'low' | 'medium' | 'high'
-  note: string
-}> {
-  const findings: Array<{ file: string; line: number; risk: 'low' | 'medium' | 'high'; note: string }> = []
-  const scanDirs = [
-    path.join(root, 'apps/server/src'),
-    path.join(root, 'apps/web/src'),
-  ]
+function shouldSkipFile(rel: string): boolean {
+  return SKIP_PATH_PARTS.some((p) => rel.includes(p))
+}
+
+function resolveRisk(
+  rel: string,
+  line: string,
+  pattern: (typeof SCAN_PATTERNS)[number],
+): 'low' | 'medium' | 'high' {
+  if (pattern.re.source.includes('requestXhsJsonWithSyncAudit')) return 'low'
+  if (pattern.re.source.includes('requestXhsJson')) {
+    if (ALLOWED_REQUEST_XHS_JSON.has(rel)) return 'low'
+    return 'high'
+  }
+  if (pattern.re.source.includes('setInterval')) {
+    if (rel.includes('scheduler.service') || rel.includes('-scheduler.service')) return 'low'
+    if (rel.includes('cleanup') || rel.includes('CacheCleanup')) return 'low'
+    return pattern.defaultRisk
+  }
+  if (rel.includes('routes/') && !line.includes('cache') && !line.includes('local')) {
+    if (
+      pattern.re.source.includes('fetch') ||
+      pattern.re.source.includes('requestXhsJson') ||
+      pattern.re.source.includes('axios')
+    ) {
+      return 'high'
+    }
+  }
+  return pattern.defaultRisk
+}
+
+export function scanDirectXhsRequestFindings(root = REPO_ROOT): XhsSyncFrequencyFinding[] {
+  const findings: XhsSyncFrequencyFinding[] = []
+  const scanDirs = [path.join(root, 'apps/server/src'), path.join(root, 'apps/web/src')]
 
   function walk(dir: string): void {
     if (!fs.existsSync(dir)) return
@@ -49,21 +122,28 @@ export function scanDirectXhsRequestFindings(root = REPO_ROOT): Array<{
       }
       if (!/\.(ts|tsx|js)$/.test(name)) continue
       const rel = path.relative(root, full).replace(/\\/g, '/')
-      if (rel.includes('verify-xhs-sync-throttle') || rel.includes('diagnose-xhs-sync-frequency')) continue
+      if (shouldSkipFile(rel)) continue
       const content = fs.readFileSync(full, 'utf8')
       const lines = content.split('\n')
+      const hasAuditedWrapper =
+        /runXhsRequestWithAuditAndThrottle|requestXhsApi\s*\(|requestXhsJsonWithSyncAudit\s*\(/.test(
+          content,
+        )
+
       lines.forEach((line, idx) => {
-        for (const p of HIGH_PATTERNS) {
+        for (const p of SCAN_PATTERNS) {
           if (!p.re.test(line)) continue
-          const hasAudit = AUDITED_OK.test(content)
-          let risk: 'low' | 'medium' | 'high' = hasAudit ? 'medium' : 'high'
-          if (p.re.source.includes('setInterval') && rel.includes('scheduler.service')) risk = 'low'
-          if (p.re.source.includes('requestXhsJson') && rel.includes('xhs-api-client.service')) risk = 'low'
+          const risk = resolveRisk(rel, line, p)
           findings.push({
+            apiName: 'unknown',
             file: rel,
             line: idx + 1,
+            trigger: rel.includes('routes/') ? 'http_route' : 'service',
+            hasAudit: hasAuditedWrapper,
+            hasCooldown: rel.includes('sync-request-audit'),
             risk,
-            note: p.note,
+            reason: p.reason,
+            suggestion: p.suggestion,
           })
         }
       })
@@ -75,7 +155,6 @@ export function scanDirectXhsRequestFindings(root = REPO_ROOT): Array<{
 }
 
 export function scanXhsSyncFrequencyReport(root = REPO_ROOT): XhsSyncFrequencyFinding[] {
-  const findings: XhsSyncFrequencyFinding[] = []
   const apiHits = [
     { key: 'order_list', re: /order_list|syncOrderList|订单列表/ },
     { key: 'after_sales', re: /afterSales|after-sales|售后/ },
@@ -84,18 +163,8 @@ export function scanXhsSyncFrequencyReport(root = REPO_ROOT): XhsSyncFrequencyFi
     { key: 'good_review', re: /goodReview|good-review|好评/ },
   ]
 
-  for (const f of scanDirectXhsRequestFindings(root)) {
-    const apiName = apiHits.find((h) => h.re.test(f.file))?.key ?? 'unknown'
-    findings.push({
-      apiName,
-      file: f.file,
-      line: f.line,
-      trigger: f.file.includes('routes/') ? 'http_route' : 'service',
-      hasAudit: f.note.includes('requestXhsJson') ? false : AUDITED_OK.test(fs.readFileSync(path.join(root, f.file), 'utf8')),
-      hasCooldown: f.file.includes('sync-request-audit'),
-      risk: f.risk,
-      suggestion: f.risk === 'high' ? '改为 runXhsRequestWithAuditAndThrottle / requestXhsApi' : '确认触发频率与冷却',
-    })
-  }
-  return findings
+  return scanDirectXhsRequestFindings(root).map((f) => ({
+    ...f,
+    apiName: apiHits.find((h) => h.re.test(f.file))?.key ?? 'unknown',
+  }))
 }

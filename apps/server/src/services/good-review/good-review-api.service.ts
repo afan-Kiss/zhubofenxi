@@ -1,7 +1,7 @@
 import { resolveGoodReviewShopKey } from '../../config/good-review-shops.constants'
 import { resolveLiveAccountCookie } from '../qianfan-cookie-resolver.service'
 import { resolveOfficialShopAccountForStatus } from '../official-shop-account.service'
-import { requestXhsJson } from '../xhs-http.service'
+import { requestXhsJsonWithSyncAudit } from '../sync-request-audit.service'
 import { enqueueXhsRequest } from '../xhs-api-sync/xhs-rate-limiter.service'
 import type { GoodReviewShopDefinition } from '../../config/good-review-shops.constants'
 import {
@@ -45,22 +45,30 @@ async function postGoodReviewApi<T>(
     if (!accountId) throw new Error('尚未配置该店铺 Cookie')
     const cookie = await resolveLiveAccountCookie(accountId, shop.shopName)
     if (!cookie) throw new Error('尚未配置该店铺 Cookie')
-    return requestXhsJson<T>({
+    return requestXhsJsonWithSyncAudit<T>({
+      shopId: accountId,
+      shopName: shop.shopName,
+      apiName: 'good_review',
       method,
-      url,
-      body,
-      cookie,
-      referer: GOOD_REVIEW_REFERER,
-      needSign: true,
-      signLogContext: {
-        tag: 'xhs-sign',
-        accountName: shop.shopName,
-        liveAccountId: accountId,
-      },
-      cmdLog: {
-        accountName: shop.shopName,
-        liveAccountId: accountId,
-        apiLabel: url.split('/').slice(-1)[0] ?? 'good-review',
+      urlKey: url.split('?')[0]!.slice(-80),
+      trigger: 'scheduled',
+      options: {
+        method,
+        url,
+        body,
+        cookie,
+        referer: GOOD_REVIEW_REFERER,
+        needSign: true,
+        signLogContext: {
+          tag: 'xhs-sign',
+          accountName: shop.shopName,
+          liveAccountId: accountId,
+        },
+        cmdLog: {
+          accountName: shop.shopName,
+          liveAccountId: accountId,
+          apiLabel: url.split('/').slice(-1)[0] ?? 'good-review',
+        },
       },
     })
   })

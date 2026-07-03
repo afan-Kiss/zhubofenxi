@@ -1,5 +1,5 @@
 import { getDecryptedCookie } from './credential.service'
-import { requestXhsJson } from './xhs-http.service'
+import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
 import { enqueueXhsRequest } from './xhs-api-sync/xhs-rate-limiter.service'
 import {
   extractApiHasMore,
@@ -224,13 +224,20 @@ export async function fetchAfterSalesForTimeRange(params: {
     let payload: unknown
     try {
       payload = await enqueueXhsRequest(() =>
-        requestXhsJson<unknown>({
+        requestXhsJsonWithSyncAudit<unknown>({
+          apiName: 'after_sales_range',
           method: 'GET',
-          url,
-          cookie,
-          referer: WORKBENCH_REFERER,
-          needSign: true,
-          parseEnvelope: true,
+          urlKey: '/after-sales/range',
+          trigger: 'scheduled',
+          pageNo: page,
+          options: {
+            method: 'GET',
+            url,
+            cookie,
+            referer: WORKBENCH_REFERER,
+            needSign: true,
+            parseEnvelope: true,
+          },
         }),
       )
     } catch (e) {

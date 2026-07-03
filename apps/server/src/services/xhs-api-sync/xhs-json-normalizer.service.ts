@@ -498,7 +498,7 @@ export async function summarizeNormalizedOrders(): Promise<NormalizedOrdersSumma
   }
 }
 
-function buildOrderTimeDbWhere(range: DateRangeResolved) {
+export function buildOrderTimeDbWhere(range: DateRangeResolved) {
   return {
     OR: [
       {

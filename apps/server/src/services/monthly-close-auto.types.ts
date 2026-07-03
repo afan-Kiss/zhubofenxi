@@ -1,5 +1,12 @@
 export type DataAccuracyStatus = 'pass' | 'warning' | 'danger'
 
+export interface DuplicateOrderSample {
+  keyType: 'orderNo' | 'packageId' | 'dedupeKey' | 'matchOrderId'
+  key: string
+  count: number
+  sampleOrderIds: string[]
+}
+
 export interface DataAccuracyCheck {
   key: string
   title: string
@@ -12,6 +19,10 @@ export interface DataAccuracyCheck {
   diffCount?: number
   note: string
   sampleOrderIds?: string[]
+  sampleBuyerKeys?: string[]
+  duplicateSamples?: DuplicateOrderSample[]
+  /** info 类核对项不计入 moneyDiff/orderDiff 汇总 */
+  excludeFromTotals?: boolean
 }
 
 export interface DataAccuracyAuditReport {
@@ -58,6 +69,14 @@ export interface MonthlyCloseAutoReport {
     failedCount24h: number
     circuitOpenCount24h: number
     highRiskApis: string[]
+    directRequestFindings?: Array<{
+      file: string
+      line: number
+      risk: 'low' | 'medium' | 'high'
+      reason: string
+      suggestion: string
+    }>
     note: string
   }
+  schedulerRegistered?: boolean
 }

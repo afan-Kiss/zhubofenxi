@@ -103,8 +103,10 @@ export async function runMonthlyCloseAuto(params?: {
         failedCount24h: syncRisk.failedCount24h,
         circuitOpenCount24h: syncRisk.circuitOpenCount24h,
         highRiskApis: syncRisk.highRiskApis,
+        directRequestFindings: syncRisk.directRequestFindings,
         note: syncRisk.note,
       },
+      schedulerRegistered: (await import('./monthly-close-scheduler.service')).isMonthlyCloseSchedulerRegistered(),
     }
 
     const reportPath = await writeMonthlyCloseReport(report)
@@ -139,13 +141,16 @@ export async function getMonthlyCloseStatus(): Promise<{
   latest: MonthlyCloseAutoReport | null
   targetMonth: string | null
   locked: boolean
+  schedulerRegistered: boolean
 }> {
   const { isMonthlyCloseLocked } = await import('./monthly-close-report-store.service')
+  const { isMonthlyCloseSchedulerRegistered } = await import('./monthly-close-scheduler.service')
   const targetMonth = resolveAutoCloseTargetMonth()
   const latest = (await readLatestMonthlyCloseReport()) ?? (targetMonth ? await readMonthlyCloseReport(targetMonth) : null)
   return {
     latest,
     targetMonth,
     locked: await isMonthlyCloseLocked(),
+    schedulerRegistered: isMonthlyCloseSchedulerRegistered(),
   }
 }

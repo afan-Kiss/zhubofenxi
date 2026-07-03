@@ -1,14 +1,15 @@
 #!/usr/bin/env tsx
+import fs from 'node:fs/promises'
+import path from 'node:path'
 import { resolveAutoCloseTargetMonth } from '../src/services/monthly-close-auto.service'
 import {
+  acquireMonthlyCloseLock,
   hasSuccessfulMonthlyCloseReport,
   readMonthlyCloseReport,
   writeMonthlyCloseReport,
 } from '../src/services/monthly-close-report-store.service'
 import type { MonthlyCloseAutoReport } from '../src/services/monthly-close-auto.types'
 import { resolveMonthlyCloseMonth } from '../src/utils/monthly-close-month.util'
-import fs from 'node:fs/promises'
-import path from 'node:path'
 import { getDataDir } from '../src/config/env'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
@@ -16,11 +17,23 @@ function assert(cond: boolean, msg: string, issues: string[]) {
 }
 
 function shanghaiNoon(y: number, m: number, d: number): Date {
-  return new Date(Date.parse(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00+08:00`))
+  return new Date(
+    Date.parse(`${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}T12:00:00+08:00`),
+  )
 }
 
 async function main() {
   const issues: string[] = []
+
+  const indexSrc = await fs.readFile(
+    path.join(process.cwd(), 'apps/server/src/index.ts'),
+    'utf8',
+  )
+  assert(
+    indexSrc.includes('initMonthlyCloseScheduler'),
+    'apps/server/src/index.ts 必须调用 initMonthlyCloseScheduler',
+    issues,
+  )
 
   assert(
     resolveAutoCloseTargetMonth(shanghaiNoon(2026, 7, 15)) === '2026-06',
@@ -77,10 +90,35 @@ async function main() {
   assert(await hasSuccessfulMonthlyCloseReport('2099-01'), '成功报告应可检测', issues)
   const loaded = await readMonthlyCloseReport('2099-01')
   assert(loaded?.month === '2099-01', 'status 接口可读报告', issues)
+
+  const mockReport2: MonthlyCloseAutoReport = {
+    ...mockReport,
+    month: '2099-03',
+    range: { startDate: '2099-03-01', endDate: '2099-03-31' },
+    status: 'pass',
+  }
+  const p2 = await writeMonthlyCloseReport(mockReport2)
+  assert(await hasSuccessfulMonthlyCloseReport('2099-03'), '同月已有成功报告应可检测', issues)
   await fs.unlink(p).catch(() => undefined)
+  await fs.unlink(p2).catch(() => undefined)
+
+  const lockMonth = '2099-02'
+  const release1 = await acquireMonthlyCloseLock(lockMonth)
+  let lockBlocked = false
+  try {
+    await acquireMonthlyCloseLock(lockMonth)
+  } catch {
+    lockBlocked = true
+  }
+  assert(lockBlocked, '同月并发 lock 应阻止第二次执行', issues)
+  await release1()
 
   const runsPath = path.join(getDataDir(), 'monthly-close-runs.jsonl')
-  assert(await fs.access(runsPath).then(() => true).catch(() => false) || true, 'runs jsonl 路径可用', issues)
+  assert(
+    (await fs.access(runsPath).then(() => true).catch(() => false)) || true,
+    'runs jsonl 路径可用',
+    issues,
+  )
 
   if (issues.length > 0) {
     console.error('[verify:monthly-close-auto] FAIL')

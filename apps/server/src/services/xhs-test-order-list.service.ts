@@ -1,5 +1,6 @@
 import { getDecryptedCookie } from './credential.service'
-import { requestXhsJson, type XhsRequestAuditContext } from './xhs-http.service'
+import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
+import { type XhsRequestAuditContext } from './xhs-http.service'
 
 const ORDER_LIST_URL =
   'https://ark.xiaohongshu.com/api/edith/fulfillment/order/page'
@@ -115,15 +116,21 @@ export async function fetchXhsOrderListTest(
   const cookie = await getDecryptedCookie()
 
   try {
-    const payload = await requestXhsJson<XhsEnvelope>({
+    const payload = await requestXhsJsonWithSyncAudit<XhsEnvelope>({
+      apiName: 'order_list_test',
       method: 'POST',
-      url: ORDER_LIST_URL,
-      body: ORDER_LIST_BODY,
-      cookie,
-      referer: ORDER_LIST_REFERER,
-      needSign: true,
-      parseEnvelope: false,
-      audit: audit ? { ...audit, module: 'xhs_export' } : undefined,
+      urlKey: ORDER_LIST_URL,
+      trigger: 'manual',
+      options: {
+        method: 'POST',
+        url: ORDER_LIST_URL,
+        body: ORDER_LIST_BODY,
+        cookie,
+        referer: ORDER_LIST_REFERER,
+        needSign: true,
+        parseEnvelope: false,
+        audit: audit ? { ...audit, module: 'xhs_export' } : undefined,
+      },
     })
     return toSanitizedResult(payload)
   } catch (err) {

@@ -16,7 +16,7 @@ import {
   normalizeAfterSaleRecord,
   type NormalizedAfterSaleRecord,
 } from './xhs-after-sales-range.service'
-import { requestXhsJson } from './xhs-http.service'
+import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
 import { enqueueXhsRequest } from './xhs-api-sync/xhs-rate-limiter.service'
 import { extractAfterSalesList } from './xhs-after-sales-workbench.service'
 import {
@@ -107,13 +107,22 @@ async function fetchAfterSalesForTimeRangeAccount(params: {
     let payload: unknown
     try {
       payload = await enqueueXhsRequest(() =>
-        requestXhsJson<unknown>({
+        requestXhsJsonWithSyncAudit<unknown>({
+          shopId: params.liveAccountId,
+          shopName: params.accountName,
+          apiName: 'after_sales_time_search',
           method: 'GET',
-          url,
-          cookie,
-          referer: WORKBENCH_REFERER,
-          needSign: true,
-          parseEnvelope: true,
+          urlKey: '/after-sales/time-search',
+          trigger: 'scheduled',
+          pageNo: page,
+          options: {
+            method: 'GET',
+            url,
+            cookie,
+            referer: WORKBENCH_REFERER,
+            needSign: true,
+            parseEnvelope: true,
+          },
         }),
       )
     } catch (e) {

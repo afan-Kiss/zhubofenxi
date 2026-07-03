@@ -64,5 +64,9 @@ export function initMonthlyCloseScheduler(): void {
 
   void runCatchupIfNeeded()
 
-  logInfo('月度结账调度', `已注册：每月 15 日 03:30（${TIMEZONE}）`)
+  logInfo('月度结账调度', `月度结账调度已注册：每月 15 日 03:30（${TIMEZONE}）`)
+}
+
+export function isMonthlyCloseSchedulerRegistered(): boolean {
+  return cronTask != null
 }

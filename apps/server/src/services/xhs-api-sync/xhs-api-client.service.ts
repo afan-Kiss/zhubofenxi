@@ -7,6 +7,10 @@ import { requestXhsJson, type XhsRequestAuditContext } from '../xhs-http.service
 import { XhsAuthError, classifyXhsErrorMessage } from '../../utils/xhs-auth.util'
 import { getApiDefinition, isApiConfigured } from './xhs-api-registry'
 import { enqueueXhsRequest } from './xhs-rate-limiter.service'
+import {
+  buildXhsRequestHash,
+  runXhsRequestWithAuditAndThrottle,
+} from '../sync-request-audit.service'
 import type { XhsApiKey, XhsApiRawSummary, XhsApiRequestResult } from './xhs-api-types'
 import { XHS_API_NOT_CONFIGURED_MSG } from './xhs-api-types'
 
@@ -245,8 +249,48 @@ export async function requestXhsApi<T = unknown>(
       }
     }
 
-    let result = await executeOnce(cookie)
+    const requestHash = buildXhsRequestHash({
+      apiName: params.apiKey,
+      query: params.query,
+      body: params.body,
+    })
+    const audited = await runXhsRequestWithAuditAndThrottle<T>({
+      shopId: params.liveAccountId,
+      shopName: params.liveAccountName,
+      apiName: params.apiKey,
+      method: def.method,
+      urlKey: urlPath(def.url),
+      requestHash,
+      trigger: 'scheduled',
+      pageNo: params.cmdLog?.pageNo,
+      execute: async () => {
+        const result = await executeOnce(cookie!)
+        return {
+          ok: result.ok,
+          data: result.data,
+          httpStatus: result.httpStatus,
+          itemCount: result.rawSummary?.itemCount,
+          errorMessage: result.errorMessage,
+        }
+      },
+    })
 
-    return result
+    if (audited.skippedRemote) {
+      return {
+        ok: false,
+        data: null,
+        rawSummary: null,
+        errorMessage: audited.errorMessage ?? '请求被冷却或熔断跳过',
+        authError: null,
+      }
+    }
+
+    return {
+      ok: audited.ok,
+      data: audited.data,
+      rawSummary: audited.data ? buildRawSummary(audited.data) : null,
+      errorMessage: audited.errorMessage,
+      authError: null,
+    }
   })
 }

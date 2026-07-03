@@ -682,6 +682,7 @@ export const BuyerRankingTab: React.FC = () => {
               const qc = Number(bp.qualityRefundOrderCount ?? 0)
               const rr = Number(bp.returnRefundOrderCount ?? 0)
               const afterSale = Number(bp.afterSaleOrderCount ?? 0)
+              const signedCount = Number(bp.signedOrderCount ?? rowRec.signedOrderCount ?? 0)
               const refundRate = bp.refundRate as number | null
               const refundRateLabel =
                 refundRate != null ? `${Math.round(refundRate * 100)}%` : '—'
@@ -726,8 +727,8 @@ export const BuyerRankingTab: React.FC = () => {
                     垃圾风险分：{riskScoreText}
                   </p>
                   <p className="text-[11px] text-slate-700">
-                    品退：{formatCount(qc)} 单｜退货：{formatCount(rr)} 单｜售后：{' '}
-                    {formatCount(afterSale)} 单
+                    签收：{formatCount(signedCount)} 单｜品退：{formatCount(qc)} 单｜退货：{' '}
+                    {formatCount(rr)} 单｜售后：{formatCount(afterSale)} 单
                   </p>
                   <p className="text-[11px] text-slate-700">
                     退款率：{refundRateLabel}｜退款金额：{formatMoney(refundAmount)}

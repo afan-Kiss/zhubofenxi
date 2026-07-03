@@ -4,7 +4,9 @@
  */
 import {
   afterSaleOrderCount,
+  badBuyerRefundOrderCount,
   buildBadBuyerProfile,
+  buyerRefundRate,
   composeBadBuyerWechatText,
   computeBadBuyerRiskScore,
   formatBadBuyerWechatBlock,
@@ -117,6 +119,26 @@ async function main() {
     buyerSummary: { refundOrderCount: 0, orderCount: 2 },
   })
   assert(!isBadBuyerCandidate(freightOnlyBuyer), '纯运费补偿不能单独作为垃圾客户', issues)
+
+  const returnOnlyBuyer = mockBuyer({
+    buyerKey: 'ret1',
+    returnRefundCount: 2,
+    refundCount: 0,
+    orderCount: 4,
+    signedOrderCount: 3,
+    buyerSummary: { refundOrderCount: 0, orderCount: 4, realDealOrderCount: 3 },
+  })
+  assert(
+    badBuyerRefundOrderCount(returnOnlyBuyer) >= 2,
+    '有退货时退款相关订单数应包含退货单',
+    issues,
+  )
+  const returnOnlyRate = buyerRefundRate(returnOnlyBuyer)
+  assert(
+    returnOnlyRate != null && returnOnlyRate > 0,
+    `仅有退货、未完成退款金额时退款率不应为 0，实际 ${returnOnlyRate}`,
+    issues,
+  )
 
   const qcScore = computeBadBuyerRiskScore(
     mockBuyer({

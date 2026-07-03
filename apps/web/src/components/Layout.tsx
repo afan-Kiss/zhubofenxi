@@ -39,6 +39,12 @@ const ALL_NAV: Array<{
     permission: 'buyers',
   },
   {
+    to: '/data-health',
+    label: (<><FileText size={14} /> 数据健康</>),
+    dataTestId: 'tab-data-health',
+    permission: 'operations_report',
+  },
+  {
     to: '/operations-report',
     label: (<><FileText size={14} /> 运营报表</>),
     dataTestId: 'tab-operations-report',

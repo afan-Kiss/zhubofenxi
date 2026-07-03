@@ -20,6 +20,7 @@ import { formatMoneyYuanCompact } from './buyer-wechat-weekly-text.service'
 export interface BadBuyerProfile {
   riskScore: number
   riskScoreText: string
+  signedOrderCount: number
   qualityRefundOrderCount: number
   returnRefundOrderCount: number
   afterSaleOrderCount: number
@@ -83,11 +84,19 @@ export function productRefundAmountYuan(item: BuyerRankingItem): number {
   return Number(item.productRefundAmount ?? item.refundAmount ?? 0)
 }
 
+/** 退款相关订单数（含退货/仅退款，与卡片「退货」口径对齐） */
+export function badBuyerRefundOrderCount(item: BuyerRankingItem): number {
+  const summaryRefund = item.buyerSummary?.refundOrderCount ?? item.refundCount ?? 0
+  const behaviorRefund = (item.returnRefundCount ?? 0) + (item.refundOnlyCount ?? 0)
+  return Math.max(summaryRefund, behaviorRefund, qualityRefundOrderCount(item))
+}
+
 export function buyerRefundRate(item: BuyerRankingItem): number | null {
   const orders = realDealOrderCount(item)
-  if (orders <= 0) return null
-  const refundOrders = item.buyerSummary?.refundOrderCount ?? item.refundCount ?? 0
-  return refundOrders / orders
+  const denominator =
+    orders > 0 ? orders : (item.buyerSummary?.orderCount ?? item.orderCount ?? 0)
+  if (denominator <= 0) return null
+  return badBuyerRefundOrderCount(item) / denominator
 }
 
 function isFreightOnlyBuyer(item: BuyerRankingItem): boolean {
@@ -201,6 +210,7 @@ export function buildBadBuyerProfile(
   return {
     riskScore,
     riskScoreText: formatBadBuyerRiskScoreText(riskScore),
+    signedOrderCount: item.signedOrderCount ?? 0,
     ...profileBase,
     refundRate: buyerRefundRate(item),
     refundAmountYuan: productRefundAmountYuan(item),

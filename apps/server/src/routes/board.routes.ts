@@ -1226,3 +1226,79 @@ boardRouter.get('/buyer-ranking/summary-drill', async (req, res) => {
     sendFail(res, err instanceof Error ? err.message : '获取买家汇总明细失败', 500)
   }
 })
+
+boardRouter.get('/monthly-close/status', async (_req, res) => {
+  try {
+    const { getMonthlyCloseStatus } = await import('../services/monthly-close-auto.service')
+    const data = await getMonthlyCloseStatus()
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取月度结账状态失败', 500)
+  }
+})
+
+boardRouter.get('/monthly-close/report', async (req, res) => {
+  try {
+    const month = req.query.month ? String(req.query.month) : undefined
+    const { readMonthlyCloseReport, readLatestMonthlyCloseReport } = await import(
+      '../services/monthly-close-report-store.service'
+    )
+    const report = month ? await readMonthlyCloseReport(month) : await readLatestMonthlyCloseReport()
+    if (!report) {
+      sendFail(res, '暂无月度结账报告', 404)
+      return
+    }
+    sendOk(res, report)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取月度结账报告失败', 500)
+  }
+})
+
+boardRouter.post('/monthly-close/rerun', requireMaintenanceTools, async (req, res) => {
+  try {
+    const month = req.body?.month ? String(req.body.month) : undefined
+    const { runMonthlyCloseAuto } = await import('../services/monthly-close-auto.service')
+    const report = await runMonthlyCloseAuto({ month, force: true, fullScan: true })
+    sendOk(res, report)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '重跑月度结账失败', 500)
+  }
+})
+
+boardRouter.get('/data-accuracy-audit', async (req, res) => {
+  try {
+    const { runDataAccuracyAudit } = await import('../services/data-accuracy-audit.service')
+    const autoPrev = req.query.autoPrevMonth === '1' || req.query.autoPrevMonth === 'true'
+    let startDate = req.query.startDate ? String(req.query.startDate) : undefined
+    let endDate = req.query.endDate ? String(req.query.endDate) : undefined
+    if (autoPrev || (!startDate && !endDate)) {
+      const { resolveMonthlyCloseMonth } = await import('../utils/monthly-close-month.util')
+      const scope = resolveMonthlyCloseMonth({ autoPrevMonth: true })
+      startDate = scope.startDate
+      endDate = scope.endDate
+    }
+    if (!startDate || !endDate) {
+      sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    const data = await runDataAccuracyAudit({
+      startDate,
+      endDate,
+      scope: 'custom',
+      fullScan: req.query.fullScan === '1' || req.query.fullScan === 'true',
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '数据准确性总检失败', 500)
+  }
+})
+
+boardRouter.get('/sync-risk/status', async (_req, res) => {
+  try {
+    const { buildSyncRiskStatus } = await import('../services/sync-request-audit.service')
+    const data = await buildSyncRiskStatus()
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取接口风险状态失败', 500)
+  }
+})

@@ -244,6 +244,12 @@ export async function initScheduler(): Promise<void> {
   scheduleBuyerRankingCache()
   scheduleWorkbenchQueueProcessor()
   try {
+    const { initMonthlyCloseScheduler } = await import('./monthly-close-scheduler.service')
+    initMonthlyCloseScheduler()
+  } catch (err) {
+    logWarn('定时任务', `月度结账调度注册失败：${err instanceof Error ? err.message : String(err)}`)
+  }
+  try {
     const { refreshWorkbenchMemoryCache } = await import('./xhs-after-sales-workbench.service')
     const n = await refreshWorkbenchMemoryCache()
     logInfo('定时任务', `售后工作台内存缓存已加载：${n} 条`)

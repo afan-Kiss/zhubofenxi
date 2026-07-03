@@ -1,3 +1,10 @@
+/**
+ * 运营月报：由每日运营日报快照汇总。
+ *
+ * 重要：summary.validAmountYuan 是「有效成交金额」（支付口径 + 售后剔除），
+ * 不是财务利润，不能用于判断公司盈利/亏损。
+ * 月度结账核对请使用 npm run monthly:close-check。
+ */
 import type { UserRole } from '../types/roles'
 import {
   endOfMonthKeyShanghai,

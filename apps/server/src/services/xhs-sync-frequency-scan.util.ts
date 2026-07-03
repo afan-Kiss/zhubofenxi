@@ -75,19 +75,38 @@ const SCAN_PATTERNS: Array<{
   },
 ]
 
+const LOCAL_DB_WHILE_REASON =
+  '本地数据库分页扫描，不请求小红书，不属于接口风控风险。'
+const LOCAL_DB_WHILE_SUGGESTION = '此为 Prisma 本地分页读取，无需按接口高频风险处理。'
+
 function shouldSkipFile(rel: string): boolean {
   return SKIP_PATH_PARTS.some((p) => rel.includes(p))
+}
+
+function isLocalDbPaginationLoop(lines: string[], lineIdx: number): boolean {
+  const start = Math.max(0, lineIdx - 3)
+  const end = Math.min(lines.length, lineIdx + 8)
+  const context = lines.slice(start, end).join('\n')
+  const hasLocalDb =
+    /prisma\.|\.findMany\s*\(|xhsRawOrder|findMany\s*\(/.test(context) &&
+    !/requestXhsJson|xiaohongshu\.com|fetch\s*\(\s*['"`]https?:\/\//i.test(context)
+  return hasLocalDb
 }
 
 function resolveRisk(
   rel: string,
   line: string,
   pattern: (typeof SCAN_PATTERNS)[number],
+  lines: string[],
+  lineIdx: number,
 ): 'low' | 'medium' | 'high' {
   if (pattern.re.source.includes('requestXhsJsonWithSyncAudit')) return 'low'
   if (pattern.re.source.includes('requestXhsJson')) {
     if (ALLOWED_REQUEST_XHS_JSON.has(rel)) return 'low'
     return 'high'
+  }
+  if (pattern.re.source.includes('while')) {
+    if (isLocalDbPaginationLoop(lines, lineIdx)) return 'low'
   }
   if (pattern.re.source.includes('setInterval')) {
     if (rel.includes('scheduler.service') || rel.includes('-scheduler.service')) return 'low'
@@ -133,7 +152,9 @@ export function scanDirectXhsRequestFindings(root = REPO_ROOT): XhsSyncFrequency
       lines.forEach((line, idx) => {
         for (const p of SCAN_PATTERNS) {
           if (!p.re.test(line)) continue
-          const risk = resolveRisk(rel, line, p)
+          const risk = resolveRisk(rel, line, p, lines, idx)
+          const isLocalDbWhile =
+            p.re.source.includes('while') && isLocalDbPaginationLoop(lines, idx)
           findings.push({
             apiName: 'unknown',
             file: rel,
@@ -142,8 +163,8 @@ export function scanDirectXhsRequestFindings(root = REPO_ROOT): XhsSyncFrequency
             hasAudit: hasAuditedWrapper,
             hasCooldown: rel.includes('sync-request-audit'),
             risk,
-            reason: p.reason,
-            suggestion: p.suggestion,
+            reason: isLocalDbWhile ? LOCAL_DB_WHILE_REASON : p.reason,
+            suggestion: isLocalDbWhile ? LOCAL_DB_WHILE_SUGGESTION : p.suggestion,
           })
         }
       })

@@ -902,9 +902,6 @@ export const BuyerRankingTab: React.FC = () => {
 
             if (isBadBuyerTab) {
               const bp = badBuyerProfileFromRow(rowRec)
-              const displayLabel = buyerDisplayLabel(rowRec)
-              const riskLevel = String(bp.riskLevel ?? '关注')
-              const riskScoreText = String(bp.riskScoreText ?? '')
               const paidCount = Number(bp.paidCount ?? rowRec.orderCount ?? 0)
               const signedCountRaw = bp.signedCount
               const signedCount =
@@ -925,6 +922,8 @@ export const BuyerRankingTab: React.FC = () => {
               const shopLabel = String(bp.shopLabel ?? bp.mainShopName ?? '未知店铺')
               const reasonText = String(bp.reasonText ?? '—')
               const suggestionText = String(bp.suggestionText ?? '—')
+              const baseLabel = buyerDisplayLabel(rowRec)
+              const displayLabel = qc > 0 ? `【${baseLabel}】` : baseLabel
               const range = badBuyerData?.range
               const openDrawer = () => {
                 setOrderDrawerScope(
@@ -951,16 +950,15 @@ export const BuyerRankingTab: React.FC = () => {
                   }}
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <p className="text-base font-semibold leading-snug text-slate-900">
+                    <p
+                      className={`text-base font-semibold leading-snug ${qc > 0 ? 'text-red-700' : 'text-slate-900'}`}
+                    >
                       {displayLabel}
                     </p>
                     <span className="shrink-0 rounded-full bg-amber-600 px-2 py-0.5 text-[10px] font-bold text-white">
                       #{rank}
                     </span>
                   </div>
-                  <p className="text-[11px] font-semibold text-red-700">
-                    风险等级：{riskLevel}｜风险分：{riskScoreText}
-                  </p>
                   <p className="text-[11px] text-slate-700">
                     支付：{formatCount(paidCount)} 单｜签收：{signedLine}｜签收率：{signedRateLabel}
                   </p>
@@ -968,7 +966,9 @@ export const BuyerRankingTab: React.FC = () => {
                     退款：{formatCount(refundOrderCount)} 单｜退款率：{refundRateLabel}｜退款金额：
                     {formatMoney(refundAmount)}
                   </p>
-                  <p className="text-[11px] text-slate-700">
+                  <p
+                    className={`text-[11px] ${qc > 0 ? 'font-semibold text-red-700' : 'text-slate-700'}`}
+                  >
                     品退：{formatCount(qc)} 单｜退货退款：{formatCount(rr)} 单｜售后申请：
                     {formatCount(aftersaleCount)} 次
                   </p>

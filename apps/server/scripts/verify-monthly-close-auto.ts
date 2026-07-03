@@ -61,6 +61,13 @@ async function main() {
     status: 'pass',
     canClose: true,
     score: 100,
+    schemaVersion: 2,
+    appVersion: '0.2.0',
+    gitCommit: 'test',
+    fullScan: true,
+    blockingIssues: [],
+    infoNotes: [],
+    conclusion: { canClose: true, reasonSummary: '数据核对通过' },
     summary: {
       validRevenueCent: 0,
       paidOrderCount: 0,

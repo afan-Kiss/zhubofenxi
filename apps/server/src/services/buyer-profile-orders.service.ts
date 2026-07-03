@@ -80,6 +80,11 @@ export function buildBuyerDrawerAuditMetrics(params: {
 export interface BadBuyerDrawerAuditMetrics {
   qualityRefundOrderCount: number
   returnRefundOrderCount: number
+  /** 售后申请次数（可大于订单数） */
+  aftersaleApplyCount: number
+  /** 售后相关订单数（与 Drawer 售后字段同口径） */
+  aftersaleOrderCount: number
+  /** @deprecated 使用 aftersaleApplyCount */
   aftersaleCount: number
   refundAmountCent: number
   refundOrderCount: number
@@ -126,9 +131,14 @@ export function buildBadBuyerDrawerAuditMetrics(params: {
     rows.filter((r) => r.afterSaleType === 'return_refund').map((r) => r.orderNo),
   ).size
 
-  let aftersaleCount = 0
+  let aftersaleApplyCount = 0
+  let aftersaleOrderCount = 0
   for (let i = 0; i < rankingViews.length; i += 1) {
-    aftersaleCount += countAftersaleAppliesForRow(rows[i]!, rankingViews[i]!)
+    const v = rankingViews[i]!
+    aftersaleApplyCount += countAftersaleAppliesForRow(rows[i]!, v)
+    if (orderCountsAsBuyerRefundRelated(v) && !v.isFreightRefundOnly) {
+      aftersaleOrderCount += 1
+    }
   }
 
   const paidCount = summary.paidOrderCount
@@ -138,7 +148,9 @@ export function buildBadBuyerDrawerAuditMetrics(params: {
   return {
     qualityRefundOrderCount: summary.qualityRefundOrderCount,
     returnRefundOrderCount,
-    aftersaleCount,
+    aftersaleApplyCount,
+    aftersaleOrderCount,
+    aftersaleCount: aftersaleApplyCount,
     refundAmountCent: summary.refundAmountCent,
     refundOrderCount,
     paidCount,

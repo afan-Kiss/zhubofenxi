@@ -9,10 +9,12 @@ import {
   buyerRefundRate,
   capBadBuyerRate,
   capBadBuyerCount,
+  compareBadBuyerRankingItems,
   composeBadBuyerWechatText,
   computeBadBuyerRiskScore,
   computeBadBuyerRiskScoreFromStats,
   extractBadBuyerCustomerStats,
+  formatBadBuyerListDisplayName,
   formatBadBuyerRefundRateLabel,
   formatBadBuyerSignedRateLabel,
   formatBadBuyerWechatBlock,
@@ -367,8 +369,31 @@ async function main() {
   assert(wechatText.includes(block1), '微信文案应包含第一个买家块', issues)
   assert(!wechatText.includes('垃圾客户'), '微信文案不应含「垃圾客户」', issues)
   assert(!wechatText.includes('垃圾风险分'), '微信文案不应含「垃圾风险分」', issues)
-  assert(wechatText.includes('风险等级：'), '微信文案应含风险等级', issues)
+  assert(!wechatText.includes('风险等级：'), '微信文案不应含风险等级', issues)
+  assert(!wechatText.includes('谨慎发货'), '微信文案不应含「谨慎发货」', issues)
+  assert(wechatText.includes('【小鹿鹿】'), '品退买家名称应用【】框起', issues)
+  assert(
+    formatBadBuyerListDisplayName('己悦', 0) === '己悦',
+    '无品退时不应加【】',
+    issues,
+  )
+  assert(
+    formatBadBuyerListDisplayName('小鹿鹿', 2) === '【小鹿鹿】',
+    '有品退时应加【】',
+    issues,
+  )
   assert(wechatText.includes('售后申请：'), '微信文案应含售后申请次数字段', issues)
+  const sortSample = [
+    { badBuyerProfile: { qualityRefundOrderCount: 0, riskScore: 9, refundOrderCount: 3 } },
+    { badBuyerProfile: { qualityRefundOrderCount: 2, riskScore: 5, refundOrderCount: 2 } },
+    { badBuyerProfile: { qualityRefundOrderCount: 2, riskScore: 8, refundOrderCount: 1 } },
+  ].sort(compareBadBuyerRankingItems)
+  assert(
+    sortSample[0].badBuyerProfile.qualityRefundOrderCount === 2 &&
+      sortSample[0].badBuyerProfile.riskScore === 8,
+    '排序应品退单数优先，同品退再按风险分',
+    issues,
+  )
   assertNoIdentityLeak(wechatText, '微信文案', issues)
 
   const fri = new Date(Date.parse('2026-07-03T12:00:00+08:00'))

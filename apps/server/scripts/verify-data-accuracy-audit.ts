@@ -6,6 +6,10 @@ import {
   resolveBuyerAuditSampleLimit,
   resolveRawVsNormalizedCheck,
 } from '../src/services/data-accuracy-audit.service'
+import { buildBlockingIssueSummary } from '../src/services/data-accuracy-audit-diff.util'
+import { scanXhsSyncFrequencyReport } from '../src/services/xhs-sync-frequency-scan.util'
+import { MONTHLY_CLOSE_REPORT_SCHEMA_VERSION } from '../src/utils/report-build-meta'
+import type { DataAccuracyCheck } from '../src/services/monthly-close-auto.types'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
@@ -84,8 +88,42 @@ async function main() {
   assert(resolveBadBuyerAuditSampleLimit(true, 50) === 50, 'fullScan 垃圾客户榜应全量', issues)
   assert(resolveBadBuyerAuditSampleLimit(false, 50) === 10, '非 fullScan 垃圾客户榜应抽样10', issues)
 
-  const score = Math.round(8.75 * 10) / 10
-  assert(score === 8.8, '风险分保留 1 位小数', issues)
+  const blockingSummary = buildBlockingIssueSummary([
+    {
+      key: 'board_vs_daily_sum',
+      title: '经营总览 vs 运营日报逐日求和',
+      status: 'danger',
+      category: 'blocking',
+      diffCent: 20,
+      note: 'test',
+    },
+    {
+      key: 'raw_vs_normalized',
+      title: 'raw vs normalized',
+      status: 'warning',
+      category: 'info',
+      note: '不应进入 blocking',
+    },
+  ] as DataAccuracyCheck[])
+  assert(blockingSummary.length === 1, 'blockingIssues 应只含 blocking danger', issues)
+  assert(blockingSummary[0]!.includes('经营总览和运营日报'), 'blocking 应含金额差异文案', issues)
+
+  const payTimeFindings = scanXhsSyncFrequencyReport().filter((f) =>
+    f.file.includes('order-pay-time-prefilter-diagnostic'),
+  )
+  assert(payTimeFindings.length > 0, '应扫描到 pay-time diagnostic 文件', issues)
+  assert(
+    payTimeFindings.every((f) => f.risk !== 'high'),
+    '本地 DB while(true) 不应标 high',
+    issues,
+  )
+  assert(
+    payTimeFindings.some((f) => f.reason.includes('本地数据库分页扫描')),
+    '本地 DB 扫描应有说明文案',
+    issues,
+  )
+
+  assert(MONTHLY_CLOSE_REPORT_SCHEMA_VERSION === 2, '报告 schema 版本应为 2', issues)
 
   if (issues.length > 0) {
     console.error('[verify:data-accuracy-audit] FAIL')

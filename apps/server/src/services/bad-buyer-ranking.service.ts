@@ -484,11 +484,7 @@ export async function buildBadBuyerRanking(params: {
       })
       return { ...item, badBuyerProfile }
     })
-    .sort((a, b) => {
-      const s = b.badBuyerProfile.riskScore - a.badBuyerProfile.riskScore
-      if (s !== 0) return s
-      return b.badBuyerProfile.qualityRefundOrderCount - a.badBuyerProfile.qualityRefundOrderCount
-    })
+    .sort(compareBadBuyerRankingItems)
     .slice(0, limit)
 
   const presetLabel =
@@ -508,10 +504,30 @@ export async function buildBadBuyerRanking(params: {
   }
 }
 
+export function formatBadBuyerListDisplayName(
+  buyerDisplayName: string,
+  qualityRefundOrderCount: number,
+): string {
+  if (qualityRefundOrderCount > 0) return `【${buyerDisplayName}】`
+  return buyerDisplayName
+}
+
+export function compareBadBuyerRankingItems(
+  a: { badBuyerProfile: Pick<BadBuyerProfile, 'qualityRefundOrderCount' | 'riskScore' | 'refundOrderCount'> },
+  b: { badBuyerProfile: Pick<BadBuyerProfile, 'qualityRefundOrderCount' | 'riskScore' | 'refundOrderCount'> },
+): number {
+  const qcDiff =
+    b.badBuyerProfile.qualityRefundOrderCount - a.badBuyerProfile.qualityRefundOrderCount
+  if (qcDiff !== 0) return qcDiff
+  const scoreDiff = b.badBuyerProfile.riskScore - a.badBuyerProfile.riskScore
+  if (scoreDiff !== 0) return scoreDiff
+  return b.badBuyerProfile.refundOrderCount - a.badBuyerProfile.refundOrderCount
+}
+
 export function formatBadBuyerWechatBlock(row: BadBuyerWechatTextRow): string {
+  const name = formatBadBuyerListDisplayName(row.buyerDisplayName, row.qualityRefundOrderCount)
   return [
-    `${row.rank}. ${row.buyerDisplayName}`,
-    `风险等级：${row.riskLevel}｜风险分：${row.riskScoreText}`,
+    `${row.rank}. ${name}`,
     `支付：${row.paidCount} 单｜签收：${row.signedLine}｜签收率：${row.signedRateLabel}`,
     `退款：${row.refundOrderCount} 单｜退款率：${row.refundRateLabel}｜退款金额：${formatMoneyYuanCompact(row.refundAmountYuan)}`,
     `品退：${row.qualityRefundOrderCount} 单｜退货退款：${row.returnRefundOrderCount} 单｜售后申请：${row.aftersaleCount} 次`,

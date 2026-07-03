@@ -12,8 +12,40 @@ import {
 } from './monthly-close-report-store.service'
 import type { MonthlyCloseAutoReport } from './monthly-close-auto.types'
 import { logError, logInfo } from '../utils/server-log'
+import { resolveReportBuildMeta } from '../utils/report-build-meta'
 
 export type { MonthlyCloseAutoReport } from './monthly-close-auto.types'
+
+function buildConclusionReasonSummary(
+  report: Pick<MonthlyCloseAutoReport, 'blockingIssues' | 'syncRisk' | 'status'>,
+): string {
+  const parts: string[] = []
+  if (report.blockingIssues?.length) {
+    if (report.blockingIssues.some((b) => b.includes('经营总览和运营日报'))) {
+      parts.push('金额差异')
+    }
+    if (report.blockingIssues.some((b) => b.includes('订单池') || b.includes('标准订单'))) {
+      parts.push('订单差异')
+    }
+    if (report.blockingIssues.some((b) => b.includes('高风险售后客户'))) {
+      parts.push('售后榜口径不一致')
+    }
+    if (report.blockingIssues.some((b) => b.includes('买家榜'))) {
+      parts.push('买家榜口径不一致')
+    }
+    if (report.blockingIssues.some((b) => b.includes('重复订单'))) {
+      parts.push('重复订单')
+    }
+    if (report.blockingIssues.some((b) => b.includes('支付时间'))) {
+      parts.push('支付时间漏单风险')
+    }
+  }
+  if (report.syncRisk.status === 'danger') parts.push('接口风险')
+  if (parts.length === 0) {
+    return report.status === 'pass' ? '数据核对通过' : '存在需关注的提示项'
+  }
+  return [...new Set(parts)].join('、')
+}
 
 export function resolveAutoCloseTargetMonth(now: Date = new Date()): string | null {
   const { year, month, day } = (() => {
@@ -44,6 +76,8 @@ export async function runMonthlyCloseAuto(params?: {
 
   const release = await acquireMonthlyCloseLock(month)
   const startedAt = new Date().toISOString()
+  const fullScan = params?.fullScan !== false
+  const buildMeta = resolveReportBuildMeta(fullScan)
   try {
     logInfo('月度结账', `开始自动核对 ${month}（${scope.startDate} ~ ${scope.endDate}）`)
 
@@ -53,7 +87,7 @@ export async function runMonthlyCloseAuto(params?: {
         startDate: scope.startDate,
         endDate: scope.endDate,
         scope: 'monthly',
-        fullScan: params?.fullScan !== false,
+        fullScan,
       }),
       buildSyncRiskStatus(),
     ])
@@ -61,6 +95,17 @@ export async function runMonthlyCloseAuto(params?: {
     const sectionB = reconciliation.sectionB as Record<string, unknown>
     const validRevenueCent = Math.round(Number(sectionB.validAmountYuan ?? 0) * 100)
     const checks = [...audit.checks]
+    const blockingIssues = audit.blockingIssues ?? []
+    const infoNotes = [...(audit.infoNotes ?? [])]
+
+    for (const f of syncRisk.directRequestFindings ?? []) {
+      if (f.risk === 'low' && f.reason.includes('本地数据库分页扫描')) {
+        infoNotes.push(`本地数据库分页扫描（Prisma findMany）：${f.file}:${f.line}`)
+      } else if (f.risk === 'medium' && f.reason.includes('setInterval')) {
+        infoNotes.push(`setInterval 扫描提醒：${f.file}:${f.line}`)
+      }
+    }
+
     const blockers = [...new Set([...audit.blockers, ...reconciliation.dataQuality.blockers])]
     const warnings = [...new Set([...audit.warnings, ...reconciliation.dataQuality.warnings])]
 
@@ -69,19 +114,28 @@ export async function runMonthlyCloseAuto(params?: {
     let status = audit.status
     if (reconciliation.dataQuality.level === 'danger') status = 'danger'
     if (moneyDiffCentTotal !== 0 || orderDiffTotal !== 0) status = 'danger'
-    if (syncRisk.status === 'danger') status = 'danger'
+    const runtimeSyncDanger =
+      syncRisk.failedCount24h >= 20 ||
+      syncRisk.circuitOpenCount24h > 0 ||
+      (syncRisk.directRequestFindings ?? []).some((f) => f.risk === 'high')
+    if (runtimeSyncDanger) status = 'danger'
 
-    if (status === 'danger') {
-      blockers.push('存在 cent/订单差异或接口风险，暂不建议结账')
-    }
+    const canClose =
+      status === 'pass' && blockers.length === 0 && blockingIssues.length === 0
 
     const report: MonthlyCloseAutoReport = {
       month,
       range: { startDate: scope.startDate, endDate: scope.endDate },
       generatedAt: new Date().toISOString(),
       status,
-      canClose: status === 'pass' && blockers.length === 0,
+      canClose,
       score: Math.min(audit.score, reconciliation.dataQuality.score),
+      schemaVersion: buildMeta.schemaVersion,
+      appVersion: buildMeta.appVersion,
+      gitCommit: buildMeta.gitCommit,
+      fullScan: buildMeta.fullScan,
+      blockingIssues,
+      infoNotes: [...new Set(infoNotes)],
       summary: {
         validRevenueCent,
         paidOrderCount: Number(sectionB.paidOrderCount ?? 0),
@@ -107,6 +161,11 @@ export async function runMonthlyCloseAuto(params?: {
         note: syncRisk.note,
       },
       schedulerRegistered: (await import('./monthly-close-scheduler.service')).isMonthlyCloseSchedulerRegistered(),
+    }
+
+    report.conclusion = {
+      canClose: report.canClose,
+      reasonSummary: buildConclusionReasonSummary(report),
     }
 
     const reportPath = await writeMonthlyCloseReport(report)

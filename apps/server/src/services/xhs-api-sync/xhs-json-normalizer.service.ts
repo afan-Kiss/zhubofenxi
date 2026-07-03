@@ -21,7 +21,7 @@ import type { DateRangeResolved } from '../../utils/date-range'
 import { orderPayTimeInRange } from '../../utils/order-stat-time.util'
 
 /** DB 预筛缓冲：orderTime 存 orderedAt，统计口径用 paymentTime，需留余量避免漏单 */
-const RAW_ORDER_RANGE_DB_BUFFER_MS = 30 * 24 * 60 * 60 * 1000
+export const RAW_ORDER_RANGE_DB_BUFFER_MS = 30 * 24 * 60 * 60 * 1000
 const RAW_LIVE_RANGE_DB_BUFFER_MS = 1 * 24 * 60 * 60 * 1000
 
 const SIGNED_KEYWORDS = ['已签收', '已完成', '交易完成', '已收货', '交易成功', '完成']

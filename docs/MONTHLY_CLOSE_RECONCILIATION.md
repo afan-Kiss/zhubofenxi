@@ -59,12 +59,20 @@ npm run monthly:close-check -- --month=2026-06
 **低于 80 分不输出最终盈亏结论。**  
 **缺成本/支出时最多只能「经营销售结果」，不能判断净利润。**
 
+## 支付时间预筛漏单诊断
+
+`npm run diagnose:order-pay-time-gap` **直接扫描 `xhsRawOrder` 全表/宽范围**，不做 `orderTime range` 业务预筛，避免「预筛漏单却诊断不到」的假阴性。
+
+输出字段：`diagnoseMode`（`full_raw_scan` / `wide_raw_scan`）、`rawRowsScanned`、`latePayOver30DaysCount`、`wouldMissWithCurrentPrefilterCount`。
+
 ## 只读脚本
 
 ```bash
 npm run monthly:close-baseline -- --auto-prev-month
 npm run monthly:close-check -- --auto-prev-month
-npm run diagnose:order-pay-time-gap
+npm run diagnose:order-pay-time-gap -- --month=2026-06
+npm run diagnose:order-pay-time-gap -- --all
+npm run verify:order-pay-time-prefilter
 npm run data-safety-baseline
 ```
 

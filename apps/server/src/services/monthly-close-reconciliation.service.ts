@@ -36,8 +36,11 @@ import {
   normalizePendingSettlementsFromRaw,
   normalizeSettledSettlementsFromRaw,
 } from './xhs-api-sync/xhs-json-normalizer.service'
-import type { NormalizedOrder } from '../types/analysis'
 import { orderPayTimeInRange } from '../utils/order-stat-time.util'
+import {
+  runPayTimePrefilterDiagnostic,
+  type PayTimePrefilterDiagnosticResult,
+} from './order-pay-time-prefilter-diagnostic.service'
 
 export type MonthlyCloseProfitConclusion =
   | 'can_judge_profit_loss'
@@ -66,6 +69,7 @@ export interface MonthlyCloseReconciliationReport {
   sectionF: Record<string, unknown>
   dataQuality: MonthlyCloseDataQuality
   crossCheck: Record<string, unknown>
+  payTimePrefilterDiagnostic: PayTimePrefilterDiagnosticResult
   fieldSourceNote: string
 }
 
@@ -289,6 +293,12 @@ export async function buildMonthlyCloseReconciliation(params: {
         ? 0
         : 0
 
+  const payTimePrefilterDiagnostic = await runPayTimePrefilterDiagnostic({
+    paymentRange: range,
+    scanAll: rawOrderTotal <= 5000,
+    scanDays: 180,
+  })
+
   const warnings: string[] = []
   const blockers: string[] = []
 
@@ -313,6 +323,11 @@ export async function buildMonthlyCloseReconciliation(params: {
   if (afterSalesPendingFetch > 0) {
     warnings.push(`售后缓存有 ${afterSalesPendingFetch} 条待拉取或失败，退款可能不全`)
   }
+  if (payTimePrefilterDiagnostic.wouldMissWithCurrentPrefilterCount > 0) {
+    warnings.push(
+      `支付时间预筛可能漏单 ${payTimePrefilterDiagnostic.wouldMissWithCurrentPrefilterCount} 单（${payTimePrefilterDiagnostic.diagnoseMode}，扫描 ${payTimePrefilterDiagnostic.rawRowsScanned} 条 raw）`,
+    )
+  }
 
   let orderScore = 20
   if (dup.duplicateOrderCount > 0 || abnormalAmountViews.length > 0) orderScore = Math.min(orderScore, 12)
@@ -321,6 +336,9 @@ export async function buildMonthlyCloseReconciliation(params: {
   let paymentScore = 20
   if (paymentGapRate > 0.05) paymentScore = 10
   if (paymentGapRate > 0.15) paymentScore = 0
+  if (payTimePrefilterDiagnostic.wouldMissWithCurrentPrefilterCount > 0) {
+    paymentScore = Math.min(paymentScore, 10)
+  }
 
   let afterSaleScore = 20
   if (afterSalesPendingFetch > 0) afterSaleScore = 10
@@ -504,6 +522,7 @@ export async function buildMonthlyCloseReconciliation(params: {
     },
     dataQuality,
     crossCheck,
+    payTimePrefilterDiagnostic,
     fieldSourceNote:
       '运营月报 validAmountYuan = 有效成交金额（支付口径+售后剔除），非利润。详见 docs/MONTHLY_CLOSE_RECONCILIATION.md',
   }
@@ -592,52 +611,4 @@ export async function buildMonthlyCloseDataSafetyBaseline(params?: {
     lastMonthScope: scope,
     lastMonthStats: monthStats,
   }
-}
-
-export function diagnosePayTimePrefilterGapFromOrders(
-  allRows: NormalizedOrder[],
-  range: ReturnType<typeof resolveDateRange>,
-): Array<{
-  packageId: string
-  orderId: string
-  orderedAt: string | null
-  paymentTime: string | null
-  gapDays: number
-  gmvYuan: number
-  wouldMissWithCurrentPrefilter: boolean
-}> {
-  const BUFFER_MS = 30 * 24 * 60 * 60 * 1000
-  const gte = range.startTimeMs - BUFFER_MS
-  const lte = range.endTimeMs + BUFFER_MS
-  const results: Array<{
-    packageId: string
-    orderId: string
-    orderedAt: string | null
-    paymentTime: string | null
-    gapDays: number
-    gmvYuan: number
-    wouldMissWithCurrentPrefilter: boolean
-  }> = []
-
-  for (const o of allRows) {
-    if (o.errors.length > 0 || !o.paymentTime || !o.orderedAt) continue
-    const gapMs = o.paymentTime.getTime() - o.orderedAt.getTime()
-    const gapDays = Math.floor(gapMs / 86_400_000)
-    if (gapDays <= 30) continue
-    if (!orderPayTimeInRange(o, range)) continue
-
-    const orderMs = o.orderTime?.getTime() ?? o.orderedAt.getTime()
-    const wouldMiss = orderMs < gte || orderMs > lte
-
-    results.push({
-      packageId: o.packageId,
-      orderId: o.orderId,
-      orderedAt: o.orderedAt.toISOString(),
-      paymentTime: o.paymentTime.toISOString(),
-      gapDays,
-      gmvYuan: Math.round(o.gmvCent / 100),
-      wouldMissWithCurrentPrefilter: wouldMiss,
-    })
-  }
-  return results.sort((a, b) => b.gapDays - a.gapDays)
 }

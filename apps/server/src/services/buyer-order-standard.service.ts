@@ -376,6 +376,69 @@ export function resolveBuyerOrderQualityRefund(v: AnalyzedOrderView): {
   }
 }
 
+function pickPositiveCent(...values: Array<number | null | undefined>): number {
+  for (const value of values) {
+    if (value != null && value > 0) return value
+  }
+  return 0
+}
+
+function rowCountsAsUnsyncedProductRefund(row: BuyerOrderStandardRow): boolean {
+  if (row.afterSaleType === 'shipping_compensation' || row.refundAmountPending) return false
+  return (
+    row.isQualityRefund ||
+    row.afterSaleType === 'return_refund' ||
+    row.afterSaleType === 'refund_only' ||
+    row.afterSaleType === 'other_after_sale'
+  )
+}
+
+/** 单笔订单展示/汇总用退款金额：售后未同步时，对已确认退款单用支付金额兜底 */
+export function resolveBuyerOrderRowRefundAmountCent(row: BuyerOrderStandardRow): number {
+  if (row.refundAmountCent > 0) return row.refundAmountCent
+  if (!rowCountsAsUnsyncedProductRefund(row)) return 0
+  return pickPositiveCent(row.payAmountCent, row.receivableAmountCent)
+}
+
+function resolveBuyerOrderRefundAmountCentFromView(
+  v: AnalyzedOrderView,
+  metrics: ReturnType<typeof resolveBuyerOrderBusinessMetrics>,
+  afterSaleType: BuyerAfterSaleType,
+  isQualityRefund: boolean,
+  refundPending: boolean,
+): number {
+  if (refundPending) return 0
+
+  const direct = pickPositiveCent(
+    metrics.productRefundAmountCent,
+    v.buyerProductRefundAmountCent,
+    v.afterSalesWorkbenchRefundAmountCent,
+    v.successfulRefundAmountCent,
+    v.productRefundAmountCent,
+    v.realAfterSaleAmountCent,
+    v.returnAmountCent,
+    resolveQualityRefundInfo({ view: v }).afterSaleRefundAmountCent,
+  )
+  if (direct > 0) return direct
+
+  const countsAsRefund =
+    isQualityRefund ||
+    afterSaleType === 'return_refund' ||
+    afterSaleType === 'refund_only' ||
+    afterSaleType === 'other_after_sale' ||
+    v.isReturnRefund ||
+    v.isRealProductRefund
+  if (!countsAsRefund || v.isFreightRefundOnly) return 0
+
+  return pickPositiveCent(
+    metrics.paidAmountCent,
+    v.officialPaidAmountCent,
+    v.buyerReceivableAmountCent,
+    v.receivableAmountCent,
+    v.paymentBaseCent,
+  )
+}
+
 export function resolveBuyerAfterSaleType(v: AnalyzedOrderView): BuyerAfterSaleType {
   const refundCent = v.buyerProductRefundAmountCent ?? 0
   const quality = resolveBuyerOrderQualityRefund(v)
@@ -409,10 +472,16 @@ export function mapViewToBuyerOrderStandard(
   const refundSource = v.buyerProductRefundSource?.trim() || ''
   const refundPending = refundSource === 'after_sales_workbench_pending'
   const payAmountCent = metrics.paidAmountCent
-  const refundAmountCent = refundPending ? 0 : metrics.productRefundAmountCent
-  const freightRefundAmountCent = metrics.freightRefundAmountCent
   const quality = resolveBuyerOrderQualityRefund(v)
   const afterSaleType = resolveBuyerAfterSaleType(v)
+  const refundAmountCent = resolveBuyerOrderRefundAmountCentFromView(
+    v,
+    metrics,
+    afterSaleType,
+    quality.isQualityRefund,
+    refundPending,
+  )
+  const freightRefundAmountCent = metrics.freightRefundAmountCent
   const typeLabel = afterSaleTypeLabel(afterSaleType)
   const afterSaleStatusText =
     v.afterSaleDisplayType && v.afterSaleDisplayType !== '—'
@@ -579,7 +648,7 @@ export function buildBuyerOrderSummary(rows: BuyerOrderStandardRow[]): BuyerOrde
     orderNos.add(r.orderNo)
     receivableAmountCent += r.receivableAmountCent
     payAmountCent += r.payAmountCent
-    refundAmountCent += r.refundAmountCent
+    refundAmountCent += resolveBuyerOrderRowRefundAmountCent(r)
     freightRefundAmountCent += r.freightRefundAmountCent
     netDealAmountCent += r.netDealAmountCent
     realDealAmountCent += r.realDealAmountCent

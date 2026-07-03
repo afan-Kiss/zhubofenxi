@@ -187,8 +187,16 @@ export function extractBadBuyerCustomerStats(
   }
   const refundOrderCount = capBadBuyerCount(rawRefundOrders, paidCount)
 
-  const refundAmountCent =
+  let refundAmountCent =
     summary?.refundAmountCent ?? Math.round(productRefundAmountYuan(item) * 100)
+  if (
+    refundAmountCent <= 0 &&
+    refundOrderCount > 0 &&
+    refundOrderCount === paidCount &&
+    paidAmountCent > 0
+  ) {
+    refundAmountCent = paidAmountCent
+  }
   const returnRefundCount = returnRefundOrderCount(item)
   const aftersaleCount = aftersaleApplyCount(item, options?.aftersaleApplyCount)
   const unsignedCount = hasSignedData ? (item.unsignedOrderCount ?? 0) : 0

@@ -443,8 +443,14 @@ async function main() {
   assert(
     qualityRowSummary.qualityRefundOrderCount === 1 &&
       qualityRowSummary.returnRefundOrderCount === 1 &&
-      qualityRowSummary.refundOrderCount === 1,
-    '品退且退款金额未同步时，汇总应同时计入品退/退货退款/退款单数',
+      qualityRowSummary.refundOrderCount === 1 &&
+      qualityRowSummary.refundAmountCent === 120000,
+    '品退且退款金额未同步时，汇总应同时计入品退/退货退款/退款单数，并用支付金额兜底退款金额',
+    issues,
+  )
+  assert(
+    extractBadBuyerCustomerStats(qualityReturnRefund).refundAmountCent === 120000,
+    '品退单在金额未同步时应用支付金额兜底退款金额',
     issues,
   )
 

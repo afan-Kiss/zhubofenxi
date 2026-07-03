@@ -20,12 +20,14 @@ import {
 import {
   fetchBadBuyerRanking,
   fetchBuyerProfile,
+  fetchBuyerValueRanking,
   fetchWechatWeeklyBuyerText,
   refreshBuyerProfile,
   rowToDrawerBuyer,
   type BadBuyerRankingData,
   type BuyerProfileData,
   type BuyerProfileSummary,
+  type BuyerValueRankingData,
 } from '../../lib/buyer-profile'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
 import { BuyerRankingProgressCard } from '../../components/board/BuyerRankingProgressCard'
@@ -45,7 +47,7 @@ import { ViewportModal, FloatingToast } from '../../components/ui/ViewportModal'
 import { copyTextFromTextarea, copyTextToClipboard } from '../../lib/copy-to-clipboard'
 
 const RANKING_TABS: Array<{ key: string; label: string }> = [
-  { key: 'highValue', label: '综合高价值榜' },
+  { key: 'highValue', label: '高价值客户榜单' },
   { key: 'highAov', label: '高客单榜' },
   { key: 'stableSigned', label: '稳定签收榜' },
   { key: 'repurchase', label: '复购榜' },
@@ -58,6 +60,20 @@ const WECHAT_PRESET_OPTIONS: Array<{ key: string; label: string }> = [
   { key: 'lastWeek', label: '上周' },
   { key: 'thisMonth', label: '本月' },
   { key: 'custom', label: '自定义' },
+]
+
+const VALUE_RANKING_PRESET_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'last30d', label: '最近30天' },
+  { key: 'last90d', label: '最近90天' },
+  { key: 'thisYear', label: '今年' },
+  { key: 'all', label: '全量历史' },
+  { key: 'custom', label: '自定义' },
+]
+
+const VALUE_RANKING_TYPE_OPTIONS: Array<{ key: string; label: string }> = [
+  { key: 'true_high_value', label: '真正高价值客户' },
+  { key: 'high_spend_need_attention', label: '高消费但需关注' },
+  { key: 'potential', label: '潜力客户' },
 ]
 
 const BAD_BUYER_PRESET_OPTIONS: Array<{ key: string; label: string }> = [
@@ -102,6 +118,14 @@ function valueProfileFromRow(row: Record<string, unknown>) {
   return (row.valueProfile ?? {}) as Record<string, unknown>
 }
 
+function valueRankingProfileFromRow(row: Record<string, unknown>) {
+  return (row.valueRankingProfile ?? {}) as Record<string, unknown>
+}
+
+function valueRankingMetricsFromProfile(vp: Record<string, unknown>) {
+  return (vp.metrics ?? {}) as Record<string, unknown>
+}
+
 const SUMMARY_FIELD_MAP: Record<BuyerSummaryKey, keyof BuyerProfileSummary> = {
   highValue: 'highValueCount',
   repurchase: 'repurchaseCount',
@@ -124,6 +148,7 @@ export const BuyerRankingTab: React.FC = () => {
 
   const [profile, setProfile] = useState<BuyerProfileData | null>(null)
   const [badBuyerData, setBadBuyerData] = useState<BadBuyerRankingData | null>(null)
+  const [valueRankingData, setValueRankingData] = useState<BuyerValueRankingData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshBusy, setRefreshBusy] = useState(false)
@@ -132,6 +157,10 @@ export const BuyerRankingTab: React.FC = () => {
   const [badBuyerPreset, setBadBuyerPreset] = useState('recent30')
   const [badBuyerCustomStart, setBadBuyerCustomStart] = useState('')
   const [badBuyerCustomEnd, setBadBuyerCustomEnd] = useState('')
+  const [valueRankingPreset, setValueRankingPreset] = useState('last90d')
+  const [valueRankingType, setValueRankingType] = useState('true_high_value')
+  const [valueRankingCustomStart, setValueRankingCustomStart] = useState('')
+  const [valueRankingCustomEnd, setValueRankingCustomEnd] = useState('')
   const [wechatPreset, setWechatPreset] = useState('thisWeek')
   const [wechatCustomStart, setWechatCustomStart] = useState('')
   const [wechatCustomEnd, setWechatCustomEnd] = useState('')
@@ -152,8 +181,38 @@ export const BuyerRankingTab: React.FC = () => {
 
   const buyerProfileStatus = syncMeta?.buyerProfileStatus
   const isBadBuyerTab = rankingTab === 'badBuyer'
+  const isHighValueTab = rankingTab === 'highValue'
 
   const load = useCallback(async (tab: string, pageNo: number) => {
+    if (tab === 'highValue') {
+      if (
+        valueRankingPreset === 'custom' &&
+        (!valueRankingCustomStart.trim() || !valueRankingCustomEnd.trim())
+      ) {
+        setValueRankingData(null)
+        setLoading(false)
+        return
+      }
+      setLoading(true)
+      setError(null)
+      try {
+        const data = await fetchBuyerValueRanking({
+          preset: valueRankingPreset,
+          startDate: valueRankingPreset === 'custom' ? valueRankingCustomStart : undefined,
+          endDate: valueRankingPreset === 'custom' ? valueRankingCustomEnd : undefined,
+          type: valueRankingType,
+          limit: 50,
+        })
+        setValueRankingData(data)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : '加载高价值客户榜单失败')
+        setValueRankingData(null)
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
     if (tab === 'badBuyer') {
       if (badBuyerPreset === 'custom' && (!badBuyerCustomStart.trim() || !badBuyerCustomEnd.trim())) {
         setBadBuyerData(null)
@@ -196,7 +255,16 @@ export const BuyerRankingTab: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [pageSize, badBuyerPreset, badBuyerCustomStart, badBuyerCustomEnd])
+  }, [
+    pageSize,
+    badBuyerPreset,
+    badBuyerCustomStart,
+    badBuyerCustomEnd,
+    valueRankingPreset,
+    valueRankingType,
+    valueRankingCustomStart,
+    valueRankingCustomEnd,
+  ])
 
   useEffect(() => {
     void load(rankingTab, page)
@@ -224,8 +292,8 @@ export const BuyerRankingTab: React.FC = () => {
     isProfileRebuilding,
   })
   const showRankingContent =
-    isBadBuyerTab || shouldShowBuyerRankingItems(profile, buyerProfileStatus)
-  const displayProfile = showRankingContent && !isBadBuyerTab ? profile : null
+    isBadBuyerTab || isHighValueTab || shouldShowBuyerRankingItems(profile, buyerProfileStatus)
+  const displayProfile = showRankingContent && !isBadBuyerTab && !isHighValueTab ? profile : null
 
   const activeWechatPreset = isBadBuyerTab ? badBuyerPreset : wechatPreset
   const activeWechatCustomStart = isBadBuyerTab ? badBuyerCustomStart : wechatCustomStart
@@ -321,11 +389,19 @@ export const BuyerRankingTab: React.FC = () => {
     ? (badBuyerData?.items ?? []).filter(
         (row) => !isLowPriceBrushBuyerRow(row as Record<string, unknown>),
       )
-    : (displayProfile?.items ?? []).filter(
-        (row) => !isLowPriceBrushBuyerRow(row as Record<string, unknown>),
-      )
-  const listBusy = loading && (isBadBuyerTab ? !badBuyerData : !profile)
-  const total = isBadBuyerTab ? items.length : (displayProfile?.pagination?.total ?? items.length)
+    : isHighValueTab
+      ? (valueRankingData?.items ?? []).filter(
+          (row) => !isLowPriceBrushBuyerRow(row as Record<string, unknown>),
+        )
+      : (displayProfile?.items ?? []).filter(
+          (row) => !isLowPriceBrushBuyerRow(row as Record<string, unknown>),
+        )
+  const listBusy =
+    loading && (isBadBuyerTab ? !badBuyerData : isHighValueTab ? !valueRankingData : !profile)
+  const total =
+    isBadBuyerTab || isHighValueTab
+      ? items.length
+      : (displayProfile?.pagination?.total ?? items.length)
 
   const summaryCount = (key: BuyerSummaryKey) => {
     if (!summary) return 0
@@ -499,7 +575,7 @@ export const BuyerRankingTab: React.FC = () => {
         </div>
       ) : null}
 
-      {error && (!hasCache || isBadBuyerTab) && buyerUiState !== 'failed' ? (
+      {error && (!hasCache || isBadBuyerTab || isHighValueTab) && buyerUiState !== 'failed' ? (
         <div className="rounded-2xl border border-red-200 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {error}
           <button
@@ -522,7 +598,7 @@ export const BuyerRankingTab: React.FC = () => {
         />
       ) : null}
 
-      {!showRankingContent && hasCache && !isBadBuyerTab && (isProfileRebuilding || !cacheCompatible) ? (
+      {!showRankingContent && hasCache && !isBadBuyerTab && !isHighValueTab && (isProfileRebuilding || !cacheCompatible) ? (
         <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           买家画像正在更新，旧版排行数据已隐藏，完成后将自动刷新。
         </p>
@@ -592,6 +668,81 @@ export const BuyerRankingTab: React.FC = () => {
         </>
       )}
 
+      {isHighValueTab ? (
+        <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 px-3 py-2.5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-emerald-900">
+              按支付时间统计 · 支付基数低于 ¥29 已剔除 · 默认最近90天
+              {valueRankingData?.range ? (
+                <span className="ml-1 font-medium">
+                  （{valueRankingData.range.presetLabel}：{valueRankingData.range.startDate} 至{' '}
+                  {valueRankingData.range.endDate}）
+                </span>
+              ) : null}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <select
+                className="min-h-[40px] rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-sm text-slate-700"
+                value={valueRankingType}
+                onChange={(e) => {
+                  setValueRankingType(e.target.value)
+                  setPage(1)
+                }}
+                data-testid="value-ranking-type"
+              >
+                {VALUE_RANKING_TYPE_OPTIONS.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="min-h-[40px] rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-sm text-slate-700"
+                value={valueRankingPreset}
+                onChange={(e) => {
+                  setValueRankingPreset(e.target.value)
+                  setPage(1)
+                }}
+                data-testid="value-ranking-date-preset"
+              >
+                {VALUE_RANKING_PRESET_OPTIONS.map((o) => (
+                  <option key={o.key} value={o.key}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          {valueRankingPreset === 'custom' ? (
+            <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_1fr] sm:items-center">
+              <input
+                type="date"
+                className="min-h-[40px] w-full rounded-lg border border-emerald-200 px-3 py-1.5 text-sm"
+                value={valueRankingCustomStart}
+                onChange={(e) => setValueRankingCustomStart(e.target.value)}
+              />
+              <span className="hidden text-center text-xs text-slate-400 sm:block">至</span>
+              <input
+                type="date"
+                className="min-h-[40px] w-full rounded-lg border border-emerald-200 px-3 py-1.5 text-sm"
+                value={valueRankingCustomEnd}
+                onChange={(e) => setValueRankingCustomEnd(e.target.value)}
+              />
+            </div>
+          ) : null}
+          {valueRankingData?.summary ? (
+            <p className="mt-2 text-[10px] leading-relaxed text-emerald-900/90">
+              真正高价值 {formatCount(valueRankingData.summary.trueHighValueCount)} 人｜需关注{' '}
+              {formatCount(valueRankingData.summary.highSpendNeedAttentionCount)} 人｜潜力{' '}
+              {formatCount(valueRankingData.summary.potentialCustomerCount)} 人
+            </p>
+          ) : null}
+          <p className="mt-1 text-[10px] leading-relaxed text-emerald-900/80">
+            说明：真正高价值客户按有效签收、复购、签收率与售后风险综合评分；未签收、售后处理中、已退款不计入有效成交价值。
+          </p>
+        </div>
+      ) : null}
+
       {isBadBuyerTab ? (
         <div className="rounded-2xl border border-amber-100 bg-amber-50/40 px-3 py-2.5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -656,7 +807,7 @@ export const BuyerRankingTab: React.FC = () => {
         ) : items.length === 0 ? (
           (() => {
             const empty =
-              profile?.buyerCount === 0
+              !isHighValueTab && profile?.buyerCount === 0
                 ? {
                     title: '暂无买家排行数据',
                     subtitle: '系统每天凌晨 3 点自动更新买家排行，请稍后再查看。',
@@ -676,7 +827,78 @@ export const BuyerRankingTab: React.FC = () => {
         ) : (
           items.map((row, idx) => {
             const rowRec = row as Record<string, unknown>
-            const rank = isBadBuyerTab ? idx + 1 : (page - 1) * pageSize + idx + 1
+            const rank = isBadBuyerTab || isHighValueTab ? idx + 1 : (page - 1) * pageSize + idx + 1
+
+            if (isHighValueTab) {
+              const vp = valueRankingProfileFromRow(rowRec)
+              const metrics = valueRankingMetricsFromProfile(vp)
+              const displayLabel = buyerDisplayLabel(rowRec)
+              const customerTypeLabel = String(vp.customerTypeLabel ?? '—')
+              const scoreText = String(vp.highValueScoreText ?? '')
+              const validOrderCount = Number(metrics.validOrderCount ?? 0)
+              const signedAmountCent = Number(metrics.signedAmountCent ?? 0)
+              const paidCount = Number(metrics.paidOrderCount ?? 0)
+              const signedCountRaw = metrics.signedOrderCount
+              const signedCount =
+                signedCountRaw == null ? null : Number(signedCountRaw ?? 0)
+              const signedRateLabel =
+                metrics.signedRate == null || paidCount <= 0
+                  ? '—'
+                  : `${Math.round(Number(metrics.signedRate) * 100)}%`
+              const refundRateLabel = `${Math.round(Math.min(Number(metrics.refundRate ?? 0), 1) * 100)}%`
+              const avgValidCent = Number(metrics.avgValidAmountCent ?? 0)
+              const lastPay = String(metrics.lastPayTime ?? rowRec.lastOrderTime ?? '—')
+              const shopLabel = String(vp.shopLabel ?? '未知店铺')
+              const reasons = Array.isArray(vp.reasons) ? (vp.reasons as string[]).join('、') : '—'
+              const suggestions = Array.isArray(vp.suggestions)
+                ? (vp.suggestions as string[]).join('；')
+                : String(vp.suggestions ?? '—')
+              return (
+                <article
+                  key={`highValue-${String(rowRec.buyerKey ?? rowRec.buyerId)}`}
+                  role="button"
+                  tabIndex={0}
+                  style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
+                  className="board-list-row-enter flex cursor-pointer flex-col gap-2 rounded-2xl border border-emerald-200/70 bg-gradient-to-br from-emerald-50/80 to-white p-3 shadow-sm transition active:bg-emerald-100/40 sm:p-4 sm:hover:-translate-y-0.5 sm:hover:shadow-md"
+                  onClick={() => {
+                    setOrderDrawerScope(null)
+                    setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      setOrderDrawerScope(null)
+                      setOrderDrawerBuyer(rowToDrawerBuyer(rowRec))
+                    }
+                  }}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="text-base font-semibold leading-snug text-slate-900">{displayLabel}</p>
+                    <span className="shrink-0 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                      #{rank}
+                    </span>
+                  </div>
+                  <p className="text-[11px] font-semibold text-emerald-800">
+                    客户类型：{customerTypeLabel}｜高价值分：{scoreText}
+                  </p>
+                  <p className="text-[11px] text-slate-700">
+                    有效签收：{signedCount == null ? '—' : `${formatCount(signedCount)} 单`}｜有效签收金额：
+                    {formatMoney(signedAmountCent / 100)}
+                  </p>
+                  <p className="text-[11px] text-slate-700">
+                    支付：{formatCount(paidCount)} 单｜签收率：{signedRateLabel}｜退款率：{refundRateLabel}
+                  </p>
+                  <p className="text-[11px] text-slate-700">
+                    客单价：{formatMoney(avgValidCent / 100)}｜最近成交：{lastPay}
+                  </p>
+                  <p className="truncate text-[11px] text-slate-600">店铺：{shopLabel}</p>
+                  <p className="text-[11px] text-emerald-900">原因：{reasons}</p>
+                  <p className="text-[10px] text-slate-600">建议：{suggestions}</p>
+                  <div className="mt-1 flex justify-end border-t border-emerald-100 pt-2 text-[11px] text-emerald-700">
+                    查看这个买家的订单 →
+                  </div>
+                </article>
+              )
+            }
 
             if (isBadBuyerTab) {
               const bp = badBuyerProfileFromRow(rowRec)
@@ -829,7 +1051,7 @@ export const BuyerRankingTab: React.FC = () => {
         )}
       </div>
       </MetricGridTransition>
-      {total > 0 && !isBadBuyerTab && (
+      {total > 0 && !isBadBuyerTab && !isHighValueTab && (
         <Pagination page={page} total={total} pageSize={pageSize} onPage={setPage} />
       )}
       </>

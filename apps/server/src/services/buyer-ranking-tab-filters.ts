@@ -80,7 +80,7 @@ export function filterBuyerRankingByTab(
 ): BuyerRankingItem[] {
   switch (tab) {
     case 'highValue':
-      return items.filter((i) => isHighValueTagBuyer(i) || isSpendRankingBuyer(i))
+      return items.filter((i) => isHighValueTagBuyer(i))
     case 'highAov':
       return items.filter((i) => isHighAovTagBuyer(i))
     case 'stableSigned':

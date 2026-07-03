@@ -18,6 +18,8 @@ export type BuyerRankingPreset =
   | 'recent7'
   | 'recent15'
   | 'recent30'
+  | 'recent90'
+  | 'thisYear'
   | 'all'
   | 'custom'
 
@@ -124,6 +126,16 @@ export function resolveBuyerRankingDateRange(
       startDate = addDaysShanghai(todayKey, -29)
       endDate = todayKey
       break
+    case 'recent90':
+      startDate = addDaysShanghai(todayKey, -89)
+      endDate = todayKey
+      break
+    case 'thisYear': {
+      const { year } = shanghaiMonthParts(now)
+      startDate = `${year}-01-01`
+      endDate = todayKey
+      break
+    }
     case 'custom':
     default: {
       const sd = customStart?.trim()
@@ -150,6 +162,8 @@ export function resolveBuyerRankingDateRange(
     'recent7',
     'recent15',
     'recent30',
+    'recent90',
+    'thisYear',
   ]
   return {
     preset: known.includes(preset as BuyerRankingPreset)
@@ -182,6 +196,21 @@ export function buyerRankingRangeToAnalysisRange(
   }
 }
 
+export const BUYER_VALUE_RANKING_PRESET_ALIASES: Record<string, BuyerRankingPreset> = {
+  last30d: 'recent30',
+  last90d: 'recent90',
+  thisYear: 'thisYear',
+  all: 'all',
+  custom: 'custom',
+  recent30: 'recent30',
+  recent90: 'recent90',
+}
+
+export function resolveBuyerValueRankingPreset(presetRaw: string): BuyerRankingPreset {
+  const key = presetRaw.trim()
+  return BUYER_VALUE_RANKING_PRESET_ALIASES[key] ?? (key as BuyerRankingPreset)
+}
+
 export const BUYER_RANKING_PRESET_LABELS: Record<BuyerRankingPreset, string> = {
   today: '当日',
   yesterday: '昨日',
@@ -192,6 +221,8 @@ export const BUYER_RANKING_PRESET_LABELS: Record<BuyerRankingPreset, string> = {
   recent7: '最近7天',
   recent15: '最近15天',
   recent30: '最近30天',
+  recent90: '最近90天',
+  thisYear: '今年',
   all: '全部',
   custom: '自定义',
 }

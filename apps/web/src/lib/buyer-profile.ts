@@ -123,6 +123,46 @@ export async function fetchBadBuyerRanking(params?: {
   return apiRequest<BadBuyerRankingData>(`/api/board/buyer-ranking/bad-buyers${suffix}`)
 }
 
+export interface BuyerValueRankingData {
+  range: {
+    preset: string
+    presetLabel: string
+    startDate: string
+    endDate: string
+    isAll: boolean
+  }
+  summary: {
+    totalBuyerCount: number
+    trueHighValueCount: number
+    highSpendNeedAttentionCount: number
+    potentialCustomerCount: number
+    totalSignedAmountCent: number
+    avgSignedRate: number | null
+    avgRefundRate: number
+  }
+  items: Array<Record<string, unknown>>
+  limit: number
+  empty: boolean
+  dataNote: string
+}
+
+export async function fetchBuyerValueRanking(params?: {
+  preset?: string
+  startDate?: string
+  endDate?: string
+  type?: string
+  limit?: number
+}): Promise<BuyerValueRankingData> {
+  const qs = new URLSearchParams()
+  if (params?.preset) qs.set('preset', params.preset)
+  if (params?.startDate) qs.set('startDate', params.startDate)
+  if (params?.endDate) qs.set('endDate', params.endDate)
+  if (params?.type) qs.set('type', params.type)
+  if (params?.limit != null) qs.set('limit', String(params.limit))
+  const suffix = qs.toString() ? `?${qs.toString()}` : ''
+  return apiRequest<BuyerValueRankingData>(`/api/board/buyer-value-ranking${suffix}`)
+}
+
 export async function fetchBuyerProfile(
   params?: { rankingTab?: string; page?: number; pageSize?: number },
   signal?: AbortSignal,

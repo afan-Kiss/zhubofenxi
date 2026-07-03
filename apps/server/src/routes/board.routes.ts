@@ -961,6 +961,21 @@ boardRouter.get('/buyer-ranking/wechat-weekly-text', async (req, res) => {
   }
 })
 
+boardRouter.get('/buyer-value-ranking', async (req, res) => {
+  try {
+    const { buildBuyerValueRanking } = await import('../services/buyer-value-ranking.service')
+    const preset = req.query.preset ? String(req.query.preset) : 'last90d'
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined
+    const type = req.query.type ? String(req.query.type) : 'true_high_value'
+    const limit = req.query.limit ? Number(req.query.limit) : 50
+    const data = await buildBuyerValueRanking({ preset, startDate, endDate, type: type as never, limit })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取高价值客户榜单失败', 500)
+  }
+})
+
 boardRouter.get('/buyer-profile', async (req, res) => {
   try {
     const { buildQualityFeedbackPublicStatus } =

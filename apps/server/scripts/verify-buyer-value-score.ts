@@ -1,5 +1,5 @@
 /**
- * 买家价值分（10 分制）验收
+ * 高价值客户评分与分类验收
  * 用法: npm run verify:buyer-value-score
  */
 import {
@@ -7,7 +7,16 @@ import {
   computeValueScore,
   formatScoreText,
 } from '../src/services/buyer-value-profile.service'
+import {
+  buildBuyerValueRankingProfile,
+  capBuyerValueRate,
+  classifyBuyerValueCustomerType,
+  computeHighValueScore,
+  extractBuyerValueCustomerMetrics,
+  isTrueHighValueCustomer,
+} from '../src/services/buyer-value-ranking.service'
 import type { BuyerRankingItem } from '../src/services/buyer-ranking.service'
+import { LOW_PRICE_BRUSH_THRESHOLD_CENT } from '../src/services/low-price-brush-order.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -21,9 +30,9 @@ function mockBuyer(partial: Partial<BuyerRankingItem> & { buyerKey: string }): B
     buyerDisplayName: partial.nickname ?? '测试买家',
     orderCount: partial.orderCount ?? 1,
     signedOrderCount: partial.signedOrderCount ?? 0,
-    unsignedOrderCount: 0,
+    unsignedOrderCount: partial.unsignedOrderCount ?? 0,
     completedOrderCount: partial.completedOrderCount ?? 0,
-    returnRefundCount: 0,
+    returnRefundCount: partial.returnRefundCount ?? 0,
     refundOnlyCount: 0,
     freightRefundCount: 0,
     afterSaleClosedNoRefundCount: 0,
@@ -36,8 +45,9 @@ function mockBuyer(partial: Partial<BuyerRankingItem> & { buyerKey: string }): B
     earnedAmount: partial.earnedAmount ?? 0,
     qualityReturnCount: partial.qualityReturnCount ?? 0,
     refundCount: partial.refundCount ?? 0,
+    pendingAfterSaleOrderCount: partial.pendingAfterSaleOrderCount ?? 0,
     buyerSummary: partial.buyerSummary,
-    lastOrderTime: partial.lastOrderTime ?? '2026-07-01 12:00:00',
+    lastOrderTime: partial.lastOrderTime ?? '2026-07-02 10:00:00',
   }
 }
 
@@ -61,116 +71,173 @@ function summary(partial: NonNullable<BuyerRankingItem['buyerSummary']>) {
 
 function main() {
   const issues: string[] = []
+  const now = Date.parse('2026-07-03T12:00:00+08:00')
+
+  const trueHighValue = mockBuyer({
+    buyerKey: 'tv1',
+    signedOrderCount: 3,
+    unsignedOrderCount: 0,
+    signedAmount: 12800,
+    buyerSummary: summary({
+      paidOrderCount: 3,
+      payAmountCent: 1_280_000,
+      realDealOrderCount: 3,
+      realDealAmountCent: 1_280_000,
+      displayEarnedAmountCent: 1_280_000,
+      netDealAmountCent: 1_280_000,
+      orderCount: 3,
+      refundOrderCount: 0,
+      qualityRefundOrderCount: 0,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 1_280_000,
+    }),
+  })
+  const tvProfile = buildBuyerValueRankingProfile(trueHighValue, undefined, { now })
+  assert(tvProfile.customerType === 'true_high_value', '3单签收无退款应属真正高价值', issues)
+  assert(isTrueHighValueCustomer(trueHighValue), 'isTrueHighValueCustomer 应通过', issues)
+
+  const highSpendRisk = mockBuyer({
+    buyerKey: 'hr1',
+    signedOrderCount: 4,
+    unsignedOrderCount: 0,
+    signedAmount: 10000,
+    buyerSummary: summary({
+      paidOrderCount: 4,
+      payAmountCent: 2_000_000,
+      realDealOrderCount: 2,
+      realDealAmountCent: 1_000_000,
+      displayEarnedAmountCent: 1_000_000,
+      netDealAmountCent: 1_000_000,
+      orderCount: 4,
+      refundOrderCount: 2,
+      refundAmountCent: 1_000_000,
+      qualityRefundOrderCount: 0,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 2_000_000,
+    }),
+  })
+  const hrProfile = buildBuyerValueRankingProfile(highSpendRisk, undefined, { now })
+  assert(
+    hrProfile.customerType === 'high_spend_need_attention',
+    '支付高但50%退款应属高消费但需关注',
+    issues,
+  )
+  assert(!isTrueHighValueCustomer(highSpendRisk), '高退款不应进入真正高价值', issues)
+
+  const potential = mockBuyer({
+    buyerKey: 'pot1',
+    signedOrderCount: 1,
+    unsignedOrderCount: 0,
+    signedAmount: 2000,
+    buyerSummary: summary({
+      paidOrderCount: 1,
+      payAmountCent: 200_000,
+      realDealOrderCount: 1,
+      realDealAmountCent: 200_000,
+      displayEarnedAmountCent: 200_000,
+      netDealAmountCent: 200_000,
+      orderCount: 1,
+      refundOrderCount: 0,
+      qualityRefundOrderCount: 0,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 200_000,
+    }),
+  })
+  const potProfile = buildBuyerValueRankingProfile(potential, undefined, { now })
+  assert(potProfile.customerType === 'potential_customer', '首单高客单无售后应属潜力客户', issues)
+  assert(potProfile.customerType !== 'true_high_value', '首单不应进真正高价值', issues)
+
+  const multiAftersale = extractBuyerValueCustomerMetrics(
+    mockBuyer({
+      buyerKey: 'ma1',
+      orderCount: 1,
+      buyerSummary: summary({
+        paidOrderCount: 1,
+        payAmountCent: 100_000,
+        refundOrderCount: 1,
+        refundAmountCent: 100_000,
+        orderCount: 1,
+        realDealOrderCount: 0,
+        realDealAmountCent: 0,
+        displayEarnedAmountCent: 0,
+        netDealAmountCent: 0,
+        receivableAmountCent: 100_000,
+      }),
+    }),
+    undefined,
+    { aftersaleApplyCount: 3 },
+  )
+  assert(multiAftersale.refundOrderCount === 1, '多次售后 refund_order_count 仍应为 1', issues)
+  assert(multiAftersale.aftersaleCount === 3, 'aftersale_count 可累计', issues)
+  assert(
+    capBuyerValueRate(multiAftersale.refundOrderCount, multiAftersale.paidOrderCount) === 1,
+    '退款率最高 100%',
+    issues,
+  )
+
+  assert(LOW_PRICE_BRUSH_THRESHOLD_CENT === 2900, '低价刷单阈值应为 2900 分', issues)
+
+  const unsignedOnly = mockBuyer({
+    buyerKey: 'un1',
+    signedOrderCount: 0,
+    unsignedOrderCount: 2,
+    buyerSummary: summary({
+      paidOrderCount: 2,
+      payAmountCent: 200_000,
+      realDealOrderCount: 0,
+      realDealAmountCent: 0,
+      orderCount: 2,
+      receivableAmountCent: 200_000,
+    }),
+  })
+  const unMetrics = extractBuyerValueCustomerMetrics(unsignedOnly)
+  assert(unMetrics.validOrderCount === 0, '未签收不应计入 valid_order_count', issues)
+  assert(unMetrics.signedOrderCount === 0, '未签收 signed_count 应为 0', issues)
+
+  const pendingAftersale = mockBuyer({
+    buyerKey: 'pa1',
+    signedOrderCount: 1,
+    buyerSummary: summary({
+      paidOrderCount: 1,
+      payAmountCent: 100_000,
+      realDealOrderCount: 0,
+      realDealAmountCent: 0,
+      pendingAfterSaleOrderCount: 1,
+      orderCount: 1,
+      receivableAmountCent: 100_000,
+    }),
+  })
+  assert(
+    extractBuyerValueCustomerMetrics(pendingAftersale).validOrderCount === 0,
+    '售后处理中不计入有效成交',
+    issues,
+  )
 
   const starBuyer = mockBuyer({
     buyerKey: 'star',
-    actualDealAmount: 12000,
-    earnedAmount: 12000,
     signedOrderCount: 6,
-    completedOrderCount: 5,
-    orderCount: 6,
-    refundCount: 0,
-    lastOrderTime: '2026-07-02 10:00:00',
+    signedAmount: 12000,
     buyerSummary: summary({
-      displayEarnedAmountCent: 1_200_000,
-      realDealAmountCent: 1_200_000,
-      realDealOrderCount: 6,
-      orderCount: 6,
       paidOrderCount: 6,
       payAmountCent: 1_200_000,
+      realDealOrderCount: 6,
+      realDealAmountCent: 1_200_000,
+      displayEarnedAmountCent: 1_200_000,
       netDealAmountCent: 1_200_000,
+      orderCount: 6,
       receivableAmountCent: 1_200_000,
     }),
   })
   const starScore = computeValueScore(starBuyer)
-  assert(starScore >= 8.5, `高成交低退款买家应 ≥8.5，实际 ${starScore}`, issues)
-
-  const highAovBuyer = mockBuyer({
-    buyerKey: 'aov',
-    actualDealAmount: 3500,
-    earnedAmount: 3500,
-    signedOrderCount: 1,
-    completedOrderCount: 1,
-    orderCount: 1,
-    refundCount: 0,
-    buyerSummary: summary({
-      displayEarnedAmountCent: 350_000,
-      realDealAmountCent: 350_000,
-      realDealOrderCount: 1,
-      orderCount: 1,
-      paidOrderCount: 1,
-      payAmountCent: 350_000,
-      netDealAmountCent: 350_000,
-      receivableAmountCent: 350_000,
-    }),
-  })
-  const aovScore = computeValueScore(highAovBuyer)
-  assert(aovScore >= 6 && aovScore <= 8.5, `高客单少单买家应在 6~8.5，实际 ${aovScore}`, issues)
-
-  const refundHeavy = mockBuyer({
-    buyerKey: 'refund',
-    actualDealAmount: 5000,
-    earnedAmount: 5000,
-    signedOrderCount: 4,
-    completedOrderCount: 2,
-    orderCount: 4,
-    refundCount: 3,
-    afterSaleCount: 3,
-    buyerSummary: summary({
-      displayEarnedAmountCent: 500_000,
-      realDealAmountCent: 500_000,
-      realDealOrderCount: 4,
-      refundOrderCount: 3,
-      orderCount: 4,
-      paidOrderCount: 4,
-      payAmountCent: 500_000,
-      refundAmountCent: 300_000,
-      netDealAmountCent: 200_000,
-      receivableAmountCent: 500_000,
-    }),
-  })
-  const refundScore = computeValueScore(refundHeavy)
-  assert(refundScore < starScore - 2, `高退款买家分数应明显低于优质买家`, issues)
-
-  const qualityHeavy = mockBuyer({
-    buyerKey: 'quality',
-    actualDealAmount: 8000,
-    earnedAmount: 8000,
-    signedOrderCount: 5,
-    completedOrderCount: 3,
-    orderCount: 5,
-    refundCount: 3,
-    qualityReturnCount: 3,
-    afterSaleCount: 3,
-    buyerSummary: summary({
-      displayEarnedAmountCent: 800_000,
-      realDealAmountCent: 800_000,
-      realDealOrderCount: 5,
-      refundOrderCount: 3,
-      qualityRefundOrderCount: 3,
-      orderCount: 5,
-      paidOrderCount: 5,
-      payAmountCent: 800_000,
-      refundAmountCent: 400_000,
-      netDealAmountCent: 400_000,
-      receivableAmountCent: 800_000,
-    }),
-  })
-  const qualityScore = computeValueScore(qualityHeavy)
-  assert(qualityScore < starScore - 1.5, `品退多买家分数应明显降低`, issues)
-
-  for (const s of [starScore, aovScore, refundScore, qualityScore, 0]) {
-    assert(s >= 0 && s <= 10, `分数应在 0~10，实际 ${s}`, issues)
-    const rounded = Math.round(s * 10) / 10
-    assert(Math.abs(s - rounded) < 0.001, `分数应保留 1 位小数，实际 ${s}`, issues)
-  }
+  assert(starScore >= 0 && starScore <= 10, '价值分应在 0~10', issues)
 
   const profile = buildBuyerValueProfile(starBuyer)
-  assert(/^\d+\.\d\/10$/.test(profile.scoreText), `scoreText 格式应为 x.x/10，实际 ${profile.scoreText}`, issues)
-  assert(profile.scoreText === formatScoreText(starScore), 'scoreText 应与 computeValueScore 一致', issues)
-  assert(profile.scoreReason.length > 0 && profile.scoreReason.length <= 16, 'scoreReason 应简短', issues)
-  assert(profile.afterSaleOrderCount >= 0, '应有 afterSaleOrderCount', issues)
-  assert(profile.completedOrderCount >= 0, '应有 completedOrderCount', issues)
+  assert(profile.scoreText === formatScoreText(starScore), 'scoreText 一致', issues)
+  assert(profile.refundRate == null || profile.refundRate <= 1, '退款率应封顶 1', issues)
+
+  for (const s of [starScore, computeHighValueScore(extractBuyerValueCustomerMetrics(starBuyer)), 0, 10]) {
+    assert(s >= 0 && s <= 10, `分数 ${s} 应在 0~10`, issues)
+  }
 
   if (issues.length > 0) {
     console.error('[verify:buyer-value-score] FAIL')

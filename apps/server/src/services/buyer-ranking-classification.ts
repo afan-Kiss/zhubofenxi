@@ -1,4 +1,5 @@
 import type { BuyerRankingItem } from './buyer-ranking.service'
+import { isTrueHighValueCustomer } from './buyer-value-ranking.service'
 
 /** 高价值客户：实际签收金额 ≥ 1000 元 */
 export const HIGH_VALUE_MIN_SIGNED_YUAN = 1000
@@ -15,24 +16,7 @@ export function isQualityHeavyBuyer(item: BuyerRankingItem): boolean {
 }
 
 export function isHighValueBuyer(item: BuyerRankingItem): boolean {
-  const realDeal =
-    item.buyerSummary?.realDealAmountCent != null
-      ? item.buyerSummary.realDealAmountCent / 100
-      : item.buyerSummary?.netDealAmountCent != null
-        ? item.buyerSummary.netDealAmountCent / 100
-        : item.actualDealAmount
-  const realDealOrders =
-    item.buyerSummary?.realDealOrderCount ?? item.signedOrderCount
-  const productRefundRate =
-    realDealOrders > 0
-      ? (item.buyerSummary?.refundOrderCount ?? item.refundCount ?? 0) / realDealOrders
-      : 0
-  return (
-    realDeal >= HIGH_VALUE_MIN_SIGNED_YUAN &&
-    realDealOrders >= 1 &&
-    productRefundRate < 0.2 &&
-    !isQualityHeavyBuyer(item)
-  )
+  return isTrueHighValueCustomer(item)
 }
 
 export function isRepurchaseBuyer(item: BuyerRankingItem): boolean {
@@ -65,7 +49,7 @@ export function isCautiousShipBuyer(item: BuyerRankingItem): boolean {
 }
 
 export const BUYER_SUMMARY_FORMULAS = {
-  highValue: `真实成交金额(realDeal)≥${HIGH_VALUE_MIN_SIGNED_YUAN}元、真实成交≥1单、商品退款率<20%，且非品退客户`,
+  highValue: `真正高价值：高价值分≥7、有效签收≥2单、签收金额≥3000元、退款率≤20%、无品退、无售后处理中`,
   repurchase: '同一 buyerKey 真实成交订单数 realDealOrderCount ≥ 2',
   refund: '商品退款金额>0 或 成功商品退款次数>0',
   qualityHeavy: '品退次数 > 0（官方品质负反馈 + 售后商品问题交叉识别）',

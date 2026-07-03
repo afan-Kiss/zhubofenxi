@@ -275,7 +275,10 @@ export function buyerRankingTabEmptyMessage(tab: string): { title: string; subti
     }
   }
   if (tab === 'highValue') {
-    return { title: '当前暂无综合高价值客户', subtitle: '有真实成交的客户会按价值分排序展示。' }
+    return {
+      title: '当前范围暂无符合条件的高价值客户',
+      subtitle: '真正高价值客户需有效签收、复购稳定且售后风险低；可切换「高消费但需关注」或「潜力客户」查看其他类型。',
+    }
   }
   if (tab === 'highAov') {
     return { title: '当前暂无高客单客户' }

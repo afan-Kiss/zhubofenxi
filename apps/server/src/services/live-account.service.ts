@@ -323,6 +323,9 @@ export async function persistLiveAccountCookieOnly(
       cookieEncrypted: encryptText(trimmed),
       updatedBy,
       cookieStatus: 'valid',
+      cookieLastCheckedAt: null,
+      cookieLastSuccessAt: null,
+      cookieLastFailedAt: null,
       cookieLastErrorCode: null,
       cookieLastErrorMessage: null,
       cookieLastFailedApi: null,
@@ -611,24 +614,24 @@ function mapShopHealthToPublicView(
   options?: { includeCookie?: boolean },
 ): LiveAccountPublicView {
   const rowCookieStatus = (row?.cookieStatus as CookieHealthStatus) || 'unknown'
+  const trustUploaded = rowCookieStatus === 'valid' && health.hasCookie
+
   let cookieStatus: CookieHealthStatus =
-    health.status === 'ok'
+    trustUploaded || health.status === 'ok'
       ? 'valid'
-      : health.status === 'unknown' &&
-          (rowCookieStatus === 'valid' || rowCookieStatus === 'invalid')
-        ? rowCookieStatus
+      : health.status === 'incomplete' || health.status === 'invalid'
+        ? 'invalid'
         : health.status === 'unknown'
-          ? 'unknown'
+          ? rowCookieStatus
           : 'invalid'
-  let healthStatus = health.status
-  let healthOk = health.ok
-  let syncReason = health.reason
-  if (health.status === 'unknown' && rowCookieStatus === 'valid') {
-    healthStatus = 'ok'
-    healthOk = true
-    syncReason = '校验通过'
-    cookieStatus = 'valid'
-  } else if (health.status === 'unknown' && rowCookieStatus === 'invalid') {
+  let healthStatus = trustUploaded ? 'ok' : health.status
+  let healthOk = trustUploaded || health.ok
+  let syncReason = trustUploaded
+    ? row?.cookieLastCheckedAt
+      ? '校验通过'
+      : '已收到 Cookie'
+    : health.reason
+  if (!trustUploaded && health.status === 'unknown' && rowCookieStatus === 'invalid') {
     healthStatus = 'invalid'
     healthOk = false
     cookieStatus = 'invalid'

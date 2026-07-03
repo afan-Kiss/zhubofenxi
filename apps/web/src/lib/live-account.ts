@@ -210,6 +210,10 @@ export function resolveAccountCookieAvailable(
   if (sessionTest) {
     const testAt = Date.parse(sessionTest.checkedAt)
     const serverAt = account.cookieLastCheckedAt ? Date.parse(account.cookieLastCheckedAt) : 0
+    const uploadedAt = account.cookieUpdatedAt ? Date.parse(account.cookieUpdatedAt) : 0
+    if (!Number.isNaN(uploadedAt) && uploadedAt > testAt) {
+      return accountCookieAvailable(account)
+    }
     if (!Number.isNaN(testAt) && testAt >= serverAt) {
       return sessionTest.ok
     }
@@ -253,9 +257,6 @@ export function resolveAccountCookieFriendlyReason(
   const msg = account.cookieLastErrorMessage?.trim() || account.syncReason?.trim() || ''
   const combined = `${code} ${msg}`
 
-  if (account.cookieStatus === 'unknown' && account.hasCookie) {
-    return '已收到 Cookie'
-  }
   if (/401|403|902|登录已过期|未登录|expired/i.test(combined)) {
     return 'Cookie 已过期'
   }

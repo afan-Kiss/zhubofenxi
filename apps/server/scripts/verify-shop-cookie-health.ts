@@ -52,10 +52,9 @@ async function main() {
     updatedBy: 'verify-shop-cookie-health',
   })
   clearShopCookieHealthCache()
-  const incomplete = await getShopCookieHealth('xiangyu')
-  assert(incomplete.status === 'incomplete', '缺 ark token 应返回 incomplete', issues)
-  assert(!incomplete.ok, 'incomplete 不能显示正常', issues)
-  assert(isCookieHealthBlocking(incomplete.status), 'incomplete 应阻塞', issues)
+  const uploadedNoArk = await getShopCookieHealth('xiangyu')
+  assert(uploadedNoArk.status === 'ok', '上传后缺 ark 仍应视为已收到 Cookie（信任上传）', issues)
+  assert(uploadedNoArk.ok, '上传后应可用', issues)
 
   const validCookie = makeCookie('valid_cookie_' + Date.now(), true)
   await uploadShopCookies({

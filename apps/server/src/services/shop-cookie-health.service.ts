@@ -166,22 +166,17 @@ function buildStructuralHealth(
   }
 
   const hasA1 = cookieContainsA1(plain)
-  const hasArkToken = cookieHasArkToken(plain)
-  const hasSellerToken = cookieHasSellerToken(plain)
 
-  if (!hasA1 || !hasArkToken) {
-    const parts: string[] = []
-    if (!hasA1) parts.push('缺少 a1')
-    if (!hasArkToken) parts.push('缺少 access-token-ark')
+  if (!hasA1) {
     return {
       ...base,
       status: 'incomplete',
       ok: false,
-      reason: `Cookie 不完整（${parts.join('、')}），请重新推送完整 Cookie`,
+      reason: 'Cookie 缺少 a1，请重新推送完整 Cookie',
       hasCookie: true,
-      hasA1,
-      hasArkToken,
-      hasSellerToken,
+      hasA1: false,
+      hasArkToken: cookieHasArkToken(plain),
+      hasSellerToken: cookieHasSellerToken(plain),
       source: 'structural',
     }
   }

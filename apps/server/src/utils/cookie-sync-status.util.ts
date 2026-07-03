@@ -86,7 +86,7 @@ export function deriveCookieSyncState(
   if (st === 'valid') {
     return {
       status: 'valid',
-      reason: 'Cookie 已验证有效，可同步订单',
+      reason: row.cookieLastCheckedAt ? 'Cookie 已验证有效，可同步订单' : '已收到 Cookie，可同步订单',
       canSyncOrders: true,
       statusLevel: 'ok',
     }

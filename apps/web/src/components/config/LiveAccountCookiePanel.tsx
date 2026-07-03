@@ -105,7 +105,7 @@ function applyTestResultToAccount(
     ...account,
     cookieStatus: available ? 'valid' : 'invalid',
     canSyncOrders: available,
-    healthStatus: available ? 'ok' : account.healthStatus === 'unknown' ? 'invalid' : account.healthStatus,
+    healthStatus: available ? 'ok' : 'invalid',
     cookieLastCheckedAt: result.checkedAt,
     cookieLastErrorMessage: available ? null : result.message,
     syncReason: available ? 'Cookie 已验证有效，可同步订单' : result.message,
@@ -264,6 +264,8 @@ export const LiveAccountCookiePanel: React.FC = () => {
         if (!test || test.status === 'testing') return account
         const testAt = Date.parse(test.checkedAt)
         const serverAt = account.cookieLastCheckedAt ? Date.parse(account.cookieLastCheckedAt) : 0
+        const uploadedAt = account.cookieUpdatedAt ? Date.parse(account.cookieUpdatedAt) : 0
+        if (!Number.isNaN(uploadedAt) && uploadedAt > testAt) return account
         if (!Number.isNaN(testAt) && testAt > serverAt) {
           return applyTestResultToAccount(account, test)
         }
@@ -281,6 +283,11 @@ export const LiveAccountCookiePanel: React.FC = () => {
           }
           const testAt = Date.parse(test.checkedAt)
           const serverAt = account.cookieLastCheckedAt ? Date.parse(account.cookieLastCheckedAt) : 0
+          const uploadedAt = account.cookieUpdatedAt ? Date.parse(account.cookieUpdatedAt) : 0
+          if (!Number.isNaN(uploadedAt) && uploadedAt > testAt) {
+            delete next[id]
+            continue
+          }
           if (Number.isNaN(testAt) || serverAt >= testAt) {
             delete next[id]
           }

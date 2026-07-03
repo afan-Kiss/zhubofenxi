@@ -292,7 +292,7 @@ export function buyerRankingTabEmptyMessage(tab: string): { title: string; subti
   if (tab === 'badBuyer') {
     return {
       title: '当前范围暂无需要重点确认的客户',
-      subtitle: '品退、退货、售后纠纷或高退款率的买家会出现在此榜，用于发货前提醒。',
+      subtitle: '品退、退货、售后申请或高退款率的买家会出现在此提醒，用于发货前确认细节。',
     }
   }
   if (tab === 'refund') {

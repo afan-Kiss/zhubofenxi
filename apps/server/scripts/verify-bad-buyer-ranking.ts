@@ -1,5 +1,5 @@
 /**
- * 垃圾客户榜单验收
+ * 高风险售后客户提醒验收
  * 用法: npm run verify:bad-buyer-ranking
  */
 import {
@@ -7,12 +7,19 @@ import {
   badBuyerRefundOrderCount,
   buildBadBuyerProfile,
   buyerRefundRate,
+  capBadBuyerRate,
+  capBadBuyerCount,
   composeBadBuyerWechatText,
   computeBadBuyerRiskScore,
+  computeBadBuyerRiskScoreFromStats,
+  extractBadBuyerCustomerStats,
+  formatBadBuyerRefundRateLabel,
+  formatBadBuyerSignedRateLabel,
   formatBadBuyerWechatBlock,
   isBadBuyerCandidate,
   qualityRefundOrderCount,
   returnRefundOrderCount,
+  BAD_BUYER_LIST_TITLE_SUFFIX,
 } from '../src/services/bad-buyer-ranking.service'
 import type { BuyerRankingItem } from '../src/services/buyer-ranking.service'
 import { resolveBuyerRankingDateRange } from '../src/utils/buyer-ranking-date-range'
@@ -31,8 +38,8 @@ function mockBuyer(partial: Partial<BuyerRankingItem> & { buyerKey: string }): B
     buyerShortCode: partial.buyerShortCode ?? 'ABC123',
     orderCount: partial.orderCount ?? 5,
     signedOrderCount: partial.signedOrderCount ?? 3,
-    unsignedOrderCount: 0,
-    completedOrderCount: partial.completedOrderCount ?? 2,
+    unsignedOrderCount: partial.unsignedOrderCount ?? 0,
+    completedOrderCount: partial.completedOrderCount ?? 0,
     returnRefundCount: partial.returnRefundCount ?? 0,
     refundOnlyCount: 0,
     freightRefundCount: partial.freightRefundCount ?? 0,
@@ -75,40 +82,159 @@ function assertScoreInRange(score: number, label: string, issues: string[]) {
 async function main() {
   const issues: string[] = []
 
-  const qualityBuyer = mockBuyer({
-    buyerKey: 'q1',
-    qualityReturnCount: 1,
-    buyerSummary: { qualityRefundOrderCount: 1, refundOrderCount: 1, orderCount: 3 },
+  // 【1】paid=1, aftersale=3, refund_orders=1 => 退款率 100% 不是 300%
+  const case1 = mockBuyer({
+    buyerKey: 'case1',
+    orderCount: 1,
+    paidOrderCount: 1,
+    signedOrderCount: 1,
+    unsignedOrderCount: 0,
+    afterSaleCount: 3,
+    buyerSummary: {
+      orderCount: 1,
+      paidOrderCount: 1,
+      realDealOrderCount: 1,
+      refundOrderCount: 1,
+      qualityRefundOrderCount: 0,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 100000,
+      payAmountCent: 100000,
+      refundAmountCent: 100000,
+      freightRefundAmountCent: 0,
+      netDealAmountCent: 0,
+      realDealAmountCent: 0,
+      displayEarnedAmountCent: 0,
+    },
   })
-  assert(isBadBuyerCandidate(qualityBuyer), '品退 >= 1 的买家应进入候选', issues)
-
-  const returnBuyer = mockBuyer({
-    buyerKey: 'r1',
-    returnRefundCount: 1,
-    buyerSummary: { refundOrderCount: 1, orderCount: 3 },
-  })
-  assert(isBadBuyerCandidate(returnBuyer), '退货退款 >= 1 的买家应进入候选', issues)
-
-  const afterSaleBuyer = mockBuyer({
-    buyerKey: 'a1',
-    afterSaleCount: 2,
-    pendingAfterSaleOrderCount: 0,
-    buyerSummary: { pendingAfterSaleOrderCount: 0, refundOrderCount: 1, orderCount: 4 },
-  })
+  const case1Stats = extractBadBuyerCustomerStats(case1, undefined, { aftersaleApplyCount: 3 })
+  assert(case1Stats.refundOrderCount === 1, 'case1 refundOrderCount 应为 1', issues)
+  assert(case1Stats.aftersaleCount === 3, 'case1 aftersaleCount 应为 3', issues)
+  const case1Rate = capBadBuyerRate(case1Stats.refundOrderCount, case1Stats.paidCount)
+  assert(case1Rate === 1, `case1 退款率应为 100%，实际 ${case1Rate}`, issues)
   assert(
-    isBadBuyerCandidate(afterSaleBuyer) || afterSaleOrderCount(afterSaleBuyer) >= 2,
-    '售后订单数 >= 2 的买家应进入候选',
+    formatBadBuyerRefundRateLabel(case1Rate) === '100%',
+    'case1 退款率展示应为 100%',
+    issues,
+  )
+  assert(
+    buyerRefundRate(case1) === 1,
+    `buyerRefundRate case1 应为 1，实际 ${buyerRefundRate(case1)}`,
     issues,
   )
 
-  const highRefundRateBuyer = mockBuyer({
-    buyerKey: 'hr1',
-    orderCount: 5,
-    signedOrderCount: 5,
-    refundCount: 2,
-    buyerSummary: { refundOrderCount: 2, orderCount: 5, realDealOrderCount: 5 },
+  // 【2】paid=2, refund_orders=8 => 封顶 100%
+  const case2Stats = extractBadBuyerCustomerStats(
+    mockBuyer({
+      buyerKey: 'case2',
+      orderCount: 2,
+      paidOrderCount: 2,
+      signedOrderCount: 2,
+      buyerSummary: {
+        orderCount: 2,
+        paidOrderCount: 2,
+        realDealOrderCount: 2,
+        refundOrderCount: 8,
+        qualityRefundOrderCount: 0,
+        pendingAfterSaleOrderCount: 0,
+        receivableAmountCent: 200000,
+        payAmountCent: 200000,
+        refundAmountCent: 150000,
+        freightRefundAmountCent: 0,
+        netDealAmountCent: 50000,
+        realDealAmountCent: 50000,
+        displayEarnedAmountCent: 50000,
+      },
+    }),
+  )
+  assert(case2Stats.refundOrderCount === 2, 'case2 refundOrderCount 应封顶为 2', issues)
+  assert(
+    capBadBuyerRate(case2Stats.refundOrderCount, case2Stats.paidCount) === 1,
+    'case2 退款率应封顶 100%',
+    issues,
+  )
+
+  // 【3】signed 80%
+  assert(
+    formatBadBuyerSignedRateLabel(8, 10) === '80%',
+    '签收率 8/10 应显示 80%',
+    issues,
+  )
+
+  // 【4】无签收字段 => 签收率 —
+  const case4 = mockBuyer({
+    buyerKey: 'case4',
+    orderCount: 2,
+    signedOrderCount: 0,
+    unsignedOrderCount: 0,
+    completedOrderCount: 0,
+    buyerSummary: {
+      orderCount: 2,
+      paidOrderCount: 2,
+      realDealOrderCount: 2,
+      refundOrderCount: 0,
+      qualityRefundOrderCount: 0,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 200000,
+      payAmountCent: 200000,
+      refundAmountCent: 0,
+      freightRefundAmountCent: 0,
+      netDealAmountCent: 200000,
+      realDealAmountCent: 200000,
+      displayEarnedAmountCent: 200000,
+    },
   })
-  assert(isBadBuyerCandidate(highRefundRateBuyer), '退款率 >= 40% 的买家应进入候选', issues)
+  const case4Stats = extractBadBuyerCustomerStats(case4)
+  assert(case4Stats.signedCount == null, '无签收追踪数据时 signedCount 应为 null', issues)
+  assert(
+    formatBadBuyerSignedRateLabel(case4Stats.signedCount, case4Stats.paidCount) === '—',
+    '无签收数据时签收率应显示 —',
+    issues,
+  )
+
+  // 【5】一订单多次售后：refund 去重，aftersale 累计
+  assert(
+    capBadBuyerCount(1, 1) === 1 && extractBadBuyerCustomerStats(case1, undefined, { aftersaleApplyCount: 3 }).aftersaleCount === 3,
+    '多次售后申请应累计 aftersaleCount',
+    issues,
+  )
+
+  // 【6】risk_score 封顶 10
+  const extremeScore = computeBadBuyerRiskScoreFromStats({
+    paidCount: 1,
+    paidAmountCent: 100000,
+    signedCount: 0,
+    signedAmountCent: 0,
+    refundOrderCount: 1,
+    refundAmountCent: 100000,
+    qualityRefundCount: 1,
+    returnRefundCount: 1,
+    aftersaleCount: 5,
+    unsignedCount: 1,
+    shopCount: 3,
+    hasSignedData: true,
+  })
+  assert(extremeScore <= 10, `极端样本 risk_score 应 <=10，实际 ${extremeScore}`, issues)
+
+  const qualityBuyer = mockBuyer({
+    buyerKey: 'q1',
+    qualityReturnCount: 1,
+    buyerSummary: {
+      qualityRefundOrderCount: 1,
+      refundOrderCount: 1,
+      orderCount: 3,
+      paidOrderCount: 3,
+      realDealOrderCount: 3,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 300000,
+      payAmountCent: 300000,
+      refundAmountCent: 100000,
+      freightRefundAmountCent: 0,
+      netDealAmountCent: 200000,
+      realDealAmountCent: 200000,
+      displayEarnedAmountCent: 200000,
+    },
+  })
+  assert(isBadBuyerCandidate(qualityBuyer), '品退 >= 1 的买家应进入候选', issues)
 
   const freightOnlyBuyer = mockBuyer({
     buyerKey: 'f1',
@@ -116,9 +242,23 @@ async function main() {
     returnRefundCount: 0,
     refundCount: 0,
     productRefundAmount: 0,
-    buyerSummary: { refundOrderCount: 0, orderCount: 2 },
+    buyerSummary: {
+      refundOrderCount: 0,
+      orderCount: 2,
+      paidOrderCount: 2,
+      realDealOrderCount: 2,
+      qualityRefundOrderCount: 0,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 200000,
+      payAmountCent: 200000,
+      refundAmountCent: 0,
+      freightRefundAmountCent: 2000,
+      netDealAmountCent: 200000,
+      realDealAmountCent: 200000,
+      displayEarnedAmountCent: 200000,
+    },
   })
-  assert(!isBadBuyerCandidate(freightOnlyBuyer), '纯运费补偿不能单独作为垃圾客户', issues)
+  assert(!isBadBuyerCandidate(freightOnlyBuyer), '纯运费补偿不能单独作为高风险客户', issues)
 
   const returnOnlyBuyer = mockBuyer({
     buyerKey: 'ret1',
@@ -126,59 +266,28 @@ async function main() {
     refundCount: 0,
     orderCount: 4,
     signedOrderCount: 3,
-    buyerSummary: { refundOrderCount: 0, orderCount: 4, realDealOrderCount: 3 },
+    unsignedOrderCount: 1,
+    buyerSummary: {
+      refundOrderCount: 0,
+      orderCount: 4,
+      paidOrderCount: 4,
+      realDealOrderCount: 3,
+      qualityRefundOrderCount: 0,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 400000,
+      payAmountCent: 400000,
+      refundAmountCent: 0,
+      freightRefundAmountCent: 0,
+      netDealAmountCent: 400000,
+      realDealAmountCent: 300000,
+      displayEarnedAmountCent: 300000,
+    },
   })
   assert(
-    badBuyerRefundOrderCount(returnOnlyBuyer) >= 2,
-    '有退货时退款相关订单数应包含退货单',
+    badBuyerRefundOrderCount(returnOnlyBuyer) <= 4,
+    '退款订单数不应超过支付订单数',
     issues,
   )
-  const returnOnlyRate = buyerRefundRate(returnOnlyBuyer)
-  assert(
-    returnOnlyRate != null && returnOnlyRate > 0,
-    `仅有退货、未完成退款金额时退款率不应为 0，实际 ${returnOnlyRate}`,
-    issues,
-  )
-
-  const qcScore = computeBadBuyerRiskScore(
-    mockBuyer({
-      buyerKey: 's1',
-      qualityReturnCount: 2,
-      returnRefundCount: 0,
-      buyerSummary: { qualityRefundOrderCount: 2, refundOrderCount: 2, orderCount: 4 },
-    }),
-  )
-  const plainRefundScore = computeBadBuyerRiskScore(
-    mockBuyer({
-      buyerKey: 's2',
-      qualityReturnCount: 0,
-      returnRefundCount: 0,
-      refundCount: 1,
-      buyerSummary: { refundOrderCount: 1, orderCount: 5, realDealOrderCount: 5 },
-    }),
-  )
-  assert(qcScore > plainRefundScore, '品退多的买家分数应高于普通退款买家', issues)
-
-  const disputeScore = computeBadBuyerRiskScore(
-    mockBuyer({
-      buyerKey: 'd1',
-      pendingAfterSaleOrderCount: 2,
-      buyerSummary: { pendingAfterSaleOrderCount: 2, orderCount: 4, refundOrderCount: 2 },
-    }),
-  )
-  const normalSignedScore = computeBadBuyerRiskScore(
-    mockBuyer({
-      buyerKey: 'n1',
-      signedOrderCount: 5,
-      orderCount: 5,
-      refundCount: 0,
-      buyerSummary: { orderCount: 5, realDealOrderCount: 5, refundOrderCount: 0 },
-    }),
-  )
-  assert(disputeScore > normalSignedScore, '售后纠纷多的买家分数应高于正常签收买家', issues)
-
-  const samples = [qcScore, plainRefundScore, disputeScore, normalSignedScore, 0, 10]
-  for (const s of samples) assertScoreInRange(s, '样本', issues)
 
   const profile = buildBadBuyerProfile(
     mockBuyer({
@@ -187,110 +296,87 @@ async function main() {
       returnRefundCount: 3,
       afterSaleCount: 4,
       refundCount: 3,
+      signedOrderCount: 4,
+      unsignedOrderCount: 0,
       productRefundAmount: 3260,
       buyerSummary: {
         qualityRefundOrderCount: 2,
         refundOrderCount: 3,
         orderCount: 4,
+        paidOrderCount: 4,
+        realDealOrderCount: 4,
         refundAmountCent: 326000,
         pendingAfterSaleOrderCount: 1,
+        receivableAmountCent: 400000,
+        payAmountCent: 400000,
+        freightRefundAmountCent: 0,
+        netDealAmountCent: 74000,
+        realDealAmountCent: 74000,
+        displayEarnedAmountCent: 74000,
       },
     }),
     { mainShopName: '祥钰珠宝', shopNames: ['祥钰珠宝'] },
+    { aftersaleApplyCount: 6 },
   )
-  assert(
-    qualityRefundOrderCount(mockBuyer({ buyerKey: 'x', qualityReturnCount: 2 })) ===
-      profile.qualityRefundOrderCount,
-    '榜单品退数应与计数函数一致',
-    issues,
-  )
-  assert(
-    returnRefundOrderCount(mockBuyer({ buyerKey: 'x', returnRefundCount: 3 })) ===
-      profile.returnRefundOrderCount,
-    '榜单退货数应与计数函数一致',
-    issues,
-  )
-
-  const limitCap = Math.min(10, 99)
-  assert(limitCap === 10, '后端 limit 应强制 <= 10', issues)
+  assert(profile.riskLevel.length > 0, 'profile 应含 riskLevel', issues)
+  assert(profile.paidCount === 4, 'profile paidCount 应正确', issues)
+  assert(!profile.reasonText.includes('售后纠纷多'), '原因不应再使用「售后纠纷多」', issues)
 
   const block1 = formatBadBuyerWechatBlock({
     rank: 1,
     buyerDisplayName: '小鹿鹿',
+    riskLevel: '重点确认',
     riskScoreText: '8.8/10',
-    qualityRefundOrderCount: 2,
-    returnRefundOrderCount: 3,
-    afterSaleOrderCount: 4,
+    paidCount: 4,
+    signedLine: '3 单',
+    signedRateLabel: '75%',
+    refundOrderCount: 3,
     refundRateLabel: '75%',
     refundAmountYuan: 3260,
+    qualityRefundOrderCount: 2,
+    returnRefundOrderCount: 3,
+    aftersaleCount: 6,
     shopLabel: '祥钰珠宝',
-    reasonText: '品退多、退货多',
-    suggestionText: '发货前必须确认圈口、颜色、瑕疵和预期',
-  })
-  const block2 = formatBadBuyerWechatBlock({
-    rank: 2,
-    buyerDisplayName: '爱玉姐姐',
-    riskScoreText: '7.6/10',
-    qualityRefundOrderCount: 1,
-    returnRefundOrderCount: 2,
-    afterSaleOrderCount: 3,
-    refundRateLabel: '50%',
-    refundAmountYuan: 1980,
-    shopLabel: '云上珠宝',
-    reasonText: '售后纠纷多',
-    suggestionText: '售前把细节讲清楚，必要时让客户确认后再发货',
+    reasonText: '品退比例偏高、售后申请次数偏多',
+    suggestionText: '发货前重点确认成色、瑕疵、纹裂、色差、实拍图和证书信息；售前把细节讲清楚，尽量用实拍图/视频确认，减少反复售后',
   })
   const wechatText = composeBadBuyerWechatText({
-    title: '【最近30天垃圾客户榜单】',
+    title: `【最近30天${BAD_BUYER_LIST_TITLE_SUFFIX}】`,
     dateRangeLabel: '2026-06-04 ~ 2026-07-03',
     rows: [
       {
         rank: 1,
         buyerDisplayName: '小鹿鹿',
+        riskLevel: '重点确认',
         riskScoreText: '8.8/10',
-        qualityRefundOrderCount: 2,
-        returnRefundOrderCount: 3,
-        afterSaleOrderCount: 4,
+        paidCount: 4,
+        signedLine: '3 单',
+        signedRateLabel: '75%',
+        refundOrderCount: 3,
         refundRateLabel: '75%',
         refundAmountYuan: 3260,
+        qualityRefundOrderCount: 2,
+        returnRefundOrderCount: 3,
+        aftersaleCount: 6,
         shopLabel: '祥钰珠宝',
-        reasonText: '品退多、退货多',
-        suggestionText: '发货前必须确认圈口、颜色、瑕疵和预期',
-      },
-      {
-        rank: 2,
-        buyerDisplayName: '爱玉姐姐',
-        riskScoreText: '7.6/10',
-        qualityRefundOrderCount: 1,
-        returnRefundOrderCount: 2,
-        afterSaleOrderCount: 3,
-        refundRateLabel: '50%',
-        refundAmountYuan: 1980,
-        shopLabel: '云上珠宝',
-        reasonText: '售后纠纷多',
-        suggestionText: '售前把细节讲清楚，必要时让客户确认后再发货',
+        reasonText: '品退比例偏高、售后申请次数偏多',
+        suggestionText: '发货前重点确认成色、瑕疵、纹裂、色差、实拍图和证书信息；售前把细节讲清楚，尽量用实拍图/视频确认，减少反复售后',
       },
     ],
   })
   assert(wechatText.includes(block1), '微信文案应包含第一个买家块', issues)
-  assert(wechatText.includes(block2), '微信文案应包含第二个买家块', issues)
-  assert(wechatText.includes('\n\n1. 小鹿鹿'), '微信文案买家块之间应有空行', issues)
-  assert(!wechatText.includes('.00'), '微信文案金额不应带 .00', issues)
+  assert(!wechatText.includes('垃圾客户'), '微信文案不应含「垃圾客户」', issues)
+  assert(!wechatText.includes('垃圾风险分'), '微信文案不应含「垃圾风险分」', issues)
+  assert(wechatText.includes('风险等级：'), '微信文案应含风险等级', issues)
+  assert(wechatText.includes('售后申请：'), '微信文案应含售后申请次数字段', issues)
   assertNoIdentityLeak(wechatText, '微信文案', issues)
-  assert(wechatText.split('\n\n').filter((p) => /^\d+\./.test(p)).length <= 10, '微信文案最多 10 人', issues)
 
   const fri = new Date(Date.parse('2026-07-03T12:00:00+08:00'))
-  const recent7 = resolveBuyerRankingDateRange('recent7', undefined, undefined, fri)
-  const recent15 = resolveBuyerRankingDateRange('recent15', undefined, undefined, fri)
   const recent30 = resolveBuyerRankingDateRange('recent30', undefined, undefined, fri)
-  const expected7Start = formatDateKeyShanghai(new Date(Date.parse('2026-06-27T12:00:00+08:00')))
-  assert(
-    recent7.startDate === expected7Start && recent7.endDate === '2026-07-03',
-    `recent7 应为 ${expected7Start}~2026-07-03，实际 ${recent7.startDate}~${recent7.endDate}`,
-    issues,
-  )
-  assert(recent15.preset === 'recent15', 'recent15 preset 应正确', issues)
   assert(recent30.preset === 'recent30', 'recent30 preset 应正确', issues)
+
+  const samples = [computeBadBuyerRiskScore(qualityBuyer), extremeScore, 0, 10]
+  for (const s of samples) assertScoreInRange(s, '样本', issues)
 
   if (issues.length > 0) {
     console.error('[verify:bad-buyer-ranking] FAIL')

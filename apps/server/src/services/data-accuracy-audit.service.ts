@@ -14,11 +14,11 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { resolveDateRange } from '../utils/date-range'
 import { buildBuyerRankingAllItems } from './buyer-ranking.service'
 import {
+  badBuyerRefundOrderCount,
   buildBadBuyerProfile,
   isBadBuyerCandidate,
   qualityRefundOrderCount,
   returnRefundOrderCount,
-  afterSaleOrderCount,
 } from './bad-buyer-ranking.service'
 import { centToYuan } from '../utils/money'
 import { runPayTimePrefilterDiagnostic } from './order-pay-time-prefilter-diagnostic.service'
@@ -314,25 +314,25 @@ export async function runDataAccuracyAudit(params: {
       const profile = buildBadBuyerProfile(item)
       if (profile.qualityRefundOrderCount !== qualityRefundOrderCount(item)) badDiff += 1
       if (profile.returnRefundOrderCount !== returnRefundOrderCount(item)) badDiff += 1
-      if (profile.afterSaleOrderCount !== afterSaleOrderCount(item)) badDiff += 1
+      if (profile.refundOrderCount !== badBuyerRefundOrderCount(item)) badDiff += 1
     }
     pushCheck(
       checks,
       {
         key: 'bad_buyer_vs_drawer',
-        title: '垃圾客户榜 vs 同口径 buyerSummary',
+        title: '高风险售后客户提醒 vs 同口径 buyerSummary',
         status: badDiff === 0 ? 'pass' : 'danger',
         diffCount: badDiff,
         note:
           badDiff === 0
-            ? '垃圾客户榜品退/退货/售后与 buyerSummary 一致'
+            ? '高风险售后客户提醒品退/退货/退款订单与 buyerSummary 一致'
             : `${badDiff} 项指标与 buyerSummary 不一致`,
       },
       blockers,
       warnings,
     )
   } catch (err) {
-    warnings.push(`买家/垃圾客户榜核对跳过：${err instanceof Error ? err.message : String(err)}`)
+    warnings.push(`买家/高风险售后客户提醒核对跳过：${err instanceof Error ? err.message : String(err)}`)
   }
 
   pushCheck(

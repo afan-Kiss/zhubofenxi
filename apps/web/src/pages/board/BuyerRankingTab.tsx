@@ -49,7 +49,7 @@ const RANKING_TABS: Array<{ key: string; label: string }> = [
   { key: 'highAov', label: '高客单榜' },
   { key: 'stableSigned', label: '稳定签收榜' },
   { key: 'repurchase', label: '复购榜' },
-  { key: 'badBuyer', label: '垃圾客户榜单' },
+  { key: 'badBuyer', label: '高风险售后客户' },
   { key: 'quality', label: '品退榜' },
 ]
 
@@ -171,7 +171,7 @@ export const BuyerRankingTab: React.FC = () => {
         })
         setBadBuyerData(data)
       } catch (e) {
-        setError(e instanceof Error ? e.message : '加载垃圾客户榜单失败')
+        setError(e instanceof Error ? e.message : '加载高风险售后客户提醒失败')
         setBadBuyerData(null)
       } finally {
         setLoading(false)
@@ -352,7 +352,7 @@ export const BuyerRankingTab: React.FC = () => {
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500">
             {isBadBuyerTab
-              ? '垃圾客户榜单用于提醒主播发货前多确认，不代表不能成交。'
+              ? '高风险售后客户提醒用于发货前确认细节，不代表不能成交。'
               : '售后关注不是拉黑客户，只是提醒发货前多确认圈口、颜色、瑕疵和预期。'}
           </p>
 
@@ -480,7 +480,7 @@ export const BuyerRankingTab: React.FC = () => {
                 {wechatCopyBusy
                   ? '正在生成微信群榜单…'
                   : isBadBuyerTab
-                    ? '复制垃圾客户榜单文案'
+                    ? '复制高风险售后客户提醒文案'
                     : '复制本周微信群榜单'}
               </button>
               {wechatToast ? null : (
@@ -637,6 +637,9 @@ export const BuyerRankingTab: React.FC = () => {
               />
             </div>
           ) : null}
+          <p className="mt-2 text-[10px] leading-relaxed text-amber-900/90">
+            说明：这个榜单只用于发货前提醒和售前确认，不要在客户面前使用负面话术。风险分不是拉黑依据，重点是帮助客服提前确认细节，减少不必要的售后。
+          </p>
         </div>
       ) : null}
 
@@ -678,15 +681,25 @@ export const BuyerRankingTab: React.FC = () => {
             if (isBadBuyerTab) {
               const bp = badBuyerProfileFromRow(rowRec)
               const displayLabel = buyerDisplayLabel(rowRec)
+              const riskLevel = String(bp.riskLevel ?? '关注')
               const riskScoreText = String(bp.riskScoreText ?? '')
+              const paidCount = Number(bp.paidCount ?? rowRec.orderCount ?? 0)
+              const signedCountRaw = bp.signedCount
+              const signedCount =
+                signedCountRaw == null ? null : Number(signedCountRaw ?? rowRec.signedOrderCount ?? 0)
+              const signedLine =
+                signedCount == null ? '—' : `${formatCount(signedCount)} 单`
+              const signedRateLabel =
+                signedCount == null || paidCount <= 0
+                  ? '—'
+                  : `${Math.round((Number(bp.signedRate ?? signedCount / paidCount) || 0) * 100)}%`
+              const refundOrderCount = Number(bp.refundOrderCount ?? 0)
+              const refundRate = Number(bp.refundRate ?? 0)
+              const refundRateLabel = `${Math.round(Math.min(refundRate, 1) * 100)}%`
+              const refundAmount = Number(bp.refundAmountYuan ?? 0)
               const qc = Number(bp.qualityRefundOrderCount ?? 0)
               const rr = Number(bp.returnRefundOrderCount ?? 0)
-              const afterSale = Number(bp.afterSaleOrderCount ?? 0)
-              const signedCount = Number(bp.signedOrderCount ?? rowRec.signedOrderCount ?? 0)
-              const refundRate = bp.refundRate as number | null
-              const refundRateLabel =
-                refundRate != null ? `${Math.round(refundRate * 100)}%` : '—'
-              const refundAmount = Number(bp.refundAmountYuan ?? 0)
+              const aftersaleCount = Number(bp.aftersaleCount ?? bp.afterSaleOrderCount ?? 0)
               const shopLabel = String(bp.shopLabel ?? bp.mainShopName ?? '未知店铺')
               const reasonText = String(bp.reasonText ?? '—')
               const suggestionText = String(bp.suggestionText ?? '—')
@@ -724,14 +737,18 @@ export const BuyerRankingTab: React.FC = () => {
                     </span>
                   </div>
                   <p className="text-[11px] font-semibold text-red-700">
-                    垃圾风险分：{riskScoreText}
+                    风险等级：{riskLevel}｜风险分：{riskScoreText}
                   </p>
                   <p className="text-[11px] text-slate-700">
-                    签收：{formatCount(signedCount)} 单｜品退：{formatCount(qc)} 单｜退货：{' '}
-                    {formatCount(rr)} 单｜售后：{formatCount(afterSale)} 单
+                    支付：{formatCount(paidCount)} 单｜签收：{signedLine}｜签收率：{signedRateLabel}
                   </p>
                   <p className="text-[11px] text-slate-700">
-                    退款率：{refundRateLabel}｜退款金额：{formatMoney(refundAmount)}
+                    退款：{formatCount(refundOrderCount)} 单｜退款率：{refundRateLabel}｜退款金额：
+                    {formatMoney(refundAmount)}
+                  </p>
+                  <p className="text-[11px] text-slate-700">
+                    品退：{formatCount(qc)} 单｜退货退款：{formatCount(rr)} 单｜售后申请：
+                    {formatCount(aftersaleCount)} 次
                   </p>
                   <p className="truncate text-[11px] text-slate-600">店铺：{shopLabel}</p>
                   <p className="text-[11px] text-amber-900">原因：{reasonText}</p>

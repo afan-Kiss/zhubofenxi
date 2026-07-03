@@ -921,7 +921,7 @@ boardRouter.get('/buyer-ranking/bad-buyers', async (req, res) => {
     const data = await buildBadBuyerRanking({ preset, startDate, endDate, limit })
     sendOk(res, data)
   } catch (err) {
-    sendFail(res, err instanceof Error ? err.message : '获取垃圾客户榜单失败', 500)
+    sendFail(res, err instanceof Error ? err.message : '获取高风险售后客户提醒失败', 500)
   }
 })
 

@@ -2,6 +2,9 @@
 import {
   dataAccuracyCheckStatus,
   duplicateSamplesFromRawViewsForTest,
+  resolveBadBuyerAuditSampleLimit,
+  resolveBuyerAuditSampleLimit,
+  resolveRawVsNormalizedCheck,
 } from '../src/services/data-accuracy-audit.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
@@ -65,10 +68,21 @@ async function main() {
   const noDup = duplicateSamplesFromRawViewsForTest(uniqueViews)
   assert(noDup.duplicateGroupCount === 0, '无重复时不应报 duplicate', issues)
 
-  const rawVsNormalizedStatus = (rawInRange: number, normalized: number) =>
-    rawInRange - normalized !== 0 ? 'danger' : 'pass'
-  assert(rawVsNormalizedStatus(10, 10) === 'pass', '同周期相等应 pass', issues)
-  assert(rawVsNormalizedStatus(10, 8) === 'danger', 'raw_vs_normalized 不能无条件 pass', issues)
+  assert(resolveRawVsNormalizedCheck(0, 0).status === 'pass', '双零应 pass', issues)
+  assert(resolveRawVsNormalizedCheck(100, 0).status === 'danger', '有 raw 无 normalized 应 danger', issues)
+  assert(resolveRawVsNormalizedCheck(10, 12).status === 'danger', 'normalized 多于 raw 应 danger', issues)
+  assert(resolveRawVsNormalizedCheck(100, 95).status === 'warning', 'raw 略多不应无脑 danger', issues)
+  assert(
+    resolveRawVsNormalizedCheck(100, 95).excludeFromTotals === true,
+    'raw_vs_normalized 不应计入 orderDiffTotal',
+    issues,
+  )
+  assert(resolveRawVsNormalizedCheck(100, 100).status === 'pass', '相等应 pass', issues)
+
+  assert(resolveBuyerAuditSampleLimit(true, 100) === 100, 'fullScan 买家榜应全量', issues)
+  assert(resolveBuyerAuditSampleLimit(false, 100) === 20, '非 fullScan 买家榜应抽样20', issues)
+  assert(resolveBadBuyerAuditSampleLimit(true, 50) === 50, 'fullScan 垃圾客户榜应全量', issues)
+  assert(resolveBadBuyerAuditSampleLimit(false, 50) === 10, '非 fullScan 垃圾客户榜应抽样10', issues)
 
   const score = Math.round(8.75 * 10) / 10
   assert(score === 8.8, '风险分保留 1 位小数', issues)

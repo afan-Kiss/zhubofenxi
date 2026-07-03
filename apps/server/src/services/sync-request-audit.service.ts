@@ -95,16 +95,22 @@ export function resolveApiCooldownMs(apiName: string): number {
   return COOLDOWN_MS_BY_API[apiName] ?? DEFAULT_COOLDOWN_MS
 }
 
+export type XhsRequestDecision = 'allowed' | 'throttled' | 'circuit_open'
+
+const JSONL_COOLDOWN_CACHE_MS = 30_000
+let jsonlCooldownCache: { loadedAt: number; items: SyncRequestAuditItem[] } | null = null
+
 export function checkXhsRequestAllowed(params: {
   shopId?: string
   apiName: string
   requestHash: string
   trigger?: SyncRequestTrigger
-}): { allowed: boolean; status: SyncRequestStatus; reason?: string } {
+}): { allowed: boolean; status: SyncRequestStatus; decision: XhsRequestDecision; reason?: string } {
   if (params.trigger === 'page_open') {
     return {
       allowed: false,
       status: 'throttled',
+      decision: 'throttled',
       reason: '页面接口禁止直接请求小红书，请使用本地缓存或受控同步任务',
     }
   }
@@ -113,17 +119,93 @@ export function checkXhsRequestAllowed(params: {
   const fState = failureState.get(fKey)
   const now = Date.now()
   if (fState?.circuitOpenUntil && fState.circuitOpenUntil > now) {
-    return { allowed: false, status: 'circuit_open', reason: '接口熔断中，请稍后再试' }
+    return {
+      allowed: false,
+      status: 'circuit_open',
+      decision: 'circuit_open',
+      reason: '接口熔断中，请稍后再试',
+    }
   }
 
   const key = auditKey(params.shopId, params.apiName, params.requestHash)
   const last = lastRequestAt.get(key)
   const cooldown = resolveApiCooldownMs(params.apiName)
   if (last != null && now - last < cooldown) {
-    return { allowed: false, status: 'throttled', reason: `冷却中（${Math.ceil((cooldown - (now - last)) / 1000)}s）` }
+    return {
+      allowed: false,
+      status: 'throttled',
+      decision: 'throttled',
+      reason: `冷却中（${Math.ceil((cooldown - (now - last)) / 1000)}s）`,
+    }
   }
 
-  return { allowed: true, status: 'skipped' }
+  return { allowed: true, status: 'success', decision: 'allowed' }
+}
+
+function findLastRemoteRequestAt(
+  items: SyncRequestAuditItem[],
+  shopId: string | undefined,
+  apiName: string,
+  requestHash: string,
+): number | null {
+  const shopKey = shopId ?? 'default'
+  let latest = 0
+  for (const item of items) {
+    if (item.apiName !== apiName || item.requestHash !== requestHash) continue
+    if ((item.shopId ?? 'default') !== shopKey) continue
+    if (item.status !== 'success' && item.status !== 'failed') continue
+    const t = Date.parse(item.finishedAt ?? item.startedAt)
+    if (Number.isFinite(t) && t > latest) latest = t
+  }
+  return latest > 0 ? latest : null
+}
+
+async function loadJsonlItemsForCooldown(): Promise<SyncRequestAuditItem[]> {
+  const now = Date.now()
+  if (jsonlCooldownCache && now - jsonlCooldownCache.loadedAt < JSONL_COOLDOWN_CACHE_MS) {
+    return jsonlCooldownCache.items
+  }
+  const sinceMs = now - 24 * 60 * 60 * 1000
+  try {
+    const items = await loadRecentAuditItemsFromJsonl(sinceMs)
+    jsonlCooldownCache = { loadedAt: now, items }
+    return items
+  } catch {
+    return jsonlCooldownCache?.items ?? []
+  }
+}
+
+/** 含 JSONL 冷却恢复：内存未命中时读今天/昨天 JSONL */
+export async function checkXhsRequestAllowedWithJsonlCooldown(params: {
+  shopId?: string
+  apiName: string
+  requestHash: string
+  trigger?: SyncRequestTrigger
+}): Promise<{ allowed: boolean; status: SyncRequestStatus; decision: XhsRequestDecision; reason?: string }> {
+  const memory = checkXhsRequestAllowed(params)
+  if (!memory.allowed) return memory
+
+  const cooldown = resolveApiCooldownMs(params.apiName)
+  const items = await loadJsonlItemsForCooldown()
+  const lastRemote = findLastRemoteRequestAt(
+    items,
+    params.shopId,
+    params.apiName,
+    params.requestHash,
+  )
+  if (lastRemote != null) {
+    const elapsed = Date.now() - lastRemote
+    if (elapsed < cooldown) {
+      return {
+        allowed: false,
+        status: 'throttled',
+        decision: 'throttled',
+        reason: `冷却中（JSONL 恢复，${Math.ceil((cooldown - elapsed) / 1000)}s）`,
+      }
+    }
+  }
+
+  return memory
 }
 
 export async function appendSyncRequestAudit(item: SyncRequestAuditItem): Promise<void> {
@@ -292,7 +374,7 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
 }): Promise<XhsAuditedRequestResult<T>> {
   const startedAt = new Date().toISOString()
   const trigger = params.trigger ?? 'unknown'
-  const gate = checkXhsRequestAllowed({
+  const gate = await checkXhsRequestAllowedWithJsonlCooldown({
     shopId: params.shopId,
     apiName: params.apiName,
     requestHash: params.requestHash,
@@ -455,6 +537,7 @@ export function resetSyncRequestAuditStateForTests(): void {
   lastRequestAt.clear()
   failureState.clear()
   recentAuditBuffer.length = 0
+  jsonlCooldownCache = null
 }
 
 export function forceCircuitOpenForTests(shopId: string | undefined, apiName: string): void {

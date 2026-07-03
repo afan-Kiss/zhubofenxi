@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
+import { useAuth } from '../../providers/AuthProvider'
 
 interface DirectRequestFinding {
   file: string
@@ -63,6 +64,8 @@ const STATUS_LABEL: Record<string, string> = {
 
 export const DataHealthPage: React.FC = () => {
   const { formatMoney, formatCount } = useAmountDisplay()
+  const { user } = useAuth()
+  const canRerunMonthlyClose = user?.role === 'super_admin'
   const [report, setReport] = useState<MonthlyCloseReport | null>(null)
   const [syncRisk, setSyncRisk] = useState<SyncRiskStatus | null>(null)
   const [schedulerRegistered, setSchedulerRegistered] = useState<boolean | null>(null)
@@ -99,6 +102,10 @@ export const DataHealthPage: React.FC = () => {
   }, [load])
 
   const handleRerun = async () => {
+    if (!canRerunMonthlyClose) {
+      setRerunError('仅管理员可手动重跑月度结账，请联系管理员处理')
+      return
+    }
     setRerunning(true)
     setRerunError(null)
     try {
@@ -109,7 +116,12 @@ export const DataHealthPage: React.FC = () => {
       })
       await load()
     } catch (e) {
-      setRerunError(e instanceof Error ? e.message : '重跑失败')
+      const msg = e instanceof Error ? e.message : '重跑失败'
+      setRerunError(
+        /维护|403|404|未启用|权限/.test(msg)
+          ? '仅管理员可手动重跑月度结账，请联系管理员处理'
+          : msg,
+      )
     } finally {
       setRerunning(false)
     }
@@ -148,15 +160,18 @@ export const DataHealthPage: React.FC = () => {
         <div className="space-y-3">
           <p className="rounded-xl border border-dashed border-slate-200 bg-white p-4 text-sm text-slate-500">
             暂无自动结账报告。系统将在每月 15 号自动生成。
+            {!canRerunMonthlyClose ? ' 如需手动重跑，请联系管理员。' : null}
           </p>
-          <button
-            type="button"
-            onClick={() => void handleRerun()}
-            disabled={rerunning}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-          >
-            {rerunning ? '正在生成…' : '管理员手动生成 / 重跑'}
-          </button>
+          {canRerunMonthlyClose ? (
+            <button
+              type="button"
+              onClick={() => void handleRerun()}
+              disabled={rerunning}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {rerunning ? '正在生成…' : '管理员手动生成 / 重跑'}
+            </button>
+          ) : null}
           {rerunError ? <p className="text-sm text-red-700">{rerunError}</p> : null}
         </div>
       ) : (
@@ -177,14 +192,16 @@ export const DataHealthPage: React.FC = () => {
                 ? '上个月数据已自动核对完成，可以用于结账和复盘。'
                 : '上个月数据存在差异或风险，暂时不建议用于结账。请先处理下面列出的问题。'}
             </p>
-            <button
-              type="button"
-              onClick={() => void handleRerun()}
-              disabled={rerunning}
-              className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {rerunning ? '重跑中…' : '管理员重跑月度结账'}
-            </button>
+            {canRerunMonthlyClose ? (
+              <button
+                type="button"
+                onClick={() => void handleRerun()}
+                disabled={rerunning}
+                className="mt-3 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                {rerunning ? '重跑中…' : '管理员重跑月度结账'}
+              </button>
+            ) : null}
             {rerunError ? <p className="mt-1 text-xs text-red-700">{rerunError}</p> : null}
           </div>
 

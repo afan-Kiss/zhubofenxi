@@ -52,6 +52,65 @@ export function dataAccuracyCheckStatus(diffCent: number, diffCount: number): Da
   return checkStatus(diffCent, diffCount)
 }
 
+/** raw 与 normalized 数量核对：仅作数据链路提示，不轻易 danger */
+export function resolveRawVsNormalizedCheck(rawInRange: number, normalized: number): {
+  status: DataAccuracyStatus
+  excludeFromTotals: boolean
+  note: string
+} {
+  const diff = rawInRange - normalized
+  const baseNote =
+    'raw 表可能含重复/异常/无效/历史残留记录，与标准订单不一定一比一；差异需排查但不一定代表金额错。'
+
+  if (rawInRange === 0 && normalized === 0) {
+    return {
+      status: 'pass',
+      excludeFromTotals: true,
+      note: `周期内无 raw 也无标准订单。${baseNote}`,
+    }
+  }
+  if (rawInRange > 0 && normalized === 0) {
+    return {
+      status: 'danger',
+      excludeFromTotals: true,
+      note: `周期内 raw ${rawInRange} 条但标准订单 0 条，归一化或支付时间过滤可能全漏。${baseNote}`,
+    }
+  }
+  if (normalized > rawInRange) {
+    return {
+      status: 'danger',
+      excludeFromTotals: true,
+      note: `标准订单 ${normalized} 条多于 raw ${rawInRange} 条，存在异常膨胀。${baseNote}`,
+    }
+  }
+  if (diff === 0) {
+    return {
+      status: 'pass',
+      excludeFromTotals: true,
+      note: `周期内 raw ${rawInRange} 条 = 标准订单 ${normalized} 条。${baseNote}`,
+    }
+  }
+
+  const largeDiff = diff > Math.max(10, Math.round(rawInRange * 0.1))
+  return {
+    status: 'warning',
+    excludeFromTotals: true,
+    note: largeDiff
+      ? `周期内 raw ${rawInRange} 条，标准订单 ${normalized} 条，多 ${diff} 条（差异较大，建议排查归一化/去重/无效 raw，但不直接判定金额错）。${baseNote}`
+      : `周期内 raw ${rawInRange} 条，标准订单 ${normalized} 条，多 ${diff} 条（差异不大，作数据链路提示）。${baseNote}`,
+  }
+}
+
+export function resolveBuyerAuditSampleLimit(fullScan: boolean, total: number): number {
+  if (fullScan) return total
+  return Math.min(20, total)
+}
+
+export function resolveBadBuyerAuditSampleLimit(fullScan: boolean, total: number): number {
+  if (fullScan) return total
+  return Math.min(10, total)
+}
+
 export function duplicateSamplesFromRawViewsForTest(
   views: AnalyzedOrderView[],
   limit = 10,
@@ -323,7 +382,7 @@ export async function runDataAccuracyAudit(params: {
     where: buildOrderTimeDbWhere(rangeResolved),
   })
   const normalizedInRange = await loadNormalizedOrdersFromRaw({ range: rangeResolved })
-  const rangeDiff = rawOrderCountInRange - normalizedInRange.length
+  const rawNorm = resolveRawVsNormalizedCheck(rawOrderCountInRange, normalizedInRange.length)
 
   pushCheck(
     checks,
@@ -345,19 +404,22 @@ export async function runDataAccuracyAudit(params: {
     checks,
     {
       key: 'raw_vs_normalized',
-      title: '同周期 raw vs 标准订单',
-      status: rangeDiff !== 0 ? 'danger' : 'pass',
+      title: '同周期 raw vs 标准订单（数据链路提示）',
+      status: rawNorm.status,
       expectedCount: rawOrderCountInRange,
       actualCount: normalizedInRange.length,
-      diffCount: rangeDiff,
-      note:
-        rangeDiff === 0
-          ? `周期 ${startDate}~${endDate}：raw ${rawOrderCountInRange} 条 = 标准订单 ${normalizedInRange.length} 条`
-          : `周期 ${startDate}~${endDate}：raw ${rawOrderCountInRange} 条，标准订单 ${normalizedInRange.length} 条，差 ${Math.abs(rangeDiff)} 条，需排查归一化或支付时间过滤`,
+      diffCount: rawOrderCountInRange - normalizedInRange.length,
+      excludeFromTotals: rawNorm.excludeFromTotals,
+      note: rawNorm.note,
     },
     blockers,
     warnings,
   )
+
+  const fullScan = params.fullScan === true
+  const auditScopeNote = fullScan
+    ? 'fullScan=true：买家榜与高风险售后客户榜为全量核对'
+    : 'fullScan=false：买家榜抽样前20、高风险售后客户榜抽样前10'
 
   try {
     const payTimeDiag = await runPayTimePrefilterDiagnostic({
@@ -392,11 +454,15 @@ export async function runDataAccuracyAudit(params: {
     })
     const periodCtx = await loadBuyerRankingPeriodContext(startDate, endDate)
 
+    const badCandidates = rankingItems.filter(isBadBuyerCandidate)
+    const buyerLimit = resolveBuyerAuditSampleLimit(fullScan, rankingItems.length)
+    const badLimit = resolveBadBuyerAuditSampleLimit(fullScan, badCandidates.length)
+
     let buyerDiff = 0
     const buyerSampleKeys: string[] = []
     const buyerSampleOrderIds: string[] = []
 
-    for (const item of rankingItems.slice(0, 20)) {
+    for (const item of rankingItems.slice(0, buyerLimit)) {
       const drawer = buildBuyerDrawerAuditMetrics({
         buyerKey: item.buyerKey,
         allViews: periodCtx.views,
@@ -440,13 +506,15 @@ export async function runDataAccuracyAudit(params: {
       checks,
       {
         key: 'buyer_ranking_vs_drawer',
-        title: '买家榜 vs 订单明细 Drawer（抽样20）',
+        title: fullScan
+          ? `买家榜 vs 订单明细 Drawer（全量 ${buyerLimit}）`
+          : '买家榜 vs 订单明细 Drawer（抽样20）',
         status: buyerDiff === 0 ? 'pass' : 'danger',
         diffCount: buyerDiff,
         note:
           buyerDiff === 0
-            ? '抽样买家榜单与订单明细逐单汇总一致（成交金额/签收/完成/售后/退款/品退）'
-            : `${buyerDiff} 个抽样买家榜单与订单明细不一致，差 1 分或 1 单即记为 danger`,
+            ? `${auditScopeNote}；榜单与订单明细逐单汇总一致（成交金额/签收/完成/售后/退款/品退）`
+            : `${auditScopeNote}；${buyerDiff} 个买家榜单与订单明细不一致，差 1 分或 1 单即记为 danger`,
         sampleBuyerKeys: buyerSampleKeys.slice(0, 5),
         sampleOrderIds: buyerSampleOrderIds.slice(0, 5),
       },
@@ -454,12 +522,11 @@ export async function runDataAccuracyAudit(params: {
       warnings,
     )
 
-    const badItems = rankingItems.filter(isBadBuyerCandidate).slice(0, 10)
     let badDiff = 0
     const badSampleKeys: string[] = []
     const badSampleOrderIds: string[] = []
 
-    for (const item of badItems) {
+    for (const item of badCandidates.slice(0, badLimit)) {
       const drawer = buildBadBuyerDrawerAuditMetrics({
         buyerKey: item.buyerKey,
         allViews: periodCtx.views,
@@ -501,13 +568,15 @@ export async function runDataAccuracyAudit(params: {
       checks,
       {
         key: 'bad_buyer_vs_drawer',
-        title: '高风险售后客户 vs 订单明细 Drawer（抽样10）',
+        title: fullScan
+          ? `高风险售后客户 vs 订单明细 Drawer（全量 ${badLimit}）`
+          : '高风险售后客户 vs 订单明细 Drawer（抽样10）',
         status: badDiff === 0 ? 'pass' : 'danger',
         diffCount: badDiff,
         note:
           badDiff === 0
-            ? '抽样高风险售后客户与订单明细逐单汇总一致（纯运费补偿不计入退货退款）'
-            : `${badDiff} 项与订单明细不一致，差 1 单或 1 分即记为 danger`,
+            ? `${auditScopeNote}；与订单明细逐单汇总一致（纯运费补偿不计入退货退款）`
+            : `${auditScopeNote}；${badDiff} 项与订单明细不一致，差 1 单或 1 分即记为 danger`,
         sampleBuyerKeys: badSampleKeys.slice(0, 5),
         sampleOrderIds: badSampleOrderIds.slice(0, 5),
       },

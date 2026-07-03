@@ -8,6 +8,7 @@ import {
   buildSyncRiskStatus,
   buildXhsRequestHash,
   checkXhsRequestAllowed,
+  checkXhsRequestAllowedWithJsonlCooldown,
   forceCircuitOpenForTests,
   resetSyncRequestAuditStateForTests,
   runXhsRequestWithAuditAndThrottle,
@@ -30,6 +31,14 @@ async function main() {
     trigger: 'page_open',
   })
   assert(!pageBlock.allowed && pageBlock.status === 'throttled', 'page_open 应被阻止', issues)
+
+  const allowed = checkXhsRequestAllowed({
+    apiName: 'order_list',
+    requestHash: hash,
+    trigger: 'scheduled',
+  })
+  assert(allowed.allowed && allowed.status === 'success', 'allowed=true 不应返回 skipped', issues)
+  assert(allowed.decision === 'allowed', 'allowed=true 时 decision 应为 allowed', issues)
 
   let executed = 0
   await runXhsRequestWithAuditAndThrottle({
@@ -70,7 +79,35 @@ async function main() {
   assert(circuit.status === 'circuit_open', '连续失败 >=5 应熔断', issues)
 
   resetSyncRequestAuditStateForTests()
+  const cooldownHash = 'verify-jsonl-cooldown-001'
   const startedAt = new Date().toISOString()
+  await appendSyncRequestAudit({
+    source: 'xhs',
+    apiName: 'order_list',
+    method: 'POST',
+    urlKey: '/verify',
+    requestHash: cooldownHash,
+    startedAt,
+    finishedAt: startedAt,
+    durationMs: 12,
+    status: 'success',
+    trigger: 'scheduled',
+  })
+
+  const day = formatDateKeyShanghai(new Date(startedAt))
+  const jsonlPath = path.join(getDataDir(), 'sync-request-audit', `${day}.jsonl`)
+  const jsonlRaw = await fs.readFile(jsonlPath, 'utf8')
+  assert(jsonlRaw.includes(cooldownHash), 'JSONL 应写入审计记录', issues)
+
+  resetSyncRequestAuditStateForTests()
+  const jsonlCooldown = await checkXhsRequestAllowedWithJsonlCooldown({
+    apiName: 'order_list',
+    requestHash: cooldownHash,
+    trigger: 'scheduled',
+  })
+  assert(!jsonlCooldown.allowed && jsonlCooldown.status === 'throttled', '重启后 JSONL 冷却应 throttled', issues)
+
+  resetSyncRequestAuditStateForTests()
   await appendSyncRequestAudit({
     source: 'xhs',
     apiName: 'order_list',
@@ -83,11 +120,6 @@ async function main() {
     status: 'success',
     trigger: 'scheduled',
   })
-
-  const day = formatDateKeyShanghai(new Date(startedAt))
-  const jsonlPath = path.join(getDataDir(), 'sync-request-audit', `${day}.jsonl`)
-  const jsonlRaw = await fs.readFile(jsonlPath, 'utf8')
-  assert(jsonlRaw.includes('verify-jsonl-001'), 'JSONL 应写入审计记录', issues)
 
   resetSyncRequestAuditStateForTests()
   const riskAfterRestart = await buildSyncRiskStatus()

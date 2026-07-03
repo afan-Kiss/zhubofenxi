@@ -308,12 +308,39 @@ function slugFromName(name: string): string {
   return `${base}-${Date.now().toString(36)}`
 }
 
+/** 保存 Cookie，不做平台接口探测（上传 / 粘贴即视为可用） */
+export async function persistLiveAccountCookieOnly(
+  id: string,
+  cookie: string,
+  updatedBy: string,
+  options?: { includeCookie?: boolean },
+): Promise<LiveAccountPublicView> {
+  const trimmed = cookie.trim()
+  if (!trimmed) throw new Error('Cookie 不能为空')
+  const row = await prisma.platformCredential.update({
+    where: { id },
+    data: {
+      cookieEncrypted: encryptText(trimmed),
+      updatedBy,
+      cookieStatus: 'valid',
+      cookieLastErrorCode: null,
+      cookieLastErrorMessage: null,
+      cookieLastFailedApi: null,
+      affectedBusinessSync: false,
+    },
+  })
+  if (isOfficialShopPlatformName(row.platformName)) {
+    clearShopCookieHealthCache(row.platformName)
+  }
+  return toPublicView(row, { includeCookie: options?.includeCookie })
+}
+
 export async function createLiveAccount(input: {
   name: string
   cookie: string
   enabled?: boolean
   updatedBy: string
-}): Promise<{ account: LiveAccountPublicView; testResult: Awaited<ReturnType<typeof testLiveAccountCookie>> }> {
+}): Promise<LiveAccountPublicView> {
   const name = input.name.trim()
   const cookie = input.cookie.trim()
   if (!name) throw new Error('请填写直播号名称')
@@ -326,57 +353,19 @@ export async function createLiveAccount(input: {
       cookieEncrypted: encryptText(cookie),
       enabled: input.enabled !== false,
       updatedBy: input.updatedBy,
-      cookieStatus: 'unknown',
+      cookieStatus: 'valid',
     },
   })
 
-  const testResult = await testLiveAccountCookie(row.id)
-  const refreshed = await prisma.platformCredential.findUnique({ where: { id: row.id } })
-  return { account: toPublicView(refreshed!, { includeCookie: true }), testResult }
+  return toPublicView(row, { includeCookie: true })
 }
 
 export async function updateLiveAccountCookie(
   id: string,
   cookie: string,
   updatedBy: string,
-): Promise<{ account: LiveAccountPublicView; testResult: Awaited<ReturnType<typeof testLiveAccountCookie>> }> {
-  const trimmed = cookie.trim()
-  if (!trimmed) throw new Error('Cookie 不能为空')
-  await prisma.platformCredential.update({
-    where: { id },
-    data: {
-      cookieEncrypted: encryptText(trimmed),
-      updatedBy,
-      cookieStatus: 'unknown',
-      affectedBusinessSync: false,
-    },
-  })
-  const testResult = await testLiveAccountCookie(id)
-  const refreshed = await prisma.platformCredential.findUnique({ where: { id } })
-  return { account: toPublicView(refreshed!, { includeCookie: true }), testResult }
-}
-
-/** 仅保存 Cookie，不立即做平台验证（机器人上传链路用） */
-export async function persistLiveAccountCookieOnly(
-  id: string,
-  cookie: string,
-  updatedBy: string,
 ): Promise<LiveAccountPublicView> {
-  const trimmed = cookie.trim()
-  if (!trimmed) throw new Error('Cookie 不能为空')
-  const row = await prisma.platformCredential.update({
-    where: { id },
-    data: {
-      cookieEncrypted: encryptText(trimmed),
-      updatedBy,
-      cookieStatus: 'unknown',
-      affectedBusinessSync: false,
-    },
-  })
-  if (isOfficialShopPlatformName(row.platformName)) {
-    clearShopCookieHealthCache(row.platformName)
-  }
-  return toPublicView(row, { includeCookie: false })
+  return persistLiveAccountCookieOnly(id, cookie, updatedBy, { includeCookie: true })
 }
 
 export async function updateLiveAccountMeta(
@@ -621,14 +610,35 @@ function mapShopHealthToPublicView(
   } | null,
   options?: { includeCookie?: boolean },
 ): LiveAccountPublicView {
-  const cookieStatus: CookieHealthStatus =
+  const rowCookieStatus = (row?.cookieStatus as CookieHealthStatus) || 'unknown'
+  let cookieStatus: CookieHealthStatus =
     health.status === 'ok'
       ? 'valid'
-      : health.status === 'unknown'
-        ? 'unknown'
-        : 'invalid'
+      : health.status === 'unknown' &&
+          (rowCookieStatus === 'valid' || rowCookieStatus === 'invalid')
+        ? rowCookieStatus
+        : health.status === 'unknown'
+          ? 'unknown'
+          : 'invalid'
+  let healthStatus = health.status
+  let healthOk = health.ok
+  let syncReason = health.reason
+  if (health.status === 'unknown' && rowCookieStatus === 'valid') {
+    healthStatus = 'ok'
+    healthOk = true
+    syncReason = '校验通过'
+    cookieStatus = 'valid'
+  } else if (health.status === 'unknown' && rowCookieStatus === 'invalid') {
+    healthStatus = 'invalid'
+    healthOk = false
+    cookieStatus = 'invalid'
+    syncReason =
+      row?.cookieLastErrorMessage?.trim() ||
+      health.reason ||
+      '登录状态校验失败，可能需要重新推送 Cookie'
+  }
   const statusLevel: 'ok' | 'warning' | 'error' =
-    health.ok ? 'ok' : health.status === 'unknown' ? 'warning' : 'error'
+    healthOk ? 'ok' : healthStatus === 'unknown' ? 'warning' : 'error'
 
   let cookiePreview: string | null = null
   let cookie: string | null = null
@@ -660,21 +670,21 @@ function mapShopHealthToPublicView(
       ? resolveCookieUploadSource(row?.updatedBy)
       : 'unknown',
     cookieStatus,
-    cookieLastCheckedAt: health.checkedAt,
+    cookieLastCheckedAt: row?.cookieLastCheckedAt?.toISOString() ?? health.checkedAt,
     cookieLastSuccessAt: row?.cookieLastSuccessAt?.toISOString() ?? null,
-    cookieLastFailedAt: health.ok ? null : health.checkedAt,
-    cookieLastErrorCode: health.ok ? null : row?.cookieLastErrorCode ?? null,
-    cookieLastErrorMessage: health.ok ? null : health.reason,
+    cookieLastFailedAt: healthOk ? null : health.checkedAt,
+    cookieLastErrorCode: healthOk ? null : row?.cookieLastErrorCode ?? null,
+    cookieLastErrorMessage: healthOk ? null : syncReason,
     cookieLastFailedApi: health.failedEndpoint,
-    affectedBusinessSync: row?.affectedBusinessSync ?? !health.ok,
+    affectedBusinessSync: row?.affectedBusinessSync ?? !healthOk,
     lastSyncSuccessAt: row?.lastSyncSuccessAt?.toISOString() ?? null,
-    canSyncOrders: health.ok,
+    canSyncOrders: healthOk,
     officialShopKey: health.shopCode,
     legacyShopKey: null,
-    syncReason: health.reason,
+    syncReason,
     statusLevel,
-    cookieDisplayStatus: health.status,
-    healthStatus: health.status,
+    cookieDisplayStatus: healthStatus,
+    healthStatus,
   }
 }
 

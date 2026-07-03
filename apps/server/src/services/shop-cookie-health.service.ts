@@ -6,12 +6,11 @@ import {
 import type { QianfanShopName } from '../config/qianfan-shops.constants'
 import { decryptText } from '../utils/crypto'
 import { cookieContainsA1 } from '../utils/cookie-sync-status.util'
-import { logInfo, logWarn } from '../utils/server-log'
+import { logWarn } from '../utils/server-log'
 import {
   resolveOfficialShopAccountForStatus,
   type PlatformCredentialRow,
 } from './official-shop-account.service'
-import { testLiveAccountCookie } from './live-account.service'
 
 export type ShopCookieHealthStatus =
   | 'ok'
@@ -43,7 +42,6 @@ export interface ShopCookieHealthResult {
 }
 
 const CACHE_TTL_MS = 5 * 60_000
-const STALE_AFTER_MS = 7 * 24 * 60 * 60_000
 
 const healthCache = new Map<
   GoodReviewShopKey,
@@ -98,17 +96,26 @@ function mapDbStatusToHealth(
       ...base,
       status: 'ok',
       ok: true,
-      reason: '校验通过',
+      reason: row.cookieLastCheckedAt ? '校验通过' : '已收到 Cookie',
       source: 'db_status',
     }
   }
 
   if (row.cookieStatus === 'unknown') {
+    if (cookieContainsA1(plain)) {
+      return {
+        ...base,
+        status: 'ok',
+        ok: true,
+        reason: '已收到 Cookie',
+        source: 'db_status',
+      }
+    }
     return {
       ...base,
-      status: 'unknown',
+      status: 'incomplete',
       ok: false,
-      reason: '正在校验 Cookie',
+      reason: 'Cookie 缺少 a1，请重新推送完整 Cookie',
       source: 'db_status',
     }
   }
@@ -179,93 +186,21 @@ function buildStructuralHealth(
     }
   }
 
-  const lastCheckedMs = row.cookieLastCheckedAt?.getTime() ?? 0
-  const updatedMs = row.updatedAt.getTime()
-  const now = Date.now()
-  if (
-    row.cookieStatus !== 'valid' &&
-    lastCheckedMs > 0 &&
-    now - lastCheckedMs > STALE_AFTER_MS &&
-    now - updatedMs > STALE_AFTER_MS
-  ) {
-    return {
-      ...base,
-      status: 'stale',
-      ok: false,
-      reason: 'Cookie 太久未校验，建议重新推送或点击检测',
-      hasCookie: true,
-      hasA1,
-      hasArkToken,
-      hasSellerToken,
-      source: 'structural',
-    }
-  }
-
   return null
 }
 
 function logUnhealthyShop(health: ShopCookieHealthResult): void {
-  if (health.ok || health.status === 'unknown') return
+  if (health.ok) return
   logWarn(
     'Cookie健康检查',
     JSON.stringify({
       shopCode: health.shopCode,
       shopName: health.shopName,
       source: health.source,
-      failedEndpoint: health.failedEndpoint,
-      httpStatus: health.httpStatus,
       reason: health.reason,
-      checkedAt: health.checkedAt,
       status: health.status,
     }),
   )
-}
-
-async function probeLiveHealth(
-  shopKey: GoodReviewShopKey,
-  shopName: QianfanShopName,
-  row: PlatformCredentialRow,
-  plain: string,
-): Promise<ShopCookieHealthResult> {
-  const probe = await testLiveAccountCookie(row.id)
-  const checkedAt = new Date().toISOString()
-  const base = {
-    shopCode: shopKey,
-    shopName,
-    displayName: shopName,
-    checkedAt,
-    updatedAt: row.updatedAt.toISOString(),
-    hasCookie: true,
-    hasA1: cookieContainsA1(plain),
-    hasArkToken: cookieHasArkToken(plain),
-    hasSellerToken: cookieHasSellerToken(plain),
-    accountId: row.id,
-    failedEndpoint: probe.ok ? null : 'order_list',
-    httpStatus: null as number | null,
-    source: 'live_probe' as const,
-  }
-
-  if (probe.ok) {
-    logInfo('Cookie健康检查', `${shopName}(${shopKey}) 真实接口探测通过`)
-    return {
-      ...base,
-      status: 'ok',
-      ok: true,
-      reason: '校验通过',
-    }
-  }
-
-  const health: ShopCookieHealthResult = {
-    ...base,
-    status: 'invalid',
-    ok: false,
-    reason:
-      probe.errorCode === '401' || probe.errorCode === '403' || /401|403|过期|未登录/i.test(probe.message)
-        ? '登录状态校验失败，可能需要重新推送 Cookie'
-        : `系统已检测到 Cookie，但真实接口访问失败：${probe.message}`,
-  }
-  logUnhealthyShop(health)
-  return health
 }
 
 export function clearShopCookieHealthCache(shopKey?: GoodReviewShopKey): void {
@@ -277,30 +212,25 @@ export function clearShopCookieHealthCache(shopKey?: GoodReviewShopKey): void {
 }
 
 export function isCookieHealthBlocking(status: ShopCookieHealthStatus): boolean {
-  return status === 'missing' || status === 'incomplete' || status === 'invalid' || status === 'stale'
+  return status === 'missing' || status === 'incomplete' || status === 'invalid'
 }
 
-/** 四店 Cookie 唯一健康检查入口 */
+/** 四店 Cookie 状态（仅读库 + 结构检查，不主动调平台接口；真实探测仅 settings 页「检测」） */
 export async function getShopCookieHealth(
   shopKey: GoodReviewShopKey,
-  options?: { fresh?: boolean },
+  _options?: { fresh?: boolean },
 ): Promise<ShopCookieHealthResult> {
   const shopName = getGoodReviewShopName(shopKey)
-  const fresh = options?.fresh === true
 
-  if (!fresh) {
-    const cached = healthCache.get(shopKey)
-    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-      const rowForCache = await resolveOfficialShopAccountForStatus(shopKey)
-      const dbCheckedMs = rowForCache?.cookieLastCheckedAt?.getTime() ?? 0
-      const cachedCheckedMs = cached.result.checkedAt
-        ? Date.parse(cached.result.checkedAt)
-        : 0
-      if (!dbCheckedMs || dbCheckedMs <= cachedCheckedMs) {
-        return { ...cached.result, source: 'cache' }
-      }
-      healthCache.delete(shopKey)
+  const cached = healthCache.get(shopKey)
+  if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+    const rowForCache = await resolveOfficialShopAccountForStatus(shopKey)
+    const dbUpdatedMs = rowForCache?.updatedAt.getTime() ?? 0
+    const cachedUpdatedMs = cached.result.updatedAt ? Date.parse(cached.result.updatedAt) : 0
+    if (!dbUpdatedMs || dbUpdatedMs <= cachedUpdatedMs) {
+      return { ...cached.result, source: 'cache' }
     }
+    healthCache.delete(shopKey)
   }
 
   const row = await resolveOfficialShopAccountForStatus(shopKey)
@@ -320,50 +250,10 @@ export async function getShopCookieHealth(
     return missing
   }
 
-  if (fresh) {
-    const probed = await probeLiveHealth(shopKey, shopName, row, plain)
-    healthCache.set(shopKey, { result: probed, cachedAt: Date.now() })
-    return probed
-  }
-
-  const lastCheckedMs = row.cookieLastCheckedAt?.getTime() ?? 0
-  const cacheFresh = lastCheckedMs > 0 && Date.now() - lastCheckedMs < CACHE_TTL_MS
-
-  if (cacheFresh) {
-    const fromDb = mapDbStatusToHealth(row, plain, shopKey, shopName)
-    if (fromDb.status !== 'unknown' || row.cookieStatus === 'unknown') {
-      healthCache.set(shopKey, { result: fromDb, cachedAt: Date.now() })
-      if (!fromDb.ok) logUnhealthyShop(fromDb)
-      return fromDb
-    }
-  }
-
-  if (structural?.status === 'stale') {
-    logUnhealthyShop(structural)
-    healthCache.set(shopKey, { result: structural, cachedAt: Date.now() })
-    return structural
-  }
-
-  const unknown: ShopCookieHealthResult = {
-    shopCode: shopKey,
-    shopName,
-    displayName: shopName,
-    status: 'unknown',
-    ok: false,
-    checkedAt: row.cookieLastCheckedAt?.toISOString() ?? null,
-    updatedAt: row.updatedAt.toISOString(),
-    reason: '正在校验 Cookie',
-    failedEndpoint: null,
-    httpStatus: null,
-    hasCookie: true,
-    hasA1: cookieContainsA1(plain),
-    hasArkToken: cookieHasArkToken(plain),
-    hasSellerToken: cookieHasSellerToken(plain),
-    source: 'db_status',
-    accountId: row.id,
-  }
-  healthCache.set(shopKey, { result: unknown, cachedAt: Date.now() })
-  return unknown
+  const fromDb = mapDbStatusToHealth(row, plain, shopKey, shopName)
+  healthCache.set(shopKey, { result: fromDb, cachedAt: Date.now() })
+  if (!fromDb.ok) logUnhealthyShop(fromDb)
+  return fromDb
 }
 
 export async function getAllShopCookieHealth(options?: {

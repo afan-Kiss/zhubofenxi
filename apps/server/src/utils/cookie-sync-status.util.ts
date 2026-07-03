@@ -93,9 +93,17 @@ export function deriveCookieSyncState(
   }
 
   if (st === 'unknown') {
+    if (plain && cookieContainsA1(plain)) {
+      return {
+        status: 'valid',
+        reason: '已收到 Cookie，可同步订单',
+        canSyncOrders: true,
+        statusLevel: 'ok',
+      }
+    }
     return {
       status: 'unknown',
-      reason: '正在校验 Cookie',
+      reason: '尚未收到有效 Cookie',
       canSyncOrders: false,
       statusLevel: 'warning',
     }

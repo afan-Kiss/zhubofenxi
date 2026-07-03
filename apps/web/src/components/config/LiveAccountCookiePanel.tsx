@@ -479,34 +479,21 @@ export const LiveAccountCookiePanel: React.FC = () => {
     }
     setCreating(true)
     try {
-      const res = await apiRequest<
-        LiveAccountPublic & { message?: string; testResult?: { ok: boolean; message: string } }
-      >('/api/settings/live-accounts', {
-        method: 'POST',
-        body: JSON.stringify({ name: newName.trim(), cookie: newCookie.trim(), enabled: true }),
-      })
+      const res = await apiRequest<LiveAccountPublic & { message?: string }>(
+        '/api/settings/live-accounts',
+        {
+          method: 'POST',
+          body: JSON.stringify({ name: newName.trim(), cookie: newCookie.trim(), enabled: true }),
+        },
+      )
       setNewName('')
       setNewCookie('')
       if (res.id) {
         setAccounts((prev) => [...prev, res])
-        if (res.testResult) {
-          setTestResults((prev) => ({
-            ...prev,
-            [res.id]: {
-              ok: res.testResult!.ok,
-              message: res.testResult!.message,
-              checkedAt: new Date().toISOString(),
-              accountId: res.id,
-              accountName: res.name,
-              apiName: '订单接口',
-              status: res.testResult!.ok ? 'valid' : 'invalid',
-            },
-          }))
-        }
       } else {
         await refreshAccounts({ silent: true })
       }
-      showToast(res.testResult?.ok ? 'ok' : 'err', res.message ?? '直播号已创建')
+      showToast('ok', res.message ?? '直播号已创建')
     } catch (e) {
       showToast('err', e instanceof Error ? e.message : '创建失败')
     } finally {
@@ -522,29 +509,21 @@ export const LiveAccountCookiePanel: React.FC = () => {
     }
     setBusyId(id)
     try {
-      const res = await apiRequest<
-        LiveAccountPublic & { message?: string; testResult?: { ok: boolean; message: string } }
-      >(`/api/settings/live-accounts/${id}/cookie`, {
-        method: 'PUT',
-        body: JSON.stringify({ cookie }),
-      })
+      const res = await apiRequest<LiveAccountPublic & { message?: string }>(
+        `/api/settings/live-accounts/${id}/cookie`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ cookie }),
+        },
+      )
       setEditCookies((prev) => ({ ...prev, [id]: '' }))
       patchAccount(res)
-      if (res.testResult) {
-        setTestResults((prev) => ({
-          ...prev,
-          [id]: {
-            ok: res.testResult!.ok,
-            message: res.testResult!.message,
-            checkedAt: new Date().toISOString(),
-            accountId: id,
-            accountName: res.name,
-            apiName: '订单接口',
-            status: res.testResult!.ok ? 'valid' : 'invalid',
-          },
-        }))
-      }
-      showToast(res.testResult?.ok ? 'ok' : 'err', res.message ?? 'Cookie 已更新')
+      setTestResults((prev) => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+      showToast('ok', res.message ?? 'Cookie 已更新')
       clearCookieExpiredModalShownKeys()
       await refreshAccounts({ silent: true })
     } catch (e) {
@@ -656,9 +635,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
     const available = enabled.filter((a) => resolveAccountCookieAvailable(a, testResults[a.id])).length
     const checking = enabled.filter((a) => {
       const test = testResults[a.id]
-      if (test?.status === 'testing' || testingIds.has(a.id)) return true
-      if (resolveAccountCookieAvailable(a, test)) return false
-      return a.healthStatus === 'unknown' && !a.cookieLastCheckedAt
+      return test?.status === 'testing' || testingIds.has(a.id)
     }).length
     const unavailable = Math.max(0, enabled.length - available - checking)
     return { available, unavailable, checking }
@@ -789,7 +766,9 @@ export const LiveAccountCookiePanel: React.FC = () => {
                 {cookieReason && !cookieAvailable ? (
                   <p className="max-w-[260px] text-[10px] leading-snug text-rose-700">{cookieReason}</p>
                 ) : cookieAvailable ? (
-                  <p className="max-w-[260px] text-[10px] leading-snug text-emerald-700">校验通过</p>
+                  <p className="max-w-[260px] text-[10px] leading-snug text-emerald-700">
+                    {account.cookieLastCheckedAt || latestTest?.ok ? '校验通过' : '已收到 Cookie'}
+                  </p>
                 ) : null}
                 {isTesting ? (
                   <span className="block text-[10px] text-indigo-600">检测中</span>
@@ -997,7 +976,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
                           onClick={() => void handleUpdateCookie(account.id)}
                           className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                         >
-                          {isBusy ? '保存并检测中…' : '更新 Cookie'}
+                          {isBusy ? '保存中…' : '更新 Cookie'}
                         </button>
                       </div>
                     </>
@@ -1053,7 +1032,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
       {!loading && activeAccounts.length > 0 ? (
         <div className="mt-4 grid grid-cols-3 gap-2">
           <div className="rounded-lg border border-emerald-100 bg-emerald-50/60 px-3 py-2">
-            <p className="text-[10px] text-emerald-700">校验通过</p>
+            <p className="text-[10px] text-emerald-700">可用</p>
             <p className="mt-0.5 text-lg font-semibold text-emerald-800">{stats.available}</p>
           </div>
           <div
@@ -1075,7 +1054,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
             </p>
           </div>
           <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2">
-            <p className="text-[10px] text-indigo-700">正在校验</p>
+            <p className="text-[10px] text-indigo-700">检测中</p>
             <p className="mt-0.5 text-lg font-semibold text-indigo-800">{stats.checking}</p>
           </div>
         </div>
@@ -1200,7 +1179,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
           onClick={() => void handleCreate()}
           className="mt-2 rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
         >
-          {creating ? '保存并检测中…' : '新增直播号'}
+          {creating ? '保存中…' : '新增直播号'}
         </button>
       </div>
     </section>

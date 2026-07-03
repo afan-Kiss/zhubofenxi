@@ -1,13 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { apiRequest } from '../../lib/api'
 import { fetchBoardSyncMeta } from '../../lib/board-live-query'
 import {
   accountCanSyncOrders,
   accountsNotSyncableForModal,
-  isCookieHealthBlocking,
   type CookieHealthPayload,
   type LiveAccountPublic,
-  type ShopCookieHealthResult,
 } from '../../lib/live-account'
 import { CookieExpiredModal } from './CookieExpiredModal'
 
@@ -32,55 +29,17 @@ function failureKey(account: LiveAccountPublic): string {
   return `${account.id}:${account.healthStatus ?? account.cookieLastFailedAt ?? account.syncReason ?? 'unknown'}`
 }
 
-function shopHealthToAccount(shop: ShopCookieHealthResult): LiveAccountPublic {
-  return {
-    id: shop.accountId ?? shop.shopCode,
-    name: shop.shopName,
-    enabled: true,
-    hasCookie: shop.hasCookie,
-    cookiePreview: shop.hasCookie ? '已保存' : null,
-    cookieUpdatedAt: shop.updatedAt,
-    cookieStatus: shop.status === 'ok' ? 'valid' : shop.status === 'unknown' ? 'unknown' : 'invalid',
-    cookieLastCheckedAt: shop.checkedAt,
-    cookieLastSuccessAt: shop.ok ? shop.checkedAt : null,
-    cookieLastFailedAt: shop.ok ? null : shop.checkedAt,
-    cookieLastErrorCode: null,
-    cookieLastErrorMessage: shop.ok ? null : shop.reason,
-    cookieLastFailedApi: shop.failedEndpoint,
-    affectedBusinessSync: !shop.ok,
-    lastSyncSuccessAt: null,
-    canSyncOrders: shop.ok,
-    officialShopKey: shop.shopCode,
-    syncReason: shop.reason,
-    healthStatus: shop.status,
-    statusLevel: shop.ok ? 'ok' : shop.status === 'unknown' ? 'warning' : 'error',
-    cookieDisplayStatus: shop.status,
-  }
-}
-
 export const CookieHealthWatcher: React.FC = () => {
   const [modalAccounts, setModalAccounts] = useState<LiveAccountPublic[]>([])
   const [open, setOpen] = useState(false)
   const shownRef = useRef(readShownKeys())
-  const freshProbeDoneRef = useRef(false)
 
-  const poll = useCallback(async (options?: { fresh?: boolean }) => {
+  /** 只读同步元数据，不主动调平台探测 Cookie */
+  const poll = useCallback(async () => {
     try {
-      const fresh = options?.fresh === true
-      const [meta, healthPayload] = await Promise.all([
-        fetchBoardSyncMeta(),
-        fresh
-          ? apiRequest<{ shops: ShopCookieHealthResult[] }>('/api/shop-cookies/health?fresh=1')
-          : Promise.resolve(null),
-      ])
-
+      const meta = await fetchBoardSyncMeta()
       const payload = (meta as { cookieHealth?: CookieHealthPayload }).cookieHealth ?? null
-      const modalSource: LiveAccountPublic[] = fresh && healthPayload?.shops
-        ? healthPayload.shops
-            .map(shopHealthToAccount)
-            .filter((a) => isCookieHealthBlocking(a.healthStatus))
-        : accountsNotSyncableForModal(payload)
-
+      const modalSource = accountsNotSyncableForModal(payload)
       const freshModal = modalSource.filter((a) => !shownRef.current.has(failureKey(a)))
 
       if (freshModal.length > 0) {
@@ -105,10 +64,8 @@ export const CookieHealthWatcher: React.FC = () => {
   }, [])
 
   useEffect(() => {
-    void poll({ fresh: true }).finally(() => {
-      freshProbeDoneRef.current = true
-    })
-    const timer = window.setInterval(() => void poll({ fresh: false }), 60_000)
+    void poll()
+    const timer = window.setInterval(() => void poll(), 5 * 60_000)
     return () => window.clearInterval(timer)
   }, [poll])
 

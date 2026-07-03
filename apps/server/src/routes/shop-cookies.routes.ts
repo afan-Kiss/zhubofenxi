@@ -64,7 +64,7 @@ shopCookiesRouter.get('/status', allowShopCookieAccess, async (_req, res, next) 
   }
 })
 
-/** 四店 Cookie 统一健康检查（fresh=1 时强制真实接口探测） */
+/** 四店 Cookie 状态（只读库，不主动调平台接口；fresh=1 已废弃，与默认相同） */
 shopCookiesRouter.get('/health', allowShopCookieAccess, async (req, res, next) => {
   try {
     const { getShopCookieHealthPayload } = await import('../services/shop-cookie-health.service')

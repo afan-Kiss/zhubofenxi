@@ -270,16 +270,15 @@ settingsRouter.get('/live-accounts', async (_req, res) => {
 
 settingsRouter.post('/live-accounts', async (req, res) => {
   try {
-    const result = await createLiveAccount({
+    const account = await createLiveAccount({
       name: String(req.body?.name ?? ''),
       cookie: String(req.body?.cookie ?? ''),
       enabled: req.body?.enabled !== false,
       updatedBy: req.user!.id,
     })
     sendOk(res, {
-      ...result.account,
-      testResult: result.testResult,
-      message: result.testResult.ok ? '直播号已创建，Cookie 测试成功' : '直播号已创建，Cookie 测试失败',
+      ...account,
+      message: '直播号已创建',
     })
     await refreshLiveAccountRowMapperContext()
   } catch (err) {
@@ -321,15 +320,14 @@ settingsRouter.post('/live-accounts/:id/test-cookie', async (req, res) => {
 
 settingsRouter.put('/live-accounts/:id/cookie', async (req, res) => {
   try {
-    const result = await updateLiveAccountCookie(
+    const account = await updateLiveAccountCookie(
       req.params.id,
       String(req.body?.cookie ?? ''),
       req.user!.id,
     )
     sendOk(res, {
-      ...result.account,
-      testResult: result.testResult,
-      message: result.testResult.ok ? 'Cookie 已更新并测试成功' : 'Cookie 已更新但测试失败',
+      ...account,
+      message: 'Cookie 已更新',
     })
     await refreshLiveAccountRowMapperContext()
   } catch (err) {

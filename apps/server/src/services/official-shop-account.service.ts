@@ -10,7 +10,6 @@ import {
 import { resolveCanonicalShopName, type QianfanShopName } from '../config/qianfan-shops.constants'
 import {
   persistLiveAccountCookieOnly,
-  testLiveAccountCookie,
 } from './live-account.service'
 import { cookieContainsA1 } from '../utils/cookie-sync-status.util'
 
@@ -154,7 +153,6 @@ export async function upsertOfficialShopAccountCookie(
   const official = before ?? (await ensureOfficialShopAccount(shopKey, updatedBy))
 
   await persistLiveAccountCookieOnly(official.id, trimmed, updatedBy)
-  await testLiveAccountCookie(official.id).catch(() => undefined)
 
   const refreshed = await prisma.platformCredential.findUnique({ where: { id: official.id } })
   if (!refreshed) throw new Error('官方账号保存后读取失败')

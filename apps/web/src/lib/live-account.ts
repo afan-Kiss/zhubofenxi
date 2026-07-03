@@ -163,43 +163,40 @@ export interface CookieSessionTest {
 }
 
 export function isCookieHealthBlocking(status: ShopCookieHealthStatus | string | undefined): boolean {
-  return status === 'missing' || status === 'incomplete' || status === 'invalid' || status === 'stale'
+  return status === 'missing' || status === 'incomplete' || status === 'invalid'
 }
 
 export function resolveHealthFriendlyLabel(
   account: LiveAccountPublic,
   sessionTest?: CookieSessionTest | null,
 ): string {
-  if (sessionTest?.status === 'testing') return '正在校验 Cookie'
-  if (resolveAccountCookieAvailable(account, sessionTest)) return '校验通过'
-  if (account.healthStatus === 'ok') return '校验通过'
+  if (sessionTest?.status === 'testing') return '检测中…'
+  if (resolveAccountCookieAvailable(account, sessionTest)) {
+    if (sessionTest?.ok || account.cookieLastCheckedAt) return '校验通过'
+    return '已收到 Cookie'
+  }
   if (account.healthStatus === 'missing') {
     return `${getAccountDisplayName(account)}尚未收到 Cookie，请推送或粘贴`
   }
   if (account.healthStatus === 'incomplete') {
     return `${getAccountDisplayName(account)} Cookie 不完整，请重新推送完整 Cookie`
   }
-  if (account.healthStatus === 'stale') {
-    return `${getAccountDisplayName(account)} Cookie 太久未校验，建议重新推送`
+  if (account.healthStatus === 'invalid' || account.cookieStatus === 'invalid') {
+    return account.syncReason?.trim() || account.cookieLastErrorMessage?.trim() || '检测未通过，请重新推送 Cookie'
   }
-  if (account.healthStatus === 'invalid') {
-    return account.syncReason?.trim() || `${getAccountDisplayName(account)}登录状态校验失败，可能需要重新推送 Cookie`
-  }
-  if (account.healthStatus === 'unknown') return '正在校验 Cookie'
-  if (resolveAccountCookieAvailable(account, sessionTest)) return '校验通过'
-  return resolveAccountCookieFriendlyReason(account, sessionTest) ?? 'Cookie 状态待确认'
+  if (account.syncReason?.trim()) return account.syncReason.trim()
+  return resolveAccountCookieFriendlyReason(account, sessionTest) ?? 'Cookie 不可用'
 }
 
+/** 上传即视为可用；仅手动「检测」失败或结构不完整时为不可用 */
 export function accountCookieAvailable(account: LiveAccountPublic): boolean {
-  if (account.healthStatus === 'ok') return true
-  if (account.healthStatus && isCookieHealthBlocking(account.healthStatus)) return false
   if (!account.hasCookie) return false
-  // 以最近一次 Cookie 检测结果为准（与「检测」按钮、DB cookieStatus 一致）
-  if (account.cookieLastCheckedAt) {
-    return account.cookieStatus === 'valid'
-  }
-  if (account.healthStatus === 'unknown') return false
-  return accountCanSyncOrders(account)
+  if (account.healthStatus && isCookieHealthBlocking(account.healthStatus)) return false
+  if (account.cookieStatus === 'invalid') return false
+  if (account.healthStatus === 'ok') return true
+  if (account.canSyncOrders === true) return true
+  if (account.cookieStatus === 'valid') return true
+  return false
 }
 
 /** 列表、详情、统计共用：优先采用比服务端记录更新的本次检测结果 */
@@ -256,8 +253,8 @@ export function resolveAccountCookieFriendlyReason(
   const msg = account.cookieLastErrorMessage?.trim() || account.syncReason?.trim() || ''
   const combined = `${code} ${msg}`
 
-  if (!account.cookieLastCheckedAt && account.cookieStatus === 'unknown') {
-    return 'Cookie 尚未验证通过'
+  if (account.cookieStatus === 'unknown' && account.hasCookie) {
+    return '已收到 Cookie'
   }
   if (/401|403|902|登录已过期|未登录|expired/i.test(combined)) {
     return 'Cookie 已过期'
@@ -274,9 +271,9 @@ export function resolveAccountCookieFriendlyReason(
 }
 
 export function accountCanSyncOrders(account: LiveAccountPublic): boolean {
-  if (account.canSyncOrders !== undefined) return account.canSyncOrders
   if (!account.enabled || !account.hasCookie) return false
-  return account.cookieStatus === 'valid'
+  if (account.canSyncOrders !== undefined) return account.canSyncOrders
+  return account.cookieStatus !== 'invalid'
 }
 
 export function accountsNotSyncableForModal(payload: CookieHealthPayload | null): LiveAccountPublic[] {
@@ -285,7 +282,7 @@ export function accountsNotSyncableForModal(payload: CookieHealthPayload | null)
     if (!a.enabled) return false
     if (a.legacyShopKey && !a.officialShopKey) return false
     if (a.healthStatus) return isCookieHealthBlocking(a.healthStatus)
-    return !accountCanSyncOrders(a) && a.cookieStatus !== 'unknown'
+    return !accountCanSyncOrders(a)
   })
 }
 
@@ -295,7 +292,7 @@ export function invalidAccountsForModal(payload: CookieHealthPayload | null): Li
 }
 
 export function accountSyncReason(account: LiveAccountPublic): string {
-  if (account.healthStatus === 'unknown') return '正在校验 Cookie'
+  if (account.healthStatus === 'missing') return '尚未收到 Cookie'
   if (account.syncReason?.trim()) return account.syncReason.trim()
   if (account.healthStatus === 'ok') return '校验通过'
   if (account.healthStatus && isCookieHealthBlocking(account.healthStatus)) {
@@ -315,7 +312,7 @@ export function buildCookieBannerMessage(payload: CookieHealthPayload | null): s
   const notSyncable = enabled.filter((a) => {
     if (a.legacyShopKey && !a.officialShopKey) return false
     if (a.healthStatus) return isCookieHealthBlocking(a.healthStatus)
-    return !accountCanSyncOrders(a) && a.cookieStatus !== 'unknown'
+    return !accountCanSyncOrders(a)
   })
   const syncable = enabled.filter((a) => accountCanSyncOrders(a))
   const missing = notSyncable.filter((a) => !a.hasCookie)

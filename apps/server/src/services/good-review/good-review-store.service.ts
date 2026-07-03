@@ -1,5 +1,8 @@
 import { prisma } from '../../lib/prisma'
-import { resolveReviewImages } from './good-review-normalize.service'
+import {
+  resolveReviewImages,
+  resolveGoodReviewItemPriceCentFromRawJson,
+} from './good-review-normalize.service'
 import type {
   NormalizedGoodReview,
   NormalizedGoodReviewShopStats,
@@ -129,6 +132,25 @@ export async function touchGoodReviewSyncMeta(syncedAt: Date): Promise<void> {
 export async function getGoodReviewLastSyncedAt(): Promise<Date | null> {
   const row = await prisma.goodReviewSyncMeta.findUnique({ where: { id: 'default' } })
   return row?.lastSyncedAt ?? null
+}
+
+export async function repairCorruptedGoodReviewPrices(): Promise<number> {
+  const rows = await prisma.goodReview.findMany({
+    where: { rawJson: { not: null } },
+    select: { id: true, itemPriceCent: true, rawJson: true },
+  })
+
+  let fixed = 0
+  for (const row of rows) {
+    const nextCent = resolveGoodReviewItemPriceCentFromRawJson(row.rawJson)
+    if (nextCent == null || nextCent === row.itemPriceCent) continue
+    await prisma.goodReview.update({
+      where: { id: row.id },
+      data: { itemPriceCent: nextCent },
+    })
+    fixed += 1
+  }
+  return fixed
 }
 
 export async function repairCorruptedGoodReviewImages(): Promise<number> {

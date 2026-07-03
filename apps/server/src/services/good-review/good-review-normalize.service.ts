@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { extractFieldPair, parseMoneyToCent } from '../../utils/amount-parse.service'
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
@@ -200,6 +201,51 @@ function stableStringify(value: unknown): string {
   return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(',')}}`
 }
 
+const GOOD_REVIEW_PRICE_KEYS = ['price', 'salePrice', 'itemPrice', 'payPrice'] as const
+
+/** 平台 sku_info.price 通常为分；少数接口带 displayValue 或 priceCent 字段 */
+export function resolveGoodReviewItemPriceCent(
+  skuInfo: Record<string, unknown> | null,
+  item: Record<string, unknown> | null,
+  raw: Record<string, unknown>,
+): number | null {
+  const sources = [skuInfo, item, raw].filter((src): src is Record<string, unknown> => Boolean(src))
+
+  for (const src of sources) {
+    const centDirect = pickNumber(src, ['priceCent', 'price_cent'])
+    if (centDirect != null) return Math.round(centDirect)
+  }
+
+  for (const src of sources) {
+    for (const key of GOOD_REVIEW_PRICE_KEYS) {
+      const pair = extractFieldPair(src, key)
+      const rawValue = pair.value ?? src[key]
+      if (rawValue == null || rawValue === '') continue
+      const parsed = parseMoneyToCent(rawValue, pair.displayValue, key)
+      if (parsed.strategy !== 'empty' && parsed.cent > 0) return parsed.cent
+    }
+  }
+
+  return null
+}
+
+export function resolveGoodReviewItemPriceCentFromRawJson(rawJson: string | null | undefined): number | null {
+  if (!rawJson) return null
+  try {
+    const raw = JSON.parse(rawJson) as Record<string, unknown>
+    const skuInfo = asRecord(raw.sku_info) ?? asRecord(raw.skuInfo)
+    const item =
+      skuInfo ??
+      asRecord(raw.itemInfo) ??
+      asRecord(raw.item_info) ??
+      asRecord(raw.goodsInfo) ??
+      raw
+    return resolveGoodReviewItemPriceCent(skuInfo, item, raw)
+  } catch {
+    return null
+  }
+}
+
 export function buildGoodReviewDedupeKey(
   shopKey: string,
   reviewId: string | null,
@@ -253,12 +299,7 @@ export function normalizeGoodReviewRow(
       'commentContent',
     ]) ?? null
 
-  const priceRaw =
-    pickNumber(skuInfo ?? item, ['price', 'salePrice', 'itemPrice', 'payPrice']) ??
-    pickNumber(raw, ['price'])
-  const priceCent =
-    pickNumber(skuInfo ?? item, ['priceCent', 'price_cent']) ??
-    (priceRaw != null ? Math.round(priceRaw * 100) : null)
+  const priceCent = resolveGoodReviewItemPriceCent(skuInfo, item, raw)
 
   const itemImage = normalizeReviewImageUrl(
     pickString(skuInfo ?? item, ['image_link', 'imageLink', 'itemImage', 'item_image', 'image', 'cover', 'picUrl']),

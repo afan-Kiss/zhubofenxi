@@ -1,9 +1,18 @@
-/** 买家排行专用日期范围（与看板 preset 独立） */
+/** 买家排行专用日期范围（与看板 preset 独立，统一 Asia/Shanghai） */
+
+import {
+  addDaysShanghai,
+  endOfDayMsShanghai,
+  formatDateKeyShanghai,
+  startOfDayMsShanghai,
+  thisWeekStartKeyShanghai,
+} from './business-timezone'
 
 export type BuyerRankingPreset =
   | 'today'
   | 'yesterday'
   | 'thisWeek'
+  | 'lastWeek'
   | 'thisMonth'
   | 'lastMonth'
   | 'all'
@@ -20,50 +29,41 @@ export interface BuyerRankingDateRange {
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0')
+function startOfMonthKey(year: number, month: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-01`
 }
 
-function formatDateKey(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+function endOfMonthKey(year: number, month: number): string {
+  const nextMonth = month === 12 ? { y: year + 1, m: 1 } : { y: year, m: month + 1 }
+  return addDaysShanghai(startOfMonthKey(nextMonth.y, nextMonth.m), -1)
 }
 
-function startOfDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0)
+function shanghaiMonthParts(now: Date): { year: number; month: number; day: number } {
+  const todayKey = formatDateKeyShanghai(now)
+  const [y, m, d] = todayKey.split('-').map(Number)
+  return { year: y!, month: m!, day: d! }
 }
 
-function endOfDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
+/** 上周一（Asia/Shanghai） */
+export function lastWeekStartKeyShanghai(now: Date = new Date()): string {
+  const thisWeekStart = thisWeekStartKeyShanghai(now)
+  return addDaysShanghai(thisWeekStart, -7)
 }
 
-function startOfMonth(year: number, monthIndex: number): Date {
-  return new Date(year, monthIndex, 1, 0, 0, 0, 0)
-}
-
-function endOfMonth(year: number, monthIndex: number): Date {
-  return new Date(new Date(year, monthIndex + 1, 1, 0, 0, 0, 0).getTime() - 1)
-}
-
-function parseDateKey(key: string): Date {
-  const [y, m, d] = key.split('-').map(Number)
-  return new Date(y, m - 1, d)
-}
-
-function startOfWeekMonday(d: Date): Date {
-  const day = d.getDay()
-  const diff = day === 0 ? 6 : day - 1
-  const s = new Date(d)
-  s.setDate(s.getDate() - diff)
-  return startOfDay(s)
+/** 上周日（Asia/Shanghai） */
+export function lastWeekEndKeyShanghai(now: Date = new Date()): string {
+  const thisWeekStart = thisWeekStartKeyShanghai(now)
+  return addDaysShanghai(thisWeekStart, -1)
 }
 
 export function resolveBuyerRankingDateRange(
   presetRaw: string,
   customStart?: string,
   customEnd?: string,
+  now: Date = new Date(),
 ): BuyerRankingDateRange {
   const preset = presetRaw as BuyerRankingPreset
-  const now = new Date()
+  const todayKey = formatDateKeyShanghai(now)
 
   if (preset === 'all') {
     return {
@@ -76,35 +76,37 @@ export function resolveBuyerRankingDateRange(
     }
   }
 
-  let start: Date
-  let end: Date
+  let startDate: string
+  let endDate: string
 
   switch (preset) {
     case 'today':
-      start = startOfDay(now)
-      end = endOfDay(now)
+      startDate = todayKey
+      endDate = todayKey
       break
-    case 'yesterday': {
-      const y = new Date(now)
-      y.setDate(y.getDate() - 1)
-      start = startOfDay(y)
-      end = endOfDay(y)
+    case 'yesterday':
+      startDate = addDaysShanghai(todayKey, -1)
+      endDate = startDate
+      break
+    case 'thisWeek':
+      startDate = thisWeekStartKeyShanghai(now)
+      endDate = todayKey
+      break
+    case 'lastWeek':
+      startDate = lastWeekStartKeyShanghai(now)
+      endDate = lastWeekEndKeyShanghai(now)
+      break
+    case 'thisMonth': {
+      const { year, month } = shanghaiMonthParts(now)
+      startDate = startOfMonthKey(year, month)
+      endDate = endOfMonthKey(year, month)
       break
     }
-    case 'thisWeek':
-      start = startOfWeekMonday(now)
-      end = endOfDay(now)
-      break
-    case 'thisMonth':
-      start = startOfMonth(now.getFullYear(), now.getMonth())
-      end = endOfMonth(now.getFullYear(), now.getMonth())
-      break
     case 'lastMonth': {
-      const m = now.getMonth() - 1
-      const y = m < 0 ? now.getFullYear() - 1 : now.getFullYear()
-      const monthIndex = m < 0 ? 11 : m
-      start = startOfMonth(y, monthIndex)
-      end = endOfMonth(y, monthIndex)
+      const { year, month } = shanghaiMonthParts(now)
+      const prev = month === 1 ? { y: year - 1, m: 12 } : { y: year, m: month - 1 }
+      startDate = startOfMonthKey(prev.y, prev.m)
+      endDate = endOfMonthKey(prev.y, prev.m)
       break
     }
     case 'custom':
@@ -114,11 +116,11 @@ export function resolveBuyerRankingDateRange(
       if (!sd || !ed || !DATE_RE.test(sd) || !DATE_RE.test(ed)) {
         throw new Error('自定义日期范围无效，请使用 YYYY-MM-DD 格式')
       }
-      start = startOfDay(parseDateKey(sd))
-      end = endOfDay(parseDateKey(ed))
-      if (start.getTime() > end.getTime()) {
+      if (sd > ed) {
         throw new Error('开始日期不能晚于结束日期')
       }
+      startDate = sd
+      endDate = ed
       break
     }
   }
@@ -127,6 +129,7 @@ export function resolveBuyerRankingDateRange(
     'today',
     'yesterday',
     'thisWeek',
+    'lastWeek',
     'thisMonth',
     'lastMonth',
   ]
@@ -134,10 +137,10 @@ export function resolveBuyerRankingDateRange(
     preset: known.includes(preset as BuyerRankingPreset)
       ? (preset as BuyerRankingPreset)
       : 'custom',
-    startDate: formatDateKey(start),
-    endDate: formatDateKey(end),
-    startTimeMs: start.getTime(),
-    endTimeMs: end.getTime(),
+    startDate,
+    endDate,
+    startTimeMs: startOfDayMsShanghai(startDate),
+    endTimeMs: endOfDayMsShanghai(endDate),
     isAll: false,
   }
 }
@@ -165,6 +168,7 @@ export const BUYER_RANKING_PRESET_LABELS: Record<BuyerRankingPreset, string> = {
   today: '当日',
   yesterday: '昨日',
   thisWeek: '本周',
+  lastWeek: '上周',
   thisMonth: '本月',
   lastMonth: '上月',
   all: '全部',

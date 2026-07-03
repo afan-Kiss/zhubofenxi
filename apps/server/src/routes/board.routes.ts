@@ -872,6 +872,39 @@ boardRouter.put('/operations-report/review-note', async (req, res) => {
   }
 })
 
+boardRouter.get('/anchor-buyer-weekly-ranking', async (req, res) => {
+  try {
+    const { buildAnchorBuyerWeeklyRanking } = await import(
+      '../services/anchor-buyer-weekly-ranking.service'
+    )
+    const preset = req.query.preset ? String(req.query.preset) : 'thisWeek'
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined
+    const rankingTab = req.query.rankingTab ? String(req.query.rankingTab) : 'spend'
+    const anchorName = req.query.anchorName ? String(req.query.anchorName) : undefined
+
+    if (preset === 'custom' && (!startDate?.trim() || !endDate?.trim())) {
+      sendFail(res, '自定义范围必须提供 startDate 与 endDate', 400)
+      return
+    }
+
+    const data = await buildAnchorBuyerWeeklyRanking({
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+      preset,
+      startDate,
+      endDate,
+      rankingTab,
+      anchorName,
+      page: req.query.page ? Number(req.query.page) : 1,
+      pageSize: req.query.pageSize ? Number(req.query.pageSize) : 20,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取主播周榜失败', 500)
+  }
+})
+
 boardRouter.get('/buyer-profile', async (req, res) => {
   try {
     const { buildQualityFeedbackPublicStatus } =
@@ -1008,6 +1041,20 @@ boardRouter.get('/buyer-profile/:buyerKey/orders', async (req, res) => {
       sendFail(res, '请提供 buyerKey', 400)
       return
     }
+    const weeklySource = req.query.source ? String(req.query.source) : undefined
+    const weeklyStart = req.query.startDate ? String(req.query.startDate) : undefined
+    const weeklyEnd = req.query.endDate ? String(req.query.endDate) : undefined
+    const weeklyAnchor = req.query.anchorName ? String(req.query.anchorName) : undefined
+    const weeklyScope =
+      weeklySource === 'anchor_weekly_ranking' && weeklyStart && weeklyEnd
+        ? {
+            startDate: weeklyStart,
+            endDate: weeklyEnd,
+            anchorName: weeklyAnchor,
+            source: 'anchor_weekly_ranking' as const,
+          }
+        : undefined
+
     const data = await buildBuyerProfileDrill({
       buyerId: buyerKey,
       buyerKey,
@@ -1017,6 +1064,7 @@ boardRouter.get('/buyer-profile/:buyerKey/orders', async (req, res) => {
       tab: req.query.tab ? String(req.query.tab) : undefined,
       role: req.user!.role as import('../types/roles').UserRole,
       username: req.user!.username,
+      weeklyScope,
     })
     sendOk(res, {
       buyerKey: data.buyerKey,
@@ -1035,6 +1083,7 @@ boardRouter.get('/buyer-profile/:buyerKey/orders', async (req, res) => {
       emptyText: data.emptyText,
       source: data.source,
       profileUpdatedAt: data.profileUpdatedAt,
+      weeklyScope: data.weeklyScope,
       needAfterSalesSync: data.needAfterSalesSync,
       pendingAfterSalesOrderNos: data.pendingAfterSalesOrderNos,
       blacklistedBuyerIds: data.blacklistedBuyerIds,

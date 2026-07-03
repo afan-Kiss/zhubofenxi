@@ -15,7 +15,17 @@ import {
 import { viewMatchesBuyerKey } from './buyer-identity.service'
 import { buildBuyerProfileOrdersResponse } from './buyer-profile-orders.service'
 import { prepareAnalysisArtifactsFromRaw } from './business-analysis.service'
-import { buildRawAnalyzeBundleAll } from './xhs-api-sync/xhs-analysis-from-raw.service'
+import {
+  buildRawAnalyzeBundle,
+  buildRawAnalyzeBundleAll,
+} from './xhs-api-sync/xhs-analysis-from-raw.service'
+import {
+  buyerRankingRangeToAnalysisRange,
+  resolveBuyerRankingDateRange,
+} from '../utils/buyer-ranking-date-range'
+import { viewBelongsToAnchor } from './anchor-attribution.util'
+import { getAnchorConfigSync } from './anchor.service'
+import { resolveAnchorWeeklyRankingScope } from './anchor-buyer-weekly-ranking.service'
 import { enrichBuyerOrderRowFromWorkbench } from './buyer-order-standard.service'
 import { mapViewToBoardDrillRow } from './order-row-mapper.service'
 import { isAfterSalesResultPending, shouldFetchInputFromView } from './after-sales-fetch-decision.service'
@@ -212,18 +222,47 @@ export async function buildBuyerProfileDrill(params: {
   tab?: string
   role?: UserRole
   username?: string
+  weeklyScope?: {
+    startDate: string
+    endDate: string
+    anchorName?: string
+    source?: 'anchor_weekly_ranking'
+  }
 }) {
-  if (params.role && params.username && isStaffUnbound(params.role, params.username)) {
+  const isWeeklyScope = params.weeklyScope?.source === 'anchor_weekly_ranking'
+
+  if (isWeeklyScope && params.role && params.username) {
+    const scope = resolveAnchorWeeklyRankingScope(
+      params.role,
+      params.username,
+      params.weeklyScope?.anchorName,
+    )
+    if (scope.mode === 'unbound') {
+      throw new Error(scope.message)
+    }
+  } else if (params.role && params.username && isStaffUnbound(params.role, params.username)) {
     throw new Error(STAFF_UNBOUND_MESSAGE)
   }
-  const profile = await getBuyerRankingProfile()
-  const buyerKey = (params.buyerKey ?? params.buyerId).trim()
-  const cachedStats: BuyerRankingItem | null =
-    profile?.items.find((i) => i.buyerKey === buyerKey) ??
-    profile?.items.find((i) => i.buyerId === buyerKey) ??
-    null
 
-  const bundle = await buildRawAnalyzeBundleAll()
+  const profile = isWeeklyScope ? null : await getBuyerRankingProfile()
+  const buyerKey = (params.buyerKey ?? params.buyerId).trim()
+  const cachedStats: BuyerRankingItem | null = isWeeklyScope
+    ? null
+    : (profile?.items.find((i) => i.buyerKey === buyerKey) ??
+      profile?.items.find((i) => i.buyerId === buyerKey) ??
+      null)
+
+  const bundle = isWeeklyScope
+    ? await buildRawAnalyzeBundle(
+        buyerRankingRangeToAnalysisRange(
+          resolveBuyerRankingDateRange(
+            'custom',
+            params.weeklyScope!.startDate,
+            params.weeklyScope!.endDate,
+          ),
+        ),
+      )
+    : await buildRawAnalyzeBundleAll()
   if (!bundle) {
     return {
       buyerId: params.buyerId,
@@ -260,9 +299,23 @@ export async function buildBuyerProfileDrill(params: {
   for (const o of artifacts?.dedupe.uniqueOrders ?? []) {
     if (o.raw) rawByMatch.set(o.matchOrderId, o.raw as Record<string, unknown>)
   }
-  const buyerRankingViews = filterViewsForBuyerRanking(
+  let buyerRankingViews = filterViewsForBuyerRanking(
     attachRawByMatchToViews(allViews, rawByMatch),
   )
+
+  if (isWeeklyScope && params.weeklyScope?.anchorName) {
+    const cfg = getAnchorConfigSync()
+    const anchor = cfg.anchors.find((a) => a.name === params.weeklyScope!.anchorName)
+    if (anchor) {
+      buyerRankingViews = buyerRankingViews.filter((v) =>
+        viewBelongsToAnchor(v, { anchorId: anchor.id, anchorName: anchor.name }),
+      )
+    } else {
+      buyerRankingViews = buyerRankingViews.filter(
+        (v) => v.anchorName === params.weeklyScope!.anchorName,
+      )
+    }
+  }
 
   const buyerViews = filterBuyerViews(buyerRankingViews, buyerKey)
   const tab = params.tab ?? ''
@@ -373,8 +426,11 @@ export async function buildBuyerProfileDrill(params: {
     buyerIdentityCode: identityCode,
     buyerShortCode: identityCode,
     stats,
-    source: 'buyer_profile_cache' as const,
+    source: (isWeeklyScope ? 'anchor_weekly_ranking' : 'buyer_profile_cache') as
+      | 'buyer_profile_cache'
+      | 'anchor_weekly_ranking',
     profileUpdatedAt: profile?.updatedAt ?? null,
+    weeklyScope: isWeeklyScope ? params.weeklyScope : undefined,
     blacklistedBuyerIds: [...blacklist],
     needAfterSalesSync,
     pendingAfterSalesOrderNos,

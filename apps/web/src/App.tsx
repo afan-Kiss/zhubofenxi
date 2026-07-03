@@ -5,6 +5,7 @@ import { OverviewTab } from './pages/board/OverviewTab'
 import { AnchorPerformanceTab } from './pages/board/AnchorPerformanceTab'
 import { AnchorSchedulePage } from './pages/board/AnchorSchedulePage'
 import { BuyerRankingTab } from './pages/board/BuyerRankingTab'
+import { AnchorBuyerWeeklyRankingTab } from './pages/board/AnchorBuyerWeeklyRankingTab'
 import { SettingsTab } from './pages/board/SettingsTab'
 import { OperationsReportPage } from './pages/operations/OperationsReportPage'
 import { GoodReviewsPage } from './pages/good-reviews/GoodReviewsPage'
@@ -37,6 +38,7 @@ const App: React.FC = () => {
                 <Route path="anchor-schedules" element={<AnchorSchedulePage />} />
                 <Route path="anchors/:anchorId" element={<Navigate to="/anchors" replace />} />
                 <Route path="buyers" element={<BuyerRankingTab />} />
+                <Route path="anchor-weekly-ranking" element={<AnchorBuyerWeeklyRankingTab />} />
                 <Route path="operations-report" element={<OperationsReportPage />} />
                 <Route path="good-reviews" element={<GoodReviewsPage />} />
                 <Route path="orders" element={<Navigate to="/" replace />} />

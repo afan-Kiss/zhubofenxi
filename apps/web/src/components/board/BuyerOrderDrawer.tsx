@@ -3,6 +3,7 @@ import { apiRequest } from '../../lib/api'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { Pagination } from '../ui/Pagination'
 import { buyerDisplayNameFromRow } from '../../lib/buyer-profile'
+import type { AnchorWeeklyOrderScope } from '../../lib/anchor-weekly-ranking'
 import { resolveDisplayEarnedAmountCent } from '../../lib/buyer-earned-amount'
 import { BoardDrawerShell } from './BoardDrawerShell'
 import { BoardDrillOrderTable, type BoardDrillOrderRow } from './BoardDrillOrderTable'
@@ -85,6 +86,7 @@ interface Props {
   open: boolean
   onClose: () => void
   buyer: BuyerOrderDrawerBuyer | null
+  scope?: AnchorWeeklyOrderScope
 }
 
 function centToYuan(cent: number): number {
@@ -125,7 +127,7 @@ function summaryFromCent(s: BuyerOrderSummaryCent | undefined, fallback: BuyerOr
   }
 }
 
-export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer }) => {
+export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer, scope }) => {
   const { formatMoney } = useAmountDisplay()
   const [tab, setTab] = useState('all')
   const [page, setPage] = useState(1)
@@ -146,6 +148,12 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer }) => {
         pageSize: String(pageSize),
         tab,
       })
+      if (scope?.source === 'anchor_weekly_ranking') {
+        qs.set('source', scope.source)
+        qs.set('startDate', scope.startDate)
+        qs.set('endDate', scope.endDate)
+        if (scope.anchorName) qs.set('anchorName', scope.anchorName)
+      }
       const res = await apiRequest<{
         buyerKey: string
         buyerId: string
@@ -194,7 +202,7 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer }) => {
     } finally {
       setLoading(false)
     }
-  }, [open, buyer?.buyerKey, page, tab])
+  }, [open, buyer?.buyerKey, page, tab, scope])
 
   useEffect(() => {
     if (open && buyer) {
@@ -204,7 +212,7 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer }) => {
       setBuyerSummary(null)
       setError(null)
     }
-  }, [open, buyer?.buyerKey])
+  }, [open, buyer?.buyerKey, scope?.startDate, scope?.endDate, scope?.anchorName])
 
   useEffect(() => {
     void load()
@@ -265,8 +273,15 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer }) => {
     buyer.buyerIdentityCode ??
     ''
 
+  const isWeeklyScope = scope?.source === 'anchor_weekly_ranking'
+  const periodLabel = isWeeklyScope
+    ? `${scope.startDate} 至 ${scope.endDate} 订单明细`
+    : '历史累计订单明细（全量，不按日期筛选）'
+
   const emptyText =
-    tabs.find((t) => t.key === tab)?.emptyText ?? data?.emptyText ?? '该买家暂无历史订单'
+    tabs.find((t) => t.key === tab)?.emptyText ??
+    data?.emptyText ??
+    (isWeeklyScope ? '该买家在本周期内暂无订单' : '该买家暂无历史订单')
 
   return (
     <BoardDrawerShell
@@ -280,20 +295,24 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer }) => {
           key={data?.buyerKey ?? buyer.buyerKey}
           className="mt-2 animate-in fade-in duration-300"
         >
-          <p className="text-[10px] text-slate-500">历史累计订单明细（全量，不按日期筛选）</p>
-          <p className="mt-1 text-[10px] text-slate-400">
-            售后数据来自最近一次自动同步；如有延迟，将在后续自动同步中更新
-          </p>
+          <p className="text-[10px] text-slate-500">{periodLabel}</p>
+          {!isWeeklyScope ? (
+            <p className="mt-1 text-[10px] text-slate-400">
+              售后数据来自最近一次自动同步；如有延迟，将在后续自动同步中更新
+            </p>
+          ) : null}
           <div className="mt-3 rounded-2xl border border-rose-100/80 bg-gradient-to-br from-white to-rose-50/40 px-4 py-3">
             <div className="inline-flex items-center gap-1 text-[11px] text-slate-500">
-              赚到金额
+              {isWeeklyScope ? '本周成交金额' : '赚到金额'}
               <MetricInfoTooltip text={getMetricExplain('earnedAmount')} />
             </div>
             <p className="mt-1 text-3xl font-bold tabular-nums text-rose-900">
               {formatMoney(headerSummary.earnedAmount)}
             </p>
             <p className="mt-1 text-[10px] leading-relaxed text-slate-500">
-              这个客户最终留下的真实成交金额，不是利润，不扣成本
+              {isWeeklyScope
+                ? '仅统计当前周期、当前主播范围内的订单，不是历史全量客户画像。'
+                : '这个客户最终留下的真实成交金额，不是利润，不扣成本'}
             </p>
           </div>
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 md:gap-x-3">

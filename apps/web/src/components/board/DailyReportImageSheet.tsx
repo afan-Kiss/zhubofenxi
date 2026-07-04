@@ -18,6 +18,8 @@ import {
   readLateStatus,
   type AnchorLateStatusView,
 } from '../../lib/anchor-late-status'
+import { AnchorTrendChart } from './AnchorTrendChart'
+import type { AnchorTrend } from '../../lib/anchor-leaderboard-row'
 
 export interface DailyReportAnchorRow extends AnchorLateStatusView {
   anchorName: string
@@ -47,6 +49,8 @@ export interface DailyReportAnchorRow extends AnchorLateStatusView {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
+  gmvYuan?: number
+  trend?: AnchorTrend
 }
 
 export interface DailyReportPayload {
@@ -155,8 +159,17 @@ function AnchorCard({
           </span>
         </div>
       </div>
+      <div className="mt-3">
+        <AnchorTrendChart
+          variant="report"
+          trend={row.trend}
+          formatMoney={(v) => formatMoney(v)}
+          formatCount={(n) => formatOrderCount(n)}
+        />
+      </div>
       <div className="mt-3 space-y-1">
-        <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} strong />
+        <MetricLine label="本期销售额" value={formatMoney(row.gmvYuan)} strong />
+        <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} />
         <MetricLine label="真实卖出" value={formatOrderCount(row.soldOrderCount)} />
         <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />
         <MetricLine label="场观人数" value={formatPeopleCount(row.viewSessionCount)} />

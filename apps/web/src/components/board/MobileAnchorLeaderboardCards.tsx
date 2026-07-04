@@ -123,6 +123,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
 
             <div className="mt-3">
               <AnchorTrendChart
+                variant="page"
                 trend={anchorRowTrend(a)}
                 formatMoney={formatMoney}
                 formatCount={(n) => `${formatCount(n)} 单`}

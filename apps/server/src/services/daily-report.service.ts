@@ -39,6 +39,10 @@ import {
   resolveFallbackSessionDisplay,
   type AnchorAttendanceStatusPayload,
 } from '../utils/anchor-attendance-status.util'
+import { aggregateAnchorLeaderboard } from './board-metrics.service'
+import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
+import { enrichAnchorLeaderboardWithTrend, type AnchorTrend } from './anchor-card-trend.service'
+import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
 
 const NO_LIVE_SESSION_TEXT = '未读取到直播场次'
 
@@ -70,6 +74,10 @@ export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
+  /** 与主播卡片「本期销售额」一致，供走势对账 */
+  gmvYuan?: number
+  /** 与主播业绩页 anchorLeaderboard.trend 同源 */
+  trend?: AnchorTrend
 }
 
 export interface DailyReportPayload {
@@ -349,6 +357,29 @@ export async function buildDailyReport(params: {
     }
     return a.anchorName.localeCompare(b.anchorName, 'zh-CN')
   })
+
+  const allPerformanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  let leaderboardRows = ensureAnchorPerformanceLeaderboardSlots(
+    aggregateAnchorLeaderboard(allPerformanceViews),
+    params.startDate,
+  ) as unknown as Array<Record<string, unknown>>
+  leaderboardRows = await enrichAnchorLeaderboardWithLateStatus(leaderboardRows, {
+    startDate: params.startDate,
+    endDate: params.endDate,
+    preset: 'custom',
+  })
+  leaderboardRows = await enrichAnchorLeaderboardWithTrend(leaderboardRows, allPerformanceViews, {
+    preset: 'custom',
+    startDate: params.startDate,
+    endDate: params.endDate,
+  })
+  const trendByAnchor = new Map(leaderboardRows.map((r) => [String(r.anchorName ?? ''), r]))
+  for (const row of anchorRows) {
+    const lb = trendByAnchor.get(row.anchorName)
+    if (!lb) continue
+    row.gmvYuan = Number(lb.gmv ?? lb.totalGmv ?? 0)
+    row.trend = lb.trend as AnchorTrend | undefined
+  }
 
   const totalSoldOrderCount = anchorRows.reduce((sum, row) => sum + row.soldOrderCount, 0)
   const totalInvalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)

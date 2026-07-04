@@ -21,6 +21,23 @@ async function waitForNextPaint(): Promise<void> {
   })
 }
 
+async function waitForTrendChartsReady(root: HTMLElement): Promise<void> {
+  const charts = Array.from(root.querySelectorAll('[data-anchor-trend-chart]'))
+  if (charts.length === 0) return
+  const started = Date.now()
+  while (Date.now() - started < 3000) {
+    const allReady = charts.every((el) => {
+      if (el.getAttribute('data-anchor-trend-chart') === 'empty') return true
+      const svg = el.querySelector('svg')
+      return Boolean(svg && svg.getBoundingClientRect().height > 0)
+    })
+    if (allReady) break
+    await waitForNextPaint()
+    await new Promise((resolve) => window.setTimeout(resolve, 40))
+  }
+  await waitForNextPaint()
+}
+
 async function waitForImagesReady(root: HTMLElement): Promise<void> {
   const imgs = Array.from(root.querySelectorAll('img'))
   await Promise.all(
@@ -208,6 +225,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   const captureImage = useCallback(async () => {
     const node = await waitForSheetRef(sheetRef)
     await waitForImagesReady(node)
+    await waitForTrendChartsReady(node)
     const restoreImages = await inlineSheetImages(node)
     const restorePhotos = await prepareExportPhotosForCapture(node)
     try {

@@ -16,6 +16,8 @@ export interface AnchorTrendChartProps {
   trend?: AnchorTrend | null
   formatMoney: (value: number) => string
   formatCount?: (value: number) => string
+  /** page=交互页；report=日报截图（固定高度、无 tooltip） */
+  variant?: 'page' | 'report'
   className?: string
 }
 
@@ -74,10 +76,12 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   trend,
   formatMoney,
   formatCount = defaultFormatCount,
+  variant = 'page',
   className = '',
 }) => {
   const gradientId = useId().replace(/:/g, '')
   const resolved = trend ?? null
+  const isReport = variant === 'report'
 
   const chartData = useMemo(
     () =>
@@ -90,17 +94,25 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
 
   const xInterval = useMemo(() => {
     const len = chartData.length
+    if (isReport) {
+      if (len <= 8) return 0
+      if (len <= 16) return 1
+      return Math.ceil(len / 6)
+    }
     if (len <= 12) return 0
     if (len <= 24) return 1
     return Math.ceil(len / 10)
-  }, [chartData.length])
+  }, [chartData.length, isReport])
+
+  const emptyMinH = isReport ? 'min-h-[100px]' : 'min-h-[120px] md:min-h-[150px]'
 
   if (!hasTrendData(resolved)) {
     return (
       <div
-        className={`flex min-h-[120px] flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-4 md:min-h-[150px] ${className}`}
+        data-anchor-trend-chart="empty"
+        className={`flex ${emptyMinH} flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-4 ${className}`}
       >
-        <p className="text-[13px] text-slate-500">暂无走势数据</p>
+        <p className={`${isReport ? 'text-[12px]' : 'text-[13px]'} text-slate-500`}>暂无走势数据</p>
         <p className="mt-1 text-[11px] text-slate-400">有订单后会按开播时间生成走势</p>
       </div>
     )
@@ -108,54 +120,68 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
 
   const mode = resolved!.mode
   const title = resolved!.title || (mode === 'intraday' ? '直播时段走势' : '每日销售走势')
+  const chartHeight = isReport ? 'h-[132px]' : 'h-[120px] md:h-[150px]'
+  const titleClass = isReport ? 'text-[11px]' : 'text-[12px]'
+  const tagClass = isReport ? 'text-[9px] px-1.5 py-0' : 'text-[10px] px-2 py-0.5'
+  const tickSize = isReport ? 9 : 10
+  const gridStroke = isReport ? '#f1f5f9' : '#f8fafc'
 
   return (
     <div
+      data-anchor-trend-chart="ready"
       className={`rounded-2xl border border-rose-100 bg-white/80 p-3 shadow-sm shadow-rose-50/40 ${className}`}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-[12px] font-medium text-slate-700">{title}</p>
-        <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600">
+        <p className={`${titleClass} font-medium text-slate-700`}>{title}</p>
+        <span
+          className={`rounded-full bg-rose-50 font-medium text-rose-600 ${tagClass}`}
+        >
           销售额
         </span>
       </div>
-      <div className="h-[120px] w-full md:h-[150px]">
+      <div className={`${chartHeight} w-full`}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -18, bottom: 0 }}>
+          <AreaChart
+            data={chartData}
+            margin={isReport ? { top: 2, right: 2, left: -16, bottom: 0 } : { top: 4, right: 4, left: -18, bottom: 0 }}
+          >
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.14} />
+                <stop offset="0%" stopColor="#f43f5e" stopOpacity={isReport ? 0.12 : 0.14} />
                 <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.04} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f8fafc" vertical={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
             <XAxis
               dataKey="label"
-              tick={{ fontSize: 10, fill: '#94a3b8' }}
+              tick={{ fontSize: tickSize, fill: '#94a3b8' }}
               axisLine={false}
               tickLine={false}
               interval={xInterval}
-              minTickGap={20}
+              minTickGap={isReport ? 14 : 20}
             />
             <YAxis hide domain={[0, 'auto']} />
-            <Tooltip
-              content={(props) => (
-                <TrendTooltip
-                  {...props}
-                  mode={mode}
-                  formatMoney={formatMoney}
-                  formatCount={formatCount}
-                />
-              )}
-            />
+            {!isReport ? (
+              <Tooltip
+                content={(props) => (
+                  <TrendTooltip
+                    {...props}
+                    mode={mode}
+                    formatMoney={formatMoney}
+                    formatCount={formatCount}
+                  />
+                )}
+              />
+            ) : null}
             <Area
               type="monotone"
               dataKey="chartValue"
               stroke="#f43f5e"
-              strokeWidth={1.5}
+              strokeWidth={isReport ? 1.25 : 1.5}
               fill={`url(#${gradientId})`}
               dot={false}
-              activeDot={{ r: 3.5, fill: '#f43f5e', stroke: '#fff', strokeWidth: 1 }}
+              activeDot={isReport ? false : { r: 3.5, fill: '#f43f5e', stroke: '#fff', strokeWidth: 1 }}
+              isAnimationActive={!isReport}
             />
           </AreaChart>
         </ResponsiveContainer>

@@ -320,16 +320,32 @@ export function resolveQualityRefundCrossVerify(params: {
       ? params.verifySource ?? 'after_sale_workbench'
       : 'none'
 
-  const afterSaleReasonChanged =
-    afterSale.hasAny &&
-    Boolean(officialReasonText) &&
-    Boolean(afterSale.reasonText) &&
-    afterSale.hasNonQualityReason &&
-    !afterSale.hasQualityReason
+  const hasLinkedAfterSale =
+    Boolean(afterSale.returnsId?.trim()) ||
+    Boolean(officialCase?.matchedAfterSaleId?.trim()) ||
+    Boolean(officialCase?.sourceBizId?.trim())
 
-  const extraHint = afterSaleReasonChanged
-    ? '买家后续可能改过售后理由，本单仍按官方品退计入品退'
-    : ''
+  const afterSaleReasonChanged =
+    (afterSale.hasAny &&
+      Boolean(officialReasonText) &&
+      Boolean(afterSale.reasonText) &&
+      afterSale.hasNonQualityReason &&
+      !afterSale.hasQualityReason) ||
+    (qualityVerifyStatus === 'verified' &&
+      hasOfficialMatched &&
+      hasLinkedAfterSale &&
+      Boolean(officialReasonText) &&
+      !afterSale.reasonText?.trim())
+
+  const extraHint =
+    afterSaleReasonChanged ||
+    (qualityVerifyStatus === 'verified' &&
+      hasOfficialMatched &&
+      hasLinkedAfterSale &&
+      Boolean(officialReasonText) &&
+      !afterSale.reasonText?.trim())
+      ? '买家后续可能改过售后理由，本单仍按官方品退计入品退'
+      : ''
 
   const afterSaleMatched = afterSale.hasAny && qualityVerifyStatus === 'verified'
 

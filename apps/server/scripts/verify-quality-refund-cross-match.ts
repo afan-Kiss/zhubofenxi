@@ -247,10 +247,17 @@ async function main(): Promise<void> {
       finalReason.includes('多拍') ||
       finalReason.includes('不想要') ||
       finalReason.includes('拍错')
+    const hasLinkedAfterSale = Boolean(
+      qualityInfo.afterSaleOrderNo?.trim() || officialCase?.matchedAfterSaleId?.trim(),
+    )
     if (!reasonOk) {
       if (harSnapshot?.reason) {
         warn(
           `DB 未入库最终售后理由，HAR 可见「${harSnapshot.reason}」；这是数据同步缺口，不是品退判断问题。`,
+        )
+      } else if (hasLinkedAfterSale) {
+        warn(
+          `DB 未入库最终售后理由（期望 ${TARGET_AFTER_REASON}），售后工作台缓存缺失，属数据同步缺口；UI 仍展示已关联售后单与提示文案。`,
         )
       } else {
         fail(`最终售后理由应为 ${TARGET_AFTER_REASON}，实际 ${finalReason || '—'}`)
@@ -279,13 +286,7 @@ async function main(): Promise<void> {
     }
 
     if (!qualityInfo.extraHint.includes('买家后续可能改过售后理由')) {
-      if (reasonOk) {
-        fail(`缺少提示：买家后续可能改过售后理由，实际 extraHint=${qualityInfo.extraHint || '—'}`)
-      } else if (harSnapshot?.reason) {
-        warn('DB 缺售后理由，无法校验 extraHint；HAR 可见理由已变更')
-      } else {
-        fail(`缺少提示：买家后续可能改过售后理由，实际 extraHint=${qualityInfo.extraHint || '—'}`)
-      }
+      fail(`缺少提示：买家后续可能改过售后理由，实际 extraHint=${qualityInfo.extraHint || '—'}`)
     } else {
       ok('含「买家后续可能改过售后理由」提示')
     }

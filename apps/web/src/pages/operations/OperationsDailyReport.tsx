@@ -81,7 +81,18 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
   }, [loading, onLoadingChange])
 
   const handleExportImage = async () => {
-    if (!sheetRef.current || !report) return
+    if (!report) {
+      setExportError('数据还没加载完，请稍后再导出长图')
+      return
+    }
+    if (refreshing) {
+      setExportError('正在刷新数据，请稍后再导出长图')
+      return
+    }
+    if (!sheetRef.current) {
+      setExportError('长图生成失败，请刷新后重试；如果还是失败，先截图当前页面发群。')
+      return
+    }
     setExporting(true)
     setExportError(null)
     try {
@@ -91,11 +102,23 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
         backgroundColor: '#ffffff',
       })
       setPreviewUrl(dataUrl)
-    } catch (e) {
-      setExportError(e instanceof Error ? e.message : '导出长图失败')
+    } catch {
+      setExportError('长图生成失败，请刷新后重试；如果还是失败，先截图当前页面发群。')
     } finally {
       setExporting(false)
     }
+  }
+
+  const handleClosePreview = () => {
+    setPreviewUrl(null)
+  }
+
+  const handleDownloadImage = () => {
+    if (!previewUrl) return
+    const link = document.createElement('a')
+    link.href = previewUrl
+    link.download = `运营日报-${dateKey}.png`
+    link.click()
   }
 
   const handleReviewSaved = (note: OpsReviewNotePayload) => {
@@ -157,14 +180,20 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
-            disabled={exporting}
+            disabled={exporting || refreshing || !report}
             onClick={() => void handleExportImage()}
             className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
           >
-            {exporting ? '导出中...' : '导出长图'}
+            {exporting ? '导出中...' : refreshing ? '刷新中...' : '导出长图'}
           </button>
         </div>
       </div>
+
+      {exportError ? (
+        <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {exportError}
+        </p>
+      ) : null}
 
       <OperationsCoreMetrics
         core={
@@ -317,11 +346,21 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
       {previewUrl ? (
         <ViewportModal
           open={Boolean(previewUrl)}
-          onClose={() => setPreviewUrl(null)}
+          onClose={handleClosePreview}
           zIndexClass="z-[10000]"
           panelClassName="max-h-[min(92dvh,calc(100dvh-2rem))] w-[min(760px,calc(100vw-1.5rem))] overflow-auto p-4"
           backdropClassName="bg-black/55"
         >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-slate-800">长图预览（可保存发群）</p>
+            <button
+              type="button"
+              onClick={handleDownloadImage}
+              className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
+            >
+              下载长图
+            </button>
+          </div>
           <img src={previewUrl} alt="运营日报" className="max-w-full rounded-xl" />
         </ViewportModal>
       ) : null}

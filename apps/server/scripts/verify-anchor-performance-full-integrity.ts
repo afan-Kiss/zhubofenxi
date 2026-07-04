@@ -214,12 +214,17 @@ function checkUiCopy(): void {
       ok('对比图不再写「全部主播」')
     }
     if (/MAX_ANCHORS\s*=\s*4/.test(compare)) {
-      const combined = compare + panel
-      if (!/前\s*4|最多.*4|4\s*个/.test(combined)) {
-        fail('MAX_ANCHORS=4 但页面缺少前4/最多4个说明')
-      } else {
-        ok('对比图文案包含前4/最多4个说明')
-      }
+      fail('AnchorTrendCompareChart 仍存在 MAX_ANCHORS=4 限制')
+    } else {
+      ok('对比图已取消最多 4 个主播限制')
+    }
+    if (/最多同时对比\s*4|支付金额最高的\s*4\s*个|前\s*4\s*个主播/.test(compare + panel)) {
+      fail('对比图仍含「最多 4 个主播」误导文案')
+    }
+    if (!/默认展示全部有走势的主播/.test(compare + panel)) {
+      fail('对比图缺少「默认展示全部有走势的主播」说明')
+    } else {
+      ok('对比图文案：默认展示全部有走势的主播')
     }
     if (hasMisleadingEffectiveTrendCopy(compare)) {
       fail('对比图含「有效成交走势」误导文案')
@@ -258,7 +263,6 @@ function hasMisleadingEffectiveTrendCopy(content: string): boolean {
 }
 
 function pickDefaultCompareAnchors(leaderboard: Record<string, unknown>[]): string[] {
-  const MAX = 4
   return leaderboard
     .filter((row) => {
       const name = String(row.anchorName ?? '').trim()
@@ -267,7 +271,6 @@ function pickDefaultCompareAnchors(leaderboard: Record<string, unknown>[]): stri
       return Boolean(trend?.points?.length)
     })
     .sort((a, b) => num(b.totalGmv ?? b.gmv) - num(a.totalGmv ?? a.gmv))
-    .slice(0, MAX)
     .map((row) => String(row.anchorName).trim())
 }
 
@@ -615,12 +618,17 @@ async function auditDate(dateKey: string): Promise<void> {
     } else {
       ok('默认对比按支付金额排序，子杰排第一')
     }
-    for (const name of ['子杰', '飞云', '小艺'] as const) {
+    for (const name of ['子杰', '飞云', '小艺', '小红', '小白'] as const) {
       if (!defaultCompare.includes(name)) {
         fail(`默认对比应包含 ${name}，实际 ${defaultCompare.join('、')}`)
       } else {
         ok(`默认对比包含 ${name}`)
       }
+    }
+    if (defaultCompare.includes('未归属')) {
+      fail('默认对比不应包含未归属')
+    } else {
+      ok('默认对比已排除未归属')
     }
   }
 

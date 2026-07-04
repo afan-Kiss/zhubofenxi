@@ -309,6 +309,7 @@ export interface DailyOperationsAnchorRow extends AnchorLivePeriodView {
   invalidOrderCount: number
   returnOrderCount: number
   returnOrderRate: number | null
+  paidOrderCount: number
   avgOrderAmountYuan: number | null
   hourlyAmountYuan: number | null
   amountRatio: number | null

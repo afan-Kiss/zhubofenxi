@@ -17,10 +17,22 @@ import {
   type AnchorTrendMode,
 } from '../../lib/anchor-leaderboard-row'
 
-const ANCHOR_COLORS = ['#f43f5e', '#3b82f6', '#22c55e', '#f59e0b'] as const
-export const MAX_ANCHORS = 4
+const ANCHOR_COLORS = [
+  '#f43f5e',
+  '#3b82f6',
+  '#22c55e',
+  '#f59e0b',
+  '#a855f7',
+  '#06b6d4',
+  '#64748b',
+  '#ec4899',
+] as const
 const INTRADAY_BUCKET_MINUTES = 30
 const BUCKET_MS = INTRADAY_BUCKET_MINUTES * 60_000
+
+function seriesColor(index: number): string {
+  return ANCHOR_COLORS[index % ANCHOR_COLORS.length] ?? ANCHOR_COLORS[0]!
+}
 
 export interface AnchorTrendCompareSeries {
   anchorName: string
@@ -73,9 +85,7 @@ export function sortCompareCandidates(rows: AnchorLeaderboardRow[]): AnchorLeade
 }
 
 export function defaultCompareAnchorNames(rows: AnchorLeaderboardRow[]): string[] {
-  return sortCompareCandidates(rows)
-    .slice(0, MAX_ANCHORS)
-    .map((row) => String(row.anchorName).trim())
+  return sortCompareCandidates(rows).map((row) => String(row.anchorName).trim())
 }
 
 function relativeBucketLabel(bucketIndex: number): string {
@@ -112,7 +122,7 @@ function buildDailyComparePayload(
 
   const series: AnchorTrendCompareSeries[] = matched.map((item, index) => ({
     anchorName: item.anchorName,
-    color: ANCHOR_COLORS[index] ?? ANCHOR_COLORS[ANCHOR_COLORS.length - 1]!,
+    color: seriesColor(index),
     dataKey: `anchor_${index}`,
   }))
 
@@ -176,7 +186,7 @@ function buildIntradayRelativeComparePayload(
 
   const series: AnchorTrendCompareSeries[] = perAnchor.map((item, index) => ({
     anchorName: item.anchorName,
-    color: ANCHOR_COLORS[index] ?? ANCHOR_COLORS[ANCHOR_COLORS.length - 1]!,
+    color: seriesColor(index),
     dataKey: `anchor_${index}`,
   }))
 
@@ -254,7 +264,6 @@ function buildComparePayload(
       continue
     }
     matched.push({ anchorName: String(row.anchorName).trim(), trend })
-    if (matched.length >= MAX_ANCHORS) break
   }
 
   if (matched.length === 0) {
@@ -273,12 +282,7 @@ function buildComparePayload(
     ? buildIntradayRelativeComparePayload(matched)
     : buildDailyComparePayload(matched)
 
-  const hasComparableData = chartData.some((row) =>
-    series.some((s) => {
-      const v = row[s.dataKey]
-      return v != null && Number(v) > 0
-    }),
-  )
+  const hasComparableData = series.length > 0 && chartData.length > 0
 
   return {
     mode: referenceMode,
@@ -371,11 +375,9 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
   const [selectedNames, setSelectedNames] = useState<string[]>(() =>
     defaultCompareAnchorNames(rows),
   )
-  const [limitHint, setLimitHint] = useState(false)
 
   useEffect(() => {
     setSelectedNames(defaultCompareAnchorNames(rows))
-    setLimitHint(false)
   }, [defaultSelectedKey, rows])
 
   const { series, chartData, skippedModeMismatch, hasComparableData, isRelativeIntraday } =
@@ -401,14 +403,8 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     setSelectedNames((prev) => {
       if (prev.includes(name)) {
         if (prev.length <= 1) return prev
-        setLimitHint(false)
         return prev.filter((item) => item !== name)
       }
-      if (prev.length >= MAX_ANCHORS) {
-        setLimitHint(true)
-        return prev
-      }
-      setLimitHint(false)
       return [...prev, name]
     })
   }
@@ -444,7 +440,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
           <p className="text-[13px] font-medium text-slate-700 md:text-[14px]">{title}</p>
           <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p>
           <p className="mt-0.5 text-[10px] text-slate-400">
-            默认展示支付金额最高的前 {MAX_ANCHORS} 个主播，最多同时对比 {MAX_ANCHORS} 个
+            默认展示全部有走势的主播，可手动隐藏不想看的主播
           </p>
         </div>
         {skippedModeMismatch ? (
@@ -460,10 +456,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
             const name = String(row.anchorName).trim()
             const checked = selectedNames.includes(name)
             const colorIndex = selectedNames.indexOf(name)
-            const dotColor =
-              colorIndex >= 0
-                ? ANCHOR_COLORS[colorIndex] ?? ANCHOR_COLORS[ANCHOR_COLORS.length - 1]
-                : '#cbd5e1'
+            const dotColor = colorIndex >= 0 ? seriesColor(colorIndex) : '#cbd5e1'
             return (
               <label
                 key={name}
@@ -491,12 +484,6 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
             )
           })}
         </div>
-      ) : null}
-
-      {limitHint ? (
-        <p className="mb-2 text-[11px] text-amber-600">
-          最多同时对比 {MAX_ANCHORS} 个主播，避免图太乱。
-        </p>
       ) : null}
 
       <div className={`w-full ${compact ? 'h-[248px]' : 'h-[220px] md:h-[260px]'}`}>

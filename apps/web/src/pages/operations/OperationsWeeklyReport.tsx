@@ -148,6 +148,7 @@ export const OperationsWeeklyReport: React.FC<Props> = ({ weekStart, weekEnd, on
     liveDurationMinutes: row.liveDurationMinutes,
     validAmountYuan: row.validAmountYuan,
     soldOrderCount: row.soldOrderCount,
+    paidOrderCount: row.soldOrderCount,
     invalidOrderCount: 0,
     returnOrderCount: row.returnOrderCount,
     returnOrderRate: row.returnOrderRate,

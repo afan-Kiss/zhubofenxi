@@ -85,7 +85,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
       {showCompareTrend && canCompareTrend ? (
         <div className="mb-4">
           <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
-            默认展示支付金额最高的 4 个主播，可手动选择要对比的人；下面列表可单独筛选。
+            默认展示全部有走势的主播，可手动隐藏不想看的主播；下面列表可单独筛选。
           </p>
           <AnchorTrendCompareChart rows={trendCompareRows} formatMoney={formatMoney} />
         </div>

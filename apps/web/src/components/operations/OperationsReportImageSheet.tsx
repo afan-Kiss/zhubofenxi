@@ -22,11 +22,31 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   )
 }
 
+function anchorHasLive(row: DailyOperationsReportPayload['anchors'][number]): boolean {
+  const liveTime = row.liveTimeRange?.trim()
+  if (liveTime && liveTime !== '—') return true
+  const period = row.livePeriodText?.trim()
+  return Boolean(period && period !== '—' && !period.includes('未读取'))
+}
+
+function anchorStatusLine(row: DailyOperationsReportPayload['anchors'][number]): string {
+  const hasLive = anchorHasLive(row)
+  const hasSales = row.validAmountYuan > 0 || row.soldOrderCount > 0 || row.paidOrderCount > 0
+  if (hasLive && !hasSales) return '有直播，无成交'
+  if (!hasLive && !hasSales) return '当日无直播或无成交'
+  return ''
+}
+
 export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ data }, ref) => {
+  const hotItems = (data.rankings?.products.hot.items ?? []).slice(0, 5)
+  const highReturnItems = (data.rankings?.products.highReturn.items ?? []).slice(0, 5)
+  const insightItems = (data.businessInsights?.items ?? []).slice(0, 6)
+  const qualityWarnings = data.reportDataQuality?.warnings ?? []
+
   return (
     <div ref={ref} className="w-[720px] bg-white p-6 text-slate-900">
       <h1 className="text-xl font-bold">{data.title}</h1>
-      <p className="mt-1 text-sm text-slate-500">全店有效成交与直播经营数据</p>
+      <p className="mt-1 text-sm text-slate-500">全店有效成交与直播经营数据（本地已同步）</p>
 
       <div className="mt-4 grid grid-cols-3 gap-2">
         <MetricCard label="全店有效成交" value={formatIntegerMoney(data.summary.validAmountYuan)} />
@@ -60,32 +80,120 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
         </div>
       ) : null}
 
-      <div className="mt-4">
+      <div className="mt-5">
         <p className="mb-2 text-sm font-semibold">主播表现</p>
         {data.anchors.map((row) => {
           const liveTime =
             row.liveTimeRange && row.liveTimeRange !== '—'
               ? row.liveTimeRange
               : row.livePeriodText?.replace(/~/g, '–') ?? '—'
-          const scheduleHint =
-            row.scheduleTimeRange && row.scheduleMatched
-              ? ` · 排班 ${row.scheduleTimeRange}`
-              : ''
+          const attributionRange =
+            row.scheduleTimeRange && row.scheduleTimeRange !== '—'
+              ? row.scheduleTimeRange.replace(/~/g, '–')
+              : '—'
+          const statusLine = anchorStatusLine(row)
+          const paidCount = row.paidOrderCount ?? 0
           return (
-            <div key={row.anchorName} className="mb-2 rounded-xl border border-slate-200 bg-white p-3 text-xs">
+            <div
+              key={row.anchorName}
+              className="mb-2 rounded-xl border border-slate-200 bg-white p-3 text-xs leading-relaxed"
+            >
               <p className="text-sm font-semibold">
-                {row.anchorName} · {row.sessionLabel}
+                {row.anchorName} · {row.sessionLabel || row.shopName}
               </p>
               <p className="mt-1 text-slate-600">
-                直播 {liveTime}
-                {scheduleHint}
-                {' · '}
-                归属有效成交 {formatIntegerMoney(row.validAmountYuan)} · 订单{' '}
-                {formatOrderCount(row.soldOrderCount)} · 直播 {row.liveDurationText}
+                实际直播 {liveTime} · 归属时段 {attributionRange}
               </p>
+              <p className="mt-1 text-slate-700">
+                有效成交 {formatIntegerMoney(row.validAmountYuan)} · 支付单数{' '}
+                {formatOrderCount(paidCount)} · 有效成交订单 {formatOrderCount(row.soldOrderCount)}
+                {' · '}
+                退货单 {formatOrderCount(row.returnOrderCount)}（
+                {formatRatePercent(row.returnOrderRate)}）
+              </p>
+              {statusLine ? (
+                <p className="mt-1 text-amber-700">{statusLine}</p>
+              ) : null}
             </div>
           )
         })}
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <div className="rounded-xl border border-slate-200 p-3">
+          <p className="text-xs font-semibold text-slate-700">热卖商品 TOP 5</p>
+          {hotItems.length === 0 ? (
+            <p className="mt-2 text-xs text-slate-500">暂无数据</p>
+          ) : (
+            <ul className="mt-2 space-y-2 text-xs text-slate-700">
+              {hotItems.map((item, index) => (
+                <li key={item.productKey}>
+                  {index + 1}. {item.productName}
+                  <span className="text-slate-500">
+                    {' '}
+                    · {formatIntegerMoney(item.validAmountYuan)} ·{' '}
+                    {formatOrderCount(item.soldOrderCount)} 单
+                    {item.sampleTooSmall ? ' · 样本少，仅参考' : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="rounded-xl border border-slate-200 p-3">
+          <p className="text-xs font-semibold text-slate-700">高退货商品 TOP 5</p>
+          {highReturnItems.length === 0 ? (
+            <p className="mt-2 text-xs text-slate-500">暂无数据</p>
+          ) : (
+            <ul className="mt-2 space-y-2 text-xs text-slate-700">
+              {highReturnItems.map((item, index) => (
+                <li key={item.productKey}>
+                  {index + 1}. {item.productName}
+                  <span className="text-slate-500">
+                    {' '}
+                    · 退货 {formatOrderCount(item.returnOrderCount)} 单（
+                    {formatRatePercent(item.returnRate)}）
+                    {item.sampleTooSmall ? ' · 样本少，仅参考' : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-xl border border-emerald-100 bg-emerald-50/40 p-3">
+        <p className="text-xs font-semibold text-emerald-900">经营建议</p>
+        {insightItems.length === 0 ? (
+          <p className="mt-2 text-xs text-slate-600">今日暂无额外建议，可对照上方数据复盘。</p>
+        ) : (
+          <ul className="mt-2 space-y-2 text-xs text-slate-700">
+            {insightItems.map((item) => (
+              <li key={item.id}>
+                <span className="font-medium text-slate-800">{item.title}</span>
+                <span className="text-slate-600"> — {item.suggestedAction || item.reason}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {qualityWarnings.length > 0 ? (
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <p className="text-xs font-semibold text-amber-900">有部分数据需人工核对</p>
+          <ul className="mt-2 space-y-1 text-xs text-amber-800">
+            {qualityWarnings.slice(0, 5).map((warning) => (
+              <li key={warning}>· {warning}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      <div className="mt-5 border-t border-slate-200 pt-3 text-[10px] leading-relaxed text-slate-500">
+        <p>
+          有效成交 = 已完成/已签收，且无在途售后、未成功退款的订单；按订单签收与售后状态认定。
+        </p>
+        <p className="mt-1">每小时成交 = 全店有效成交 ÷ 全部直播时长。</p>
       </div>
     </div>
   )

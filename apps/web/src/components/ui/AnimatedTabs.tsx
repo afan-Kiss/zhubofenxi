@@ -13,6 +13,8 @@ interface Props {
   variant?: 'pills' | 'nav'
   className?: string
   buttonClassName?: string
+  /** 小屏三列网格 + 紧凑字号，隐藏滑动 pill 改用按钮底色 */
+  compactMobile?: boolean
   /** 若设置，则为每个 tab 按钮生成 data-testid="{prefix}-{key}" */
   testIdPrefix?: string
 }
@@ -24,6 +26,7 @@ export const AnimatedTabs: React.FC<Props> = ({
   variant = 'pills',
   className = '',
   buttonClassName = '',
+  compactMobile = false,
   testIdPrefix,
 }) => {
   const trackRef = useRef<HTMLDivElement>(null)
@@ -60,15 +63,25 @@ export const AnimatedTabs: React.FC<Props> = ({
 
   const isNav = variant === 'nav'
   const activeBtnClass = isNav ? 'board-tab-btn--nav-active' : 'board-tab-btn--active'
+  const compactActiveClass =
+    compactMobile && !isNav
+      ? 'bg-gradient-to-r from-[#ff2442] to-[#ff6b81] text-white shadow-sm sm:bg-transparent sm:shadow-none'
+      : compactMobile && isNav
+        ? 'bg-white text-slate-900 shadow-md ring-2 ring-rose-100 sm:bg-transparent sm:shadow-none sm:ring-0'
+        : ''
 
   return (
     <div
       ref={trackRef}
-      className={`board-tab-pill-track flex flex-wrap gap-1 ${className}`}
+      className={`board-tab-pill-track ${
+        compactMobile ? 'grid grid-cols-3 gap-1 sm:flex sm:flex-wrap' : 'flex flex-wrap gap-1'
+      } ${className}`}
       role="tablist"
     >
       <span
-        className={`board-tab-pill ${isNav ? 'board-tab-pill--nav' : ''}`}
+        className={`board-tab-pill ${isNav ? 'board-tab-pill--nav' : ''} ${
+          compactMobile ? 'hidden sm:block' : ''
+        }`}
         style={{
           transform: `translateX(${pill.left}px)`,
           width: pill.ready ? pill.width : 0,
@@ -90,9 +103,13 @@ export const AnimatedTabs: React.FC<Props> = ({
               else btnRefs.current.delete(item.key)
             }}
             onClick={() => onChange(item.key)}
-            className={`board-tab-btn rounded-full px-4 py-2.5 text-sm font-semibold ${buttonClassName} ${
+            className={`board-tab-btn rounded-full font-semibold ${
+              compactMobile
+                ? 'px-2 py-1.5 text-xs sm:px-4 sm:py-2.5 sm:text-sm'
+                : 'px-4 py-2.5 text-sm'
+            } ${buttonClassName} ${
               active
-                ? activeBtnClass
+                ? `${activeBtnClass} ${compactActiveClass}`
                 : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
             }`}
           >

@@ -37,24 +37,27 @@ export const RangeBar: React.FC<Props> = ({
           activeKey={preset}
           onChange={(key) => onPreset(key as BoardRangePreset)}
           variant="pills"
+          compactMobile
           testIdPrefix="range-preset"
         />
       </div>
       {preset === 'custom' && (
-        <div className="board-custom-panel-enter flex flex-wrap items-center gap-2 rounded-xl border border-slate-100 bg-white p-3 text-xs">
-          <input
-            type="date"
-            value={customStart}
-            onChange={(e) => onCustomStart(e.target.value)}
-            className="rounded-lg border border-slate-200 px-2 py-1 transition focus:border-rose-300 focus:outline-none"
-          />
-          <span className="text-slate-400">至</span>
-          <input
-            type="date"
-            value={customEnd}
-            onChange={(e) => onCustomEnd(e.target.value)}
-            className="rounded-lg border border-slate-200 px-2 py-1 transition focus:border-rose-300 focus:outline-none"
-          />
+        <div className="board-custom-panel-enter flex flex-col gap-2 rounded-xl border border-slate-100 bg-white p-3 text-xs sm:flex-row sm:flex-wrap sm:items-center">
+          <div className="flex min-w-0 items-center gap-2">
+            <input
+              type="date"
+              value={customStart}
+              onChange={(e) => onCustomStart(e.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 transition focus:border-rose-300 focus:outline-none"
+            />
+            <span className="shrink-0 text-slate-400">至</span>
+            <input
+              type="date"
+              value={customEnd}
+              onChange={(e) => onCustomEnd(e.target.value)}
+              className="min-w-0 flex-1 rounded-lg border border-slate-200 px-2 py-1 transition focus:border-rose-300 focus:outline-none"
+            />
+          </div>
           {showCustomQuery && (
             <button
               type="button"

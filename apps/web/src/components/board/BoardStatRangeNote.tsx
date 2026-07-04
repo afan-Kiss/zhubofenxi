@@ -23,10 +23,16 @@ export const BoardStatRangeNote: React.FC<Props> = ({
         <CalendarRange className="h-3.5 w-3.5" strokeWidth={2} />
       </span>
       <div className="min-w-0">
-        <div className="font-medium text-slate-700">统计窗口：{meta.windowText}</div>
+        <div className="font-medium text-slate-700">
+          <span className="sm:hidden">统计：{meta.windowText.replace(/ 00:00:00| 23:59:59/g, '')}</span>
+          <span className="hidden sm:inline">统计窗口：{meta.windowText}</span>
+        </div>
         <div className="mt-0.5 text-slate-500">
-          {meta.payAmountNote} · {meta.masterOrderNote}
-          {meta.includesTodayRealtime ? ' · 含当天实时订单' : ''}
+          <span className="sm:hidden">支付时间归属 · 与接口查询一致{meta.includesTodayRealtime ? ' · 含今日实时' : ''}</span>
+          <span className="hidden sm:inline">
+            {meta.payAmountNote} · {meta.masterOrderNote}
+            {meta.includesTodayRealtime ? ' · 含当天实时订单' : ''}
+          </span>
         </div>
       </div>
     </div>

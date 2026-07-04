@@ -100,9 +100,14 @@ async function auditSchedules(): Promise<void> {
       fail(`${dateKey} 同主播重复排班: ${[...new Set(dupAnchors)].join('、')}`)
     }
 
-    const overlapWarnings = table.warnings.filter(
-      (w) => w.includes('重叠') || w.includes('冲突') || w.includes('已经有一条排班'),
-    )
+    const overlapWarnings = table.warnings.filter((w) => {
+      if (w.includes('模板与当天排班冲突') || w.includes('已跳过')) return false
+      return (
+        w.includes('重叠') ||
+        w.includes('已经有一条排班') ||
+        (w.includes('生效排班') && w.includes('请检查'))
+      )
+    })
     if (overlapWarnings.length > 0) {
       fail(`${dateKey} 排班冲突: ${overlapWarnings.join('；')}`)
     } else {

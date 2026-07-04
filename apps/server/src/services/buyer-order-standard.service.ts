@@ -100,6 +100,8 @@ export interface BuyerOrderSummary {
   qualityRefundOrderCount: number
   /** 退货退款订单数（按订单去重；品退默认归入此类，除非明确仅退款） */
   returnRefundOrderCount: number
+  /** 售后订单数（order 级去重，不含纯运费补偿） */
+  afterSaleOrderCount: number
   /** 售后中/待同步且 refundAmountCent=0 的订单数（不计入退款统计） */
   pendingAfterSaleOrderCount: number
 }
@@ -400,6 +402,26 @@ export function resolveBuyerOrderRowRefundAmountCent(row: BuyerOrderStandardRow)
   return pickPositiveCent(row.payAmountCent, row.receivableAmountCent)
 }
 
+/** 订单是否计入退款单数（与 buildBuyerOrderSummary 共用） */
+export function buyerOrderRowCountsAsRefundOrder(row: BuyerOrderStandardRow): boolean {
+  if (row.afterSaleType === 'shipping_compensation') return false
+  if (row.isQualityRefund) return true
+  if (
+    row.afterSaleType === 'return_refund' ||
+    row.afterSaleType === 'refund_only' ||
+    row.afterSaleType === 'other_after_sale'
+  ) {
+    return true
+  }
+  return resolveBuyerOrderRowRefundAmountCent(row) > 0
+}
+
+/** 订单是否计入售后订单数（order 级去重） */
+export function buyerOrderRowCountsAsAfterSaleOrder(row: BuyerOrderStandardRow): boolean {
+  if (row.afterSaleType === 'shipping_compensation') return false
+  return row.hasEffectiveAfterSale || buyerOrderRowCountsAsRefundOrder(row)
+}
+
 function resolveBuyerOrderRefundAmountCentFromView(
   v: AnalyzedOrderView,
   metrics: ReturnType<typeof resolveBuyerOrderBusinessMetrics>,
@@ -636,6 +658,7 @@ export function buildBuyerOrderSummary(rows: BuyerOrderStandardRow[]): BuyerOrde
   const refundNos = new Set<string>()
   const qualityNos = new Set<string>()
   const returnRefundNos = new Set<string>()
+  const afterSaleNos = new Set<string>()
   const pendingNos = new Set<string>()
   let receivableAmountCent = 0
   let payAmountCent = 0
@@ -648,19 +671,19 @@ export function buildBuyerOrderSummary(rows: BuyerOrderStandardRow[]): BuyerOrde
     orderNos.add(r.orderNo)
     receivableAmountCent += r.receivableAmountCent
     payAmountCent += r.payAmountCent
-    refundAmountCent += resolveBuyerOrderRowRefundAmountCent(r)
     freightRefundAmountCent += r.freightRefundAmountCent
     netDealAmountCent += r.netDealAmountCent
     realDealAmountCent += r.realDealAmountCent
     if (r.isPaid && r.payAmountCent > 0) paidNos.add(r.orderNo)
     if (r.isRealDealOrder) realDealNos.add(r.orderNo)
-    if (r.isQualityRefund) {
-      qualityNos.add(r.orderNo)
+    // 退款金额仅累加计入 refundOrderCount 的订单，禁止金额孤岛
+    if (buyerOrderRowCountsAsRefundOrder(r)) {
       refundNos.add(r.orderNo)
-    } else if (r.refundAmountCent > 0 && r.afterSaleType !== 'shipping_compensation') {
-      refundNos.add(r.orderNo)
+      refundAmountCent += resolveBuyerOrderRowRefundAmountCent(r)
     }
+    if (r.isQualityRefund) qualityNos.add(r.orderNo)
     if (r.afterSaleType === 'return_refund' || r.isQualityRefund) returnRefundNos.add(r.orderNo)
+    if (buyerOrderRowCountsAsAfterSaleOrder(r)) afterSaleNos.add(r.orderNo)
     if (r.refundAmountPending === true && r.refundAmountCent === 0) pendingNos.add(r.orderNo)
   }
 
@@ -681,6 +704,7 @@ export function buildBuyerOrderSummary(rows: BuyerOrderStandardRow[]): BuyerOrde
     refundOrderCount: refundNos.size,
     qualityRefundOrderCount: qualityNos.size,
     returnRefundOrderCount: returnRefundNos.size,
+    afterSaleOrderCount: afterSaleNos.size,
     pendingAfterSaleOrderCount: pendingNos.size,
   }
 }

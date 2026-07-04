@@ -174,7 +174,10 @@ export function inferBuyerDrawerPossibleReasons(fields: BuyerDrawerDiffField[]):
   }
   if (names.includes('退货退款')) reasons.push('纯运费补偿口径不一致')
   if (names.includes('品退')) reasons.push('品退判定与官方品退表同步时差')
-  if (names.includes('退款')) reasons.push('售后中/售后关闭口径不一致')
+  if (names.includes('退款')) {
+    reasons.push('售后中/售后关闭口径不一致')
+    reasons.push('退款金额未绑定订单（金额孤岛）')
+  }
   return [...new Set(reasons)]
 }
 

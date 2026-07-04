@@ -903,6 +903,10 @@ export const BuyerRankingTab: React.FC = () => {
             if (isBadBuyerTab) {
               const bp = badBuyerProfileFromRow(rowRec)
               const paidCount = Number(bp.paidCount ?? rowRec.orderCount ?? 0)
+              const historicalRefundOnly = Boolean(bp.historicalRefundOnly)
+              const paidLine = historicalRefundOnly
+                ? '支付：历史订单'
+                : `本期支付：${formatCount(paidCount)} 单`
               const signedCountRaw = bp.signedCount
               const signedCount =
                 signedCountRaw == null ? null : Number(signedCountRaw ?? rowRec.signedOrderCount ?? 0)
@@ -955,10 +959,10 @@ export const BuyerRankingTab: React.FC = () => {
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-700">
-                    支付：{formatCount(paidCount)} 单｜签收：{signedLine}｜签收率：{signedRateLabel}
+                    {paidLine}｜签收：{signedLine}｜签收率：{signedRateLabel}
                   </p>
                   <p className="text-[11px] text-slate-700">
-                    退款：{formatCount(refundOrderCount)} 单｜退款金额：{formatMoney(refundAmount)}
+                    本期退款：{formatCount(refundOrderCount)} 单｜退款金额：{formatMoney(refundAmount)}
                   </p>
                   <p
                     className={`text-[11px] ${qc > 0 ? 'font-semibold text-red-700' : 'text-slate-700'}`}
@@ -966,6 +970,9 @@ export const BuyerRankingTab: React.FC = () => {
                     品退：{formatCount(qc)} 单｜退货退款：{formatCount(rr)} 单
                   </p>
                   <p className="truncate text-[11px] text-slate-600">店铺：{shopLabel}</p>
+                  {historicalRefundOnly ? (
+                    <p className="text-[10px] text-amber-800">来源：历史订单本期售后/退款</p>
+                  ) : null}
                   <div className="mt-1 flex justify-end border-t border-amber-100 pt-2 text-[11px] text-amber-700">
                     查看这个买家的订单 →
                   </div>

@@ -15,14 +15,20 @@ import {
   computeBadBuyerRiskScoreFromStats,
   extractBadBuyerCustomerStats,
   formatBadBuyerListDisplayName,
+  formatBadBuyerPaidLine,
   formatBadBuyerRefundRateLabel,
   formatBadBuyerSignedRateLabel,
   formatBadBuyerWechatBlock,
+  hasBadBuyerOrderSignal,
   isBadBuyerCandidate,
   qualityRefundOrderCount,
   returnRefundOrderCount,
   BAD_BUYER_LIST_TITLE_SUFFIX,
 } from '../src/services/bad-buyer-ranking.service'
+import {
+  enforceBadBuyerRefundConsistency,
+  isBadBuyerRefundStatsConsistent,
+} from '../src/services/bad-buyer-refund-consistency.service'
 import type { BuyerRankingItem } from '../src/services/buyer-ranking.service'
 import { resolveBuyerRankingDateRange } from '../src/utils/buyer-ranking-date-range'
 import { formatDateKeyShanghai } from '../src/utils/business-timezone'
@@ -150,10 +156,10 @@ async function main() {
       },
     }),
   )
-  assert(case2Stats.refundOrderCount === 2, 'case2 refundOrderCount 应封顶为 2', issues)
+  assert(case2Stats.refundOrderCount === 8, 'case2 refundOrderCount 应来自订单汇总（不去封顶支付单数）', issues)
   assert(
-    capBadBuyerRate(case2Stats.refundOrderCount, case2Stats.paidCount) === 1,
-    'case2 退款率应封顶 100%',
+    isBadBuyerRefundStatsConsistent(case2Stats),
+    'case2 退款金额与退款单数应一致',
     issues,
   )
 
@@ -292,8 +298,8 @@ async function main() {
     },
   })
   assert(
-    badBuyerRefundOrderCount(returnOnlyBuyer) <= 4,
-    '退款订单数不应超过支付订单数',
+    badBuyerRefundOrderCount(returnOnlyBuyer) === 0,
+    '无 buyerSummary 退款单数时不应凭空推断',
     issues,
   )
 
@@ -348,11 +354,12 @@ async function main() {
       pendingAfterSaleOrderCount: 0,
       receivableAmountCent: 120000,
       payAmountCent: 120000,
-      refundAmountCent: 0,
+      refundAmountCent: 120000,
       freightRefundAmountCent: 0,
-      netDealAmountCent: 120000,
-      realDealAmountCent: 120000,
-      displayEarnedAmountCent: 120000,
+      netDealAmountCent: 0,
+      realDealAmountCent: 0,
+      displayEarnedAmountCent: 0,
+      afterSaleOrderCount: 1,
     },
   })
   assert(
@@ -378,20 +385,21 @@ async function main() {
       realDealOrderCount: 1,
       refundOrderCount: 1,
       qualityRefundOrderCount: 1,
-      returnRefundOrderCount: 0,
+      returnRefundOrderCount: 1,
       pendingAfterSaleOrderCount: 0,
       receivableAmountCent: 120000,
       payAmountCent: 120000,
-      refundAmountCent: 0,
+      refundAmountCent: 120000,
       freightRefundAmountCent: 0,
-      netDealAmountCent: 120000,
-      realDealAmountCent: 120000,
-      displayEarnedAmountCent: 120000,
+      netDealAmountCent: 0,
+      realDealAmountCent: 0,
+      displayEarnedAmountCent: 0,
+      afterSaleOrderCount: 1,
     },
   })
   assert(
     returnRefundOrderCount(staleReturnRefund) === 1,
-    '汇总未更新时品退单仍应兜底计入退货退款',
+    '退货退款单数应来自 buyerSummary',
     issues,
   )
 
@@ -460,6 +468,8 @@ async function main() {
     riskLevel: '重点确认',
     riskScoreText: '8.8/10',
     paidCount: 4,
+    paidLine: formatBadBuyerPaidLine(4, false),
+    historicalRefundOnly: false,
     signedLine: '3 单',
     signedRateLabel: '75%',
     refundOrderCount: 3,
@@ -482,6 +492,8 @@ async function main() {
         riskLevel: '重点确认',
         riskScoreText: '8.8/10',
         paidCount: 4,
+        paidLine: formatBadBuyerPaidLine(4, false),
+        historicalRefundOnly: false,
         signedLine: '3 单',
         signedRateLabel: '75%',
         refundOrderCount: 3,
@@ -516,16 +528,120 @@ async function main() {
   assert(!wechatText.includes('售后申请：'), '微信文案不应含售后申请', issues)
   assert(!wechatText.includes('原因：'), '微信文案不应含原因', issues)
   assert(!wechatText.includes('建议：'), '微信文案不应含建议', issues)
-  assert(wechatText.includes('退货退款：'), '微信文案应含退货退款', issues)
+  assert(wechatText.includes('本期退款：'), '微信文案应含本期退款', issues)
+  assert(wechatText.includes('本期支付：'), '微信文案应含本期支付', issues)
+  assert(!wechatText.includes('退款：0 单｜退款金额：'), '微信文案不应出现退款0但金额不为0', issues)
   const sortSample = [
-    { badBuyerProfile: { qualityRefundOrderCount: 0, riskScore: 9, refundOrderCount: 3 } },
-    { badBuyerProfile: { qualityRefundOrderCount: 2, riskScore: 5, refundOrderCount: 2 } },
-    { badBuyerProfile: { qualityRefundOrderCount: 2, riskScore: 8, refundOrderCount: 1 } },
+    {
+      badBuyerProfile: {
+        qualityRefundOrderCount: 0,
+        returnRefundOrderCount: 0,
+        refundOrderCount: 3,
+        refundAmountYuan: 1000,
+        aftersaleCount: 1,
+      },
+    },
+    {
+      badBuyerProfile: {
+        qualityRefundOrderCount: 2,
+        returnRefundOrderCount: 1,
+        refundOrderCount: 2,
+        refundAmountYuan: 500,
+        aftersaleCount: 3,
+      },
+    },
+    {
+      badBuyerProfile: {
+        qualityRefundOrderCount: 2,
+        returnRefundOrderCount: 2,
+        refundOrderCount: 1,
+        refundAmountYuan: 800,
+        aftersaleCount: 2,
+      },
+    },
   ].sort(compareBadBuyerRankingItems)
   assert(
     sortSample[0].badBuyerProfile.qualityRefundOrderCount === 2 &&
-      sortSample[0].badBuyerProfile.riskScore === 8,
-    '排序应品退单数优先，同品退再按风险分',
+      sortSample[0].badBuyerProfile.returnRefundOrderCount === 2,
+    '排序应品退单数优先，同品退再按退货退款单数',
+    issues,
+  )
+
+  const orphanAmountBuyer = mockBuyer({
+    buyerKey: 'orphan-amount',
+    buyerSummary: {
+      orderCount: 0,
+      paidOrderCount: 0,
+      realDealOrderCount: 0,
+      refundOrderCount: 0,
+      qualityRefundOrderCount: 0,
+      returnRefundOrderCount: 0,
+      afterSaleOrderCount: 0,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 0,
+      payAmountCent: 0,
+      refundAmountCent: 752000,
+      freightRefundAmountCent: 0,
+      netDealAmountCent: 0,
+      realDealAmountCent: 0,
+      displayEarnedAmountCent: 0,
+    },
+  })
+  assert(!isBadBuyerCandidate(orphanAmountBuyer), '无订单来源的退款金额不应入榜', issues)
+  const orphanStats = extractBadBuyerCustomerStats(orphanAmountBuyer)
+  assert(orphanStats.refundAmountCent === 0, '无订单来源时退款金额应清零', issues)
+  assert(orphanStats.inconsistent, '无订单来源时标记 inconsistent', issues)
+
+  const historicalBuyer = mockBuyer({
+    buyerKey: 'historical',
+    buyerSummary: {
+      orderCount: 1,
+      paidOrderCount: 0,
+      realDealOrderCount: 0,
+      refundOrderCount: 1,
+      qualityRefundOrderCount: 0,
+      returnRefundOrderCount: 1,
+      afterSaleOrderCount: 1,
+      pendingAfterSaleOrderCount: 0,
+      receivableAmountCent: 752000,
+      payAmountCent: 0,
+      refundAmountCent: 752000,
+      freightRefundAmountCent: 0,
+      netDealAmountCent: 0,
+      realDealAmountCent: 0,
+      displayEarnedAmountCent: 0,
+    },
+  })
+  const historicalStats = extractBadBuyerCustomerStats(historicalBuyer)
+  assert(historicalStats.historicalRefundOnly, '支付0但有退款单应标记历史订单来源', issues)
+  assert(isBadBuyerCandidate(historicalBuyer), '历史订单退款应可入榜', issues)
+  assert(
+    formatBadBuyerPaidLine(0, true) === '支付：历史订单',
+    '历史订单支付行文案',
+    issues,
+  )
+  assert(
+    enforceBadBuyerRefundConsistency({
+      refundOrderCount: 1,
+      refundAmountCent: 752000,
+      paidCount: 0,
+    }).historicalRefundOnly,
+    '一致性函数应识别历史退款',
+    issues,
+  )
+  assert(
+    !isBadBuyerRefundStatsConsistent({ refundOrderCount: 0, refundAmountCent: 752000 }),
+    '一致性校验应拒绝有金额无订单',
+    issues,
+  )
+  assert(
+    isBadBuyerRefundStatsConsistent({ refundOrderCount: 1, refundAmountCent: 752000 }),
+    '一致性校验应允许有订单有金额',
+    issues,
+  )
+  assert(
+    isBadBuyerRefundStatsConsistent({ refundOrderCount: 0, refundAmountCent: 0 }),
+    '一致性校验应允许双零',
     issues,
   )
   assertNoIdentityLeak(wechatText, '微信文案', issues)

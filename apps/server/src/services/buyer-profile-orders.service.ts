@@ -18,6 +18,7 @@ import {
   attachRawByMatchToViews,
   filterViewsForBuyerRanking,
 } from './low-price-brush-order.service'
+import { enforceBadBuyerRefundConsistency } from './bad-buyer-refund-consistency.service'
 
 export interface BuyerDrawerAuditMetrics {
   summary: BuyerOrderSummary
@@ -128,28 +129,30 @@ export function buildBadBuyerDrawerAuditMetrics(params: {
   const summary = buildBuyerOrderSummary(rows)
 
   const returnRefundOrderCount = summary.returnRefundOrderCount
+  const afterSaleOrderCount = summary.afterSaleOrderCount
 
   let aftersaleApplyCount = 0
-  let aftersaleOrderCount = 0
   for (let i = 0; i < rankingViews.length; i += 1) {
-    const v = rankingViews[i]!
-    aftersaleApplyCount += countAftersaleAppliesForRow(rows[i]!, v)
-    if (orderCountsAsBuyerRefundRelated(v) && !v.isFreightRefundOnly) {
-      aftersaleOrderCount += 1
-    }
+    aftersaleApplyCount += countAftersaleAppliesForRow(rows[i]!, rankingViews[i]!)
   }
 
   const paidCount = summary.paidOrderCount
   const refundOrderCount = summary.refundOrderCount
+  const refundAmountCent = enforceBadBuyerRefundConsistency({
+    buyerKey,
+    paidCount,
+    refundOrderCount,
+    refundAmountCent: summary.refundAmountCent,
+  }).refundAmountCent
   const refundRate = paidCount > 0 ? Math.min(refundOrderCount / paidCount, 1) : 0
 
   return {
     qualityRefundOrderCount: summary.qualityRefundOrderCount,
     returnRefundOrderCount,
     aftersaleApplyCount,
-    aftersaleOrderCount,
+    aftersaleOrderCount: afterSaleOrderCount,
     aftersaleCount: aftersaleApplyCount,
-    refundAmountCent: summary.refundAmountCent,
+    refundAmountCent,
     refundOrderCount,
     paidCount,
     refundRate,

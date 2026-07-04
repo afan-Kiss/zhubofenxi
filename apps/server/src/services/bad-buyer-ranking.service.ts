@@ -19,6 +19,10 @@ import { filterViewsForBuyerRanking, attachRawByMatchToViews } from './low-price
 import { formatMoneyYuanCompact } from './buyer-wechat-weekly-text.service'
 import { mapViewToBuyerOrderStandard } from './buyer-order-standard.service'
 import { resolveBuyerIdentityFromView } from './buyer-identity.service'
+import {
+  enforceBadBuyerRefundConsistency,
+  isBadBuyerRefundStatsConsistent,
+} from './bad-buyer-refund-consistency.service'
 
 export type BadBuyerRiskLevel = '低风险' | '关注' | '谨慎发货' | '重点确认' | '建议人工复核'
 
@@ -32,9 +36,12 @@ export interface BadBuyerCustomerStats {
   qualityRefundCount: number
   returnRefundCount: number
   aftersaleCount: number
+  afterSaleOrderCount: number
   unsignedCount: number
   shopCount: number
   hasSignedData: boolean
+  historicalRefundOnly: boolean
+  inconsistent: boolean
 }
 
 export interface BadBuyerProfile {
@@ -52,13 +59,16 @@ export interface BadBuyerProfile {
   refundAmountYuan: number
   qualityRefundOrderCount: number
   returnRefundOrderCount: number
+  /** 售后申请次数（事件级，可大于订单数） */
   aftersaleCount: number
+  /** 售后订单数（order 级去重） */
+  afterSaleOrderCount: number
   unsignedCount: number
   shopCount: number
+  /** 本期无支付、仅有历史订单在本期发生售后/退款 */
+  historicalRefundOnly: boolean
   /** @deprecated 使用 signedCount */
   signedOrderCount: number
-  /** @deprecated 使用 aftersaleCount */
-  afterSaleOrderCount: number
   disputeOrderCount: number
   reasonText: string
   suggestionText: string
@@ -76,6 +86,8 @@ export interface BadBuyerWechatTextRow {
   riskLevel: BadBuyerRiskLevel
   riskScoreText: string
   paidCount: number
+  paidLine: string
+  historicalRefundOnly: boolean
   signedLine: string
   signedRateLabel: string
   refundOrderCount: number
@@ -111,42 +123,35 @@ function hasSignedTrackingData(item: BuyerRankingItem): boolean {
 }
 
 export function qualityRefundOrderCount(item: BuyerRankingItem): number {
-  return item.buyerSummary?.qualityRefundOrderCount ?? item.qualityReturnCount ?? 0
+  return item.buyerSummary?.qualityRefundOrderCount ?? 0
 }
 
-/** 退货退款单数（不含纯运费补偿；品退默认计入，与 Drawer 口径一致） */
+/** 退货退款单数（order 级；与 Drawer / 汇总口径一致） */
 export function returnRefundOrderCount(item: BuyerRankingItem): number {
-  const base =
-    item.buyerSummary?.returnRefundOrderCount ??
-    item.returnRefundCount ??
-    0
-  const qc = qualityRefundOrderCount(item)
-  return Math.max(base, qc)
+  return item.buyerSummary?.returnRefundOrderCount ?? 0
 }
 
-/** 售后申请次数（可大于订单数；不等于退款订单数） */
+/** 售后申请次数（事件级，可大于订单数） */
 export function aftersaleApplyCount(
   item: BuyerRankingItem,
   override?: number,
 ): number {
   if (override != null) return Math.max(0, override)
-  return Math.max(item.afterSaleCount ?? 0, item.refundCount ?? 0, 0)
+  return Math.max(item.afterSaleCount ?? 0, 0)
 }
 
-/** @deprecated 使用 aftersaleApplyCount */
+/** 售后订单数（order 级去重） */
 export function afterSaleOrderCount(item: BuyerRankingItem): number {
-  return aftersaleApplyCount(item)
+  return item.buyerSummary?.afterSaleOrderCount ?? 0
 }
 
 export function disputeOrderCount(item: BuyerRankingItem): number {
   return item.buyerSummary?.pendingAfterSaleOrderCount ?? item.pendingAfterSaleOrderCount ?? 0
 }
 
-export function productRefundAmountYuan(item: BuyerRankingItem): number {
-  if (item.buyerSummary?.refundAmountCent != null) {
-    return centToYuan(item.buyerSummary.refundAmountCent)
-  }
-  return Number(item.productRefundAmount ?? item.refundAmount ?? 0)
+/** @deprecated 使用 aftersaleApplyCount */
+export function afterSaleApplyCountLegacy(item: BuyerRankingItem): number {
+  return aftersaleApplyCount(item)
 }
 
 /** 发生退款的订单数（按订单去重，封顶 paidCount） */
@@ -165,40 +170,28 @@ export function extractBadBuyerCustomerStats(
   options?: { aftersaleApplyCount?: number },
 ): BadBuyerCustomerStats {
   const summary = item.buyerSummary
-  const paidCount = summary?.paidOrderCount ?? item.paidOrderCount ?? item.orderCount ?? 0
-  const paidAmountCent =
-    summary?.payAmountCent ??
-    (item.statPaidAmount != null
-      ? Math.round(item.statPaidAmount * 100)
-      : Math.round((item.gmv ?? 0) * 100))
+  const paidCount = summary?.paidOrderCount ?? 0
+  const paidAmountCent = summary?.payAmountCent ?? 0
 
   const hasSignedData = hasSignedTrackingData(item)
   const signedCount = hasSignedData ? (item.signedOrderCount ?? 0) : null
   const signedAmountCent = Math.round((item.signedAmount ?? 0) * 100)
 
-  const qualityRefundCount = qualityRefundOrderCount(item)
-  const summaryRefundOrders = summary?.refundOrderCount ?? 0
-  const behaviorRefundOrders =
-    (item.returnRefundCount ?? 0) + (item.refundOnlyCount ?? 0)
-  let rawRefundOrders =
-    summaryRefundOrders > 0 ? summaryRefundOrders : behaviorRefundOrders
-  if (rawRefundOrders <= 0 && qualityRefundCount > 0) {
-    rawRefundOrders = qualityRefundCount
-  }
-  const refundOrderCount = capBadBuyerCount(rawRefundOrders, paidCount)
-
-  let refundAmountCent =
-    summary?.refundAmountCent ?? Math.round(productRefundAmountYuan(item) * 100)
-  if (
-    refundAmountCent <= 0 &&
-    refundOrderCount > 0 &&
-    refundOrderCount === paidCount &&
-    paidAmountCent > 0
-  ) {
-    refundAmountCent = paidAmountCent
-  }
-  const returnRefundCount = returnRefundOrderCount(item)
+  const qualityRefundCount = summary?.qualityRefundOrderCount ?? 0
+  const returnRefundCount = summary?.returnRefundOrderCount ?? 0
+  const afterSaleOrderCountValue = summary?.afterSaleOrderCount ?? 0
   const aftersaleCount = aftersaleApplyCount(item, options?.aftersaleApplyCount)
+
+  const rawRefundOrders = summary?.refundOrderCount ?? 0
+  const rawRefundAmountCent = summary?.refundAmountCent ?? 0
+
+  const enforced = enforceBadBuyerRefundConsistency({
+    buyerKey: item.buyerKey,
+    paidCount,
+    refundOrderCount: rawRefundOrders,
+    refundAmountCent: rawRefundAmountCent,
+  })
+
   const unsignedCount = hasSignedData ? (item.unsignedOrderCount ?? 0) : 0
   const shopCount = Math.max(1, shop?.shopNames.length ?? 1)
 
@@ -207,14 +200,17 @@ export function extractBadBuyerCustomerStats(
     paidAmountCent,
     signedCount,
     signedAmountCent,
-    refundOrderCount,
-    refundAmountCent,
+    refundOrderCount: enforced.refundOrderCount,
+    refundAmountCent: enforced.refundAmountCent,
     qualityRefundCount,
     returnRefundCount,
     aftersaleCount,
+    afterSaleOrderCount: afterSaleOrderCountValue,
     unsignedCount,
     shopCount,
     hasSignedData,
+    historicalRefundOnly: enforced.historicalRefundOnly,
+    inconsistent: enforced.inconsistent,
   }
 }
 
@@ -318,35 +314,54 @@ function buildSuggestionText(reasonText: string): string {
 }
 
 function isFreightOnlyBuyer(item: BuyerRankingItem): boolean {
-  const freight = item.freightRefundCount ?? 0
-  const productRefund = item.buyerSummary?.refundOrderCount ?? item.refundCount ?? 0
-  const productAmount = productRefundAmountYuan(item)
+  const summary = item.buyerSummary
+  const freight = summary?.freightRefundAmountCent ?? item.freightRefundCount ?? 0
+  const productRefund = summary?.refundOrderCount ?? 0
+  const productAmount = summary?.refundAmountCent ?? 0
   return (
     freight > 0 &&
     productRefund <= 0 &&
     productAmount <= 0 &&
-    returnRefundOrderCount(item) <= 0
+    (summary?.returnRefundOrderCount ?? 0) <= 0
+  )
+}
+
+export function hasBadBuyerOrderSignal(stats: BadBuyerCustomerStats): boolean {
+  return (
+    stats.refundOrderCount > 0 ||
+    stats.qualityRefundCount > 0 ||
+    stats.returnRefundCount > 0 ||
+    stats.afterSaleOrderCount > 0 ||
+    stats.aftersaleCount > 0
   )
 }
 
 export function isBadBuyerCandidate(item: BuyerRankingItem): boolean {
   if (isFreightOnlyBuyer(item)) return false
+  if (!item.buyerSummary) return false
 
   const stats = extractBadBuyerCustomerStats(item)
+  if (stats.inconsistent) return false
+  if (!isBadBuyerRefundStatsConsistent(stats)) return false
+  if (!hasBadBuyerOrderSignal(stats)) return false
+
   const qc = stats.qualityRefundCount
   const rr = stats.returnRefundCount
+  const afterSaleOrders = stats.afterSaleOrderCount
   const afterSale = stats.aftersaleCount
   const refundRate = capBadBuyerRate(stats.refundOrderCount, stats.paidCount)
   const dispute = disputeOrderCount(item)
 
   if (qc >= 1) return true
   if (rr >= 1) return true
+  if (afterSaleOrders >= 1) return true
   if (afterSale >= 2) return true
-  if (refundRate >= 0.4) return true
+  if (stats.refundOrderCount >= 1) return true
+  if (refundRate >= 0.4 && stats.paidCount > 0) return true
   if (dispute >= 1) return true
 
   const risk = computeBadBuyerRiskScoreFromStats(stats)
-  return risk >= 3 && (qc > 0 || rr > 0 || afterSale >= 2 || dispute >= 1)
+  return risk >= 3 && hasBadBuyerOrderSignal(stats)
 }
 
 export function computeBadBuyerRiskScore(item: BuyerRankingItem): number {
@@ -385,10 +400,11 @@ export function buildBadBuyerProfile(
     qualityRefundOrderCount: stats.qualityRefundCount,
     returnRefundOrderCount: stats.returnRefundCount,
     aftersaleCount: stats.aftersaleCount,
+    afterSaleOrderCount: stats.afterSaleOrderCount,
     unsignedCount: stats.unsignedCount,
     shopCount: stats.shopCount,
+    historicalRefundOnly: stats.historicalRefundOnly,
     signedOrderCount: stats.signedCount ?? 0,
-    afterSaleOrderCount: stats.aftersaleCount,
     disputeOrderCount: disputeOrderCount(item),
     reasonText,
     suggestionText: buildSuggestionText(reasonText),
@@ -499,6 +515,12 @@ export async function buildBadBuyerRanking(params: {
       })
       return { ...item, badBuyerProfile }
     })
+    .filter((item) =>
+      isBadBuyerRefundStatsConsistent({
+        refundOrderCount: item.badBuyerProfile.refundOrderCount,
+        refundAmountCent: Math.round(item.badBuyerProfile.refundAmountYuan * 100),
+      }),
+    )
     .sort(compareBadBuyerRankingItems)
     .slice(0, limit)
 
@@ -527,27 +549,62 @@ export function formatBadBuyerListDisplayName(
   return buyerDisplayName
 }
 
+export function formatBadBuyerPaidLine(paidCount: number, historicalRefundOnly: boolean): string {
+  if (historicalRefundOnly) return '支付：历史订单'
+  return `本期支付：${paidCount} 单`
+}
+
 export function compareBadBuyerRankingItems(
-  a: { badBuyerProfile: Pick<BadBuyerProfile, 'qualityRefundOrderCount' | 'riskScore' | 'refundOrderCount'> },
-  b: { badBuyerProfile: Pick<BadBuyerProfile, 'qualityRefundOrderCount' | 'riskScore' | 'refundOrderCount'> },
+  a: {
+    badBuyerProfile: Pick<
+      BadBuyerProfile,
+      | 'qualityRefundOrderCount'
+      | 'returnRefundOrderCount'
+      | 'refundOrderCount'
+      | 'refundAmountYuan'
+      | 'aftersaleCount'
+    >
+  },
+  b: {
+    badBuyerProfile: Pick<
+      BadBuyerProfile,
+      | 'qualityRefundOrderCount'
+      | 'returnRefundOrderCount'
+      | 'refundOrderCount'
+      | 'refundAmountYuan'
+      | 'aftersaleCount'
+    >
+  },
 ): number {
   const qcDiff =
     b.badBuyerProfile.qualityRefundOrderCount - a.badBuyerProfile.qualityRefundOrderCount
   if (qcDiff !== 0) return qcDiff
-  const scoreDiff = b.badBuyerProfile.riskScore - a.badBuyerProfile.riskScore
-  if (scoreDiff !== 0) return scoreDiff
-  return b.badBuyerProfile.refundOrderCount - a.badBuyerProfile.refundOrderCount
+  const rrDiff =
+    b.badBuyerProfile.returnRefundOrderCount - a.badBuyerProfile.returnRefundOrderCount
+  if (rrDiff !== 0) return rrDiff
+  const refundOrderDiff =
+    b.badBuyerProfile.refundOrderCount - a.badBuyerProfile.refundOrderCount
+  if (refundOrderDiff !== 0) return refundOrderDiff
+  const amountDiff =
+    Math.round(b.badBuyerProfile.refundAmountYuan * 100) -
+    Math.round(a.badBuyerProfile.refundAmountYuan * 100)
+  if (amountDiff !== 0) return amountDiff
+  return b.badBuyerProfile.aftersaleCount - a.badBuyerProfile.aftersaleCount
 }
 
 export function formatBadBuyerWechatBlock(row: BadBuyerWechatTextRow): string {
   const name = formatBadBuyerListDisplayName(row.buyerDisplayName, row.qualityRefundOrderCount)
-  return [
+  const lines = [
     `${row.rank}. ${name}`,
-    `支付：${row.paidCount} 单｜签收：${row.signedLine}｜签收率：${row.signedRateLabel}`,
-    `退款：${row.refundOrderCount} 单｜退款金额：${formatMoneyYuanCompact(row.refundAmountYuan)}`,
+    `${row.paidLine}｜签收：${row.signedLine}｜签收率：${row.signedRateLabel}`,
+    `本期退款：${row.refundOrderCount} 单｜退款金额：${formatMoneyYuanCompact(row.refundAmountYuan)}`,
     `品退：${row.qualityRefundOrderCount} 单｜退货退款：${row.returnRefundOrderCount} 单`,
     `店铺：${row.shopLabel}`,
-  ].join('\n')
+  ]
+  if (row.historicalRefundOnly) {
+    lines.push('来源：历史订单本期售后/退款')
+  }
+  return lines.join('\n')
 }
 
 export function composeBadBuyerWechatText(params: {
@@ -593,6 +650,8 @@ export async function buildBadBuyerWechatText(params: {
       riskLevel: p.riskLevel,
       riskScoreText: p.riskScoreText,
       paidCount: p.paidCount,
+      paidLine: formatBadBuyerPaidLine(p.paidCount, p.historicalRefundOnly),
+      historicalRefundOnly: p.historicalRefundOnly,
       signedLine: formatBadBuyerSignedLine(p.signedCount, p.paidCount),
       signedRateLabel: formatBadBuyerSignedRateLabel(p.signedCount, p.paidCount),
       refundOrderCount: p.refundOrderCount,

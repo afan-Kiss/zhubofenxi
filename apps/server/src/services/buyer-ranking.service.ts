@@ -307,6 +307,7 @@ function emptyBuyerSummary(): BuyerOrderSummary {
     refundOrderCount: 0,
     qualityRefundOrderCount: 0,
     returnRefundOrderCount: 0,
+    afterSaleOrderCount: 0,
     pendingAfterSaleOrderCount: 0,
   }
 }

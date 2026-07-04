@@ -621,7 +621,7 @@ export async function runDataAccuracyAudit(params: {
         drawerQuality: drawer.qualityRefundOrderCount,
         listReturnRefund: profile.returnRefundOrderCount,
         drawerReturnRefund: drawer.returnRefundOrderCount,
-        listAftersaleOrders: item.afterSaleCount ?? 0,
+        listAftersaleOrders: profile.afterSaleOrderCount,
         drawerAftersaleOrders: drawer.aftersaleOrderCount,
         listAftersaleApplies: profile.aftersaleCount,
         drawerAftersaleApplies: drawer.aftersaleApplyCount,

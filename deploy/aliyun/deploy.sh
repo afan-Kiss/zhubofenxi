@@ -81,8 +81,8 @@ install_deps_build() {
   require_cmd node
   require_cmd npm
   log "Node $(node -v) / npm $(npm -v)"
-  log "npm ci"
-  npm ci
+  log "npm ci --include=dev"
+  npm ci --include=dev
   log "prisma generate"
   npm run db:generate -w @live/server
   log "prisma migrate deploy"

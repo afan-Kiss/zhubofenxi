@@ -41,6 +41,7 @@ import {
 import { rescheduleFromSettings } from '../services/scheduler.service'
 import type { DateRangePreset } from '../utils/date-range'
 import { sendFail, sendOk } from '../utils/response'
+import { formatSettingsCookieUpdatedBy } from '../utils/cookie-upload-source.util'
 import { clearBusinessDataForSettings } from '../services/clear-business-data.service'
 import { triggerBusinessSyncIfStale } from '../services/business-sync-scheduler.service'
 
@@ -274,7 +275,7 @@ settingsRouter.post('/live-accounts', async (req, res) => {
       name: String(req.body?.name ?? ''),
       cookie: String(req.body?.cookie ?? ''),
       enabled: req.body?.enabled !== false,
-      updatedBy: req.user!.id,
+      updatedBy: formatSettingsCookieUpdatedBy(req.user!.id),
     })
     sendOk(res, {
       ...account,
@@ -324,7 +325,7 @@ settingsRouter.put('/live-accounts/:id/cookie', async (req, res) => {
     const account = await updateLiveAccountCookie(
       req.params.id,
       String(req.body?.cookie ?? ''),
-      req.user!.id,
+      formatSettingsCookieUpdatedBy(req.user!.id),
     )
     sendOk(res, {
       ...account,

@@ -5,6 +5,7 @@ import {
   cookieAvailableTone,
   cookieStatusLabel,
   cookieUploadSourceLabel,
+  cookieUploadSourceHint,
   getAccountDisplayName,
   partitionLiveAccounts,
   resolveAccountCookieAvailable,
@@ -703,7 +704,9 @@ export const LiveAccountCookiePanel: React.FC = () => {
                 </span>
                 <span className="ml-2 text-slate-500">{formatTime(latest.checkedAt)}</span>
                 {latest.apiName ? (
-                  <span className="ml-2 text-slate-500">· {latest.apiName}</span>
+                  <span className="ml-2 text-slate-500" title="Cookie 检测使用的平台接口">
+                    · 检测接口：{latest.apiName}
+                  </span>
                 ) : null}
                 <p className={`mt-1 ${latest.ok ? 'text-emerald-800' : 'text-rose-700'}`}>
                   {latest.message}
@@ -747,7 +750,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
                   </span>
                 ) : account.officialShopKey ? (
                   <span className="block text-[10px] font-normal text-indigo-600">
-                    四店官方账号 · 外部上传覆盖此条
+                    四店官方账号 · 在此粘贴并保存 Cookie
                   </span>
                 ) : null}
               </div>
@@ -799,6 +802,11 @@ export const LiveAccountCookiePanel: React.FC = () => {
                   {cookieUploadSourceLabel(account.cookieUploadSource)}
                 </span>
                 <p className="text-[10px] text-slate-500">{formatTime(account.cookieUpdatedAt)}</p>
+                {cookieUploadSourceHint(account.cookieUploadSource) ? (
+                  <p className="max-w-[220px] text-[10px] leading-snug text-amber-700">
+                    {cookieUploadSourceHint(account.cookieUploadSource)}
+                  </p>
+                ) : null}
               </div>
             </td>
             <td className="px-3 py-2.5">
@@ -938,8 +946,15 @@ export const LiveAccountCookiePanel: React.FC = () => {
                           <dd>{formatTime(account.lastSyncSuccessAt)}</dd>
                         </div>
                         <div>
-                          <dt className="text-slate-400">Cookie 来源</dt>
-                          <dd>{cookieUploadSourceLabel(account.cookieUploadSource)}</dd>
+                          <dt className="text-slate-400">写入方式</dt>
+                          <dd>
+                            {cookieUploadSourceLabel(account.cookieUploadSource)}
+                            {cookieUploadSourceHint(account.cookieUploadSource) ? (
+                              <span className="mt-1 block text-amber-700">
+                                {cookieUploadSourceHint(account.cookieUploadSource)}
+                              </span>
+                            ) : null}
+                          </dd>
                         </div>
                         <div>
                           <dt className="text-slate-400">Cookie 更新时间</dt>
@@ -1008,7 +1023,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
             <th className="px-3 py-2 font-medium">启用</th>
             <th className="px-3 py-2 font-medium">Cookie 状态</th>
             <th className="px-3 py-2 font-medium">最近同步</th>
-            <th className="px-3 py-2 font-medium">Cookie 来源 / 时间</th>
+            <th className="px-3 py-2 font-medium">写入方式 / 时间</th>
             <th className="px-3 py-2 font-medium text-right">操作</th>
           </tr>
         </thead>
@@ -1023,7 +1038,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         <div className="min-w-0 flex-1">
           <h3 className="text-sm font-semibold text-slate-800">直播号 Cookie 管理</h3>
           <p className="mt-1 text-xs text-slate-500">
-            上面四条官方账号就是系统实际使用的 Cookie。外部程序上传后，只会覆盖这里对应店铺的官方账号。
+            四店官方账号在此手动粘贴 Cookie 并保存；保存后写入方式显示为「系统设置粘贴」。
           </p>
         </div>
         <button
@@ -1119,7 +1134,7 @@ export const LiveAccountCookiePanel: React.FC = () => {
         <p className="mt-4 text-xs text-slate-500">加载中…</p>
       ) : activeAccounts.length === 0 && legacyAccounts.length === 0 ? (
         <p className="mt-4 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-6 text-center text-xs text-slate-600">
-          暂无直播号，请在下方添加，或通过外部程序调用上传接口写入 Cookie。
+          暂无直播号，请在下方添加并在各行内粘贴 Cookie。
         </p>
       ) : null}
 

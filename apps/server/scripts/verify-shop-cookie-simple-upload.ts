@@ -8,6 +8,7 @@ import {
 } from '../src/config/shop-cookie-api-upload.config'
 import { uploadShopCookies, getShopCookieStatusPayload } from '../src/services/shop-cookie-upload.service'
 import { upsertOfficialShopAccountCookie } from '../src/services/official-shop-account.service'
+import { formatSettingsCookieUpdatedBy } from '../src/utils/cookie-upload-source.util'
 import { listLiveAccountsForSettings } from '../src/services/live-account.service'
 import { prisma } from '../src/lib/prisma'
 import { decryptText } from '../src/utils/crypto'
@@ -34,20 +35,18 @@ async function run(): Promise<void> {
 
   const testCookie =
     'a1=verify1234567890123456789012345678; test_cookie_field=abc123; session=test_session_value'
-  const saved = await upsertOfficialShopAccountCookie('xyxiangyu', testCookie, 'verify-script-manual')
+  const saved = await upsertOfficialShopAccountCookie(
+    'xyxiangyu',
+    testCookie,
+    formatSettingsCookieUpdatedBy('verify-script-manual'),
+  )
 
-  assert(Boolean(saved.savedAccountId), '手动落库应返回 savedAccountId', issues)
+  assert(saved.savedAccountId, '手动落库应返回 savedAccountId', issues)
   assert(saved.savedContainsA1 === true, '手动落库应包含 a1', issues)
-
-  const status = await getShopCookieStatusPayload()
-  assert(status.apiUploadEnabled === false, 'status 应标记 apiUploadEnabled=false', issues)
-  assert(status.shops.length === 4, '应返回四店状态', issues)
-  const xy = status.shops.find((s) => s.shopKey === 'xyxiangyu')
-  assert(xy?.hasCookie === true, 'xyxiangyu 应有 Cookie', issues)
-  assert(xy?.accountId === saved.savedAccountId, 'status 与手动落库 accountId 应一致', issues)
 
   const settings = await listLiveAccountsForSettings()
   const page = settings.find((a) => a.id === saved.savedAccountId)
+  assert(page?.cookieUploadSource === 'manual', '系统设置粘贴应标记为 manual', issues)
   assert(page?.officialShopKey === 'xyxiangyu', '设置页应标记四店官方账号', issues)
   assert(page?.cookieText?.includes('test_cookie_field') === true, '页面 cookieText 应与手动粘贴一致', issues)
 

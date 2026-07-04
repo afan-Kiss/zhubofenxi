@@ -5,12 +5,19 @@ export type CookieUploadSource = 'manual' | 'api' | 'unknown'
 export function cookieUploadSourceLabel(source: CookieUploadSource | undefined): string {
   switch (source) {
     case 'api':
-      return 'API 上传'
+      return '历史自动写入'
     case 'manual':
-      return '手动上传'
+      return '系统设置粘贴'
     default:
       return '—'
   }
+}
+
+export function cookieUploadSourceHint(source: CookieUploadSource | undefined): string | null {
+  if (source === 'api') {
+    return '该 Cookie 曾由外部 API 写入；重新粘贴并保存后，来源会变为「系统设置粘贴」。'
+  }
+  return null
 }
 
 export type ShopCookieHealthStatus =

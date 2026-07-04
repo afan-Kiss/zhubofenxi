@@ -750,7 +750,10 @@ function mapShopHealthToPublicView(
     cookie,
     cookieText,
     cookiePreview,
-    cookieUpdatedAt: health.updatedAt,
+    cookieUpdatedAt:
+      health.hasCookie && row?.updatedAt
+        ? row.updatedAt.toISOString()
+        : health.updatedAt,
     cookieUpdatedBy: health.hasCookie ? row?.updatedBy ?? null : null,
     cookieUploadSource: health.hasCookie
       ? resolveCookieUploadSource(row?.updatedBy)

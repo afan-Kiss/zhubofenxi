@@ -103,6 +103,7 @@ export interface BoardLiveQueryResult {
     | 'syncing_no_cache'
     | 'failed_with_cache'
     | 'empty'
+    | 'coverage_missing'
 }
 
 function resolveLiveQueryRange(params: BoardLiveQueryParams): {

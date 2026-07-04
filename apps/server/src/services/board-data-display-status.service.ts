@@ -6,6 +6,7 @@ export type BoardDataDisplayStatus =
   | 'syncing_no_cache'
   | 'failed_with_cache'
   | 'empty'
+  | 'coverage_missing'
 
 export function resolveBoardDataDisplayStatus(params: {
   orderCountInRange: number
@@ -43,6 +44,8 @@ export function boardDataDisplayStatusMessage(status: BoardDataDisplayStatus): s
       return '本次更新失败，当前展示上一次成功同步数据。'
     case 'empty':
       return '当前日期范围内暂无订单数据。'
+    case 'coverage_missing':
+      return '当前范围暂无本地数据，请手动同步或等待定时同步。'
     default:
       return '已从本地同步数据加载'
   }

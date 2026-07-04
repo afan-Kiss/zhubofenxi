@@ -31,8 +31,9 @@ import {
 } from '../../providers/BoardLiveQueryProvider'
 import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
-import { useDataFreshness } from '../../hooks/useDataFreshness'
-import { formatDataFreshnessTime, type DataFreshnessInfo } from '../../lib/data-freshness'
+import { formatDataFreshnessTime } from '../../lib/data-freshness'
+import type { OverviewMeta } from '../../lib/board-live-query'
+import { apiRequest } from '../../lib/api'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
 
 function summaryMetricValue(ds: Record<string, unknown>, metric: BoardMetricKey): number {
@@ -208,19 +209,17 @@ const MORE_SUMMARY_CARDS: SummaryCardDef[] = [
   },
 ]
 
-function formatFreshnessLine(
-  freshness: DataFreshnessInfo | null | undefined,
-  syncSuccessAt: string | null | undefined,
-): string | null {
-  const parts: string[] = []
-  if (freshness?.latestOrderTime) {
-    parts.push(`数据更新 ${formatDataFreshnessTime(freshness.latestOrderTime)}`)
-  }
-  const syncAt = syncSuccessAt ?? freshness?.lastQianfanSyncAt
-  if (syncAt) {
-    parts.push(`同步 ${formatDataFreshnessTime(syncAt)}`)
-  }
-  return parts.length > 0 ? parts.join(' · ') : null
+function formatOverviewVersionLine(overviewMeta: OverviewMeta | null | undefined): string | null {
+  if (!overviewMeta) return null
+  const parts: string[] = ['本地已同步数据']
+  const syncLabel = overviewMeta.lastQianfanSyncAt
+    ? formatDataFreshnessTime(overviewMeta.lastQianfanSyncAt)
+    : overviewMeta.cacheBuiltAt
+      ? formatDataFreshnessTime(overviewMeta.cacheBuiltAt)
+      : null
+  if (syncLabel) parts.push(`${syncLabel} 更新`)
+  if (overviewMeta.dataVersionId) parts.push(`版本 ${overviewMeta.dataVersionId}`)
+  return parts.join(' · ')
 }
 
 function qualityReturnCardNote(
@@ -273,11 +272,11 @@ export const OverviewTab: React.FC = () => {
     triggerSyncBusy,
   } = useBoardLiveQuery()
 
-  const { data: dataFreshness, loading: dataFreshnessLoading } = useDataFreshness(startDate, endDate)
-
   const [metricDrawer, setMetricDrawer] = useState<BoardMetricKey | null>(null)
   const [moreMetricsOpen, setMoreMetricsOpen] = useState(false)
+  const [stableUpdateBusy, setStableUpdateBusy] = useState(false)
 
+  const overviewMeta = data?.overviewMeta
   const ds = displaySummary
   const blacklistedBuyerIds = data?.blacklistedBuyerIds ?? []
   const boardDataVisible =
@@ -288,10 +287,15 @@ export const OverviewTab: React.FC = () => {
   const hasMetrics = Boolean(ds)
   const showMetrics = hasMetrics && boardDataVisible
   const qualityNote = qualityReturnCardNote(qualityFeedback)
-  const freshnessLine = formatFreshnessLine(
-    dataFreshness,
-    syncMeta?.businessSync?.lastSuccessAt ?? null,
-  )
+  const versionLine = formatOverviewVersionLine(overviewMeta)
+  const stableWarning = overviewMeta?.stableVsLatest?.needsManualUpdate
+    ? overviewMeta.stableVsLatest.message
+    : null
+  const staleCacheWarning =
+    overviewMeta?.cacheStale || overviewMeta?.fallbackReason
+      ? overviewMeta?.dataVersionText ??
+        '当前展示上一次成功缓存，数据可能不是最新。'
+      : null
 
   const overviewTransitionKey = [
     'overview',
@@ -377,13 +381,42 @@ export const OverviewTab: React.FC = () => {
         <div>
           <h2 className="text-xl font-semibold text-slate-900">经营总览</h2>
           <p className="mt-0.5 text-sm text-slate-500">本期经营大盘 · 支付、有效成交与品退</p>
-          {freshnessLine ? (
-            <p className="mt-1 text-xs text-slate-500">{freshnessLine}</p>
-          ) : dataFreshnessLoading ? (
-            <p className="mt-1 text-xs text-slate-400">正在读取数据状态…</p>
+          {versionLine ? (
+            <p className="mt-1 text-xs text-slate-500">{versionLine}</p>
+          ) : status === 'loading' ? (
+            <p className="mt-1 text-xs text-slate-400">正在读取本地数据…</p>
+          ) : null}
+          {overviewMeta?.stableSnapshot?.label ? (
+            <p className="mt-0.5 text-xs text-emerald-700">{overviewMeta.stableSnapshot.label}</p>
           ) : null}
         </div>
       </div>
+      {staleCacheWarning ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          {staleCacheWarning}
+        </div>
+      ) : null}
+      {stableWarning ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <p>{stableWarning}</p>
+          <button
+            type="button"
+            disabled={stableUpdateBusy}
+            className="mt-2 rounded-full bg-amber-700 px-3 py-1 text-xs font-medium text-white disabled:opacity-60"
+            onClick={() => {
+              setStableUpdateBusy(true)
+              void apiRequest<{ validSalesAmount?: number }>(
+                '/api/settings/data-maintenance/update-last-month-stable-snapshot',
+                { method: 'POST' },
+              )
+                .then(() => void reload())
+                .finally(() => setStableUpdateBusy(false))
+            }}
+          >
+            {stableUpdateBusy ? '正在更新稳定版…' : '更新上月稳定版'}
+          </button>
+        </div>
+      ) : null}
       <RangeBar
         preset={preset}
         onPreset={(p) => {

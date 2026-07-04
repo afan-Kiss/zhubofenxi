@@ -558,6 +558,26 @@ model XhsAfterSalesTimeSearchCache {
   @@index([liveAccountId])
 }
 
+/// 经营总览上月稳定快照（同步完成后写入，老板查看 lastMonth 时优先展示）
+model OverviewMetricSnapshot {
+  id                 String   @id @default(cuid())
+  monthKey           String
+  preset             String   @default("lastMonth")
+  sourceSyncJobId    String?
+  cacheBuiltAt       DateTime
+  totalGmv           Float    @default(0)
+  validSalesAmount   Float    @default(0)
+  orderCount         Int      @default(0)
+  refundAmount       Float    @default(0)
+  qualityReturnCount Int      @default(0)
+  dataJson           String   @default("{}")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([monthKey, preset])
+  @@index([cacheBuiltAt])
+}
+
 /// 买家排行全量客户画像缓存（与经营看板日期范围无关）
 model BuyerRankingCache {
   id                      String   @id @default("default")

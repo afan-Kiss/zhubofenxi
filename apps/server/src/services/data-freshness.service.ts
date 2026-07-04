@@ -13,7 +13,7 @@ export interface DataFreshnessPayload {
   lastQianfanSyncAt: string | null
 }
 
-async function resolveLatestOrderTimeInRange(
+export async function resolveLatestOrderTimeInRange(
   startDate: string,
   endDate: string,
 ): Promise<string | null> {

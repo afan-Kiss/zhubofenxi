@@ -63,8 +63,15 @@ import {
   resolveBoardDataDisplayStatus,
   type BoardDataDisplayStatus,
 } from './board-data-display-status.service'
+import { buildOverviewMeta, type OverviewMeta } from './overview-meta.service'
+import {
+  applyLastMonthStableSummary,
+} from './overview-metric-snapshot.service'
+import { buildBoardSyncMetaForApi } from './board-sync-meta.service'
 import { logWarn } from '../utils/server-log'
 import { getAllShopCookieHealth } from './shop-cookie-health.service'
+
+const AUTO_SYNC_ON_VIEW_MISSING = process.env.AUTO_SYNC_ON_VIEW_MISSING === 'true'
 
 function resolveLocalQueryRange(params: {
   preset: BoardLiveQueryPreset
@@ -224,9 +231,11 @@ export async function executeBoardLocalQuery(params: {
 
   BoardLiveQueryResult & {
 
-    syncMeta?: Awaited<ReturnType<typeof getBusinessSyncStatus>>
+    syncMeta?: Awaited<ReturnType<typeof buildBoardSyncMetaForApi>>
 
     dataDisplayStatus?: BoardDataDisplayStatus
+
+    overviewMeta?: OverviewMeta
 
   }
 
@@ -256,7 +265,7 @@ export async function executeBoardLocalQuery(params: {
 
   if (role && isStaffUnbound(role, username)) {
 
-    const syncMeta = await getBusinessSyncStatus()
+    const syncMeta = await buildBoardSyncMetaForApi()
 
     return {
 
@@ -385,17 +394,38 @@ export async function executeBoardLocalQuery(params: {
   }
 
   if (
-    dataDisplayStatus === 'syncing_no_cache' ||
-    (views.length === 0 && totalOrderCount > 0 && syncMeta.businessSync.status === 'running')
+    AUTO_SYNC_ON_VIEW_MISSING &&
+    (dataDisplayStatus === 'syncing_no_cache' ||
+      (views.length === 0 && totalOrderCount > 0 && syncMeta.businessSync.status === 'running'))
   ) {
     void handleLocalDataCoverageMissing()
     syncMeta = await getBusinessSyncStatus()
+  } else if (
+    !AUTO_SYNC_ON_VIEW_MISSING &&
+    dataDisplayStatus === 'syncing_no_cache'
+  ) {
+    dataDisplayStatus = 'coverage_missing'
+  } else if (
+    !AUTO_SYNC_ON_VIEW_MISSING &&
+    views.length === 0 &&
+    totalOrderCount > 0 &&
+    syncMeta.businessSync.status !== 'running' &&
+    syncMeta.businessSync.status !== 'queued'
+  ) {
+    dataDisplayStatus = 'coverage_missing'
   }
 
-  const summary =
+  let recalculatedSummary =
     views.length === boardCache.orderCount && !boardCache.stale
       ? { ...boardCache.summary }
       : buildSummaryFromViews(views)
+
+  const stableApplied = await applyLastMonthStableSummary({
+    preset: params.preset,
+    startDate,
+    recalculatedSummary,
+  })
+  const summary = stableApplied.summary
 
   const performanceBaseViews =
     anchorId?.trim() || anchorName?.trim() ? views : scopedAllViews
@@ -447,6 +477,19 @@ export async function executeBoardLocalQuery(params: {
   const cacheHit = Boolean(
     getBusinessBoardCache(params.preset, startDate, endDate),
   )
+
+  const fullSyncMeta = await buildBoardSyncMetaForApi()
+
+  const overviewMeta = await buildOverviewMeta({
+    preset: params.preset,
+    startDate,
+    endDate,
+    boardCache,
+    businessCacheHit: cacheHit,
+    dataDisplayStatus,
+    lastQianfanSyncAt: fullSyncMeta.businessSync.lastSuccessAt,
+    stableContext: stableApplied.stableContext,
+  })
   if (
     isBusinessCacheWarmupRunning() &&
     !cacheHit &&
@@ -564,7 +607,9 @@ export async function executeBoardLocalQuery(params: {
 
     qualityFeedback,
 
-    syncMeta,
+    syncMeta: fullSyncMeta,
+
+    overviewMeta,
 
     ...(forcedAnchor ? { forcedAnchorName: forcedAnchor } : {}),
 

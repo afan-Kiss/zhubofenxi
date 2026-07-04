@@ -394,6 +394,22 @@ settingsRouter.post(
   },
 )
 
+settingsRouter.post(
+  '/data-maintenance/update-last-month-stable-snapshot',
+  requireMaintenanceTools,
+  async (_req, res) => {
+    try {
+      const { forceUpdateLastMonthStableSnapshot } = await import(
+        '../services/overview-metric-snapshot.service'
+      )
+      const result = await forceUpdateLastMonthStableSnapshot()
+      sendOk(res, { ok: true, ...result })
+    } catch (err) {
+      sendFail(res, err instanceof Error ? err.message : '更新上月稳定版失败', 500)
+    }
+  },
+)
+
 settingsRouter.delete('/live-accounts/legacy-duplicates', async (_req, res) => {
   try {
     const result = await deleteLegacyDuplicateLiveAccounts()

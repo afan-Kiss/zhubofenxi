@@ -177,15 +177,29 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       setData({ ...result, rangeKey: resultRangeKey })
       setDisplaySummary(summary)
       setDataDisplayStatus(result.dataDisplayStatus ?? null)
+      if (result.syncMeta) {
+        setSyncMeta(result.syncMeta)
+      }
       setLastSyncedAt(
-        result.syncMeta?.businessSync.lastSuccessAt ?? result.fetchedAt,
+        result.overviewMeta?.lastQianfanSyncAt ??
+          result.syncMeta?.businessSync.lastSuccessAt ??
+          result.fetchedAt,
       )
 
       const applyStaleMessage = (
         meta: BoardSyncMeta | null,
         displayStatus: BoardDataDisplayStatus | null | undefined,
         progressMessage?: string,
+        overviewMetaStale?: boolean,
+        overviewFallback?: string | null,
       ) => {
+        if (overviewMetaStale || overviewFallback) {
+          setStaleMessage(
+            overviewFallback ??
+              '当前展示上一次成功缓存，数据可能不是最新。',
+          )
+          return
+        }
         const uiMode = deriveBoardSyncUiMode({
           hasDisplayData: Boolean(summary),
           businessSync: meta?.businessSync ?? result.syncMeta?.businessSync,
@@ -209,38 +223,14 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       }
 
       applyStaleMessage(
-        syncMeta,
+        result.syncMeta ?? null,
         result.dataDisplayStatus,
         result.progress.message,
+        result.overviewMeta?.cacheStale,
+        result.overviewMeta?.fallbackReason,
       )
       setStatus('ready')
       setError(null)
-
-      void fetchBoardSyncMeta(controller.signal)
-        .then((meta) => {
-          if (controller.signal.aborted || seq !== requestSeqRef.current) return
-          if (meta) {
-            setSyncMeta(meta)
-            setLastSyncedAt(
-              (prev) =>
-                meta.businessSync.lastSuccessAt ??
-                prev ??
-                result.fetchedAt,
-            )
-            applyStaleMessage(
-              meta,
-              result.dataDisplayStatus,
-              result.progress.message,
-            )
-          }
-        })
-        .catch(() => {
-          if (controller.signal.aborted || seq !== requestSeqRef.current) return
-          setStaleMessage((prev) =>
-            prev ?? '同步状态读取失败，不影响本地数据展示。',
-          )
-          setSyncMeta((prev) => prev ?? result.syncMeta ?? null)
-        })
     } catch (e) {
       if (controller.signal.aborted || seq !== requestSeqRef.current) return
       const msg = e instanceof Error ? e.message : '加载失败'
@@ -269,10 +259,6 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   }, [loadLocal, rangeKey])
 
   useEffect(() => {
-    void refreshSyncMeta()
-  }, [refreshSyncMeta])
-
-  useEffect(() => {
     const onInvalidate = () => {
       void loadLocal()
     }
@@ -298,7 +284,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     const biz = syncMeta?.businessSync
     const syncing = isBusinessSyncActive(biz?.status)
     const hasData = Boolean(displaySummary)
-    const intervalMs = syncing && !hasData ? 2000 : syncing && hasData ? 5000 : 60_000
+    const intervalMs = syncing ? 5000 : 60_000
 
     const timer = window.setInterval(() => {
       void (async () => {

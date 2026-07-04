@@ -64,6 +64,17 @@ let warmupRunning = false
 /** 串行化全量重建，避免启动/同步/品退等多处同时重建导致内存峰值或进程异常退出 */
 let fullRebuildQueue: Promise<void> = Promise.resolve()
 
+const rebuildLog: Array<{ at: string; reason: string; presetCount: number }> = []
+
+export function getRecentBusinessCacheRebuilds(withinMs = 86_400_000): Array<{
+  at: string
+  reason: string
+  presetCount: number
+}> {
+  const cutoff = Date.now() - withinMs
+  return rebuildLog.filter((e) => Date.parse(e.at) >= cutoff)
+}
+
 export function isBusinessCacheWarmupRunning(): boolean {
   return warmupRunning
 }
@@ -345,6 +356,31 @@ export async function rebuildBusinessCacheForPresets(
   }
   const totalMs = Date.now() - started
   logInfo('经营缓存', `全量重建完成：${rebuilt} 个范围，总用时 ${totalMs}ms`)
+  rebuildLog.unshift({
+    at: new Date().toISOString(),
+    reason: 'rebuildBusinessCacheForPresets',
+    presetCount: rebuilt,
+  })
+  if (rebuildLog.length > 50) rebuildLog.length = 50
+
+  const lastMonthRange = resolveBusinessRange('lastMonth')
+  const lastMonthEntry = getBusinessBoardCache(
+    'lastMonth',
+    lastMonthRange.startDate,
+    lastMonthRange.endDate,
+  )
+  if (lastMonthEntry && !lastMonthEntry.stale) {
+    const { tryUpdateLastMonthSnapshotAfterSync } = await import(
+      './overview-metric-snapshot.service'
+    )
+    await tryUpdateLastMonthSnapshotAfterSync(lastMonthEntry).catch((err) => {
+      logWarn(
+        '经营总览快照',
+        `上月快照写入失败：${err instanceof Error ? err.message : String(err)}`,
+      )
+    })
+  }
+
   return { rebuilt, totalMs }
 }
 
@@ -361,6 +397,8 @@ function enqueueFullBusinessCacheRebuild(
       logInfo('经营缓存', reason)
     }
     await rebuildBusinessCacheForPresets()
+    rebuildLog.unshift({ at: new Date().toISOString(), reason, presetCount: BUSINESS_CACHE_PRESETS.length })
+    if (rebuildLog.length > 50) rebuildLog.length = 50
   }
   const queued = fullRebuildQueue.then(task, task)
   fullRebuildQueue = queued.catch(() => {

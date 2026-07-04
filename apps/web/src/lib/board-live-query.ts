@@ -93,11 +93,35 @@ export type BoardDataDisplayStatus =
   | 'syncing_no_cache'
   | 'failed_with_cache'
   | 'empty'
+  | 'coverage_missing'
 
-export interface BoardResolvedRange {
-  preset: string
-  startDate: string
-  endDate: string
+export interface OverviewMeta {
+  cacheKey: string
+  cacheBuiltAt: string | null
+  sourceSyncJobId: string | null
+  sourceDataMaxTime: string | null
+  businessCacheHit: boolean
+  cacheStale: boolean
+  fallbackReason: string | null
+  dataVersionText: string
+  recalculatedAt: string | null
+  latestOrderTime: string | null
+  lastQianfanSyncAt: string | null
+  dataVersionId: string | null
+  stableSnapshot?: {
+    monthKey: string
+    validSalesAmount: number
+    cacheBuiltAt: string
+    sourceSyncJobId: string | null
+    label: string
+  } | null
+  stableVsLatest?: {
+    stableValidSalesAmount: number
+    latestValidSalesAmount: number
+    diffAmount: number
+    needsManualUpdate: boolean
+    message: string | null
+  } | null
 }
 
 export interface BoardLiveQueryData {
@@ -130,6 +154,13 @@ export interface BoardLiveQueryData {
   }
   qualityFeedback?: QualityFeedbackStatus
   syncMeta?: BoardSyncMeta
+  overviewMeta?: OverviewMeta
+}
+
+export interface BoardResolvedRange {
+  preset: string
+  startDate: string
+  endDate: string
 }
 
 export async function fetchBoardLocalData(params: {

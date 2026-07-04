@@ -193,10 +193,6 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               />
             </div>
 
-            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-              品退按订单下单时间匹配主播开播场次归属，不按售后发生时间。
-            </p>
-
             <div className="mt-2 flex flex-wrap gap-2 border-t border-rose-50 pt-2.5">
               <span
                 className={`rounded-full px-2.5 py-1 text-xs font-medium ${

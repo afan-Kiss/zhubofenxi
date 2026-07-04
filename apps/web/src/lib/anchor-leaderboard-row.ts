@@ -81,9 +81,29 @@ export function anchorRowReturnRefundRate(row: AnchorLeaderboardRow): number | n
 }
 
 export function anchorRowLivePeriodText(row: AnchorLeaderboardRow): string | null {
-  const raw = String(row.livePeriodText ?? row.liveTimeRange ?? '').trim()
-  if (!raw || raw === '—') return null
-  return raw.replace(/~/g, '–')
+  const attribution = normalizeLivePeriodText(row.livePeriodText)
+  if (attribution) return attribution
+  return normalizeLivePeriodText(row.liveTimeRange)
+}
+
+function normalizeLivePeriodText(raw: unknown): string | null {
+  const text = String(raw ?? '').trim()
+  if (!text || text === '—') return null
+  return text.replace(/~/g, '–')
+}
+
+function stripClockSeconds(text: string): string {
+  return text.replace(/(\d{2}:\d{2}):\d{2}/g, '$1')
+}
+
+function livePeriodComparable(text: string): string {
+  return stripClockSeconds(text.replace(/\s/g, ''))
+}
+
+function livePeriodsLooselyEqual(a: string, b: string): boolean {
+  const left = livePeriodComparable(a)
+  const right = livePeriodComparable(b)
+  return left === right || left.includes(right) || right.includes(left)
 }
 
 export function anchorRowLivePeriodHint(row: AnchorLeaderboardRow): string | null {
@@ -97,7 +117,7 @@ export function anchorRowScheduleTimeRange(row: AnchorLeaderboardRow): string | 
   return raw.replace(/~/g, '–')
 }
 
-/** 今日/昨日卡片：直播时间 + 可选排班对照 */
+/** 今日/昨日卡片：归属直播时段；与排班不一致时合并为一行 */
 export function anchorRowLivePeriodLines(row: AnchorLeaderboardRow): {
   primary: string | null
   secondary: string | null
@@ -107,13 +127,10 @@ export function anchorRowLivePeriodLines(row: AnchorLeaderboardRow): {
   const hint = anchorRowLivePeriodHint(row)
 
   if (live) {
-    const secondary =
-      schedule && schedule !== live
-        ? `排班 ${schedule}｜实际 ${live}`
-        : schedule
-          ? `排班 ${schedule}`
-          : null
-    return { primary: `直播 ${live}`, secondary }
+    if (schedule && !livePeriodsLooselyEqual(schedule, live)) {
+      return { primary: `直播 ${live} · 排班 ${schedule}`, secondary: null }
+    }
+    return { primary: `直播 ${live}`, secondary: null }
   }
 
   if (hint) {

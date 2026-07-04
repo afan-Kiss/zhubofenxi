@@ -33,3 +33,18 @@ export function resolveReportBuildMeta(fullScan: boolean): {
 export function isStaleMonthlyCloseReport(report: { schemaVersion?: number }): boolean {
   return (report.schemaVersion ?? 1) < MONTHLY_CLOSE_REPORT_SCHEMA_VERSION
 }
+
+/** 已有成功报告是否与当前构建元信息不一致，需重跑 */
+export function isMonthlyCloseReportBuildStale(
+  report: { schemaVersion?: number; gitCommit?: string; fullScan?: boolean },
+  buildMeta: { schemaVersion: number; gitCommit: string; fullScan: boolean },
+): boolean {
+  if ((report.schemaVersion ?? 1) !== buildMeta.schemaVersion) return true
+  if (report.fullScan !== buildMeta.fullScan) return true
+  const reportCommit = report.gitCommit ?? 'unknown'
+  const currentCommit = buildMeta.gitCommit ?? 'unknown'
+  if (reportCommit !== 'unknown' && currentCommit !== 'unknown' && reportCommit !== currentCommit) {
+    return true
+  }
+  return false
+}

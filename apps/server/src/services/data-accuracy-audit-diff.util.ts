@@ -358,6 +358,10 @@ export function buildBlockingIssueSummary(checks: import('./monthly-close-auto.t
       issues.push(
         `经营总览和运营日报差 ${formatCentYuan(Math.abs(c.diffCent))}，需要统一金额四舍五入口径`,
       )
+    } else if (c.key === 'monthly_close_vs_daily_sum' && c.diffCent) {
+      issues.push(
+        `月度运营月报与每日求和差 ${formatCentYuan(Math.abs(c.diffCent))}，需要核对月报汇总口径`,
+      )
     } else if (c.key === 'ranking_vs_standard_orders') {
       issues.push('榜单中心和标准订单池不一致，需要查看差异订单')
     } else if (c.key === 'bad_buyer_vs_drawer' && c.diffCount) {

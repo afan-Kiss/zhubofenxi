@@ -7,6 +7,7 @@ import {
   resolveRawVsNormalizedCheck,
 } from '../src/services/data-accuracy-audit.service'
 import { buildBlockingIssueSummary } from '../src/services/data-accuracy-audit-diff.util'
+import { buildConclusionReasonSummaryFromChecks } from '../src/services/monthly-close-conclusion.util'
 import { scanXhsSyncFrequencyReport } from '../src/services/xhs-sync-frequency-scan.util'
 import { MONTHLY_CLOSE_REPORT_SCHEMA_VERSION } from '../src/utils/report-build-meta'
 import type { DataAccuracyCheck } from '../src/services/monthly-close-auto.types'
@@ -107,6 +108,22 @@ async function main() {
   ] as DataAccuracyCheck[])
   assert(blockingSummary.length === 1, 'blockingIssues 应只含 blocking danger', issues)
   assert(blockingSummary[0]!.includes('经营总览和运营日报'), 'blocking 应含金额差异文案', issues)
+
+  const conclusionSummary = buildConclusionReasonSummaryFromChecks({
+    checks: [
+      {
+        key: 'board_vs_daily_sum',
+        title: '经营总览 vs 运营日报逐日求和',
+        status: 'danger',
+        category: 'blocking',
+        diffCent: 20,
+        note: 'test',
+      },
+    ],
+    syncRiskStatus: 'pass',
+    overallStatus: 'danger',
+  })
+  assert(conclusionSummary.includes('金额差异'), '结论摘要按 key 识别金额差异', issues)
 
   const payTimeFindings = scanXhsSyncFrequencyReport().filter((f) =>
     f.file.includes('order-pay-time-prefilter-diagnostic'),

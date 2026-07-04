@@ -52,6 +52,14 @@ interface BuyerDrawerDiffRow {
   possibleReasons: string[]
 }
 
+interface QualityRefundDiagnostic {
+  officialRawCount: number
+  matchedOrderCount: number
+  unmatchedOrderCount: number
+  periodQualityRefundOrderCount: number
+  excludeSamples: Array<{ orderNo: string; packageId: string; reason: string }>
+}
+
 interface DataAccuracyCheck {
   key: string
   title: string
@@ -65,9 +73,11 @@ interface DataAccuracyCheck {
     onlyInBoard?: OrderPoolDiffRow[]
     onlyInAggregate?: OrderPoolDiffRow[]
     roundingNote?: string
+    widePoolExcludedSamples?: OrderPoolDiffRow[]
   }
   buyerDrawerDiffs?: BuyerDrawerDiffRow[]
   badBuyerDrawerDiffs?: BuyerDrawerDiffRow[]
+  qualityRefundDiagnostic?: QualityRefundDiagnostic
 }
 
 interface MonthlyCloseReport {
@@ -183,15 +193,24 @@ export const DataHealthPage: React.FC = () => {
   }
 
   const risk = syncRisk ?? report?.syncRisk
+  const qualityCheck = report?.checks.find((c) => c.key === 'quality_refund_diagnostic')
+  const qualityDiag = qualityCheck?.qualityRefundDiagnostic
+  const qualityNeedsAttention =
+    qualityCheck != null && (qualityCheck.status === 'warning' || qualityCheck.status === 'danger')
   const isStaleReport = report != null && (report.schemaVersion ?? 1) < CURRENT_SCHEMA_VERSION
+  const isPartialScan = report?.fullScan === false
   const blockingIssues =
     report?.blockingIssues?.length
       ? report.blockingIssues
       : (report?.checks.filter(isBlockingCheck).map((c) => `${c.title}：${c.note}`) ?? [])
   const infoNotes =
     report?.infoNotes?.length
-      ? report.infoNotes
-      : (report?.checks.filter(isInfoCheck).map((c) => `${c.title}：${c.note}`) ?? [])
+      ? report.infoNotes.filter(
+          (n) => !n.startsWith('品退订单数诊断') && !n.startsWith('品退'),
+        )
+      : (report?.checks
+          .filter((c) => isInfoCheck(c) && c.key !== 'quality_refund_diagnostic')
+          .map((c) => `${c.title}：${c.note}`) ?? [])
 
   const techChecks = report?.checks.filter(isInfoCheck) ?? []
   const blockingChecks = report?.checks.filter((c) => !isInfoCheck(c)) ?? []
@@ -237,8 +256,90 @@ export const DataHealthPage: React.FC = () => {
         <>
           {isStaleReport ? (
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-              当前报告由旧版本生成，建议管理员重跑以获取最新核对逻辑与差异明细。
+              当前报告由旧版本生成（schema={report.schemaVersion ?? '—'}），建议管理员重跑以获取最新核对逻辑与差异明细。
             </div>
+          ) : null}
+
+          {isPartialScan ? (
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
+              当前报告为非全量核对（fullScan=false），高风险售后客户榜等可能为抽样结果；建议管理员重跑 fullScan 报告。
+            </div>
+          ) : null}
+
+          {qualityNeedsAttention && qualityCheck ? (
+            <section className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+              <h3 className="text-sm font-semibold text-amber-950">品退诊断异常</h3>
+              <p className="mt-1 text-sm text-amber-900">{qualityCheck.note}</p>
+              {qualityDiag ? (
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <MetricCard
+                    label="官方品退原始数"
+                    value={formatCount(qualityDiag.officialRawCount)}
+                  />
+                  <MetricCard
+                    label="本期匹配数"
+                    value={formatCount(qualityDiag.matchedOrderCount)}
+                  />
+                  <MetricCard
+                    label="未匹配数"
+                    value={formatCount(qualityDiag.unmatchedOrderCount)}
+                  />
+                  <MetricCard
+                    label="本期计入品退数"
+                    value={formatCount(qualityDiag.periodQualityRefundOrderCount)}
+                    danger={
+                      (qualityDiag.officialRawCount > 0 ||
+                        qualityDiag.matchedOrderCount > 0) &&
+                      qualityDiag.periodQualityRefundOrderCount === 0
+                    }
+                  />
+                </div>
+              ) : null}
+              {qualityDiag &&
+              (qualityDiag.officialRawCount > 0 || qualityDiag.matchedOrderCount > 0) &&
+              qualityDiag.periodQualityRefundOrderCount === 0 ? (
+                <p className="mt-2 text-sm font-medium text-amber-950">
+                  本期存在官方品退或已匹配记录，但经营总览品退订单数仍为 0，请对照下方未计入原因排查。
+                </p>
+              ) : null}
+              {qualityDiag?.excludeSamples?.length ? (
+                <div className="mt-3 overflow-x-auto">
+                  <p className="mb-1 text-xs font-medium text-amber-950">未计入原因样本</p>
+                  <table className="w-full text-left text-[11px] text-amber-900">
+                    <thead>
+                      <tr className="text-amber-700">
+                        <th className="pr-2">订单号</th>
+                        <th className="pr-2">包裹号</th>
+                        <th>原因</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {qualityDiag.excludeSamples.map((s) => (
+                        <tr key={`${s.orderNo}-${s.reason}`} className="border-t border-amber-200/60">
+                          <td className="py-1 pr-2 font-mono">{s.orderNo}</td>
+                          <td className="py-1 pr-2 font-mono">{s.packageId}</td>
+                          <td className="py-1">{s.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+            </section>
+          ) : qualityCheck && qualityDiag ? (
+            <section className="rounded-xl border border-slate-200 bg-white p-4">
+              <h3 className="text-sm font-semibold text-slate-900">品退诊断</h3>
+              <p className="mt-1 text-xs text-slate-600">{qualityCheck.note}</p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <MetricCard label="官方品退原始数" value={formatCount(qualityDiag.officialRawCount)} />
+                <MetricCard label="本期匹配数" value={formatCount(qualityDiag.matchedOrderCount)} />
+                <MetricCard label="未匹配数" value={formatCount(qualityDiag.unmatchedOrderCount)} />
+                <MetricCard
+                  label="本期计入品退数"
+                  value={formatCount(qualityDiag.periodQualityRefundOrderCount)}
+                />
+              </div>
+            </section>
           ) : null}
 
           {/* 第一块：结论 */}

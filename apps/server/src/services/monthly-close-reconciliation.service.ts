@@ -467,6 +467,7 @@ export async function buildMonthlyCloseReconciliation(params: {
       totalPaymentAmountYuan: Math.round(
         paidViews.reduce((s, v) => s + (v.paymentBaseCent ?? 0), 0) / 100,
       ),
+      validAmountCent: validRevenue.validAmountCent,
       validAmountYuan: validRevenue.validAmountYuan,
       avgOrderAmountYuan:
         validRevenue.soldOrderCount > 0

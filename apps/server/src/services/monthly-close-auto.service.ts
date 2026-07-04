@@ -12,40 +12,17 @@ import {
 } from './monthly-close-report-store.service'
 import type { MonthlyCloseAutoReport } from './monthly-close-auto.types'
 import { logError, logInfo } from '../utils/server-log'
-import { resolveReportBuildMeta } from '../utils/report-build-meta'
+import {
+  isMonthlyCloseReportBuildStale,
+  resolveReportBuildMeta,
+} from '../utils/report-build-meta'
+import {
+  buildConclusionReasonSummaryFromChecks,
+  resolveValidRevenueCentFromSectionB,
+} from './monthly-close-conclusion.util'
 
 export type { MonthlyCloseAutoReport } from './monthly-close-auto.types'
-
-function buildConclusionReasonSummary(
-  report: Pick<MonthlyCloseAutoReport, 'blockingIssues' | 'syncRisk' | 'status'>,
-): string {
-  const parts: string[] = []
-  if (report.blockingIssues?.length) {
-    if (report.blockingIssues.some((b) => b.includes('经营总览和运营日报'))) {
-      parts.push('金额差异')
-    }
-    if (report.blockingIssues.some((b) => b.includes('订单池') || b.includes('标准订单'))) {
-      parts.push('订单差异')
-    }
-    if (report.blockingIssues.some((b) => b.includes('高风险售后客户'))) {
-      parts.push('售后榜口径不一致')
-    }
-    if (report.blockingIssues.some((b) => b.includes('买家榜'))) {
-      parts.push('买家榜口径不一致')
-    }
-    if (report.blockingIssues.some((b) => b.includes('重复订单'))) {
-      parts.push('重复订单')
-    }
-    if (report.blockingIssues.some((b) => b.includes('支付时间'))) {
-      parts.push('支付时间漏单风险')
-    }
-  }
-  if (report.syncRisk.status === 'danger') parts.push('接口风险')
-  if (parts.length === 0) {
-    return report.status === 'pass' ? '数据核对通过' : '存在需关注的提示项'
-  }
-  return [...new Set(parts)].join('、')
-}
+export { buildConclusionReasonSummaryFromChecks } from './monthly-close-conclusion.util'
 
 export function resolveAutoCloseTargetMonth(now: Date = new Date()): string | null {
   const { year, month, day } = (() => {
@@ -68,16 +45,24 @@ export async function runMonthlyCloseAuto(params?: {
     autoPrevMonth: !params?.month,
   })
   const month = scope.month
+  const fullScan = params?.fullScan !== false
+  const buildMeta = resolveReportBuildMeta(fullScan)
 
   if (!params?.force && (await hasSuccessfulMonthlyCloseReport(month))) {
     const existing = await readMonthlyCloseReport(month)
-    if (existing) return existing
+    if (existing && !isMonthlyCloseReportBuildStale(existing, buildMeta)) {
+      return existing
+    }
+    if (existing && isMonthlyCloseReportBuildStale(existing, buildMeta)) {
+      logInfo(
+        '月度结账',
+        `${month} 已有报告但 buildMeta 不一致（schema=${existing.schemaVersion ?? '?'} commit=${existing.gitCommit?.slice(0, 8) ?? '?'} fullScan=${existing.fullScan}），将重跑`,
+      )
+    }
   }
 
   const release = await acquireMonthlyCloseLock(month)
   const startedAt = new Date().toISOString()
-  const fullScan = params?.fullScan !== false
-  const buildMeta = resolveReportBuildMeta(fullScan)
   try {
     logInfo('月度结账', `开始自动核对 ${month}（${scope.startDate} ~ ${scope.endDate}）`)
 
@@ -93,7 +78,7 @@ export async function runMonthlyCloseAuto(params?: {
     ])
 
     const sectionB = reconciliation.sectionB as Record<string, unknown>
-    const validRevenueCent = Math.round(Number(sectionB.validAmountYuan ?? 0) * 100)
+    const validRevenueCent = resolveValidRevenueCentFromSectionB(sectionB)
     const checks = [...audit.checks]
     const blockingIssues = audit.blockingIssues ?? []
     const infoNotes = [...(audit.infoNotes ?? [])]
@@ -165,7 +150,11 @@ export async function runMonthlyCloseAuto(params?: {
 
     report.conclusion = {
       canClose: report.canClose,
-      reasonSummary: buildConclusionReasonSummary(report),
+      reasonSummary: buildConclusionReasonSummaryFromChecks({
+        checks: report.checks,
+        syncRiskStatus: report.syncRisk.status,
+        overallStatus: report.status,
+      }),
     }
 
     const reportPath = await writeMonthlyCloseReport(report)

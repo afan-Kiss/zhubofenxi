@@ -36,6 +36,11 @@ SKIP_DIRS = {
 }
 SKIP_FILE_SUFFIX = {".db-journal", ".log", ".zip"}
 SKIP_PATH_PARTS = {".venv", "__pycache__", "apps/server/dist", "apps/web/dist"}
+DB_FILE_SUFFIXES = (".db", ".db-shm", ".db-wal", ".sqlite", ".sqlite3")
+SERVER_DATA_DIR_PREFIX = "apps/server/data/"
+DB_OVERWRITE_CONFIRM = "YES_I_KNOW_THIS_WILL_OVERWRITE_PRODUCTION_DB"
+FORCED_LOCAL_DB_REMOTE = "/tmp/zhubo-upload/forced-local-app.db"
+MIN_PRESERVE_DB_BYTES = 5 * 1024 * 1024
 
 
 def load_ssh_pass() -> str:
@@ -96,11 +101,58 @@ def should_skip(rel: str) -> bool:
     for part in SKIP_PATH_PARTS:
         if part in rel_norm:
             return True
+    if rel_norm.startswith(SERVER_DATA_DIR_PREFIX):
+        return True
+    lower = rel_norm.lower()
+    if lower.endswith(DB_FILE_SUFFIXES):
+        return True
     if rel_norm.endswith("tsconfig.tsbuildinfo"):
         return True
     if any(rel_norm.endswith(s) for s in SKIP_FILE_SUFFIX):
         return True
     return False
+
+
+def sqlite_count(path: Path, table: str) -> int | None:
+    if not path.is_file():
+        return None
+    try:
+        r = subprocess.run(
+            ["sqlite3", str(path), f"SELECT COUNT(*) FROM {table};"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        if r.returncode != 0:
+            return None
+        return int((r.stdout or "0").strip() or "0")
+    except Exception:
+        return None
+
+
+def resolve_forced_local_db_upload() -> Path | None:
+    """Explicit local db upload is opt-in and requires a second confirmation."""
+    if os.environ.get("DEPLOY_UPLOAD_LOCAL_DB", "0") != "1":
+        return None
+    confirm = os.environ.get("DEPLOY_ALLOW_DB_OVERWRITE", "").strip()
+    if confirm != DB_OVERWRITE_CONFIRM:
+        print(
+            "DEPLOY_UPLOAD_LOCAL_DB=1 requires "
+            f"DEPLOY_ALLOW_DB_OVERWRITE={DB_OVERWRITE_CONFIRM}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    db = ROOT / "apps/server/data/app.db"
+    if not db.is_file():
+        print(f"Local database not found: {db}", file=sys.stderr)
+        sys.exit(1)
+    orders = sqlite_count(db, "XhsRawOrder")
+    print(
+        f"Forced local db upload enabled: {db} "
+        f"(size={db.stat().st_size}, XhsRawOrder={orders if orders is not None else 'unknown'})"
+    )
+    return db
 
 
 def build_zip(zip_path: Path) -> None:
@@ -226,11 +278,9 @@ def main() -> None:
             sftp_put(client, zip_path, "/tmp/zhubo-upload/zhubo-analysis.zip")
             sftp_put(client, env_path, "/tmp/zhubo-upload/server.env")
 
-            upload_local_db = os.environ.get("DEPLOY_UPLOAD_LOCAL_DB", "0") == "1"
-            if upload_local_db:
-                db = ROOT / "apps/server/data/app.db"
-                if db.exists():
-                    sftp_put(client, db, "/tmp/zhubo-upload/app.db.local")
+            forced_local_db = resolve_forced_local_db_upload()
+            if forced_local_db is not None:
+                sftp_put(client, forced_local_db, FORCED_LOCAL_DB_REMOTE)
 
         run(
             client,
@@ -240,8 +290,20 @@ DEPLOY_DIR={DEPLOY_DIR}
 PRESERVE_DB=/tmp/zhubo-upload/preserve-app.db
 PRESERVE_ENV=/tmp/zhubo-upload/preserve-server.env
 PRESERVE_REPORT_IMAGES=/tmp/zhubo-upload/preserve-daily-report-images
-rm -f /tmp/zhubo-upload/app.db /tmp/zhubo-upload/app.db.local "$PRESERVE_DB" "$PRESERVE_ENV"
+FORCED_LOCAL_DB={FORCED_LOCAL_DB_REMOTE}
+MIN_PRESERVE_DB_BYTES={MIN_PRESERVE_DB_BYTES}
+rm -f /tmp/zhubo-upload/app.db "$PRESERVE_DB" "$PRESERVE_ENV"
 rm -rf "$PRESERVE_REPORT_IMAGES"
+
+count_orders() {{
+  local db_file="$1"
+  if [ ! -f "$db_file" ]; then
+    echo 0
+    return
+  fi
+  sqlite3 "$db_file" "SELECT COUNT(*) FROM XhsRawOrder;" 2>/dev/null || echo 0
+}}
+
 if [ -f "$DEPLOY_DIR/apps/server/data/app.db" ]; then
   cp -a "$DEPLOY_DIR/apps/server/data/app.db" "$PRESERVE_DB"
   echo "Preserved production app.db before deploy"
@@ -312,12 +374,41 @@ target.write_text("\\n".join(out_lines) + "\\n", encoding="utf-8")
 print("Restored production secrets in apps/server/.env:", ", ".join(k for k in preserve_keys if k in preserved))
 PY
 fi
-if [ -f /tmp/zhubo-upload/app.db.local ]; then
-  cp /tmp/zhubo-upload/app.db.local "$DEPLOY_DIR/apps/server/data/app.db"
-  echo "Restored app.db from explicit local upload (DEPLOY_UPLOAD_LOCAL_DB=1)"
+
+RESTORE_SOURCE=""
+if [ -f "$FORCED_LOCAL_DB" ]; then
+  RESTORE_SOURCE="$FORCED_LOCAL_DB"
 elif [ -f "$PRESERVE_DB" ]; then
-  cp -a "$PRESERVE_DB" "$DEPLOY_DIR/apps/server/data/app.db"
-  echo "Restored preserved production app.db after deploy"
+  RESTORE_SOURCE="$PRESERVE_DB"
+fi
+
+if [ -n "$RESTORE_SOURCE" ]; then
+  PRESERVE_ORDERS=0
+  PRESERVE_SIZE=0
+  if [ -f "$PRESERVE_DB" ]; then
+    PRESERVE_ORDERS=$(count_orders "$PRESERVE_DB")
+    PRESERVE_SIZE=$(stat -c '%s' "$PRESERVE_DB" 2>/dev/null || echo 0)
+  fi
+  RESTORE_ORDERS=$(count_orders "$RESTORE_SOURCE")
+  RESTORE_SIZE=$(stat -c '%s' "$RESTORE_SOURCE" 2>/dev/null || echo 0)
+  echo "Database restore check: preserve_orders=$PRESERVE_ORDERS preserve_size=$PRESERVE_SIZE restore_orders=$RESTORE_ORDERS restore_size=$RESTORE_SIZE source=$RESTORE_SOURCE"
+
+  if [ "$PRESERVE_ORDERS" -gt 0 ] && [ "$RESTORE_ORDERS" -eq 0 ]; then
+    echo "[deploy][FAIL] 拒绝用空库覆盖生产库: 线上原有 XhsRawOrder=$PRESERVE_ORDERS，恢复目标 XhsRawOrder=0"
+    exit 1
+  fi
+  if [ "$PRESERVE_ORDERS" -gt 0 ] && [ "$PRESERVE_SIZE" -lt "$MIN_PRESERVE_DB_BYTES" ]; then
+    echo "[deploy][FAIL] 拒绝用空库覆盖生产库: preserve 仅 ${{PRESERVE_SIZE}}B (<5MB) 但线上原有 XhsRawOrder=$PRESERVE_ORDERS"
+    exit 1
+  fi
+
+  cp -a "$RESTORE_SOURCE" "$DEPLOY_DIR/apps/server/data/app.db"
+  if [ "$RESTORE_SOURCE" = "$FORCED_LOCAL_DB" ]; then
+    echo "Restored app.db from explicit local upload (DEPLOY_UPLOAD_LOCAL_DB=1 with overwrite confirmation)"
+  else
+    echo "Restored preserved production app.db after deploy"
+  fi
+  rm -f "$FORCED_LOCAL_DB"
 fi
 if [ -d "$PRESERVE_REPORT_IMAGES" ]; then
   cp -a "$PRESERVE_REPORT_IMAGES" "$DEPLOY_DIR/apps/server/data/daily-report-images"
@@ -348,6 +439,13 @@ chmod +x "$DEPLOY_DIR"/deploy/aliyun/*.sh "$DEPLOY_DIR"/scripts/install-xhs-sign
         run(client, "curl -i --max-time 10 http://127.0.0.1/api/health")
         run(client, "curl -i --max-time 15 http://8.137.126.18/api/health")
         run(client, "export NVM_DIR=/root/.nvm && . /root/.nvm/nvm.sh && pm2 status")
+        run(
+            client,
+            f"cd {DEPLOY_DIR} && "
+            'echo "=== post-deploy database counts ===" && '
+            'sqlite3 apps/server/data/app.db "SELECT COUNT(*) AS XhsRawOrder FROM XhsRawOrder;" && '
+            'sqlite3 apps/server/data/app.db "SELECT COUNT(*) AS XhsSyncJob FROM XhsSyncJob;"',
+        )
 
     finally:
         client.close()

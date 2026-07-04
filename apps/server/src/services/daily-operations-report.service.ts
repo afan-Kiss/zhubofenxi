@@ -464,13 +464,14 @@ export async function buildDailyOperationsReport(params: {
   )
   const storeWideInvalid = countDailyReportOrders(remappedAll)
   const invalidOrderCount = storeWideInvalid.invalidOrderCount
-  const anchorAssignedInvalidOrderCount = anchorRows.reduce(
-    (sum, row) => sum + row.invalidOrderCount,
-    0,
-  )
   const unassignedInvalidViews = dedupeViewsByMetricOrderNo(remappedAll).filter(
     (v) => v.attributionType === 'unassigned',
   )
+  const assignedInvalidViews = dedupeViewsByMetricOrderNo(remappedAll).filter(
+    (v) => v.attributionType !== 'unassigned',
+  )
+  const anchorAssignedInvalidOrderCount =
+    countDailyReportOrders(assignedInvalidViews).invalidOrderCount
   const unassignedInvalidOrderCount =
     countDailyReportOrders(unassignedInvalidViews).invalidOrderCount
   const summaryRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViewsAll)

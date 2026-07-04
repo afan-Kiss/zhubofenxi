@@ -41,6 +41,8 @@ SERVER_DATA_DIR_PREFIX = "apps/server/data/"
 DB_OVERWRITE_CONFIRM = "YES_I_KNOW_THIS_WILL_OVERWRITE_PRODUCTION_DB"
 FORCED_LOCAL_DB_REMOTE = "/tmp/zhubo-upload/forced-local-app.db"
 MIN_PRESERVE_DB_BYTES = 5 * 1024 * 1024
+DB_BACKUP_DIR = "/www/backups/zhubo-analysis-db"
+MIN_DB_BACKUP_KEEP_WITH_ORDERS = 20
 
 
 def load_ssh_pass() -> str:
@@ -292,20 +294,75 @@ PRESERVE_ENV=/tmp/zhubo-upload/preserve-server.env
 PRESERVE_REPORT_IMAGES=/tmp/zhubo-upload/preserve-daily-report-images
 FORCED_LOCAL_DB={FORCED_LOCAL_DB_REMOTE}
 MIN_PRESERVE_DB_BYTES={MIN_PRESERVE_DB_BYTES}
+DB_BACKUP_DIR={DB_BACKUP_DIR}
+MIN_DB_BACKUP_KEEP_WITH_ORDERS={MIN_DB_BACKUP_KEEP_WITH_ORDERS}
 rm -f /tmp/zhubo-upload/app.db "$PRESERVE_DB" "$PRESERVE_ENV"
 rm -rf "$PRESERVE_REPORT_IMAGES"
+mkdir -p "$DB_BACKUP_DIR"
 
-count_orders() {{
+count_table() {{
   local db_file="$1"
+  local table="$2"
   if [ ! -f "$db_file" ]; then
     echo 0
     return
   fi
-  sqlite3 "$db_file" "SELECT COUNT(*) FROM XhsRawOrder;" 2>/dev/null || echo 0
+  sqlite3 "$db_file" "SELECT COUNT(*) FROM $table;" 2>/dev/null || echo 0
 }}
 
+count_orders() {{
+  count_table "$1" "XhsRawOrder"
+}}
+
+collect_db_stats() {{
+  local db_file="$1"
+  if [ ! -f "$db_file" ]; then
+    echo "orders=0 users=0 creds=0 jobs=0 size=0"
+    return
+  fi
+  local orders users creds jobs size
+  orders=$(count_orders "$db_file")
+  users=$(count_table "$db_file" "User")
+  creds=$(count_table "$db_file" "PlatformCredential")
+  jobs=$(count_table "$db_file" "XhsSyncJob")
+  size=$(stat -c '%s' "$db_file" 2>/dev/null || echo 0)
+  echo "orders=$orders users=$users creds=$creds jobs=$jobs size=$size"
+}}
+
+backup_production_db_with_stats() {{
+  local db_file="$1"
+  local stats="$2"
+  local ts orders users creds backup_name
+  ts=$(date +%Y%m%d-%H%M%S)
+  orders=$(echo "$stats" | sed -n 's/.*orders=\\([0-9]*\\).*/\\1/p')
+  users=$(echo "$stats" | sed -n 's/.*users=\\([0-9]*\\).*/\\1/p')
+  creds=$(echo "$stats" | sed -n 's/.*creds=\\([0-9]*\\).*/\\1/p')
+  backup_name="app.db.${{ts}}.orders-${{orders}}.users-${{users}}.cookies-${{creds}}.db"
+  cp -a "$db_file" "$DB_BACKUP_DIR/$backup_name"
+  echo "Backed up production app.db -> $DB_BACKUP_DIR/$backup_name"
+}}
+
+prune_db_backups() {{
+  local keep=0
+  for f in $(ls -t "$DB_BACKUP_DIR"/app.db.*.orders-*.db 2>/dev/null); do
+    local orders
+    orders=$(echo "$f" | sed -n 's/.*orders-\\([0-9]*\\).*/\\1/p')
+    if [ "${{orders:-0}}" -gt 0 ]; then
+      keep=$((keep + 1))
+      if [ "$keep" -gt "$MIN_DB_BACKUP_KEEP_WITH_ORDERS" ]; then
+        rm -f "$f"
+        echo "Pruned old non-empty backup: $f"
+      fi
+    fi
+  done
+}}
+
+PRE_DEPLOY_STATS=""
 if [ -f "$DEPLOY_DIR/apps/server/data/app.db" ]; then
+  PRE_DEPLOY_STATS=$(collect_db_stats "$DEPLOY_DIR/apps/server/data/app.db")
+  echo "Pre-deploy db stats: $PRE_DEPLOY_STATS"
   cp -a "$DEPLOY_DIR/apps/server/data/app.db" "$PRESERVE_DB"
+  backup_production_db_with_stats "$DEPLOY_DIR/apps/server/data/app.db" "$PRE_DEPLOY_STATS"
   echo "Preserved production app.db before deploy"
 fi
 if [ -f "$DEPLOY_DIR/apps/server/.env" ]; then
@@ -409,6 +466,35 @@ if [ -n "$RESTORE_SOURCE" ]; then
     echo "Restored preserved production app.db after deploy"
   fi
   rm -f "$FORCED_LOCAL_DB"
+
+  POST_DEPLOY_STATS=$(collect_db_stats "$DEPLOY_DIR/apps/server/data/app.db")
+  echo "Post-deploy db stats: $POST_DEPLOY_STATS"
+  PRE_ORDERS=$(echo "$PRE_DEPLOY_STATS" | sed -n 's/.*orders=\\([0-9]*\\).*/\\1/p')
+  PRE_USERS=$(echo "$PRE_DEPLOY_STATS" | sed -n 's/.*users=\\([0-9]*\\).*/\\1/p')
+  PRE_CREDS=$(echo "$PRE_DEPLOY_STATS" | sed -n 's/.*creds=\\([0-9]*\\).*/\\1/p')
+  PRE_SIZE=$(echo "$PRE_DEPLOY_STATS" | sed -n 's/.*size=\\([0-9]*\\).*/\\1/p')
+  POST_ORDERS=$(echo "$POST_DEPLOY_STATS" | sed -n 's/.*orders=\\([0-9]*\\).*/\\1/p')
+  POST_USERS=$(echo "$POST_DEPLOY_STATS" | sed -n 's/.*users=\\([0-9]*\\).*/\\1/p')
+  POST_CREDS=$(echo "$POST_DEPLOY_STATS" | sed -n 's/.*creds=\\([0-9]*\\).*/\\1/p')
+  POST_SIZE=$(echo "$POST_DEPLOY_STATS" | sed -n 's/.*size=\\([0-9]*\\).*/\\1/p')
+
+  if [ "${{PRE_ORDERS:-0}}" -gt 0 ] && [ "${{POST_ORDERS:-0}}" -eq 0 ]; then
+    echo "[deploy][FAIL] 拒绝部署：数据库疑似被空库覆盖（XhsRawOrder ${{PRE_ORDERS}} -> 0）"
+    exit 1
+  fi
+  if [ "${{PRE_USERS:-0}}" -gt 0 ] && [ "${{POST_USERS:-0}}" -eq 0 ]; then
+    echo "[deploy][FAIL] 拒绝部署：User 被清空（${{PRE_USERS}} -> 0）"
+    exit 1
+  fi
+  if [ "${{PRE_CREDS:-0}}" -gt 0 ] && [ "${{POST_CREDS:-0}}" -eq 0 ]; then
+    echo "[deploy][FAIL] 拒绝部署：PlatformCredential 被清空（${{PRE_CREDS}} -> 0）"
+    exit 1
+  fi
+  if [ "${{PRE_SIZE:-0}}" -gt 5242880 ] && [ "${{POST_SIZE:-0}}" -lt 1048576 ]; then
+    echo "[deploy][FAIL] 拒绝部署：app.db 体积异常缩小（${{PRE_SIZE}}B -> ${{POST_SIZE}}B）"
+    exit 1
+  fi
+  prune_db_backups
 fi
 if [ -d "$PRESERVE_REPORT_IMAGES" ]; then
   cp -a "$PRESERVE_REPORT_IMAGES" "$DEPLOY_DIR/apps/server/data/daily-report-images"

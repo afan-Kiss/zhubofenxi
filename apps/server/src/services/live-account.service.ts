@@ -467,7 +467,25 @@ export async function markLiveAccountSyncSuccess(id: string): Promise<void> {
   })
 }
 
-export async function testLiveAccountCookie(id: string): Promise<{
+/** Cookie 真实探测冷却：5 分钟内不重复请求平台接口 */
+const COOKIE_TEST_COOLDOWN_MS = 5 * 60 * 1000
+
+function isPlatformRequestThrottled(message: string | null | undefined): boolean {
+  if (!message) return false
+  return /冷却|熔断|频率/i.test(message)
+}
+
+function buildTestResultFromDbRow(account: {
+  cookieStatus: string
+  cookieLastCheckedAt: Date | null
+  cookieLastErrorCode: string | null
+  cookieLastErrorMessage: string | null
+  cookieLastFailedApi: string | null
+}, extra?: {
+  fromCooldown?: boolean
+  cooldownRemainingSeconds?: number
+  message?: string
+}): {
   ok: boolean
   cookieStatus: CookieHealthStatus
   message: string
@@ -478,6 +496,49 @@ export async function testLiveAccountCookie(id: string): Promise<{
   qualitySignError?: string | null
   qualityApiOk: boolean
   qualityApiError?: string | null
+  fromCooldown?: boolean
+  cooldownRemainingSeconds?: number
+  checkedAt?: string
+} {
+  const status = (account.cookieStatus as CookieHealthStatus) || 'unknown'
+  const checkedAt = account.cookieLastCheckedAt?.toISOString()
+  const errMsg = account.cookieLastErrorMessage?.trim() || undefined
+  const failedApi = account.cookieLastFailedApi
+  const commonOk = status === 'valid'
+  return {
+    ok: status === 'valid',
+    cookieStatus: status,
+    message: extra?.message ?? errMsg ?? (status === 'valid' ? 'Cookie 可用' : 'Cookie 检测未通过'),
+    errorCode: account.cookieLastErrorCode ?? undefined,
+    commonApiOk: commonOk && failedApi !== 'order_list',
+    commonApiError: commonOk ? null : errMsg ?? null,
+    qualitySignOk: commonOk && failedApi !== 'quality_sign',
+    qualitySignError: commonOk ? null : errMsg ?? null,
+    qualityApiOk: commonOk && failedApi !== 'quality_badcase',
+    qualityApiError: commonOk ? null : errMsg ?? null,
+    fromCooldown: extra?.fromCooldown,
+    cooldownRemainingSeconds: extra?.cooldownRemainingSeconds,
+    checkedAt,
+  }
+}
+
+export async function testLiveAccountCookie(
+  id: string,
+  options?: { force?: boolean },
+): Promise<{
+  ok: boolean
+  cookieStatus: CookieHealthStatus
+  message: string
+  errorCode?: string
+  commonApiOk: boolean
+  commonApiError?: string | null
+  qualitySignOk: boolean
+  qualitySignError?: string | null
+  qualityApiOk: boolean
+  qualityApiError?: string | null
+  fromCooldown?: boolean
+  cooldownRemainingSeconds?: number
+  checkedAt?: string
 }> {
   const account = await prisma.platformCredential.findUnique({ where: { id } })
   if (!account?.cookieEncrypted?.trim()) {
@@ -498,6 +559,23 @@ export async function testLiveAccountCookie(id: string): Promise<{
       qualitySignError: '尚未配置 Cookie',
       qualityApiOk: false,
       qualityApiError: '尚未配置 Cookie',
+    }
+  }
+
+  const cookieUpdatedAfterCheck =
+    account.cookieLastCheckedAt != null &&
+    Math.abs(account.updatedAt.getTime() - account.cookieLastCheckedAt.getTime()) >= 2000 &&
+    account.updatedAt.getTime() > account.cookieLastCheckedAt.getTime()
+
+  if (!options?.force && account.cookieLastCheckedAt && !cookieUpdatedAfterCheck) {
+    const elapsed = Date.now() - account.cookieLastCheckedAt.getTime()
+    if (elapsed < COOKIE_TEST_COOLDOWN_MS) {
+      const remaining = COOKIE_TEST_COOLDOWN_MS - elapsed
+      return buildTestResultFromDbRow(account, {
+        fromCooldown: true,
+        cooldownRemainingSeconds: Math.ceil(remaining / 1000),
+        message: '刚检测过，冷却期内不重复请求平台接口',
+      })
     }
   }
 
@@ -569,6 +647,11 @@ export async function testLiveAccountCookie(id: string): Promise<{
   }
 
   const classified = classifyXhsErrorMessage(res.errorMessage ?? '')
+  if (isPlatformRequestThrottled(res.errorMessage)) {
+    return buildTestResultFromDbRow(account, {
+      message: res.errorMessage ?? '平台接口冷却中，沿用上次检测结果',
+    })
+  }
   const status: CookieHealthStatus =
     classified.cookieStatus ?? (classified.suspected ? 'suspected' : 'invalid')
   await markCookieCheckResult(id, {

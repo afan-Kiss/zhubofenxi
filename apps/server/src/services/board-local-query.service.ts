@@ -63,6 +63,7 @@ import {
   type BoardDataDisplayStatus,
 } from './board-data-display-status.service'
 import { logWarn } from '../utils/server-log'
+import { getAllShopCookieHealth } from './shop-cookie-health.service'
 
 function resolveLocalQueryRange(params: {
   preset: BoardLiveQueryPreset
@@ -345,12 +346,23 @@ export async function executeBoardLocalQuery(params: {
   )
   const views = filterViewsByAnchor(scopedAllViews, anchorId, anchorName)
 
-  const dataDisplayStatus = resolveBoardDataDisplayStatus({
+  let dataDisplayStatus = resolveBoardDataDisplayStatus({
     orderCountInRange: views.length,
     totalOrderCount,
     lastSuccessAt: syncMeta.businessSync.lastSuccessAt,
     syncStatus: syncMeta.businessSync.status,
   })
+
+  if (boardCache.stale) {
+    dataDisplayStatus = 'failed_with_cache'
+  } else if (
+    views.length > 0 &&
+    syncMeta.businessSync.status === 'failed'
+  ) {
+    dataDisplayStatus = syncMeta.businessSync.lastSuccessAt
+      ? 'failed_with_cache'
+      : 'ready'
+  }
 
   if (
     dataDisplayStatus === 'syncing_no_cache' ||
@@ -361,7 +373,7 @@ export async function executeBoardLocalQuery(params: {
   }
 
   const summary =
-    views.length === boardCache.orderCount
+    views.length === boardCache.orderCount && !boardCache.stale
       ? { ...boardCache.summary }
       : buildSummaryFromViews(views)
 
@@ -410,6 +422,39 @@ export async function executeBoardLocalQuery(params: {
     dataDisplayStatus !== 'syncing_no_cache'
   ) {
     progressMessage = boardCachePreparingMessage()
+  }
+
+  if (views.length > 0 && syncMeta.businessSync.status === 'failed') {
+    const shopHealth = await getAllShopCookieHealth()
+    const cookieBlocksSync = shopHealth.some(
+      (h) => h.hasCookie && !h.ok,
+    )
+    if (cookieBlocksSync) {
+      progressMessage =
+        'Cookie 当前不可用，新数据同步失败；当前展示本地已同步数据。'
+    }
+  }
+
+  if (boardCache.stale && boardCache.buildError) {
+    progressMessage = `缓存重建失败（${boardCache.buildError}），当前展示上一次成功缓存。`
+  }
+
+  if (boardCache.stale || dataDisplayStatus === 'failed_with_cache') {
+    logWarn(
+      '经营看板',
+      JSON.stringify({
+        preset: params.preset,
+        startDate,
+        endDate,
+        rangeKey,
+        orderCount: summary.orderCount ?? 0,
+        totalGmv: summary.totalGmv ?? 0,
+        dataDisplayStatus,
+        cacheHit,
+        cacheStale: boardCache.stale ?? false,
+        sourceDataMaxTime: boardCache.sourceDataMaxTime,
+      }),
+    )
   }
 
 

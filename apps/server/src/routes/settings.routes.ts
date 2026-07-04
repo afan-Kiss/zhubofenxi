@@ -300,13 +300,14 @@ settingsRouter.post('/live-accounts/:id/test-cookie', async (req, res) => {
     const account = await (
       await import('../services/live-account.service')
     ).getLiveAccountById(req.params.id)
-    const result = await testLiveAccountCookie(req.params.id)
+    const force = req.body?.force === true
+    const result = await testLiveAccountCookie(req.params.id, { force })
     const name = account?.displayName?.trim() || account?.platformName || '未知直播号'
     sendOk(res, {
       ...result,
       liveAccountId: req.params.id,
       name,
-      checkedAt: new Date().toISOString(),
+      checkedAt: result.checkedAt ?? new Date().toISOString(),
       apiName: '订单接口',
       status:
         result.cookieStatus === 'valid' && result.ok

@@ -50,6 +50,9 @@ export interface BusinessBoardCacheEntry {
   sourceSyncJobId: string | null
   sourceDataMaxTime: string | null
   buildDurationMs: number
+  stale?: boolean
+  buildError?: string | null
+  fallbackReason?: string | null
 }
 
 const cache = new Map<string, BusinessBoardCacheEntry>()
@@ -138,8 +141,21 @@ function evictBusinessBoardCacheEntry(
   pendingBuilds.delete(key)
   logInfo(
     '经营缓存',
-    `构建前已清理旧缓存：${presetLabel(preset)} ${startDate}~${endDate}`,
+    `已清理缓存条目：${presetLabel(preset)} ${startDate}~${endDate}`,
   )
+}
+
+function fallbackFromPreviousCache(
+  previous: BusinessBoardCacheEntry,
+  buildError: unknown,
+): BusinessBoardCacheEntry {
+  const message = buildError instanceof Error ? buildError.message : String(buildError)
+  return {
+    ...previous,
+    stale: true,
+    buildError: message,
+    fallbackReason: 'build_failed',
+  }
 }
 
 export async function buildAndSetBusinessBoardCache(params: {
@@ -154,58 +170,72 @@ export async function buildAndSetBusinessBoardCache(params: {
   const range = resolveBusinessRange(businessPreset, params.startDate, params.endDate)
   const datePreset = normalizeBoardPreset(params.preset) as DateRangePreset
   const key = buildBusinessCacheKey(params.preset, range.startDate, range.endDate, scope)
+  const previous = cache.get(key)
 
-  evictBusinessBoardCacheEntry(key, params.preset, range.startDate, range.endDate)
+  try {
+    const { views, rawByMatch, artifacts } = await loadBoardArtifactsForRange(
+      datePreset,
+      range.startDate,
+      range.endDate,
+    )
 
-  const { views, rawByMatch, artifacts } = await loadBoardArtifactsForRange(
-    datePreset,
-    range.startDate,
-    range.endDate,
-  )
+    const coreViews = filterViewsForCoreMetrics(views)
+    const performanceViews = filterViewsForAnchorPerformance(
+      attachRawByMatchToViews(coreViews, rawByMatch),
+    )
 
-  const coreViews = filterViewsForCoreMetrics(views)
-  const performanceViews = filterViewsForAnchorPerformance(
-    attachRawByMatchToViews(coreViews, rawByMatch),
-  )
+    const summary = buildSummaryFromViews(coreViews)
+    const abnormalOrderCount = artifacts?.abnormalOrderCount ?? 0
+    if (abnormalOrderCount > 0) {
+      summary.abnormalOrderCount = abnormalOrderCount
+      summary.dataWarning = `有 ${abnormalOrderCount} 笔订单时间异常，未计入本期统计`
+    }
 
-  const summary = buildSummaryFromViews(coreViews)
-  const abnormalOrderCount = artifacts?.abnormalOrderCount ?? 0
-  if (abnormalOrderCount > 0) {
-    summary.abnormalOrderCount = abnormalOrderCount
-    summary.dataWarning = `有 ${abnormalOrderCount} 笔订单时间异常，未计入本期统计`
+    const anchorLeaderboard = aggregateAnchorLeaderboard(performanceViews)
+    const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(coreViews)]
+    const sourceDataMaxTime = await resolveSourceDataMaxTime()
+    const workbenchCacheMaxUpdatedAt = (await getLatestWorkbenchCacheUpdatedAt())?.toISOString() ?? null
+
+    const entry: BusinessBoardCacheEntry = {
+      cacheKey: key,
+      preset: params.preset,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      scope,
+      range,
+      summary,
+      anchorLeaderboard: anchorLeaderboard as unknown as Array<Record<string, unknown>>,
+      views,
+      rawByMatch,
+      blacklistedBuyerIds,
+      orderCount: views.length,
+      lastBuiltAt: new Date().toISOString(),
+      workbenchCacheMaxUpdatedAt,
+      sourceSyncJobId: await resolveLatestBusinessSyncJobId(),
+      sourceDataMaxTime,
+      buildDurationMs: Date.now() - started,
+      stale: false,
+      buildError: null,
+      fallbackReason: null,
+    }
+
+    cache.set(entry.cacheKey, entry)
+    logInfo(
+      '经营缓存',
+      `${presetLabel(params.preset)} 重新构建完成：${views.length} 单，用时 ${entry.buildDurationMs}ms，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
+    )
+    return entry
+  } catch (e) {
+    if (previous) {
+      const fallback = fallbackFromPreviousCache(previous, e)
+      logWarn(
+        '经营缓存',
+        `${presetLabel(params.preset)} 构建失败，回退旧缓存：${fallback.buildError}`,
+      )
+      return fallback
+    }
+    throw e
   }
-
-  const anchorLeaderboard = aggregateAnchorLeaderboard(performanceViews)
-  const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(coreViews)]
-  const sourceDataMaxTime = await resolveSourceDataMaxTime()
-  const workbenchCacheMaxUpdatedAt = (await getLatestWorkbenchCacheUpdatedAt())?.toISOString() ?? null
-
-  const entry: BusinessBoardCacheEntry = {
-    cacheKey: key,
-    preset: params.preset,
-    startDate: range.startDate,
-    endDate: range.endDate,
-    scope,
-    range,
-    summary,
-    anchorLeaderboard: anchorLeaderboard as unknown as Array<Record<string, unknown>>,
-    views,
-    rawByMatch,
-    blacklistedBuyerIds,
-    orderCount: views.length,
-    lastBuiltAt: new Date().toISOString(),
-    workbenchCacheMaxUpdatedAt,
-    sourceSyncJobId: await resolveLatestBusinessSyncJobId(),
-    sourceDataMaxTime,
-    buildDurationMs: Date.now() - started,
-  }
-
-  cache.set(entry.cacheKey, entry)
-  logInfo(
-    '经营缓存',
-    `${presetLabel(params.preset)} 重新构建完成：${views.length} 单，用时 ${entry.buildDurationMs}ms，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
-  )
-  return entry
 }
 
 export async function getOrBuildBusinessBoardCache(params: {
@@ -233,9 +263,15 @@ export async function getOrBuildBusinessBoardCache(params: {
       startDate: range.startDate,
       endDate: range.endDate,
       scope,
-    }).finally(() => {
-      pendingBuilds.delete(key)
     })
+      .catch((err) => {
+        const hit = cache.get(key)
+        if (hit) return fallbackFromPreviousCache(hit, err)
+        throw err
+      })
+      .finally(() => {
+        pendingBuilds.delete(key)
+      })
     pendingBuilds.set(key, buildPromise)
     return buildPromise
   }
@@ -254,7 +290,6 @@ export async function getOrBuildBusinessBoardCache(params: {
       '经营缓存',
       `${presetLabel(params.preset)} 售后工作台已更新，重建经营缓存`,
     )
-    evictBusinessBoardCacheEntry(key, params.preset, range.startDate, range.endDate)
   }
   const pending = pendingBuilds.get(key)
   if (pending) return pending
@@ -264,9 +299,15 @@ export async function getOrBuildBusinessBoardCache(params: {
     startDate: range.startDate,
     endDate: range.endDate,
     scope,
-  }).finally(() => {
-    pendingBuilds.delete(key)
   })
+    .catch((err) => {
+      const hit = cache.get(key)
+      if (hit) return fallbackFromPreviousCache(hit, err)
+      throw err
+    })
+    .finally(() => {
+      pendingBuilds.delete(key)
+    })
   pendingBuilds.set(key, buildPromise)
   return buildPromise
 }

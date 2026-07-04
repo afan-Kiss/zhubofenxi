@@ -1,5 +1,5 @@
 import { prisma } from '../lib/prisma'
-import { getCookieHealthPayload } from './live-account.service'
+import { getCookieHealthPayload, type CookieHealthSummary } from './live-account.service'
 import { getBusinessSyncStatus } from './business-sync-scheduler.service'
 import {
   buildBuyerProfileStatusForApi,
@@ -97,21 +97,46 @@ function toActiveSyncJobView(
   }
 }
 
+function buildDegradedCookieHealth(errorMessage: string): {
+  accounts: []
+  summary: CookieHealthSummary
+  degraded: true
+  errorMessage: string
+} {
+  return {
+    accounts: [],
+    summary: {
+      enabledCount: 0,
+      validCount: 0,
+      invalidCount: 0,
+      suspectedCount: 0,
+      unknownCount: 0,
+      canSyncCount: 0,
+      cannotSyncCount: 0,
+      missingCookieCount: 0,
+      missingA1Count: 0,
+      missingArkCount: 0,
+      expiredCount: 0,
+    },
+    degraded: true,
+    errorMessage,
+  }
+}
+
 /** 经营看板用：业务同步状态 + 进行中任务进度（复用 sync/status 字段） */
 export async function buildBoardSyncMetaForApi(): Promise<{
   businessSync: Awaited<ReturnType<typeof getBusinessSyncStatus>>['businessSync']
   buyerRankingSync: Awaited<ReturnType<typeof getBusinessSyncStatus>>['buyerRankingSync']
-  cookieHealth: Awaited<ReturnType<typeof getCookieHealthPayload>>
+  cookieHealth: Awaited<ReturnType<typeof getCookieHealthPayload>> | ReturnType<typeof buildDegradedCookieHealth>
   syncRunning: boolean
   activeSyncJob: BoardActiveSyncJobView | null
   totalRawOrders: number
   totalRawLiveSessions: number
   buyerProfileStatus: BuyerProfileStatusView
 }> {
-  const [base, cookieHealth, syncPayload, totalRawOrders, totalRawLiveSessions, afterSaleCount, qualityCaseCount, buyerCacheRow] =
+  const [base, syncPayload, totalRawOrders, totalRawLiveSessions, afterSaleCount, qualityCaseCount, buyerCacheRow] =
     await Promise.all([
       getBusinessSyncStatus(),
-      getCookieHealthPayload(),
       getSyncStatusPayload(),
       prisma.xhsRawOrder.count(),
       prisma.xhsRawLiveSession.count(),
@@ -119,6 +144,13 @@ export async function buildBoardSyncMetaForApi(): Promise<{
       prisma.qualityBadCase.count(),
       prisma.buyerRankingCache.findUnique({ where: { id: 'default' } }),
     ])
+
+  let cookieHealth: Awaited<ReturnType<typeof getCookieHealthPayload>> | ReturnType<typeof buildDegradedCookieHealth>
+  try {
+    cookieHealth = await getCookieHealthPayload()
+  } catch {
+    cookieHealth = buildDegradedCookieHealth('Cookie 状态读取失败，但不影响本地数据查看')
+  }
 
   const bizRunning =
     base.businessSync.status === 'running' || base.businessSync.status === 'queued'

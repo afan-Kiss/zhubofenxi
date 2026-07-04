@@ -357,6 +357,12 @@ export const OverviewTab: React.FC = () => {
         />
       ) : null}
 
+      {boardSyncUiMode === 'loading_range' && !ds ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-8 text-center">
+          <p className="text-sm text-slate-600">正在切换统计范围…</p>
+        </div>
+      ) : null}
+
       {status === 'failed' && !ds && boardSyncUiMode !== 'empty_failed' ? (
         <div className="rounded-2xl border border-dashed border-red-200 bg-red-50/40 p-8 text-center">
           <p className="text-sm text-red-800">{error ?? '加载失败'}</p>

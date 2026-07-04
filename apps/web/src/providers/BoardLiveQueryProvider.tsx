@@ -96,6 +96,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   )
 
   const loadedRangeKey = data?.rangeKey ?? null
+  const rangeMatched = loadedRangeKey === rangeKey
   const isDisplayStale = Boolean(
     displaySummary && loadedRangeKey && loadedRangeKey !== rangeKey,
   )
@@ -104,20 +105,19 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   const totalRawOrders = syncMeta?.totalRawOrders ?? 0
   const totalRawLiveSessions = syncMeta?.totalRawLiveSessions ?? 0
 
-  /** 日期切换时保留上一份 summary / data，直到新范围请求成功写回（与买家排行 Tab 切换一致） */
-  const showSummaryForUi = displaySummary
-  const showDataForUi = data
+  /** 仅当 loadedRangeKey 与当前 rangeKey 一致时，才向 UI 暴露 summary / data */
+  const showSummaryForUi = rangeMatched ? displaySummary : null
+  const showDataForUi = rangeMatched ? data : null
 
   const boardSyncUiMode = deriveBoardSyncUiMode({
     hasDisplayData: Boolean(showSummaryForUi),
     businessSync: syncMeta?.businessSync,
     activeSyncJob,
     totalRawOrders,
-    isLoadingRange: isDisplayStale && status === 'loading',
+    isLoadingRange: !rangeMatched && status === 'loading',
   })
 
-  const qualityFeedback =
-    loadedRangeKey === rangeKey ? data?.qualityFeedback ?? null : null
+  const qualityFeedback = rangeMatched ? data?.qualityFeedback ?? null : null
 
   const refreshSyncMeta = useCallback(async () => {
     try {
@@ -150,24 +150,26 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     setError(null)
 
     try {
-      const [result, meta] = await Promise.all([
-        fetchBoardLocalData({
-          preset,
-          startDate,
-          endDate,
-          signal: controller.signal,
-        }),
-        fetchBoardSyncMeta(controller.signal),
-      ])
+      const result = await fetchBoardLocalData({
+        preset,
+        startDate,
+        endDate,
+        signal: controller.signal,
+      })
       if (controller.signal.aborted || seq !== requestSeqRef.current) return
 
       const resultRangeKey =
         result.rangeKey ??
         buildBoardRangeKey(result.preset, result.startDate, result.endDate)
-      if (resultRangeKey !== fetchRangeKey) return
+      if (resultRangeKey !== fetchRangeKey) {
+        setError(
+          `返回数据范围（${resultRangeKey}）与当前统计范围（${fetchRangeKey}）不一致，请重试。`,
+        )
+        setStatus('failed')
+        return
+      }
 
       hasLoadedOnceRef.current = true
-      setSyncMeta(meta ?? result.syncMeta ?? null)
 
       const summary =
         Object.keys(result.summary).length > 0 ? result.summary : null
@@ -176,32 +178,69 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       setDisplaySummary(summary)
       setDataDisplayStatus(result.dataDisplayStatus ?? null)
       setLastSyncedAt(
-        meta?.businessSync.lastSuccessAt ??
-          result.syncMeta?.businessSync.lastSuccessAt ??
-          result.fetchedAt,
+        result.syncMeta?.businessSync.lastSuccessAt ?? result.fetchedAt,
       )
 
-      const uiMode = deriveBoardSyncUiMode({
-        hasDisplayData: Boolean(summary),
-        businessSync: meta?.businessSync ?? result.syncMeta?.businessSync,
-        activeSyncJob: meta?.activeSyncJob,
-        totalRawOrders: meta?.totalRawOrders ?? 0,
-      })
+      const applyStaleMessage = (
+        meta: BoardSyncMeta | null,
+        displayStatus: BoardDataDisplayStatus | null | undefined,
+        progressMessage?: string,
+      ) => {
+        const uiMode = deriveBoardSyncUiMode({
+          hasDisplayData: Boolean(summary),
+          businessSync: meta?.businessSync ?? result.syncMeta?.businessSync,
+          activeSyncJob: meta?.activeSyncJob,
+          totalRawOrders: meta?.totalRawOrders ?? 0,
+        })
 
-      if (uiMode === 'first_sync' || uiMode === 'empty_idle') {
-        setStaleMessage(null)
-      } else if (uiMode === 'syncing_with_data') {
-        setStaleMessage(null)
-      } else if (result.dataDisplayStatus === 'failed_with_cache') {
-        setStaleMessage(
-          result.progress.message || '本次更新失败，当前展示上一次成功同步数据。',
-        )
-      } else if (result.dataDisplayStatus === 'empty') {
-        setStaleMessage(result.progress.message || '当前日期范围内暂无订单数据。')
-      } else {
-        setStaleMessage(null)
+        if (uiMode === 'first_sync' || uiMode === 'empty_idle') {
+          setStaleMessage(null)
+        } else if (uiMode === 'syncing_with_data') {
+          setStaleMessage(null)
+        } else if (displayStatus === 'failed_with_cache') {
+          setStaleMessage(
+            progressMessage || '本次更新失败，当前展示上一次成功同步数据。',
+          )
+        } else if (displayStatus === 'empty') {
+          setStaleMessage(progressMessage || '当前日期范围内暂无订单数据。')
+        } else {
+          setStaleMessage(null)
+        }
       }
+
+      applyStaleMessage(
+        syncMeta,
+        result.dataDisplayStatus,
+        result.progress.message,
+      )
       setStatus('ready')
+      setError(null)
+
+      void fetchBoardSyncMeta(controller.signal)
+        .then((meta) => {
+          if (controller.signal.aborted || seq !== requestSeqRef.current) return
+          if (meta) {
+            setSyncMeta(meta)
+            setLastSyncedAt(
+              (prev) =>
+                meta.businessSync.lastSuccessAt ??
+                prev ??
+                result.fetchedAt,
+            )
+            applyStaleMessage(
+              meta,
+              result.dataDisplayStatus,
+              result.progress.message,
+            )
+          }
+        })
+        .catch(() => {
+          if (controller.signal.aborted || seq !== requestSeqRef.current) return
+          setStaleMessage((prev) =>
+            prev ?? '同步状态读取失败，不影响本地数据展示。',
+          )
+          setSyncMeta((prev) => prev ?? result.syncMeta ?? null)
+        })
     } catch (e) {
       if (controller.signal.aborted || seq !== requestSeqRef.current) return
       const msg = e instanceof Error ? e.message : '加载失败'
@@ -314,8 +353,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       displayData: showDataForUi,
       displaySummary: showSummaryForUi,
       resolvedRange,
-      dataDisplayStatus:
-        loadedRangeKey === rangeKey ? dataDisplayStatus : null,
+      dataDisplayStatus: rangeMatched ? dataDisplayStatus : null,
       isLoading: status === 'loading',
       isDisplayStale,
       boardSyncUiMode,

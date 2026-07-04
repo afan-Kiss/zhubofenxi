@@ -91,6 +91,8 @@ export interface CookieHealthPayload {
   ok?: boolean
   accounts: LiveAccountPublic[]
   summary: CookieHealthSummary
+  degraded?: boolean
+  errorMessage?: string
 }
 
 export function clearCookieExpiredModalShownKeys(): void {
@@ -308,6 +310,9 @@ export function accountSyncReason(account: LiveAccountPublic): string {
 
 export function buildCookieBannerMessage(payload: CookieHealthPayload | null): string | null {
   if (!payload) return null
+  if (payload.degraded && payload.errorMessage) {
+    return payload.errorMessage
+  }
 
   const enabled = payload.accounts.filter((a) => a.enabled)
   const notSyncable = enabled.filter((a) => {

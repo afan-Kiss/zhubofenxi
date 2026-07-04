@@ -213,19 +213,22 @@ export function isCookieHealthBlocking(status: ShopCookieHealthStatus): boolean 
 /** 四店 Cookie 状态（仅读库 + 结构检查，不主动调平台接口；真实探测仅 settings 页「检测」） */
 export async function getShopCookieHealth(
   shopKey: GoodReviewShopKey,
-  _options?: { fresh?: boolean },
+  options?: { fresh?: boolean },
 ): Promise<ShopCookieHealthResult> {
   const shopName = getGoodReviewShopName(shopKey)
+  const skipCache = options?.fresh === true
 
-  const cached = healthCache.get(shopKey)
-  if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
-    const rowForCache = await resolveOfficialShopAccountForStatus(shopKey)
-    const dbUpdatedMs = rowForCache?.updatedAt.getTime() ?? 0
-    const cachedUpdatedMs = cached.result.updatedAt ? Date.parse(cached.result.updatedAt) : 0
-    if (!dbUpdatedMs || dbUpdatedMs <= cachedUpdatedMs) {
-      return { ...cached.result, source: 'cache' }
+  if (!skipCache) {
+    const cached = healthCache.get(shopKey)
+    if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+      const rowForCache = await resolveOfficialShopAccountForStatus(shopKey)
+      const dbUpdatedMs = rowForCache?.updatedAt.getTime() ?? 0
+      const cachedUpdatedMs = cached.result.updatedAt ? Date.parse(cached.result.updatedAt) : 0
+      if (!dbUpdatedMs || dbUpdatedMs <= cachedUpdatedMs) {
+        return { ...cached.result, source: 'cache' }
+      }
+      healthCache.delete(shopKey)
     }
-    healthCache.delete(shopKey)
   }
 
   const row = await resolveOfficialShopAccountForStatus(shopKey)

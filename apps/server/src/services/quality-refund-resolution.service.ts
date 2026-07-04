@@ -27,10 +27,11 @@ export interface QualityRefundInfo extends QualityRefundCrossVerify {
 function legacyQualitySource(status: QualityVerifyStatus, isQuality: boolean): QualityRefundSource {
   if (!isQuality) return status === 'after_sale_only' ? 'after_sale' : 'none'
   if (status === 'verified') return 'both'
+  if (status === 'after_sale_only') return 'after_sale'
   return 'official_bad_case'
 }
 
-/** 统一品退判断：仅以官方品质问题接口命中且匹配订单主表为准 */
+/** 主品退指标：官方品退命中，或严格商品问题售后（明细区分来源） */
 export function resolveQualityRefundInfo(params: {
   view: AnalyzedOrderView
   afterSaleRecords?: Record<string, unknown>[]
@@ -49,7 +50,7 @@ export function resolveQualityRefundInfo(params: {
   }
 }
 
-/** 主品退指标：仅官方品退接口命中且已匹配订单主表 */
+/** 主品退指标：官方品退 + 严格商品问题售后 */
 export function viewCountsAsQualityRefund(
   v: AnalyzedOrderView,
   matchedOfficialPackageIds?: Set<string>,
@@ -96,12 +97,12 @@ export function calcQualityRefundRate(params: {
 }
 
 export const QUALITY_REFUND_DATA_SOURCE_NOTE =
-  '品退主来源：小红书官方品质负反馈接口；售后时间查询仅作交叉印证'
+  '品退主来源：官方品质负反馈接口 + 严格商品问题售后；售后时间查询仅作交叉印证'
 
 export const QUALITY_REFUND_TOOLTIP =
-  '品退单数 = 官方品质问题接口命中且能匹配订单主表的唯一 P 单号。' +
+  '品退单数 = 官方品质问题接口命中且匹配订单主表，或售后明确商品质量问题的唯一 P 单号。' +
+  '明细会区分「官方品退 / 售后疑似品退」。' +
   '品退率 = 品退订单数 ÷ 本期支付订单数。' +
-  '售后工作台按时间查询的结果仅用于印证售后状态与退款金额，不改变主品退判定。' +
   '按订单支付时间归属统计范围。'
 
 export const QUALITY_UNMATCHED_HINT =
@@ -113,7 +114,7 @@ export function qualitySourceDisplayLabel(source: QualityRefundSource): string {
     case 'official_bad_case':
       return '官方品退'
     case 'after_sale':
-      return '售后疑似品退（未计入主指标）'
+      return '售后疑似品退'
     case 'both':
       return '官方品退，售后已印证'
     default:

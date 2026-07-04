@@ -6,6 +6,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { config } from 'dotenv'
 import { executeBoardLocalQuery } from '../src/services/board-local-query.service'
+import { buildBoardMetricDetail } from '../src/services/board-metric-detail.service'
 import type { BoardLiveQueryPreset } from '../src/services/board-live-query.service'
 import { formatDateKeyShanghai } from '../src/utils/business-timezone'
 
@@ -182,6 +183,32 @@ async function main(): Promise<void> {
   }
 
   validateOverviewTabUi(issues)
+
+  try {
+    const thisMonth = await executeBoardLocalQuery({ preset: 'thisMonth' })
+    const summary = (thisMonth.summary ?? {}) as Record<string, unknown>
+    const detail = await buildBoardMetricDetail({
+      metric: 'qualityReturnCount',
+      preset: 'thisMonth',
+      startDate: thisMonth.startDate,
+      endDate: thisMonth.endDate,
+      role: 'super_admin',
+      username: 'admin',
+    })
+    const summaryQuality = Number(summary.qualityReturnCount ?? 0)
+    const detailQuality = Number(
+      detail.summary.qualityRefundOrderCount ?? detail.summary.valueRaw ?? 0,
+    )
+    assert(
+      summaryQuality === detailQuality,
+      `thisMonth summary.qualityReturnCount(${summaryQuality}) 应与 metric-detail(${detailQuality}) 一致`,
+      issues,
+    )
+  } catch (err) {
+    issues.push(
+      `thisMonth 品退对账失败: ${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
 
   console.log('[accept:board-summary-cards] 范围验收结果:')
   for (const row of results) {

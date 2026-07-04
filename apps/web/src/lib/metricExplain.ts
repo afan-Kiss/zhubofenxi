@@ -32,7 +32,7 @@ export const METRIC_EXPLAIN: Record<BoardMetricExplainKey, string> = {
     '实际签收订单数：统计本期实际签收的订单数，按 P 订单号去重。签收率 = 实际签收订单数 ÷ 本期总订单数。',
   returnCount: '退款订单数：统计本期发生退款/售后的订单数，按 P 订单号去重。退款率 = 退款订单数 ÷ 本期总订单数。',
   qualityReturnCount:
-    '品退订单数：统计当前范围内命中官方品质负反馈或售后商品问题逻辑的订单数，按 P 订单号去重。',
+    '品退订单数：统计官方品质负反馈命中且匹配订单主表，或售后明确商品质量问题的订单数，按 P 单号去重。明细区分官方品退与售后疑似品退。',
   returnRate: '退款率 = 退款订单数 ÷ 本期总订单数（后端 summary.returnRate，前端不自行计算）。',
   signRate: '签收率 = 实际签收订单数 ÷ 本期总订单数（后端 summary.signRate，前端不自行计算）。',
   qualityReturnRate:

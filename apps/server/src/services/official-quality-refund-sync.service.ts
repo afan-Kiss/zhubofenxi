@@ -146,6 +146,10 @@ export async function rematchStoredQualityBadCases(): Promise<number> {
   await saveQualityBadCases(rematched)
   invalidateQualityBadCaseMemoryCache()
   await loadAllQualityBadCases(true)
+  const { rebuildBusinessBoardCacheAfterQualityDataChange } = await import(
+    './quality-badcase-cache-hooks.service'
+  )
+  await rebuildBusinessBoardCacheAfterQualityDataChange('官方品退重新匹配订单')
   return rematched.length
 }
 
@@ -323,6 +327,10 @@ export async function syncOfficialQualityBadCases(params?: {
   invalidateQualityBadCaseMemoryCache()
   await loadAllQualityBadCases(true)
   await markBuyerRankingCacheStaleAfterQualitySync()
+  const { rebuildBusinessBoardCacheAfterQualityDataChange } = await import(
+    './quality-badcase-cache-hooks.service'
+  )
+  await rebuildBusinessBoardCacheAfterQualityDataChange('官方品退数据更新')
 
   const matchedOrderCount = matchedCases.filter(
     (c) => c.matchStatus === 'matched_order_and_after_sale' || c.matchStatus === 'matched_order_only',

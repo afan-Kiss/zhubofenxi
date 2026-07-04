@@ -7,6 +7,9 @@ import {
 import { getBusinessSyncStatus } from './business-sync-scheduler.service'
 import { getBusinessCacheDebugInfo, getBusinessBoardCache } from './business-cache.service'
 import { getCookieHealthPayload, getLastAuthError } from './live-account.service'
+import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
+import { buildQualityRefundMonthDiagnostic } from './quality-refund-month-diagnostic.service'
+import { bootstrapQualityBadCaseCache } from './quality-badcase-store.service'
 
 function parsePayTimeFromRaw(rawJson: unknown): Date | null {
   if (rawJson == null) return null
@@ -123,6 +126,18 @@ export async function buildBoardSyncDiagnose(params: {
       }
     : null
 
+  await bootstrapQualityBadCaseCache().catch(() => {
+    /* 诊断页允许品退缓存加载失败 */
+  })
+  const allViews = cacheEntry?.views ?? []
+  const coreViews = filterViewsForCoreMetrics(allViews)
+  const qualityRefundDiagnostic = buildQualityRefundMonthDiagnostic({
+    views: coreViews,
+    allViews,
+    startDate: range.startDate,
+    endDate: range.endDate,
+  })
+
   return {
     requestedRange: { preset, startDate: params.startDate, endDate: params.endDate },
     resolvedRange: {
@@ -182,5 +197,18 @@ export async function buildBoardSyncDiagnose(params: {
       cookieHealthPayload.summary.enabledCount > 0 &&
       cookieHealthPayload.summary.validCount === 0 &&
       cookieHealthPayload.summary.invalidCount > 0,
+    qualityRefundDiagnostic: {
+      officialMatchedInPeriodCount: qualityRefundDiagnostic.officialMatchedInPeriodCount,
+      suspectedQualityRefundInPeriodCount:
+        qualityRefundDiagnostic.suspectedQualityRefundInPeriodCount,
+      unmatchedOfficialInPeriodCount: qualityRefundDiagnostic.unmatchedOfficialInPeriodCount,
+      excludedByLowPriceBrushCount: qualityRefundDiagnostic.excludedByLowPriceBrushCount,
+      excludedByPayTimeOutOfPeriodCount:
+        qualityRefundDiagnostic.excludedByPayTimeOutOfPeriodCount,
+      periodQualityRefundOrderCount: qualityRefundDiagnostic.periodQualityRefundOrderCount,
+      summaryQualityReturnCount: Number(cacheEntry?.summary?.qualityReturnCount ?? 0),
+      note: qualityRefundDiagnostic.note,
+      excludeSamples: qualityRefundDiagnostic.excludeSamples,
+    },
   }
 }

@@ -23,6 +23,15 @@ export function startDeferredBootTasks(): void {
       )
     }
 
+    try {
+      await bootstrapQualityBadCaseCache()
+    } catch (err) {
+      logWarn(
+        '品退缓存',
+        `加载失败：${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+
     await warmupBusinessCacheOnBoot()
 
     void import('./operations-report-cache.service').then((m) =>
@@ -42,13 +51,6 @@ export function startDeferredBootTasks(): void {
         `启动时构建失败：${err instanceof Error ? err.message : String(err)}`,
       )
     }
-
-    void bootstrapQualityBadCaseCache().catch((err) => {
-      logWarn(
-        '品退缓存',
-        `加载失败：${err instanceof Error ? err.message : String(err)}`,
-      )
-    })
 
     void import('./quality-badcase-orphan-cleanup.service').then((m) =>
       m.cleanupOrphanQualityBadCaseSyncJobs({ logOrphans: true }).catch((err) => {

@@ -26,7 +26,7 @@ export type QualityVerifyStatus =
 
 export interface QualityRefundCrossVerify {
   isQualityRefund: boolean
-  qualityMainSource: 'official_bad_case' | 'none'
+  qualityMainSource: 'official_bad_case' | 'after_sale' | 'none'
   qualityVerifySource: 'after_sale_time_search' | 'after_sale_workbench' | 'none'
   qualityVerifyStatus: QualityVerifyStatus
   qualityReasonText: string
@@ -161,7 +161,7 @@ export function qualityVerifyDisplayLabel(status: QualityVerifyStatus): string {
     case 'conflict':
       return '官方品退，售后原因存在差异'
     case 'after_sale_only':
-      return '售后疑似品退，官方品退未命中，暂不计入主指标'
+      return '售后疑似品退（官方未命中）'
     case 'unmatched':
       return '官方品退暂未匹配订单主表'
     default:
@@ -201,6 +201,7 @@ export function resolveQualityRefundCrossVerify(params: {
     afterSale.hasSuccessful &&
     afterSale.hasQualityReason &&
     matchPlatformReturnReason(afterSale.reasonText).isQualityReturn
+  const strictQualityRefund = v.strictQualityRefund === true
 
   let qualityVerifyStatus: QualityVerifyStatus = 'none'
   let isQualityRefund = false
@@ -214,10 +215,11 @@ export function resolveQualityRefundCrossVerify(params: {
     } else {
       qualityVerifyStatus = 'verified'
     }
+  } else if ((strictQualityRefund || afterSaleQualityCandidate) && v.includedInGmv) {
+    isQualityRefund = true
+    qualityVerifyStatus = 'after_sale_only'
   } else if (officialCase && !isQualityBadCaseOrderMatched(officialCase)) {
     qualityVerifyStatus = 'unmatched'
-  } else if (afterSaleQualityCandidate) {
-    qualityVerifyStatus = 'after_sale_only'
   }
 
   const verifySource =
@@ -227,7 +229,11 @@ export function resolveQualityRefundCrossVerify(params: {
 
   return {
     isQualityRefund,
-    qualityMainSource: isQualityRefund ? 'official_bad_case' : 'none',
+    qualityMainSource: isQualityRefund
+      ? hasOfficialMatched
+        ? 'official_bad_case'
+        : 'after_sale'
+      : 'none',
     qualityVerifySource: verifySource,
     qualityVerifyStatus,
     qualityReasonText: officialReasonText || afterSale.reasonText,
@@ -344,7 +350,7 @@ export function buildQualityCrossVerifySummary(params: {
           orderNo: no,
           afterSaleReason: cv.afterSaleReasonText,
           afterSaleStatus: cv.afterSaleStatus,
-          whyExcluded: '售后疑似品退但官方品退接口未命中，主指标以官方品退为准',
+          whyExcluded: '售后疑似品退，官方品退接口未命中（已计入品退订单数）',
         })
         break
       case 'conflict':

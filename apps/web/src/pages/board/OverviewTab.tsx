@@ -171,7 +171,7 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
     type: 'count',
     tone: 'rose',
     hint: '点击查看明细',
-    helper: '品质原因退款订单数',
+    helper: '官方品退与售后商品问题订单数',
     icon: AlertTriangle,
   },
   {

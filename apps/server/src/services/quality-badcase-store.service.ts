@@ -265,9 +265,11 @@ export async function bootstrapQualityBadCaseCache(): Promise<void> {
         const { markBuyerRankingCacheStaleAfterQualitySync } = await import(
           './buyer-ranking-cache.service'
         )
-        const { invalidateAndRebuildBusinessBoardCache } = await import('./business-cache.service')
+        const { rebuildBusinessBoardCacheAfterQualityDataChange } = await import(
+          './quality-badcase-cache-hooks.service'
+        )
         await markBuyerRankingCacheStaleAfterQualitySync()
-        await invalidateAndRebuildBusinessBoardCache('官方品退数据更新')
+        await rebuildBusinessBoardCacheAfterQualityDataChange('官方品退数据更新')
       }
     }
     await loadAllQualityBadCases(true)
@@ -288,9 +290,11 @@ export async function bootstrapQualityBadCaseCache(): Promise<void> {
       const { markBuyerRankingCacheStaleAfterQualitySync } = await import(
         './buyer-ranking-cache.service'
       )
-      const { invalidateAndRebuildBusinessBoardCache } = await import('./business-cache.service')
+      const { rebuildBusinessBoardCacheAfterQualityDataChange } = await import(
+        './quality-badcase-cache-hooks.service'
+      )
       await markBuyerRankingCacheStaleAfterQualitySync()
-      await invalidateAndRebuildBusinessBoardCache('官方品退数据更新')
+      await rebuildBusinessBoardCacheAfterQualityDataChange('官方品退数据更新')
     }
     await loadAllQualityBadCases(true)
   }

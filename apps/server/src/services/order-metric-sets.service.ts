@@ -11,7 +11,7 @@ import {
   resolveViewRefundAmountCent,
   viewCountsAsRefundOrder,
 } from './order-refund-metrics.service'
-import { isEffectiveSignedView, isStrictQualityRefundView } from './strict-after-sale-metrics.service'
+import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
 import { viewCountsAsQualityRefund } from './quality-refund-resolution.service'
 import type { NormalizedQualityBadCase } from './quality-badcase.types'
 import { getOfficialQualityPackageIdSet } from './quality-badcase-store.service'

@@ -98,16 +98,17 @@ const METRIC_DEFS: Record<
   },
   qualityReturnCount: {
     title: '品退单数',
-    formula: '品退单数 = 命中官方品质负反馈或严格商品问题售后的唯一 P 单号数量',
+    formula:
+      '品退单数 = 官方品质负反馈命中且匹配订单主表，或售后明确商品质量问题的唯一 P 单号数量',
     description:
-      '来自官方品质负反馈明细接口 + 售后商品问题逻辑交叉识别，按 P 单号去重。同一 P 单号多条反馈只计 1 单。',
+      '官方品退与售后商品问题逻辑合并统计，按 P 单号去重。明细会区分「官方品退 / 售后疑似品退」。',
     valueKey: 'qualityReturnCount',
   },
   qualityReturnRate: {
     title: '品退率',
     formula: '品退率 = 品退订单数 ÷ 支付订单数',
     description:
-      '数据来源：小红书官方品质负反馈接口 + 售后接口交叉印证。官方接口当前覆盖近 30 天，超出范围使用历史缓存和售后原因辅助识别。',
+      '数据来源：官方品质负反馈接口 + 严格商品问题售后。明细区分官方品退与售后疑似品退。',
     valueKey: 'qualityReturnRate',
   },
   orderCount: {

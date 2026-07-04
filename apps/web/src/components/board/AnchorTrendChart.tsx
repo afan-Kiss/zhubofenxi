@@ -25,8 +25,12 @@ function defaultFormatCount(value: number): string {
   return `${value} 单`
 }
 
-function hasTrendData(trend: AnchorTrend | null | undefined): boolean {
+function hasTrendData(
+  trend: AnchorTrend | null | undefined,
+  variant: 'page' | 'report',
+): boolean {
   if (!trend?.points?.length) return false
+  if (variant === 'report') return true
   return trend.points.some((p) => p.value > 0 || p.orderCount > 0)
 }
 
@@ -92,6 +96,11 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
     [resolved?.points],
   )
 
+  const hasPositiveSales = useMemo(
+    () => chartData.some((p) => p.value > 0 || p.orderCount > 0),
+    [chartData],
+  )
+
   const xInterval = useMemo(() => {
     const len = chartData.length
     if (isReport) {
@@ -106,7 +115,7 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
 
   const emptyMinH = isReport ? 'min-h-[100px]' : 'min-h-[120px] md:min-h-[150px]'
 
-  if (!hasTrendData(resolved)) {
+  if (!hasTrendData(resolved, variant)) {
     return (
       <div
         data-anchor-trend-chart="empty"
@@ -133,11 +142,20 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <p className={`${titleClass} font-medium text-slate-700`}>{title}</p>
-        <span
-          className={`rounded-full bg-rose-50 font-medium text-rose-600 ${tagClass}`}
-        >
-          销售额
-        </span>
+        <div className="flex items-center gap-1.5">
+          {isReport && !hasPositiveSales ? (
+            <span
+              className={`rounded-full bg-slate-100 font-medium text-slate-500 ${tagClass}`}
+            >
+              暂无成交
+            </span>
+          ) : null}
+          <span
+            className={`rounded-full bg-rose-50 font-medium text-rose-600 ${tagClass}`}
+          >
+            销售额
+          </span>
+        </div>
       </div>
       <div className={`${chartHeight} w-full`}>
         <ResponsiveContainer width="100%" height="100%">
@@ -160,7 +178,7 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
               interval={xInterval}
               minTickGap={isReport ? 14 : 20}
             />
-            <YAxis hide domain={[0, 'auto']} />
+            <YAxis hide domain={[0, (max: number) => Math.max(max, 1)]} />
             {!isReport ? (
               <Tooltip
                 content={(props) => (

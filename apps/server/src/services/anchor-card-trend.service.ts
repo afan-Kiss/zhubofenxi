@@ -342,8 +342,10 @@ function buildDailyTrendFromViews(
   for (const day of days) byDate.set(day, { cent: 0, orders: 0 })
 
   for (const v of anchorViews) {
-    const dayKey = v.orderTimeText?.trim().slice(0, 10)
-    if (!dayKey || !byDate.has(dayKey)) continue
+    const payMs = parseOrderPaymentMs(v.orderTimeText)
+    if (payMs == null) continue
+    const dayKey = formatDateKeyShanghai(new Date(payMs))
+    if (!byDate.has(dayKey)) continue
     const bucket = byDate.get(dayKey)!
     bucket.cent += orderGmvCent(v)
     bucket.orders += 1

@@ -36,6 +36,7 @@ import type { QualityFeedbackPublicStatus } from './quality-badcase-auto-sync.se
 import { attachRawByMatchToViews, filterViewsForAnchorPerformance } from './low-price-brush-order.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
+import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 
 export type BoardLiveQueryPreset =
   | 'today'
@@ -235,9 +236,17 @@ export async function executeBoardLiveQuery(
       params.anchorId || params.anchorName ? scopedPerformanceViews : performanceViews,
       debugCtx,
     )
-    const anchorLeaderboard = await enrichAnchorLeaderboardWithLateStatus(
+    const anchorLeaderboardWithLate = await enrichAnchorLeaderboardWithLateStatus(
       anchorLeaderboardRaw as unknown as Array<Record<string, unknown>>,
       { startDate, endDate, preset: params.preset },
+    )
+    const performanceViewsForTrend = params.anchorId || params.anchorName
+      ? scopedPerformanceViews
+      : performanceViews
+    const anchorLeaderboard = await enrichAnchorLeaderboardWithTrend(
+      anchorLeaderboardWithLate,
+      performanceViewsForTrend,
+      { preset: params.preset, startDate, endDate },
     )
     warnAnchorTotalsMismatch(summary, anchorLeaderboard as unknown as Array<Record<string, unknown>>)
     const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(scopedCoreViews)]

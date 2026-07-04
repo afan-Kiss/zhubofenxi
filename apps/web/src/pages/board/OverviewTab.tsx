@@ -19,9 +19,33 @@ import {
   useBoardLiveQuery,
 } from '../../providers/BoardLiveQueryProvider'
 import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
-import { showLongPeriodRates } from '../../lib/board-rate-display'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
 import { useDataFreshness } from '../../hooks/useDataFreshness'
+
+function summaryMetricValue(ds: Record<string, unknown>, metric: BoardMetricKey): number {
+  switch (metric) {
+    case 'gmv':
+      return Number(ds.totalGmv ?? 0)
+    case 'actualSignedAmount':
+      return Number(ds.actualSignedAmount ?? 0)
+    case 'returnAmount':
+      return Number(ds.returnAmount ?? 0)
+    case 'orderCount':
+      return Number(ds.orderCount ?? 0)
+    case 'signedCount':
+      return Number(ds.signedOrderCount ?? 0)
+    case 'returnCount':
+      return Number(ds.returnCount ?? 0)
+    case 'qualityReturnCount':
+      return Number(ds.qualityReturnCount ?? 0)
+    case 'signRate':
+      return Number(ds.signRate ?? 0)
+    case 'returnRate':
+      return Number(ds.returnRate ?? 0)
+    default:
+      return 0
+  }
+}
 
 export const OverviewTab: React.FC = () => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
@@ -61,7 +85,6 @@ export const OverviewTab: React.FC = () => {
 
   const ds = displaySummary
   const blacklistedBuyerIds = data?.blacklistedBuyerIds ?? []
-  const showRates = showLongPeriodRates(preset, startDate, endDate)
   const boardDataVisible =
     boardSyncUiMode === 'synced_idle' ||
     boardSyncUiMode === 'syncing_with_data' ||
@@ -210,104 +233,84 @@ export const OverviewTab: React.FC = () => {
         >
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <StaggerCard index={1}>
-            <BoardStatCard
-              label={<MetricStatLabel label="本期销售额" metricKey="totalGmv" />}
-              value={animMoney(Number(ds.totalGmv ?? 0))}
-              onClick={() => setMetricDrawer('gmv')}
-              hint="查看相关订单"
-            />
+              <BoardStatCard
+                label={<MetricStatLabel label="本期总订单数" metricKey="orderCount" />}
+                value={animCount(Number(ds.orderCount ?? 0))}
+                onClick={() => setMetricDrawer('orderCount')}
+                hint="查看相关订单"
+              />
             </StaggerCard>
             <StaggerCard index={2}>
-            <BoardStatCard
-              label={<MetricStatLabel label="有效成交额" metricKey="validSalesAmount" />}
-              value={animMoney(Number(ds.validSalesAmount ?? 0))}
-              onClick={() => setMetricDrawer('effectiveGmv')}
-              hint="查看相关订单"
-            />
+              <BoardStatCard
+                label={<MetricStatLabel label="本期销售额[GMV]" metricKey="totalGmv" />}
+                value={animMoney(Number(ds.totalGmv ?? 0))}
+                onClick={() => setMetricDrawer('gmv')}
+                hint="查看相关订单"
+              />
             </StaggerCard>
             <StaggerCard index={3}>
-            <BoardStatCard
-              label={<MetricStatLabel label="实际签收金额" metricKey="actualSignedAmount" />}
-              value={animMoney(Number(ds.actualSignedAmount ?? 0))}
-              onClick={() => setMetricDrawer('actualSignedAmount')}
-              hint="点击查看明细"
-            />
+              <BoardStatCard
+                label={<MetricStatLabel label="实际签收金额" metricKey="actualSignedAmount" />}
+                value={animMoney(Number(ds.actualSignedAmount ?? 0))}
+                onClick={() => setMetricDrawer('actualSignedAmount')}
+                hint="点击查看明细"
+              />
             </StaggerCard>
             <StaggerCard index={4}>
-            <BoardStatCard
-              label={<MetricStatLabel label="退款金额" metricKey="returnAmount" />}
-              value={animMoney(Number(ds.returnAmount ?? 0))}
-              onClick={() => setMetricDrawer('returnAmount')}
-              hint="点击查看明细"
-            />
+              <BoardStatCard
+                label={<MetricStatLabel label="实际签收订单数" metricKey="signedOrderCount" />}
+                value={animCount(Number(ds.signedOrderCount ?? 0))}
+                onClick={() => setMetricDrawer('signedCount')}
+                hint="查看相关订单"
+              />
             </StaggerCard>
             <StaggerCard index={5}>
-            <BoardStatCard
-              label={<MetricStatLabel label="支付订单数" metricKey="orderCount" />}
-              value={animCount(Number(ds.orderCount ?? 0))}
-              onClick={() => setMetricDrawer('orderCount')}
-              hint="点击查看明细"
-            />
+              <BoardStatCard
+                label={<MetricStatLabel label="签收率" metricKey="signRate" />}
+                value={animRate(Number(ds.signRate ?? 0))}
+                onClick={() => setMetricDrawer('signRate')}
+                hint="点击查看明细"
+              />
             </StaggerCard>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <StaggerCard index={6}>
-            <BoardStatCard
-              label={<MetricStatLabel label="签收单数" metricKey="signedOrderCount" />}
-              value={animCount(Number(ds.signedOrderCount ?? 0))}
-              onClick={() => setMetricDrawer('signedCount')}
-              hint="查看相关订单"
-            />
+              <BoardStatCard
+                label={<MetricStatLabel label="退款金额" metricKey="returnAmount" />}
+                value={animMoney(Number(ds.returnAmount ?? 0))}
+                onClick={() => setMetricDrawer('returnAmount')}
+                hint="点击查看明细"
+              />
             </StaggerCard>
-            {showRates && (
-              <>
-                <StaggerCard index={7}>
-                <BoardStatCard
-                  label={<MetricStatLabel label="签收率" metricKey="signRate" />}
-                  value={animRate(Number(ds.signRate ?? 0))}
-                  onClick={() => setMetricDrawer('signRate')}
-                  hint="点击查看明细"
-                />
-                </StaggerCard>
-                <StaggerCard index={8}>
-                <BoardStatCard
-                  label={<MetricStatLabel label="退款率" metricKey="returnRate" />}
-                  value={animRate(Number(ds.returnRate ?? 0))}
-                  onClick={() => setMetricDrawer('returnRate')}
-                  hint="点击查看明细"
-                />
-                </StaggerCard>
-                <StaggerCard index={9}>
-                <BoardStatCard
-                  label={<MetricStatLabel label="品退率" metricKey="qualityReturnRate" />}
-                  value={animRate(Number(ds.qualityReturnRate ?? 0))}
-                  onClick={() => setMetricDrawer('qualityReturnRate')}
-                  hint="点击查看明细"
-                />
-                </StaggerCard>
-              </>
-            )}
-            <StaggerCard index={showRates ? 10 : 7}>
-            <BoardStatCard
-              label={<MetricStatLabel label="退款单数" metricKey="returnCount" />}
-              value={animCount(Number(ds.returnCount ?? 0))}
-              onClick={() => setMetricDrawer('returnCount')}
-              hint="点击查看明细"
-            />
+            <StaggerCard index={7}>
+              <BoardStatCard
+                label={<MetricStatLabel label="退款率" metricKey="returnRate" />}
+                value={animRate(Number(ds.returnRate ?? 0))}
+                onClick={() => setMetricDrawer('returnRate')}
+                hint="点击查看明细"
+              />
             </StaggerCard>
-            <StaggerCard index={showRates ? 11 : 8}>
-            <BoardStatCard
-              label={<MetricStatLabel label="品退单数" metricKey="qualityReturnCount" />}
-              value={animCount(Number(ds.qualityReturnCount ?? 0))}
-              onClick={() => setMetricDrawer('qualityReturnCount')}
-              hint="点击查看明细"
-            />
+            <StaggerCard index={8}>
+              <BoardStatCard
+                label={<MetricStatLabel label="品退订单数" metricKey="qualityReturnCount" />}
+                value={animCount(Number(ds.qualityReturnCount ?? 0))}
+                onClick={() => setMetricDrawer('qualityReturnCount')}
+                hint="点击查看明细"
+              />
+            </StaggerCard>
+            <StaggerCard index={9}>
+              <BoardStatCard
+                label={<MetricStatLabel label="退款订单数" metricKey="returnCount" />}
+                value={animCount(Number(ds.returnCount ?? 0))}
+                onClick={() => setMetricDrawer('returnCount')}
+                hint="点击查看明细"
+              />
             </StaggerCard>
           </div>
         </MetricGridTransition>
       ) : null}
 
-      {metricDrawer && (
+      {metricDrawer && ds ? (
         <BoardMetricDrawer
           open={Boolean(metricDrawer)}
           onClose={() => setMetricDrawer(null)}
@@ -316,21 +319,9 @@ export const OverviewTab: React.FC = () => {
           endDate={endDate}
           preset={preset}
           blacklistedBuyerIds={blacklistedBuyerIds}
-          cardValueRaw={Number(
-            ds?.[
-              metricDrawer.includes('Rate')
-                ? metricDrawer
-                : metricDrawer === 'gmv'
-                  ? 'totalGmv'
-                  : metricDrawer === 'effectiveGmv'
-                    ? 'validSalesAmount'
-                    : metricDrawer === 'returnAmount'
-                      ? 'returnAmount'
-                      : metricDrawer
-            ] ?? 0,
-          )}
+          cardValueRaw={summaryMetricValue(ds, metricDrawer)}
         />
-      )}
+      ) : null}
     </div>
   )
 }

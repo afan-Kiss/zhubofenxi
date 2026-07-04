@@ -168,7 +168,7 @@ export async function buildAndSetBusinessBoardCache(params: {
     attachRawByMatchToViews(coreViews, rawByMatch),
   )
 
-  const summary = coreViews.length > 0 ? buildSummaryFromViews(coreViews) : {}
+  const summary = buildSummaryFromViews(coreViews)
   const abnormalOrderCount = artifacts?.abnormalOrderCount ?? 0
   if (abnormalOrderCount > 0) {
     summary.abnormalOrderCount = abnormalOrderCount

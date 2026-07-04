@@ -363,9 +363,7 @@ export async function executeBoardLocalQuery(params: {
   const summary =
     views.length === boardCache.orderCount
       ? { ...boardCache.summary }
-      : views.length > 0
-        ? buildSummaryFromViews(views)
-        : {}
+      : buildSummaryFromViews(views)
 
   const performanceBaseViews =
     anchorId?.trim() || anchorName?.trim() ? views : scopedAllViews
@@ -375,8 +373,7 @@ export async function executeBoardLocalQuery(params: {
     anchorId,
     anchorName,
   )
-  const anchorPerformanceSummary =
-    performanceViews.length > 0 ? buildSummaryFromViews(performanceViews) : {}
+  const anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
 
   const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
     aggregateAnchorLeaderboard(performanceViews, {

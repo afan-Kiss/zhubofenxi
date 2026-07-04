@@ -77,6 +77,7 @@
     "accept:operations-report-cache": "tsx apps/server/scripts/operations-report-cache-acceptance.ts",
     "accept:operations-bi-drill": "tsx apps/server/scripts/operations-bi-drill-acceptance.ts",
     "accept:valid-revenue-order": "tsx apps/server/scripts/valid-revenue-order-acceptance.ts",
+    "accept:board-summary-cards": "tsx apps/server/scripts/board-summary-card-fields-acceptance.ts",
     "accept:metrics-exclusion": "tsx apps/server/scripts/metrics-exclusion-acceptance.ts",
     "accept:quality-refund": "tsx apps/server/scripts/dev/quality-refund-acceptance.ts",
     "check:business": "tsx apps/server/scripts/acceptance/check-business-rules.ts",

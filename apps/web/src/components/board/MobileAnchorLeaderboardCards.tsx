@@ -16,7 +16,7 @@ import {
 } from '../../lib/anchor-leaderboard-row'
 import { anchorCardTestId } from '../../lib/anchor-test-id'
 import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
-import { AnchorCardTrendChart } from './AnchorCardTrendChart'
+import { AnchorTrendChart } from './AnchorTrendChart'
 import { anchorRowTrend } from '../../lib/anchor-leaderboard-row'
 import {
   formatLateTimingLine,
@@ -122,7 +122,11 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
             </div>
 
             <div className="mt-3">
-              <AnchorCardTrendChart trend={anchorRowTrend(a)} />
+              <AnchorTrendChart
+                trend={anchorRowTrend(a)}
+                formatMoney={formatMoney}
+                formatCount={(n) => `${formatCount(n)} 单`}
+              />
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">

@@ -1,28 +1,38 @@
 export type AnchorLeaderboardRow = Record<string, unknown>
 
-export type AnchorCardTrendMode = 'intraday' | 'daily'
+export type AnchorTrendMode = 'intraday' | 'daily'
 
-export interface AnchorCardTrendPoint {
+export interface AnchorTrendPoint {
   key: string
   label: string
   value: number
   orderCount: number
   date?: string
+  timeRange?: string
   scheduleRange?: string | null
   actualRange?: string | null
 }
 
-export interface AnchorCardTrend {
-  mode: AnchorCardTrendMode
+export interface AnchorTrend {
+  mode: AnchorTrendMode
   metric: 'gmv'
-  points: AnchorCardTrendPoint[]
+  title: string
+  points: AnchorTrendPoint[]
 }
 
-export function anchorRowTrend(row: AnchorLeaderboardRow): AnchorCardTrend | null {
+/** @deprecated 使用 AnchorTrend */
+export type AnchorCardTrend = AnchorTrend
+/** @deprecated 使用 AnchorTrendPoint */
+export type AnchorCardTrendPoint = AnchorTrendPoint
+/** @deprecated 使用 AnchorTrendMode */
+export type AnchorCardTrendMode = AnchorTrendMode
+
+export function anchorRowTrend(row: AnchorLeaderboardRow): AnchorTrend | null {
   const raw = row.trend
   if (!raw || typeof raw !== 'object') return null
-  const t = raw as AnchorCardTrend
+  const t = raw as AnchorTrend
   if (t.mode !== 'intraday' && t.mode !== 'daily') return null
+  if (t.metric !== 'gmv') return null
   if (!Array.isArray(t.points)) return null
   return t
 }

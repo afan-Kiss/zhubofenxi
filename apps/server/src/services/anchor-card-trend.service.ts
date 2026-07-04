@@ -18,37 +18,60 @@ import {
 import { eachDayInShanghaiRange } from '../utils/each-day-shanghai'
 import { centToYuan } from '../utils/money'
 
-export type AnchorCardTrendMode = 'intraday' | 'daily'
+export type AnchorTrendMode = 'intraday' | 'daily'
 
-export interface AnchorCardTrendPoint {
+export interface AnchorTrendPoint {
   key: string
   label: string
   value: number
   orderCount: number
   date?: string
+  timeRange?: string
   scheduleRange?: string | null
   actualRange?: string | null
 }
 
-export interface AnchorCardTrend {
-  mode: AnchorCardTrendMode
+export interface AnchorTrend {
+  mode: AnchorTrendMode
   metric: 'gmv'
-  points: AnchorCardTrendPoint[]
+  title: string
+  points: AnchorTrendPoint[]
 }
 
-const INTRADAY_BUCKET_MINUTES = 30
+/** @deprecated 使用 AnchorTrendMode */
+export type AnchorCardTrendMode = AnchorTrendMode
+/** @deprecated 使用 AnchorTrendPoint */
+export type AnchorCardTrendPoint = AnchorTrendPoint
+/** @deprecated 使用 AnchorTrend */
+export type AnchorCardTrend = AnchorTrend
 
+const INTRADAY_BUCKET_MINUTES = 30
+const INTRADAY_TITLE = '直播时段走势'
+const DAILY_TITLE = '每日销售走势'
+
+export function resolveAnchorTrendMode(params: {
+  preset?: string
+  startDate: string
+  endDate: string
+}): AnchorTrendMode {
+  const { preset, startDate, endDate } = params
+  if (preset === 'today' || preset === 'yesterday') return 'intraday'
+  if (preset === 'custom') {
+    return isSingleDayRange(startDate, endDate) ? 'intraday' : 'daily'
+  }
+  if (preset === 'thisWeek' || preset === 'thisMonth' || preset === 'lastMonth') {
+    return 'daily'
+  }
+  return isSingleDayRange(startDate, endDate) ? 'intraday' : 'daily'
+}
+
+/** @deprecated 使用 resolveAnchorTrendMode */
 export function resolveAnchorCardTrendMode(
   preset: string | undefined,
   startDate: string,
   endDate: string,
-): AnchorCardTrendMode {
-  if (preset === 'today' || preset === 'yesterday') return 'intraday'
-  if (preset === 'thisWeek' || preset === 'thisMonth' || preset === 'lastMonth') return 'daily'
-  if (preset === 'custom') {
-    return isSingleDayRange(startDate, endDate) ? 'intraday' : 'daily'
-  }
-  return isSingleDayRange(startDate, endDate) ? 'intraday' : 'daily'
+): AnchorTrendMode {
+  return resolveAnchorTrendMode({ preset, startDate, endDate })
 }
 
 function rowAnchorKey(row: Record<string, unknown>): string {
@@ -63,8 +86,9 @@ function parseOrderPaymentMs(orderTimeText: string): number | null {
   return parseLiveSessionTimeMs(orderTimeText?.trim())
 }
 
+/** 与主播卡片「本期销售额」一致：paymentBaseCent → 元 */
 function orderGmvCent(v: AnalyzedOrderView): number {
-  return v.effectiveGmvCent ?? v.gmvCent ?? 0
+  return v.paymentBaseCent ?? 0
 }
 
 function floorToBucketMs(ms: number, bucketMinutes: number): number {
@@ -76,10 +100,43 @@ function formatBucketLabel(ms: number): string {
   return formatClockShanghai(new Date(ms))
 }
 
+function formatBucketTimeRange(ms: number, bucketMinutes: number): string {
+  const endMs = ms + bucketMinutes * 60_000
+  return `${formatClockShanghai(new Date(ms))}-${formatClockShanghai(new Date(endMs))}`
+}
+
 function formatDailyLabel(dateKey: string): string {
   const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(dateKey)
   if (!m) return dateKey
   return `${Number(m[2])}/${Number(m[3])}`
+}
+
+function formatRangeSegments(parts: string[]): string | null {
+  if (parts.length === 0) return null
+  return parts.join('；')
+}
+
+function parseClockRangeSegments(
+  text: string,
+  dateKey: string,
+): { startMs: number; endMs: number } | null {
+  const segments = text.split(/[\n,，;；]+/).map((s) => s.trim()).filter(Boolean)
+  let minStart: number | null = null
+  let maxEnd: number | null = null
+  for (const seg of segments) {
+    const m = /(\d{1,2}:\d{2})\s*[~–-]\s*(\d{1,2}:\d{2})/.exec(seg)
+    if (!m) continue
+    const startMs = parseLiveSessionTimeMs(`${dateKey} ${m[1]}:00`)
+    let endMs = parseLiveSessionTimeMs(`${dateKey} ${m[2]}:00`)
+    if (startMs == null || endMs == null) continue
+    if (endMs <= startMs) endMs += 86_400_000
+    if (minStart == null || startMs < minStart) minStart = startMs
+    if (maxEnd == null || endMs > maxEnd) maxEnd = endMs
+  }
+  if (minStart != null && maxEnd != null && maxEnd > minStart) {
+    return { startMs: minStart, endMs: maxEnd }
+  }
+  return null
 }
 
 function resolveSchedulePeriodText(
@@ -93,72 +150,99 @@ function resolveSchedulePeriodText(
   const parts = matched.map((r) => {
     const start = formatClockShanghai(new Date(r.startAt))
     const end = formatClockShanghai(new Date(r.endAt))
-    return `${start}–${end}`
+    return `${start}-${end}`
   })
-  return parts.join('\n')
+  return formatRangeSegments(parts)
 }
 
-function resolveIntradayLiveRangeMs(
+function resolveIntradayDisplayRanges(row: Record<string, unknown>): {
+  scheduleRange: string | null
+  actualRange: string | null
+} {
+  const scheduleRange = String(row.scheduledPeriodText ?? '').trim().replace(/~/g, '-').replace(/–/g, '-') || null
+  const liveRaw = String(row.liveTimeRange ?? row.livePeriodText ?? '').trim()
+  const actualRange =
+    liveRaw && liveRaw !== '—' && liveRaw !== '未读取到直播场次'
+      ? liveRaw.replace(/~/g, '-').replace(/–/g, '-').replace(/\n/g, '；')
+      : null
+  return { scheduleRange, actualRange }
+}
+
+function resolveIntradayBaseRangeMs(
   row: Record<string, unknown>,
   dateKey: string,
   anchorViews: AnalyzedOrderView[],
-): { startMs: number; endMs: number } | null {
+): { startMs: number; endMs: number } {
   const actualStartMs = parseLiveSessionTimeMs(String(row.actualStartAt ?? ''))
   const actualEndMs = parseLiveSessionTimeMs(String(row.actualEndAt ?? ''))
   if (actualStartMs != null && actualEndMs != null && actualEndMs > actualStartMs) {
     return { startMs: actualStartMs, endMs: actualEndMs }
   }
 
-  const liveTimeRange = String(row.liveTimeRange ?? row.livePeriodText ?? '').trim()
-  if (liveTimeRange && liveTimeRange !== '—' && liveTimeRange !== '未读取到直播场次') {
-    const segments = liveTimeRange.split(/[\n,，;；]+/).map((s) => s.trim()).filter(Boolean)
-    let minStart: number | null = null
-    let maxEnd: number | null = null
-    for (const seg of segments) {
-      const m = /(\d{1,2}:\d{2})\s*[~–-]\s*(\d{1,2}:\d{2})/.exec(seg)
-      if (!m) continue
-      const startMs = parseLiveSessionTimeMs(`${dateKey} ${m[1]}:00`)
-      let endMs = parseLiveSessionTimeMs(`${dateKey} ${m[2]}:00`)
-      if (startMs == null || endMs == null) continue
-      if (endMs <= startMs) endMs += 86_400_000
-      if (minStart == null || startMs < minStart) minStart = startMs
-      if (maxEnd == null || endMs > maxEnd) maxEnd = endMs
-    }
-    if (minStart != null && maxEnd != null && maxEnd > minStart) {
-      return { startMs: minStart, endMs: maxEnd }
-    }
+  const scheduledStartMs = parseLiveSessionTimeMs(String(row.scheduledStartAt ?? ''))
+  const scheduledEndMs = parseLiveSessionTimeMs(String(row.scheduledEndAt ?? ''))
+  if (scheduledStartMs != null && scheduledEndMs != null && scheduledEndMs > scheduledStartMs) {
+    return { startMs: scheduledStartMs, endMs: scheduledEndMs }
+  }
+
+  const scheduleText = String(row.scheduledPeriodText ?? '').trim()
+  if (scheduleText) {
+    const parsed = parseClockRangeSegments(scheduleText.replace(/~/g, '–'), dateKey)
+    if (parsed) return parsed
+  }
+
+  const liveText = String(row.liveTimeRange ?? row.livePeriodText ?? '').trim()
+  if (liveText && liveText !== '—' && liveText !== '未读取到直播场次') {
+    const parsed = parseClockRangeSegments(liveText, dateKey)
+    if (parsed) return parsed
   }
 
   const paymentTimes = anchorViews
     .map((v) => parseOrderPaymentMs(v.orderTimeText))
     .filter((ms): ms is number => ms != null)
-  if (paymentTimes.length === 0) return null
+  if (paymentTimes.length > 0) {
+    const dayStart = startOfDayMsShanghai(dateKey)
+    const dayEnd = dayStart + 86_400_000 - 1
+    const inDay = paymentTimes.filter((ms) => ms >= dayStart && ms <= dayEnd)
+    if (inDay.length > 0) {
+      return { startMs: Math.min(...inDay), endMs: Math.max(...inDay) }
+    }
+  }
 
   const dayStart = startOfDayMsShanghai(dateKey)
+  const defaultStart = parseLiveSessionTimeMs(`${dateKey} 09:00:00`) ?? dayStart + 9 * 3_600_000
+  const defaultEnd = parseLiveSessionTimeMs(`${dateKey} 23:59:00`) ?? dayStart + 23 * 3_600_000 + 59 * 60_000
+  return { startMs: defaultStart, endMs: defaultEnd }
+}
+
+function expandRangeToCoverOrders(
+  range: { startMs: number; endMs: number },
+  anchorViews: AnalyzedOrderView[],
+  dateKey: string,
+): { startMs: number; endMs: number } {
+  const dayStart = startOfDayMsShanghai(dateKey)
   const dayEnd = dayStart + 86_400_000 - 1
-  const inDay = paymentTimes.filter((ms) => ms >= dayStart && ms <= dayEnd)
-  if (inDay.length === 0) return null
-  return { startMs: Math.min(...inDay), endMs: Math.max(...inDay) }
+  let startMs = range.startMs
+  let endMs = range.endMs
+
+  for (const v of anchorViews) {
+    const payMs = parseOrderPaymentMs(v.orderTimeText)
+    if (payMs == null || payMs < dayStart || payMs > dayEnd) continue
+    if (payMs < startMs) startMs = payMs
+    if (payMs > endMs) endMs = payMs
+  }
+
+  return { startMs, endMs }
 }
 
 function buildIntradayTrend(
   anchorViews: AnalyzedOrderView[],
   dateKey: string,
   row: Record<string, unknown>,
-): AnchorCardTrend {
-  const liveRange = resolveIntradayLiveRangeMs(row, dateKey, anchorViews)
-  const scheduleRange =
-    String(row.scheduledPeriodText ?? '').trim() ||
-    null
-  const actualRange =
-    String(row.liveTimeRange ?? '').trim() &&
-    String(row.liveTimeRange ?? '').trim() !== '未读取到直播场次'
-      ? String(row.liveTimeRange ?? '').replace(/~/g, '–')
-      : null
-
-  if (!liveRange) {
-    return { mode: 'intraday', metric: 'gmv', points: [] }
-  }
+): AnchorTrend {
+  const { scheduleRange, actualRange } = resolveIntradayDisplayRanges(row)
+  const baseRange = resolveIntradayBaseRangeMs(row, dateKey, anchorViews)
+  const liveRange = expandRangeToCoverOrders(baseRange, anchorViews, dateKey)
 
   const bucketMs = INTRADAY_BUCKET_MINUTES * 60_000
   const rangeStart = floorToBucketMs(liveRange.startMs, INTRADAY_BUCKET_MINUTES)
@@ -172,7 +256,6 @@ function buildIntradayTrend(
   for (const v of anchorViews) {
     const payMs = parseOrderPaymentMs(v.orderTimeText)
     if (payMs == null) continue
-    if (payMs < liveRange.startMs || payMs > liveRange.endMs) continue
     const bucket = floorToBucketMs(payMs, INTRADAY_BUCKET_MINUTES)
     const cur = bucketMap.get(bucket)
     if (!cur) continue
@@ -180,19 +263,20 @@ function buildIntradayTrend(
     cur.orders += 1
   }
 
-  const points: AnchorCardTrendPoint[] = [...bucketMap.entries()]
+  const points: AnchorTrendPoint[] = [...bucketMap.entries()]
     .sort(([a], [b]) => a - b)
     .map(([ms, agg]) => ({
-      key: formatBucketLabel(ms),
+      key: String(ms),
       label: formatBucketLabel(ms),
       value: centToYuan(agg.cent),
       orderCount: agg.orders,
       date: dateKey,
+      timeRange: formatBucketTimeRange(ms, INTRADAY_BUCKET_MINUTES),
       scheduleRange,
       actualRange,
     }))
 
-  return { mode: 'intraday', metric: 'gmv', points }
+  return { mode: 'intraday', metric: 'gmv', title: INTRADAY_TITLE, points }
 }
 
 async function buildDailySessionInfoByDate(params: {
@@ -234,20 +318,12 @@ async function buildDailySessionInfoByDate(params: {
     const scheduleRange = resolveSchedulePeriodText(table.rows, params.anchorName)
     let actualRange: string | null = null
     if (daySessions.length > 0) {
+      // 多场直播：各场时段用分号拼接；若需合并为最早~最晚可改此处
       const text = buildActualLivePeriodText(daySessions)
-      actualRange = text && text !== '—' ? text.replace(/~/g, '–') : null
-    } else if (scheduleRange) {
-      const usedRowIds = new Set<string>()
-      const attendance = resolveAnchorAttendanceFromSessions(
-        table.rows,
-        params.anchorName,
-        '',
-        [],
-        usedRowIds,
-      )
-      actualRange = attendance.actualStartText && attendance.actualEndText
-        ? `${attendance.actualStartText}–${attendance.actualEndText}`
-        : null
+      actualRange =
+        text && text !== '—'
+          ? text.replace(/~/g, '-').replace(/–/g, '-').replace(/\n/g, '；')
+          : null
     }
     result.set(day, { scheduleRange, actualRange })
   }
@@ -260,7 +336,7 @@ function buildDailyTrendFromViews(
   startDate: string,
   endDate: string,
   sessionInfoByDate: Map<string, { scheduleRange: string | null; actualRange: string | null }>,
-): AnchorCardTrend {
+): AnchorTrend {
   const days = eachDayInShanghaiRange(startDate, endDate)
   const byDate = new Map<string, { cent: number; orders: number }>()
   for (const day of days) byDate.set(day, { cent: 0, orders: 0 })
@@ -273,7 +349,7 @@ function buildDailyTrendFromViews(
     bucket.orders += 1
   }
 
-  const points: AnchorCardTrendPoint[] = days.map((day) => {
+  const points: AnchorTrendPoint[] = days.map((day) => {
     const agg = byDate.get(day) ?? { cent: 0, orders: 0 }
     const sessionInfo = sessionInfoByDate.get(day)
     return {
@@ -287,7 +363,7 @@ function buildDailyTrendFromViews(
     }
   })
 
-  return { mode: 'daily', metric: 'gmv', points }
+  return { mode: 'daily', metric: 'gmv', title: DAILY_TITLE, points }
 }
 
 export async function enrichAnchorLeaderboardWithTrend(
@@ -295,7 +371,7 @@ export async function enrichAnchorLeaderboardWithTrend(
   performanceViews: AnalyzedOrderView[],
   params: { preset?: string; startDate: string; endDate: string },
 ): Promise<Array<Record<string, unknown>>> {
-  const mode = resolveAnchorCardTrendMode(params.preset, params.startDate, params.endDate)
+  const mode = resolveAnchorTrendMode(params)
 
   const viewsByAnchor = new Map<string, AnalyzedOrderView[]>()
   for (const v of performanceViews) {

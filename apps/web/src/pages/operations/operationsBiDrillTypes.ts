@@ -80,6 +80,7 @@ export interface OperationsBiDrillOrderRow {
   quantity?: number | null
   validAmountYuan?: number | null
   productRefundAmountYuan?: number | null
+  refundAmountYuan?: number | null
   orderStatusText?: string | null
   afterSaleStatus?: string | null
   normalizedAfterSalesReason?: string | null

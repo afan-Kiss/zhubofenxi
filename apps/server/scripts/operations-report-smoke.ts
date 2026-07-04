@@ -5,6 +5,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { addDaysShanghai, formatDateKeyShanghai } from '../src/utils/business-timezone'
+import { acceptanceFetch } from './operations-acceptance-auth'
 
 const BASE = (process.env.METRICS_BASE_URL ?? process.env.E2E_BASE_URL ?? 'http://127.0.0.1:4723').replace(
   /\/$/,
@@ -45,13 +46,7 @@ async function fetchJson<T>(
   path: string,
   query?: Record<string, string | undefined>,
 ): Promise<{ status: number; body: Envelope<T> & Record<string, unknown> }> {
-  const url = new URL(`${BASE}${path}`)
-  if (query) {
-    for (const [k, v] of Object.entries(query)) {
-      if (v != null && v !== '') url.searchParams.set(k, v)
-    }
-  }
-  const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } })
+  const res = await acceptanceFetch(path, { query, baseUrl: BASE })
   const body = (await res.json()) as Envelope<T> & Record<string, unknown>
   return { status: res.status, body }
 }
@@ -257,9 +252,10 @@ function checkDailyCaliber(daily: DailyPayload, sampleDate: string) {
   )
 
   for (const p of daily.products.slice(0, 5)) {
-    if ((p.soldOrderCount ?? 0) > 0 && p.returnRate != null) {
-      const expected = (p.returnOrderCount ?? 0) / (p.soldOrderCount ?? 1)
-      assert(near(Number(p.returnRate), expected, 0.001), '商品退货率为订单维度 returnOrderCount/soldOrderCount')
+    const paid = p.paidOrderCount ?? p.soldOrderCount ?? 0
+    if (paid > 0 && p.returnRate != null) {
+      const expected = (p.returnOrderCount ?? 0) / paid
+      assert(near(Number(p.returnRate), expected, 0.001), '商品退货率为订单维度 returnOrderCount/paidOrderCount')
     }
   }
 }

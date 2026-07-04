@@ -16,6 +16,18 @@ export function anchorDrillTarget(rankingType: string): OperationsBiDrillTarget 
   return 'anchor_amount'
 }
 
+/** 官方流量榜不提供订单下钻 */
+export function anchorRankingSupportsDrill(rankingType: string): boolean {
+  return !(
+    rankingType === 'anchor_by_deal_conversion' ||
+    rankingType === 'anchor_by_new_followers' ||
+    rankingType === 'anchor_by_follower_conversion'
+  )
+}
+
+export const ANCHOR_TRAFFIC_RANKING_NOTE =
+  '这是官方流量指标，不是订单直接组成的，所以不提供订单明细。'
+
 export function productDrillTarget(rankingType: string): OperationsBiDrillTarget {
   if (rankingType.includes('slow')) return 'product_slow'
   if (rankingType.includes('return')) return 'product_high_return'

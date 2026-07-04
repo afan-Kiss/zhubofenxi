@@ -15,6 +15,8 @@ import type { OperationsRankingsPayload, WithOperationsReportCacheMeta } from '.
 import type { OperationsBiDrillContextProps } from './operationsBiDrillTypes'
 import {
   anchorDrillTarget,
+  anchorRankingSupportsDrill,
+  ANCHOR_TRAFFIC_RANKING_NOTE,
   buildBossSummaryDrillRequest,
   priceBandDrillTarget,
   productDrillTarget,
@@ -27,6 +29,7 @@ import type { BusinessInsightActionStatsPayload } from './operationsReportTypes'
 type RankingsTab = 'summary' | 'anchors' | 'products' | 'priceBands' | 'afterSales'
 
 const TABLE_DEFAULT_LIMIT = 5
+const RANKINGS_LIMIT_OPTIONS = [10, 20, 50] as const
 
 function RankingsLimitedTable<T>({
   rows,
@@ -83,6 +86,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({
   const [rangeStart, setRangeStart] = useState(startDate)
   const [rangeEnd, setRangeEnd] = useState(endDate)
   const [rangePreset, setRangePreset] = useState(preset)
+  const [rankingsLimit, setRankingsLimit] = useState<number>(10)
 
   const {
     data: loaded,
@@ -97,6 +101,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({
         endDate: rangeEnd,
         preset: rangePreset,
         scope: 'custom',
+        limit: String(rankingsLimit),
       })
       const res = await apiRequest<WithOperationsReportCacheMeta<OperationsRankingsPayload>>(
         `/api/board/operations-rankings?${qs}`,
@@ -105,7 +110,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({
       const { cacheMeta: meta, cacheWarning: warning, ...payload } = res
       return { payload, cacheMeta: meta, cacheWarning: warning ?? null }
     },
-    [rangeStart, rangeEnd, rangePreset],
+    [rangeStart, rangeEnd, rangePreset, rankingsLimit],
   )
 
   const data = loaded?.payload ?? null
@@ -296,6 +301,21 @@ export const OperationsRankingsTab: React.FC<Props> = ({
         >
           复制摘要
         </button>
+        <label className="text-xs text-slate-600">
+          榜单条数
+          <select
+            disabled={controlsDisabled}
+            value={rankingsLimit}
+            onChange={(e) => setRankingsLimit(Number(e.target.value))}
+            className="ml-1 rounded border border-slate-200 px-2 py-1 disabled:opacity-50"
+          >
+            {RANKINGS_LIMIT_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                Top {n}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {data.dataQuality.warnings.length > 0 ? (
@@ -361,11 +381,17 @@ export const OperationsRankingsTab: React.FC<Props> = ({
               data.anchors.byFollowerConversion,
               data.anchors.byReturnRate,
             ] as const
-          ).map((list) => (
+          ).map((list) => {
+            const anchorDrillEnabled = anchorRankingSupportsDrill(list.rankingType)
+            return (
             <RankingSection
               key={list.rankingType}
               title={list.title}
-              subtitle={list.subtitle}
+              subtitle={
+                anchorDrillEnabled
+                  ? list.subtitle
+                  : `${list.subtitle} ${ANCHOR_TRAFFIC_RANKING_NOTE}`
+              }
               dataQuality={list.dataQuality}
               sampleTooSmall={
                 list.sampleTooSmall?.length
@@ -374,6 +400,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({
                         rows={list.sampleTooSmall}
                         drillContext={drillContext}
                         drillTarget={anchorDrillTarget(list.rankingType)}
+                        showDrill={anchorDrillEnabled}
                       />
                     )
                   : undefined
@@ -386,11 +413,13 @@ export const OperationsRankingsTab: React.FC<Props> = ({
                     rows={visibleRows}
                     drillContext={drillContext}
                     drillTarget={anchorDrillTarget(list.rankingType)}
+                    showDrill={anchorDrillEnabled}
                   />
                 )}
               />
             </RankingSection>
-          ))}
+            )
+          })}
         </div>
       ) : null}
 

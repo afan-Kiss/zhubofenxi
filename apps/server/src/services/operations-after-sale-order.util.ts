@@ -144,3 +144,13 @@ export function viewCountsAsOperationsAfterSalesReasonOrder(view: AnalyzedOrderV
   if (view.isFreightRefundOnly) return false
   return isActualAfterSaleOrder(view)
 }
+
+/** 运营报表售后退款金额（分）：商品退款 / 退货 / 实际售后金额取最大，排除纯运费 */
+export function resolveOperationsAfterSalesRefundAmountCent(view: AnalyzedOrderView): number {
+  if (view.isFreightRefundOnly) return 0
+  return Math.max(
+    view.productRefundAmountCent ?? 0,
+    view.returnAmountCent ?? 0,
+    view.realAfterSaleAmountCent ?? 0,
+  )
+}

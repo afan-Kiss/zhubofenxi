@@ -4,6 +4,10 @@
  */
 import type { AnalyzedOrderView } from '../src/types/analysis'
 import { isDailyReportSoldOrder } from '../src/services/daily-report-order.util'
+import { addDaysShanghai } from '../src/utils/business-timezone'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { OPERATIONS_ANCHOR_RANKING } from '../src/config/operations-anchor-ranking.config'
 import { OPERATIONS_PRODUCT_RANKING } from '../src/config/operations-product-ranking.config'
 import { resolvePriceBandLabelFromCent } from '../src/config/operations-price-band.config'
@@ -31,6 +35,12 @@ import {
   normalizeAfterSalesReason,
 } from '../src/services/after-sales-reason-normalize.service'
 import {
+  resolveOperationsAfterSalesReasonRaw,
+  resolveOperationsAfterSalesRefundAmountCent,
+} from '../src/services/operations-after-sale-order.util'
+import { mapViewToOperationsBiDrillRow } from '../src/services/operations-bi-drill-row.mapper'
+import { resolveOperationsRankingsTrendDayRange, getOperationsRankings } from '../src/services/operations-rankings.service'
+import {
   buildOperationsDailyTrendFromSnapshots,
   detectSuspiciousDailyTrendRepeat,
 } from '../src/services/operations-daily-trend.service'
@@ -39,6 +49,9 @@ import type {
   AnchorRankItem,
   ProductRankListItem,
 } from '../src/services/operations-rankings.types'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const WEB_ROOT = path.resolve(__dirname, '../../web/src')
 
 function mockDailySnapshot(
   date: string,
@@ -348,7 +361,127 @@ function testPriceBandRankings(issues: string[]) {
   )
 }
 
+function testAfterSalesRefundAmount(issues: string[]) {
+  const returnOnly = {
+    orderId: 'as-ret-only',
+    productRefundAmountCent: 0,
+    returnAmountCent: 10000,
+    isReturnRefund: true,
+    isFreightRefundOnly: false,
+    afterSalesWorkbenchReason: '尺寸不合适',
+  } as AnalyzedOrderView
+  assert(
+    resolveOperationsAfterSalesRefundAmountCent(returnOnly) === 10000,
+    'returnAmountCent 应计入售后退款',
+    issues,
+  )
+  const items = buildAfterSalesItemsFromViews([returnOnly])
+  const lists = buildAfterSalesRankingLists(aggregateAfterSalesReasons(items))
+  assert(
+    lists.byRefundAmount.items.some((r) => r.refundAmountYuan === 100),
+    'returnAmountCent=10000 时售后榜退款金额应为 ¥100',
+    issues,
+  )
+
+  const realAfterSale = {
+    orderId: 'as-real',
+    productRefundAmountCent: 0,
+    realAfterSaleAmountCent: 20000,
+    isReturnRefund: true,
+    isFreightRefundOnly: false,
+    afterSalesWorkbenchReason: '质量问题',
+  } as AnalyzedOrderView
+  assert(
+    resolveOperationsAfterSalesRefundAmountCent(realAfterSale) === 20000,
+    'realAfterSaleAmountCent 应计入售后退款',
+    issues,
+  )
+
+  const freightOnly = {
+    orderId: 'f1',
+    isFreightRefundOnly: true,
+    isReturnRefund: true,
+    returnAmountCent: 5000,
+    afterSalesWorkbenchReason: '运费',
+  } as AnalyzedOrderView
+  assert(
+    buildAfterSalesItemsFromViews([freightOnly]).length === 0,
+    '纯运费补偿不进售后原因榜',
+    issues,
+  )
+}
+
+function testAfterSalesReasonConsistency(issues: string[]) {
+  const view = {
+    orderId: 'reason-order',
+    isReturnRefund: true,
+    isFreightRefundOnly: false,
+    afterSalesWorkbenchReason: '工作台原因',
+    afterSaleReasonText: '文本原因',
+    productRefundAmountCent: 100,
+  } as AnalyzedOrderView
+  const raw = resolveOperationsAfterSalesReasonRaw(view)
+  assert(raw === '工作台原因', 'reason 优先级应以 workbench 为准', issues)
+  const row = mapViewToOperationsBiDrillRow(view, new Map(), '测试')
+  assert(row.returnReason === '工作台原因', '下钻订单行 reason 应与统一解析一致', issues)
+  assert(row.normalizedAfterSalesReason === '工作台原因', '下钻展示 reason 一致', issues)
+}
+
+function testTrendDayRange(issues: string[]) {
+  const startDate = '2026-01-01'
+  const endDate = addDaysShanghai(startDate, 59)
+  const { trendDays, trendEndDate } = resolveOperationsRankingsTrendDayRange(startDate, endDate)
+  assert(trendDays.length === 31, '60 天范围走势窗口最多 31 天', issues)
+  assert(trendEndDate === endDate, '走势窗口应覆盖范围最后一天', issues)
+}
+
+function testBuyerCountDisplay(issues: string[]) {
+  const productTable = fs.readFileSync(
+    path.join(WEB_ROOT, 'components/operations/ProductRankingTable.tsx'),
+    'utf8',
+  )
+  const priceBandTable = fs.readFileSync(
+    path.join(WEB_ROOT, 'components/operations/PriceBandRankingTable.tsx'),
+    'utf8',
+  )
+  assert(
+    productTable.includes('formatPeopleCount(row.buyerCount)'),
+    '商品榜买家数应使用 formatPeopleCount',
+    issues,
+  )
+  assert(
+    !productTable.includes('formatOrderCount(row.buyerCount)'),
+    '商品榜买家数不能 formatOrderCount',
+    issues,
+  )
+  assert(
+    priceBandTable.includes('formatPeopleCount(row.buyerCount)'),
+    '价格带买家数应使用 formatPeopleCount',
+    issues,
+  )
+}
+
+function testAnchorTrafficDrillPolicy(issues: string[]) {
+  const helpers = fs.readFileSync(
+    path.join(WEB_ROOT, 'components/operations/operationsBiDrillHelpers.ts'),
+    'utf8',
+  )
+  assert(
+    helpers.includes('anchorRankingSupportsDrill'),
+    '应提供 anchorRankingSupportsDrill',
+    issues,
+  )
+  assert(
+    helpers.includes('anchor_by_deal_conversion'),
+    '成交率榜应标记为无下钻',
+    issues,
+  )
+}
+
 function testAfterSalesRankings(issues: string[]) {
+  testAfterSalesRefundAmount(issues)
+  testAfterSalesReasonConsistency(issues)
+
   const norm = normalizeAfterSalesReason('尺寸不合适')
   assert(norm.category === 'size_mismatch', '售后归一化', issues)
 
@@ -436,7 +569,26 @@ function testDailyTrendHelpers(issues: string[]) {
   )
 }
 
-function main() {
+async function testTrendReportBuildCount(issues: string[]) {
+  const dailyMod = await import('../src/services/daily-operations-report.service')
+  let reportCalls = 0
+  const orig = dailyMod.buildDailyOperationsReport
+  dailyMod.buildDailyOperationsReport = async (...args: Parameters<typeof orig>) => {
+    reportCalls += 1
+    return orig(...args)
+  }
+  try {
+    const startDate = '2026-01-01'
+    const endDate = addDaysShanghai(startDate, 59)
+    const payload = await getOperationsRankings({ startDate, endDate, preset: 'custom' })
+    assert(reportCalls <= 31, `60天范围 buildDailyOperationsReport 最多 31 次（实际 ${reportCalls}）`, issues)
+    assert(payload.dailyTrend.length <= 31, '60天范围 dailyTrend 最多 31 条', issues)
+  } finally {
+    dailyMod.buildDailyOperationsReport = orig
+  }
+}
+
+async function main() {
   const issues: string[] = []
   testAnchorRankings(issues)
   testProductRankings(issues)
@@ -445,6 +597,10 @@ function main() {
   testAfterSalesRankings(issues)
   testTypeFields(issues)
   testDailyTrendHelpers(issues)
+  testTrendDayRange(issues)
+  testBuyerCountDisplay(issues)
+  testAnchorTrafficDrillPolicy(issues)
+  await testTrendReportBuildCount(issues)
 
   if (issues.length > 0) {
     console.error('[operations-rankings-acceptance] FAILED')
@@ -454,4 +610,7 @@ function main() {
   console.log('[operations-rankings-acceptance] OK')
 }
 
-main()
+main().catch((err) => {
+  console.error('[operations-rankings-acceptance] ERROR', err)
+  process.exit(1)
+})

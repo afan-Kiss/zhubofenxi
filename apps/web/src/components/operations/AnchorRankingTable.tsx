@@ -17,12 +17,14 @@ interface Props {
   rows: AnchorRankItem[]
   drillContext?: OperationsBiDrillContextProps
   drillTarget?: OperationsBiDrillTarget
+  showDrill?: boolean
 }
 
 export const AnchorRankingTable: React.FC<Props> = ({
   rows,
   drillContext,
   drillTarget = 'anchor_amount',
+  showDrill = true,
 }) => {
   if (rows.length === 0) {
     return <p className="text-sm text-slate-500">暂无数据</p>
@@ -49,7 +51,7 @@ export const AnchorRankingTable: React.FC<Props> = ({
             <th className="px-3 py-2">新增粉丝</th>
             <th className="px-3 py-2">粉丝转化率</th>
             <th className="px-3 py-2">上榜原因</th>
-            {drillContext ? <th className="px-3 py-2">操作</th> : null}
+            {drillContext && showDrill ? <th className="px-3 py-2">操作</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -72,7 +74,7 @@ export const AnchorRankingTable: React.FC<Props> = ({
               <td className="px-3 py-2">{formatPeopleCount(row.newFollowerCount)}</td>
               <td className="px-3 py-2">{formatRatePercent(row.followerConversionRate)}</td>
               <td className="px-3 py-2 text-slate-500">{row.rankReason}</td>
-              {drillContext ? (
+              {drillContext && showDrill ? (
                 <td className="px-3 py-2">
                   <OperationsBiDrillLinkButton
                     request={{

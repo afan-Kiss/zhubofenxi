@@ -99,6 +99,7 @@ export interface OperationsBiDrillOrderRow {
   orderStatusText?: string | null
 
   productRefundAmountYuan?: number | null
+  refundAmountYuan?: number | null
   freightRefundAmountYuan?: number | null
   isFreightRefundOnly?: boolean | null
   returnReason?: string | null

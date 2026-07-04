@@ -5,6 +5,7 @@ import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
 import { prisma } from '../lib/prisma'
 import {
   buildDailyOperationsReport,
+  buildDailyOperationsAnchorRowsForDay,
   buildAfterSalesItemsFromViews,
   type DailyOperationsAnchorRow,
   type DailyOperationsReportPayload,
@@ -38,6 +39,21 @@ export type OperationsRankingsPreset =
   | 'custom'
 
 const MAX_DAILY_TREND_DAYS = 31
+
+/** 榜单走势图日期窗口：完整范围内取最近 maxDays 天 */
+export function resolveOperationsRankingsTrendDayRange(
+  startDate: string,
+  endDate: string,
+  maxDays: number = MAX_DAILY_TREND_DAYS,
+): { trendStartDate: string; trendEndDate: string; trendDays: string[] } {
+  const days = eachDayInShanghaiRange(startDate, endDate)
+  const trendDays = days.length > maxDays ? days.slice(-maxDays) : days
+  return {
+    trendStartDate: trendDays[0] ?? startDate,
+    trendEndDate: trendDays[trendDays.length - 1] ?? endDate,
+    trendDays,
+  }
+}
 
 function formatMoneyYuan(yuan: number): string {
   return `¥${Math.round(yuan).toLocaleString('zh-CN')}`
@@ -202,14 +218,40 @@ function resolvePrevRange(startDate: string, endDate: string): { prevStartDate: 
   return { prevStartDate, prevEndDate }
 }
 
+async function loadDailyAnchorRowsForRange(params: {
+  startDate: string
+  endDate: string
+  role?: UserRole
+  username?: string
+}): Promise<DailyOperationsAnchorRow[][]> {
+  const days = eachDayInShanghaiRange(params.startDate, params.endDate)
+  const rowsByDay: DailyOperationsAnchorRow[][] = []
+  for (const day of days) {
+    rowsByDay.push(
+      await buildDailyOperationsAnchorRowsForDay({
+        startDate: day,
+        endDate: day,
+        role: params.role,
+        username: params.username,
+      }),
+    )
+  }
+  return rowsByDay
+}
+
 async function loadDailySnapshotsForRange(params: {
   preset?: string
   startDate: string
   endDate: string
   role?: UserRole
   username?: string
+  /** 若指定，仅加载这些日期（用于走势，避免超长范围全量日报） */
+  onlyDays?: string[]
 }): Promise<DailyOperationsReportPayload[]> {
-  const days = eachDayInShanghaiRange(params.startDate, params.endDate)
+  const days =
+    params.onlyDays && params.onlyDays.length > 0
+      ? params.onlyDays
+      : eachDayInShanghaiRange(params.startDate, params.endDate)
   const snapshots: DailyOperationsReportPayload[] = []
   for (const day of days) {
     snapshots.push(
@@ -230,19 +272,9 @@ function buildDailyTrendFromSnapshots(
   startDate: string,
   endDate: string,
 ): OperationsRankingsPayload['dailyTrend'] {
-  const days = eachDayInShanghaiRange(startDate, endDate)
-  const cappedEnd =
-    days.length > MAX_DAILY_TREND_DAYS
-      ? days[MAX_DAILY_TREND_DAYS - 1]!
-      : endDate
-  const cappedStart = days.length > MAX_DAILY_TREND_DAYS ? days[0]! : startDate
-  const trendSnapshots =
-    days.length > MAX_DAILY_TREND_DAYS
-      ? snapshots.slice(0, MAX_DAILY_TREND_DAYS)
-      : snapshots
-  return buildOperationsDailyTrendFromSnapshots(trendSnapshots, {
-    startDate: cappedStart,
-    endDate: cappedEnd,
+  return buildOperationsDailyTrendFromSnapshots(snapshots, {
+    startDate,
+    endDate,
   })
 }
 
@@ -279,16 +311,44 @@ export async function getOperationsRankings(params: {
   let mergedAnchors: DailyOperationsAnchorRow[] = []
   let dailyTrend: OperationsRankingsPayload['dailyTrend'] = []
   let dailyTrendError: string | null = null
+  const rangeDayCount = eachDayInShanghaiRange(startDate, endDate).length
+  const trendRange = resolveOperationsRankingsTrendDayRange(startDate, endDate)
+  const trendRangeTruncated = rangeDayCount > MAX_DAILY_TREND_DAYS
   try {
-    const daySnapshots = await loadDailySnapshotsForRange({
-      preset,
-      startDate,
-      endDate,
-      role: params.role,
-      username: params.username,
-    })
-    mergedAnchors = mergeAnchorRowsForRange(daySnapshots.map((snap) => snap.anchors))
-    dailyTrend = buildDailyTrendFromSnapshots(daySnapshots, startDate, endDate)
+    if (trendRangeTruncated) {
+      const [trendSnapshots, anchorRowsByDay] = await Promise.all([
+        loadDailySnapshotsForRange({
+          preset,
+          startDate,
+          endDate,
+          role: params.role,
+          username: params.username,
+          onlyDays: trendRange.trendDays,
+        }),
+        loadDailyAnchorRowsForRange({
+          startDate,
+          endDate,
+          role: params.role,
+          username: params.username,
+        }),
+      ])
+      mergedAnchors = mergeAnchorRowsForRange(anchorRowsByDay)
+      dailyTrend = buildDailyTrendFromSnapshots(
+        trendSnapshots,
+        trendRange.trendStartDate,
+        trendRange.trendEndDate,
+      )
+    } else {
+      const anchorSnapshots = await loadDailySnapshotsForRange({
+        preset,
+        startDate,
+        endDate,
+        role: params.role,
+        username: params.username,
+      })
+      mergedAnchors = mergeAnchorRowsForRange(anchorSnapshots.map((snap) => snap.anchors))
+      dailyTrend = buildDailyTrendFromSnapshots(anchorSnapshots, startDate, endDate)
+    }
   } catch (err) {
     dailyTrendError = err instanceof Error ? err.message : '未知错误'
     mergedAnchors = []
@@ -335,6 +395,9 @@ export async function getOperationsRankings(params: {
 
   if (dailyTrendError) {
     payload.dataQuality.warnings.push(`成交走势生成失败：${dailyTrendError}`)
+  }
+  if (trendRangeTruncated) {
+    payload.dataQuality.warnings.push('走势只展示最近 31 天，榜单统计仍按所选完整范围。')
   }
 
   try {

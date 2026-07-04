@@ -8,6 +8,7 @@ import { OperationsBiDrillLinkButton } from './OperationsBiDrillProvider'
 import {
   formatIntegerMoney,
   formatOrderCount,
+  formatPeopleCount,
   formatRatePercent,
 } from './operationsReportFormatters'
 
@@ -63,7 +64,7 @@ export const ProductRankingTable: React.FC<Props> = ({
               <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.paidOrderCount)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldCount)}</td>
-              <td className="px-3 py-2">{formatOrderCount(row.buyerCount)}</td>
+              <td className="px-3 py-2">{formatPeopleCount(row.buyerCount)}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.averageOrderValueYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.returnOrderCount)}</td>
               <td className="px-3 py-2">{formatRatePercent(row.returnRate)}</td>

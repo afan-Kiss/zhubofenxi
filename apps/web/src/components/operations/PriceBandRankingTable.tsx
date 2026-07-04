@@ -8,6 +8,7 @@ import { OperationsBiDrillLinkButton } from './OperationsBiDrillProvider'
 import {
   formatIntegerMoney,
   formatOrderCount,
+  formatPeopleCount,
   formatPercent,
   formatRatePercent,
 } from './operationsReportFormatters'
@@ -51,7 +52,7 @@ export const PriceBandRankingTable: React.FC<Props> = ({
               <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.paidOrderCount)}</td>
-              <td className="px-3 py-2">{formatOrderCount(row.buyerCount)}</td>
+              <td className="px-3 py-2">{formatPeopleCount(row.buyerCount)}</td>
               <td className="px-3 py-2">{formatPercent(row.amountSharePercent)}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.averageOrderValueYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.productReturnOrderCount)}</td>

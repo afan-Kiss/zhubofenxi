@@ -34,6 +34,8 @@ const PRIVACY_FIELDS = [
   'buyerKey',
 ]
 
+import { acceptanceFetch } from './operations-acceptance-auth'
+
 const BASE = (process.env.METRICS_BASE_URL ?? process.env.E2E_BASE_URL ?? 'http://127.0.0.1:4723').replace(
   /\/$/,
   '',
@@ -323,8 +325,8 @@ async function main() {
   try {
     const health = await fetch(`${BASE}/api/health`, { signal: AbortSignal.timeout(3000) })
     if (health.ok) {
-      const statusRes = await fetch(`${BASE}/api/board/operations-report-cache/status`, {
-        headers: { Accept: 'application/json' },
+      const statusRes = await acceptanceFetch('/api/board/operations-report-cache/status', {
+        baseUrl: BASE,
       })
       if (statusRes.status === 200) {
         const body = (await statusRes.json()) as { ok?: boolean; data?: { entryCount?: number } }

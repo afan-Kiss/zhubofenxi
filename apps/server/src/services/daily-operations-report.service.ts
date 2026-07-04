@@ -57,6 +57,7 @@ import {
   computeReturnOrderRateRatio,
   computeOperationsRefundMetricsFromViews,
   resolveOperationsAfterSalesReasonRaw,
+  resolveOperationsAfterSalesRefundAmountCent,
   viewCountsAsOperationsAfterSalesReasonOrder,
 } from './operations-after-sale-order.util'
 import { prisma } from '../lib/prisma'
@@ -293,39 +294,30 @@ export function buildAfterSalesItemsFromViews(views: AnalyzedOrderView[]): Array
     if (!orderKey) continue
     items.push({
       rawReason: resolveOperationsAfterSalesReasonRaw(v),
-      refundAmountCent: v.productRefundAmountCent,
+      refundAmountCent: resolveOperationsAfterSalesRefundAmountCent(v),
       orderKey,
     })
   }
   return items
 }
 
-export async function buildDailyOperationsReport(params: {
-  preset?: string
+/** 单日主播行（榜单多日聚合用，不走完整日报） */
+export async function buildDailyOperationsAnchorRowsForDay(params: {
   startDate: string
   endDate: string
   role?: UserRole
   username?: string
-}): Promise<DailyOperationsReportPayload> {
+}): Promise<DailyOperationsAnchorRow[]> {
   if (params.startDate !== params.endDate) {
-    throw new Error('运营日报仅支持单日范围')
+    throw new Error('buildDailyOperationsAnchorRowsForDay 仅支持单日')
   }
-
-  // 单日日报必须按 custom + 当天日期取数；preset=thisWeek/thisMonth 会误拉整段周期汇总
   const dayParams = { ...params, preset: 'custom' as const }
-
   const scoped = await getBoardScopedViewsForRange(dayParams)
   const config = getAnchorConfigSync()
   const remappedAll = remapViewsForAnchorPerformance(
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)
-  const performanceViewsAll = await getAnchorPerformanceViews(
-    scoped.views,
-    scoped.rawByMatch,
-  )
-
-  const anchorRows: DailyOperationsAnchorRow[] = []
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
   const liveAssignment = await loadAndAssignDailyReportLiveSessions({
@@ -335,6 +327,7 @@ export async function buildDailyOperationsReport(params: {
     scheduleRows: scheduleTable.rows,
   })
   const usedScheduleRowIds = new Set<string>()
+  const anchorRows: DailyOperationsAnchorRow[] = []
 
   for (const anchor of reportAnchors) {
     const performanceViews = await getAnchorPerformanceViews(
@@ -411,9 +404,43 @@ export async function buildDailyOperationsReport(params: {
     row.amountRatio = safeRatioPercent(row.validAmountYuan, validAmountYuan)
   }
 
+  return anchorRows
+}
+
+export async function buildDailyOperationsReport(params: {
+  preset?: string
+  startDate: string
+  endDate: string
+  role?: UserRole
+  username?: string
+}): Promise<DailyOperationsReportPayload> {
+  if (params.startDate !== params.endDate) {
+    throw new Error('运营日报仅支持单日范围')
+  }
+
+  // 单日日报必须按 custom + 当天日期取数；preset=thisWeek/thisMonth 会误拉整段周期汇总
+  const dayParams = { ...params, preset: 'custom' as const }
+
+  const scoped = await getBoardScopedViewsForRange(dayParams)
+  const performanceViewsAll = await getAnchorPerformanceViews(
+    scoped.views,
+    scoped.rawByMatch,
+  )
+
+  const anchorRows = await buildDailyOperationsAnchorRowsForDay(params)
+
   const soldOrderCount = anchorRows.reduce((sum, row) => sum + row.soldOrderCount, 0)
   const invalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)
+  const validAmountYuan = anchorRows.reduce((sum, row) => sum + row.validAmountYuan, 0)
   const summaryRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViewsAll)
+
+  const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
+  const liveAssignment = await loadAndAssignDailyReportLiveSessions({
+    reportDate: params.startDate,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    scheduleRows: scheduleTable.rows,
+  })
 
   const totalLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(
     liveAssignment.allSessions,

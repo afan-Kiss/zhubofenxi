@@ -2,6 +2,7 @@
  * 经营建议执行统计验收
  * 用法: npm run accept:operations-business-insight-action-stats
  */
+import './operations-acceptance-auth'
 import { prisma } from '../src/lib/prisma'
 import {
   attachBusinessInsightActions,

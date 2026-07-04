@@ -17,6 +17,8 @@ import {
   formatAfterSaleStatusDisplay,
   formatAfterSalesCategoryLabel,
   formatAfterSalesReasonDisplay,
+  resolveOperationsAfterSalesReasonRaw,
+  resolveOperationsAfterSalesRefundAmountCent,
 } from './operations-after-sale-order.util'
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
 import {
@@ -55,12 +57,8 @@ export function mapViewToOperationsBiDrillRow(
   const buyerCode = identity
     ? formatBuyerIdentityCode(identity.buyerKey, identity.buyerId)
     : ''
-  const reasonRaw =
-    withRaw.afterSaleReasonText?.trim() ||
-    withRaw.afterSalesWorkbenchReason?.trim() ||
-    withRaw.reasonText?.trim() ||
-    withRaw.finalAfterSaleReason?.trim() ||
-    ''
+  const reasonRaw = resolveOperationsAfterSalesReasonRaw(withRaw)
+  const refundAmountCent = resolveOperationsAfterSalesRefundAmountCent(withRaw)
   const displayNo = resolveDisplayOrderNoForView(withRaw)
   const orderNo = displayNo || withRaw.orderId || withRaw.packageId || '—'
   const buyerNickname = pickBuyerNicknameFromView(withRaw) || null
@@ -87,7 +85,8 @@ export function mapViewToOperationsBiDrillRow(
     includedInGmv: withRaw.includedInGmv ?? null,
     isLowPriceExcluded: brush.isLowPriceBrushOrder ?? null,
     orderStatusText: withRaw.orderStatusText ?? null,
-    productRefundAmountYuan: Math.round(centToYuan(withRaw.productRefundAmountCent || 0)),
+    productRefundAmountYuan: Math.round(centToYuan(refundAmountCent)),
+    refundAmountYuan: Math.round(centToYuan(refundAmountCent)),
     freightRefundAmountYuan: Math.round(centToYuan(withRaw.freightRefundAmountCent || 0)),
     isFreightRefundOnly: withRaw.isFreightRefundOnly ?? null,
     returnReason: reasonRaw ? String(reasonRaw) : null,

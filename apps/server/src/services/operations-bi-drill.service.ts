@@ -23,6 +23,7 @@ import {
   formatAfterSalesReasonDisplay,
   isActualAfterSaleOrder,
   resolveOperationsAfterSalesReasonRaw,
+  resolveOperationsAfterSalesRefundAmountCent,
   viewCountsAsOperationsAfterSalesReasonOrder,
 } from './operations-after-sale-order.util'
 import { normalizeAfterSalesReason } from './after-sales-reason-normalize.service'
@@ -467,7 +468,7 @@ export async function buildOperationsBiDrill(
   const refundAmountYuan =
     mode === 'after_sale'
       ? filtered.reduce(
-          (sum, v) => sum + Math.round((v.productRefundAmountCent ?? 0) / 100),
+          (sum, v) => sum + Math.round(resolveOperationsAfterSalesRefundAmountCent(v) / 100),
           0,
         )
       : 0

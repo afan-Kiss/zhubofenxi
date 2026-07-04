@@ -2,6 +2,7 @@
  * 经营建议处理状态验收
  * 用法: npm run accept:operations-business-insight-actions
  */
+import './operations-acceptance-auth'
 import {
   attachBusinessInsightActions,
   BusinessInsightActionValidationError,

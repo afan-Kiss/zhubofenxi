@@ -13,9 +13,15 @@ import {
 import { assertOperationsBiDrillPayloadPrivacy } from '../src/services/operations-bi-drill-row.mapper'
 import {
   consumeQianfanOrderOpenTicket,
-  createQianfanOrderOpenTicket,
   __testOnlySeedQianfanTicket,
 } from '../src/services/qianfan-order-open-ticket.service'
+import { acceptanceFetch, resolveAcceptanceFetchHeaders } from './operations-acceptance-auth'
+import type { AnalyzedOrderView } from '../src/types/analysis'
+import {
+  resolveOperationsAfterSalesReasonRaw,
+  resolveOperationsAfterSalesRefundAmountCent,
+} from '../src/services/operations-after-sale-order.util'
+import { mapViewToOperationsBiDrillRow } from '../src/services/operations-bi-drill-row.mapper'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const WEB_OPS = path.resolve(__dirname, '../../web/src/components/operations')
@@ -39,23 +45,29 @@ function assert(cond: boolean, msg: string, issues: string[]) {
 }
 
 async function fetchDrill(query: Record<string, string | number | undefined>) {
-  const url = new URL(`${BASE}/api/board/operations-bi-drill`)
-  for (const [k, v] of Object.entries(query)) {
-    if (v != null && v !== '') url.searchParams.set(k, String(v))
-  }
-  const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } })
+  const res = await acceptanceFetch('/api/board/operations-bi-drill', { query, baseUrl: BASE })
   const body = (await res.json()) as { ok?: boolean; data?: Record<string, unknown>; message?: string }
   return { status: res.status, body }
 }
 
 async function fetchTicket(orderNo: string) {
-  const res = await fetch(`${BASE}/api/board/qianfan-order-detail-ticket`, {
+  const res = await acceptanceFetch('/api/board/qianfan-order-detail-ticket', {
     method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+    baseUrl: BASE,
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ orderNo }),
   })
   const body = (await res.json()) as { ok?: boolean; data?: Record<string, unknown>; message?: string }
   return { status: res.status, body, text: JSON.stringify(body) }
+}
+
+function isUserVisibleUiStringLiteral(raw: string): boolean {
+  const inner = raw.slice(1, -1).trim()
+  if (!inner) return false
+  if (/[\u4e00-\u9fff]/.test(inner)) return true
+  if (/^ops-[\w-]+$/.test(inner)) return false
+  if (/^[a-z][\w.-]*$/i.test(inner)) return false
+  return true
 }
 
 function scanFrontendForbiddenWords(issues: string[]) {
@@ -76,8 +88,10 @@ function scanFrontendForbiddenWords(issues: string[]) {
       const line = lines[i]!
       if (line.trim().startsWith('import ')) continue
       if (line.includes('OperationsBiDrill') || line.includes('operationsBiDrill')) continue
+      if (/^\s*(id|className|labelledBy|htmlFor|key|type|name|role)=/.test(line.trim())) continue
       const strings = line.match(/'[^']*'|"[^"]*"/g) ?? []
       for (const s of strings) {
+        if (!isUserVisibleUiStringLiteral(s)) continue
         const lower = s.toLowerCase()
         for (const word of FORBIDDEN_UI) {
           if (lower.includes(word.toLowerCase())) {
@@ -121,8 +135,41 @@ async function pickSampleOrderNo(): Promise<string | null> {
   return row?.packageId || row?.orderId || null
 }
 
+function testRefundAndReasonPure(issues: string[]) {
+  const view = {
+    orderId: 'drill-refund',
+    productRefundAmountCent: 0,
+    realAfterSaleAmountCent: 20000,
+    isReturnRefund: true,
+    isFreightRefundOnly: false,
+    afterSalesWorkbenchReason: '质量问题',
+  } as AnalyzedOrderView
+  assert(
+    resolveOperationsAfterSalesRefundAmountCent(view) === 20000,
+    'realAfterSaleAmountCent 20000 分',
+    issues,
+  )
+  const row = mapViewToOperationsBiDrillRow(view, new Map(), '售后')
+  assert(row.refundAmountYuan === 200, '下钻行 refundAmountYuan 应为 200 元', issues)
+
+  const mixedReason = {
+    ...view,
+    afterSaleReasonText: '其它文本',
+  } as AnalyzedOrderView
+  assert(
+    resolveOperationsAfterSalesReasonRaw(mixedReason) === '质量问题',
+    '下钻 reason 与 workbench 一致',
+    issues,
+  )
+  const reasonRow = mapViewToOperationsBiDrillRow(mixedReason, new Map(), '售后')
+  assert(reasonRow.returnReason === '质量问题', 'mapper reason 与榜单一致', issues)
+}
+
 async function main() {
   const issues: string[] = []
+
+  await resolveAcceptanceFetchHeaders()
+  testRefundAndReasonPure(issues)
 
   // 1-2 日报总览卡
   const dailyAmount = await buildOperationsBiDrill({
@@ -212,6 +259,18 @@ async function main() {
   }).catch(() => null)
   if (afterSales) {
     assert(Array.isArray(afterSales.rows), '售后原因下钻应返回 rows', issues)
+    if (afterSales.pagination.total > 0) {
+      assert(
+        afterSales.summary.orderCount === afterSales.pagination.total,
+        '售后下钻 summary.orderCount 应与明细条数一致',
+        issues,
+      )
+      assert(
+        typeof afterSales.summary.refundAmountYuan === 'number',
+        '售后下钻 summary 应含 refundAmountYuan',
+        issues,
+      )
+    }
   }
 
   // 8 主推未成交

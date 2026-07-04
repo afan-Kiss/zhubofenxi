@@ -95,12 +95,12 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
     <OperationsViewportModal
       open={open}
       onClose={onClose}
-      labelledBy="ops-bi-drill-title"
+      labelledBy="ops-order-detail-title"
     >
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-4 py-3">
           <div className="min-w-0 pr-2">
-            <h2 id="ops-bi-drill-title" className="text-base font-semibold text-slate-900">
+            <h2 id="ops-order-detail-title" className="text-base font-semibold text-slate-900">
               {payload?.title ?? '订单明细'}
             </h2>
             <p className="mt-1 text-xs text-slate-500">{payload?.subtitle}</p>
@@ -139,23 +139,27 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
               ) : null}
 
               <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                <Metric label="订单数" value={formatOrderCount(payload.summary.orderCount)} />
-                <Metric
-                  label="有效成交金额"
-                  value={formatIntegerMoney(payload.summary.validAmountYuan)}
-                />
                 {isAfterSaleDrill ? (
                   <>
+                    <Metric label="售后订单" value={formatOrderCount(payload.summary.orderCount)} />
                     <Metric
-                      label="退款/退货订单"
-                      value={formatOrderCount(payload.summary.productReturnOrderCount)}
+                      label="退款金额"
+                      value={formatIntegerMoney(payload.summary.refundAmountYuan ?? 0)}
                     />
                     <Metric
                       label="退货单率"
                       value={formatRatePercent(payload.summary.productReturnRate)}
                     />
                   </>
-                ) : null}
+                ) : (
+                  <>
+                    <Metric label="订单数" value={formatOrderCount(payload.summary.orderCount)} />
+                    <Metric
+                      label="有效成交金额"
+                      value={formatIntegerMoney(payload.summary.validAmountYuan)}
+                    />
+                  </>
+                )}
               </div>
 
               {payload.dataQuality.warnings.map((w) => (
@@ -241,8 +245,8 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                                 {formatIntegerMoney(row.validAmountYuan ?? 0)}
                               </td>
                               <td className="px-2 py-2 text-right font-semibold text-rose-700">
-                                {(row.productRefundAmountYuan ?? 0) > 0
-                                  ? formatIntegerMoney(row.productRefundAmountYuan ?? 0)
+                                {resolveRowRefundYuan(row) > 0
+                                  ? formatIntegerMoney(resolveRowRefundYuan(row))
                                   : '—'}
                               </td>
                               <td className="px-2 py-2">
@@ -305,6 +309,10 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
   )
 }
 
+function resolveRowRefundYuan(row: OperationsBiDrillOrderRow): number {
+  return row.refundAmountYuan ?? row.productRefundAmountYuan ?? 0
+}
+
 function ValidRevenueTag({ included }: { included?: boolean | null }) {
   if (included == null) return <span className="text-slate-400">—</span>
   return included ? (
@@ -358,9 +366,9 @@ const MobileOrderCard: React.FC<{
         <p className="mt-1 font-semibold text-slate-900">
           成交 {formatIntegerMoney(row.validAmountYuan ?? 0)}
         </p>
-        {(row.productRefundAmountYuan ?? 0) > 0 ? (
+        {(resolveRowRefundYuan(row)) > 0 ? (
           <p className="mt-0.5 font-semibold text-rose-700">
-            退款 {formatIntegerMoney(row.productRefundAmountYuan ?? 0)}
+            退款 {formatIntegerMoney(resolveRowRefundYuan(row))}
           </p>
         ) : null}
         <p className="mt-1 flex flex-wrap items-center gap-1 text-slate-600">

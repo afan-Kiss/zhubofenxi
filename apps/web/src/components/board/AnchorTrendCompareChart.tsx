@@ -10,13 +10,15 @@ import {
   YAxis,
 } from 'recharts'
 import {
+  anchorRowGmv,
+  anchorRowPaidCount,
   anchorRowTrend,
   type AnchorLeaderboardRow,
   type AnchorTrendMode,
 } from '../../lib/anchor-leaderboard-row'
 
 const ANCHOR_COLORS = ['#f43f5e', '#3b82f6', '#22c55e', '#f59e0b'] as const
-const MAX_ANCHORS = 4
+export const MAX_ANCHORS = 4
 const INTRADAY_BUCKET_MINUTES = 30
 const BUCKET_MS = INTRADAY_BUCKET_MINUTES * 60_000
 
@@ -62,6 +64,18 @@ function isValidAnchorRow(row: AnchorLeaderboardRow): boolean {
   if (!name || name === '未归属') return false
   const trend = anchorRowTrend(row)
   return Boolean(trend?.points?.length)
+}
+
+export function sortCompareCandidates(rows: AnchorLeaderboardRow[]): AnchorLeaderboardRow[] {
+  return rows
+    .filter(isValidAnchorRow)
+    .sort((a, b) => anchorRowGmv(b) - anchorRowGmv(a))
+}
+
+export function defaultCompareAnchorNames(rows: AnchorLeaderboardRow[]): string[] {
+  return sortCompareCandidates(rows)
+    .slice(0, MAX_ANCHORS)
+    .map((row) => String(row.anchorName).trim())
 }
 
 function relativeBucketLabel(bucketIndex: number): string {
@@ -188,7 +202,10 @@ function buildIntradayRelativeComparePayload(
   return { series, chartData }
 }
 
-function buildComparePayload(rows: AnchorLeaderboardRow[]): {
+function buildComparePayload(
+  rows: AnchorLeaderboardRow[],
+  selectedNames: string[],
+): {
   mode: AnchorTrendMode | null
   series: AnchorTrendCompareSeries[]
   chartData: CompareChartRow[]
@@ -196,7 +213,23 @@ function buildComparePayload(rows: AnchorLeaderboardRow[]): {
   hasComparableData: boolean
   isRelativeIntraday: boolean
 } {
-  const candidates = rows.filter(isValidAnchorRow)
+  const sortedCandidates = sortCompareCandidates(rows)
+  if (sortedCandidates.length === 0) {
+    return {
+      mode: null,
+      series: [],
+      chartData: [],
+      skippedModeMismatch: false,
+      hasComparableData: false,
+      isRelativeIntraday: false,
+    }
+  }
+
+  const selectedSet = new Set(selectedNames)
+  const candidates = sortedCandidates.filter((row) =>
+    selectedSet.has(String(row.anchorName).trim()),
+  )
+
   if (candidates.length === 0) {
     return {
       mode: null,
@@ -319,17 +352,34 @@ function CompareTooltip({
 export interface AnchorTrendCompareChartProps {
   rows: AnchorLeaderboardRow[]
   formatMoney: (value: number) => string
+  formatCount?: (value: number) => string
   className?: string
 }
 
 export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = ({
   rows,
   formatMoney,
+  formatCount = (value) => `${value} 单`,
   className = '',
 }) => {
   const compact = useCompactChart()
+  const sortedCandidates = useMemo(() => sortCompareCandidates(rows), [rows])
+  const defaultSelectedKey = useMemo(
+    () => defaultCompareAnchorNames(rows).join('|'),
+    [rows],
+  )
+  const [selectedNames, setSelectedNames] = useState<string[]>(() =>
+    defaultCompareAnchorNames(rows),
+  )
+  const [limitHint, setLimitHint] = useState(false)
+
+  useEffect(() => {
+    setSelectedNames(defaultCompareAnchorNames(rows))
+    setLimitHint(false)
+  }, [defaultSelectedKey, rows])
+
   const { series, chartData, skippedModeMismatch, hasComparableData, isRelativeIntraday } =
-    useMemo(() => buildComparePayload(rows), [rows])
+    useMemo(() => buildComparePayload(rows, selectedNames), [rows, selectedNames])
 
   const chartDataWithTicks = useMemo(
     () =>
@@ -347,6 +397,22 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     [chartData.length, compact, isRelativeIntraday],
   )
 
+  const toggleAnchor = (name: string) => {
+    setSelectedNames((prev) => {
+      if (prev.includes(name)) {
+        if (prev.length <= 1) return prev
+        setLimitHint(false)
+        return prev.filter((item) => item !== name)
+      }
+      if (prev.length >= MAX_ANCHORS) {
+        setLimitHint(true)
+        return prev
+      }
+      setLimitHint(false)
+      return [...prev, name]
+    })
+  }
+
   if (!hasComparableData || series.length === 0) {
     return (
       <div
@@ -359,12 +425,12 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     )
   }
 
-  const title = isRelativeIntraday ? '主播开播后成交节奏对比' : '主播每日销售走势对比'
+  const title = isRelativeIntraday ? '主播开播后支付金额节奏对比' : '主播每日支付金额走势对比'
   const subtitle = isRelativeIntraday
     ? compact
       ? '按开播后分钟对齐（横轴为起始分钟）'
       : '按「开播后第几分钟」对齐，不按自然时间'
-    : '按日期对比每日销售额'
+    : '按日期对比每日支付金额，不是有效成交额'
 
   const xAxisKey = compact ? 'tickLabel' : 'label'
 
@@ -377,6 +443,9 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
         <div>
           <p className="text-[13px] font-medium text-slate-700 md:text-[14px]">{title}</p>
           <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p>
+          <p className="mt-0.5 text-[10px] text-slate-400">
+            默认展示支付金额最高的前 {MAX_ANCHORS} 个主播，最多同时对比 {MAX_ANCHORS} 个
+          </p>
         </div>
         {skippedModeMismatch ? (
           <p className="max-w-[200px] text-right text-[10px] leading-snug text-amber-600">
@@ -384,6 +453,51 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
           </p>
         ) : null}
       </div>
+
+      {sortedCandidates.length > 0 ? (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {sortedCandidates.map((row) => {
+            const name = String(row.anchorName).trim()
+            const checked = selectedNames.includes(name)
+            const colorIndex = selectedNames.indexOf(name)
+            const dotColor =
+              colorIndex >= 0
+                ? ANCHOR_COLORS[colorIndex] ?? ANCHOR_COLORS[ANCHOR_COLORS.length - 1]
+                : '#cbd5e1'
+            return (
+              <label
+                key={name}
+                className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition ${
+                  checked
+                    ? 'border-rose-200 bg-rose-50 text-rose-800'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="sr-only"
+                  checked={checked}
+                  onChange={() => toggleAnchor(name)}
+                />
+                <span
+                  className="inline-block h-2 w-2 rounded-full"
+                  style={{ backgroundColor: dotColor }}
+                />
+                <span className="font-medium">{name}</span>
+                <span className="tabular-nums text-slate-500">
+                  {formatMoney(anchorRowGmv(row))} / {formatCount(anchorRowPaidCount(row))}
+                </span>
+              </label>
+            )
+          })}
+        </div>
+      ) : null}
+
+      {limitHint ? (
+        <p className="mb-2 text-[11px] text-amber-600">
+          最多同时对比 {MAX_ANCHORS} 个主播，避免图太乱。
+        </p>
+      ) : null}
 
       <div className={`w-full ${compact ? 'h-[248px]' : 'h-[220px] md:h-[260px]'}`}>
         <ResponsiveContainer width="100%" height="100%">

@@ -182,6 +182,7 @@ function checkUiCopy(): void {
     path.resolve(__dirname, '../../web/src/components/board/AnchorOrderDrawer.tsx'),
     path.resolve(__dirname, '../../web/src/components/board/AnchorLeaderboardPanel.tsx'),
     path.resolve(__dirname, '../../web/src/components/board/AnchorTrendChart.tsx'),
+    path.resolve(__dirname, '../../web/src/components/board/AnchorTrendCompareChart.tsx'),
   ]
   for (const filePath of files) {
     if (!fs.existsSync(filePath)) {
@@ -193,7 +194,81 @@ function checkUiCopy(): void {
       if (content.includes(phrase)) fail(`${path.basename(filePath)} 含禁用文案「${phrase}」`)
     }
   }
+
+  const comparePath = path.resolve(
+    __dirname,
+    '../../web/src/components/board/AnchorTrendCompareChart.tsx',
+  )
+  const panelPath = path.resolve(
+    __dirname,
+    '../../web/src/components/board/AnchorLeaderboardPanel.tsx',
+  )
+  const trendPath = path.resolve(__dirname, '../../web/src/components/board/AnchorTrendChart.tsx')
+
+  if (fs.existsSync(comparePath) && fs.existsSync(panelPath)) {
+    const compare = fs.readFileSync(comparePath, 'utf-8')
+    const panel = fs.readFileSync(panelPath, 'utf-8')
+    if (compare.includes('全部主播') || panel.includes('全部主播')) {
+      fail('对比图仍含「全部主播」误导文案')
+    } else {
+      ok('对比图不再写「全部主播」')
+    }
+    if (/MAX_ANCHORS\s*=\s*4/.test(compare)) {
+      const combined = compare + panel
+      if (!/前\s*4|最多.*4|4\s*个/.test(combined)) {
+        fail('MAX_ANCHORS=4 但页面缺少前4/最多4个说明')
+      } else {
+        ok('对比图文案包含前4/最多4个说明')
+      }
+    }
+    if (hasMisleadingEffectiveTrendCopy(compare)) {
+      fail('对比图含「有效成交走势」误导文案')
+    }
+    if (!compare.includes('anchorRowGmv')) {
+      fail('AnchorTrendCompareChart 未按 anchorRowGmv 排序')
+    } else {
+      ok('对比图默认候选按支付金额排序')
+    }
+  }
+
+  if (fs.existsSync(trendPath)) {
+    const trend = fs.readFileSync(trendPath, 'utf-8')
+    if (hasMisleadingEffectiveTrendCopy(trend)) {
+      fail('单人趋势图含「有效成交走势」误导文案')
+    } else {
+      ok('趋势图不含「有效成交走势」误导标题')
+    }
+    if (!trend.includes('最高半小时') || !trend.includes('最高一天')) {
+      fail('AnchorTrendChart 缺少走势大白话小结')
+    } else {
+      ok('单人趋势图含大白话小结')
+    }
+  }
+
   ok('主播业绩相关页面未发现禁用文案')
+}
+
+function hasMisleadingEffectiveTrendCopy(content: string): boolean {
+  return content.split('\n').some((line) => {
+    if (!line.includes('有效成交走势')) return false
+    if (line.includes('不是有效成交走势')) return false
+    if (line.includes('不是有效成交额')) return false
+    return true
+  })
+}
+
+function pickDefaultCompareAnchors(leaderboard: Record<string, unknown>[]): string[] {
+  const MAX = 4
+  return leaderboard
+    .filter((row) => {
+      const name = String(row.anchorName ?? '').trim()
+      if (!name || name === '未归属') return false
+      const trend = row.trend as AnchorTrend | undefined
+      return Boolean(trend?.points?.length)
+    })
+    .sort((a, b) => num(b.totalGmv ?? b.gmv) - num(a.totalGmv ?? a.gmv))
+    .slice(0, MAX)
+    .map((row) => String(row.anchorName).trim())
 }
 
 function loadExtendedHarOrders(harDir: string): Array<{
@@ -472,7 +547,9 @@ async function auditDate(dateKey: string): Promise<void> {
         ok(`${m.anchorName} trend合计与支付金额一致`)
       }
       if (trendOrders !== m.paidCount) {
-        warn(`${m.anchorName} trend orderCount=${trendOrders} vs paidCount=${m.paidCount}`)
+        fail(`${m.anchorName} trend orderCount=${trendOrders} vs paidCount=${m.paidCount}`)
+      } else {
+        ok(`${m.anchorName} trend orderCount 与支付单数一致`)
       }
       const title = String(trend.title ?? '')
       if (title.includes('有效成交') && !title.includes('支付')) {
@@ -526,6 +603,24 @@ async function auditDate(dateKey: string): Promise<void> {
       fail(`下播后30分钟未归属应为 ${FIXED_20260703_TOTAL.postStreamUnassigned}，实际 ${postStream}`)
     } else {
       ok('下播后30分钟未归属 = 0')
+    }
+  }
+
+  if (dateKey === '2026-07-03' && paidOnDay.length > 0) {
+    section('默认对比主播排序 2026-07-03')
+    const defaultCompare = pickDefaultCompareAnchors(leaderboard as Record<string, unknown>[])
+    console.log(`  默认对比: ${defaultCompare.join('、') || '—'}`)
+    if (defaultCompare[0] !== '子杰') {
+      fail(`默认对比第一位应为子杰，实际 ${defaultCompare[0] ?? '—'}`)
+    } else {
+      ok('默认对比按支付金额排序，子杰排第一')
+    }
+    for (const name of ['子杰', '飞云', '小艺'] as const) {
+      if (!defaultCompare.includes(name)) {
+        fail(`默认对比应包含 ${name}，实际 ${defaultCompare.join('、')}`)
+      } else {
+        ok(`默认对比包含 ${name}`)
+      }
     }
   }
 

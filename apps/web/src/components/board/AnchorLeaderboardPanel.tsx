@@ -19,7 +19,7 @@ import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
 
 interface Props {
   rows: AnchorLeaderboardRow[]
-  /** 对比图使用全部主播；列表可用筛选后的 rows */
+  /** 对比图候选主播；列表可用筛选后的 rows */
   compareRows?: AnchorLeaderboardRow[]
   emptyText?: string
   onRowClick?: (row: AnchorLeaderboardRow) => void
@@ -85,7 +85,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
       {showCompareTrend && canCompareTrend ? (
         <div className="mb-4">
           <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
-            对比图展示当前日期范围内全部主播，下面列表可单独筛选。
+            默认展示支付金额最高的 4 个主播，可手动选择要对比的人；下面列表可单独筛选。
           </p>
           <AnchorTrendCompareChart rows={trendCompareRows} formatMoney={formatMoney} />
         </div>

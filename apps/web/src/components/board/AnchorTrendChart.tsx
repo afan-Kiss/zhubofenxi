@@ -25,6 +25,65 @@ function defaultFormatCount(value: number): string {
   return `${value} 单`
 }
 
+function formatShortDayLabel(raw: string): string {
+  const trimmed = raw.trim()
+  const iso = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/)
+  if (iso) return `${Number(iso[2])}/${Number(iso[3])}`
+  const slash = trimmed.match(/^(\d{1,2})\/(\d{1,2})/)
+  if (slash) return `${Number(slash[1])}/${Number(slash[2])}`
+  return trimmed.length > 8 ? trimmed.slice(5) : trimmed
+}
+
+function pickPeakPoint(points: AnchorTrendPoint[]): AnchorTrendPoint {
+  return points.reduce((best, point) => {
+    if (point.value > best.value) return point
+    if (point.value === best.value && point.orderCount > best.orderCount) return point
+    return best
+  }, points[0]!)
+}
+
+function buildTrendSummary(
+  trend: AnchorTrend,
+  formatMoney: (value: number) => string,
+  formatCount: (value: number) => string,
+): { headline: string; peak?: string } {
+  const points = trend.points
+  const totalPay = points.reduce((sum, point) => sum + point.value, 0)
+  const totalOrders = points.reduce((sum, point) => sum + point.orderCount, 0)
+
+  if (totalOrders <= 0 && totalPay <= 0) {
+    return { headline: '暂无成交' }
+  }
+
+  const peak = pickPeakPoint(points)
+  if (trend.mode === 'intraday') {
+    const peakLabel = peak.timeRange ?? peak.label
+    return {
+      headline: `本场支付：${formatMoney(totalPay)} · 出单：${formatCount(totalOrders)}`,
+      peak:
+        totalOrders > 0
+          ? `最高半小时：${peakLabel} ${formatMoney(peak.value)} / ${formatCount(peak.orderCount)}`
+          : undefined,
+    }
+  }
+
+  const peakDay = formatShortDayLabel(peak.date ?? peak.label)
+  return {
+    headline: `本期支付：${formatMoney(totalPay)} · 出单：${formatCount(totalOrders)}`,
+    peak:
+      totalOrders > 0
+        ? `最高一天：${peakDay} ${formatMoney(peak.value)} / ${formatCount(peak.orderCount)}`
+        : undefined,
+  }
+}
+
+function resolveTrendSubtitle(trend: AnchorTrend): string | undefined {
+  if (trend.mode === 'daily' && trend.points.length > 1) {
+    return '按订单支付日期统计，不是有效成交走势'
+  }
+  return trend.subtitle ?? '按订单支付时间统计，不是有效成交走势'
+}
+
 function hasTrendData(
   trend: AnchorTrend | null | undefined,
   variant: 'page' | 'report',
@@ -113,6 +172,13 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
     return Math.ceil(len / 10)
   }, [chartData.length, isReport])
 
+  const summary = useMemo(() => {
+    if (!resolved?.points?.length) {
+      return { headline: '暂无成交' as const, peak: undefined }
+    }
+    return buildTrendSummary(resolved, formatMoney, formatCount)
+  }, [resolved, formatMoney, formatCount])
+
   const emptyMinH = isReport ? 'min-h-[100px]' : 'min-h-[120px] md:min-h-[150px]'
 
   if (!hasTrendData(resolved, variant)) {
@@ -128,8 +194,8 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   }
 
   const mode = resolved!.mode
-  const title = resolved!.title || (mode === 'intraday' ? '支付金额走势' : '支付金额走势')
-  const subtitle = resolved!.subtitle
+  const title = resolved!.title || '支付金额走势'
+  const subtitle = resolveTrendSubtitle(resolved!)
   const chartHeight = isReport ? 'h-[132px]' : 'h-[120px] md:h-[150px]'
   const titleClass = isReport ? 'text-[11px]' : 'text-[12px]'
   const tagClass = isReport ? 'text-[9px] px-1.5 py-0' : 'text-[10px] px-2 py-0.5'
@@ -141,11 +207,15 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
       data-anchor-trend-chart="ready"
       className={`rounded-2xl border border-rose-100 bg-white/80 p-3 shadow-sm shadow-rose-50/40 ${className}`}
     >
-      <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className={`${titleClass} font-medium text-slate-700`}>{title}</p>
           {subtitle ? (
             <p className="mt-0.5 text-[10px] leading-snug text-slate-400">{subtitle}</p>
+          ) : null}
+          <p className="mt-1 text-[11px] leading-snug text-slate-600">{summary.headline}</p>
+          {summary.peak ? (
+            <p className="mt-0.5 text-[11px] leading-snug text-slate-500">{summary.peak}</p>
           ) : null}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">

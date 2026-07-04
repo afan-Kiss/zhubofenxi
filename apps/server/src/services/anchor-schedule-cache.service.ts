@@ -1,13 +1,18 @@
-import { invalidateAndRebuildBusinessBoardCache } from './business-cache.service'
+import {
+  invalidateBusinessBoardCache,
+  scheduleBusinessBoardCacheRebuild,
+} from './business-cache.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 import { logInfo } from '../utils/server-log'
 
-export async function invalidateBusinessBoardCacheForDate(dateKey: string): Promise<void> {
+/** 排班变更：立即失效归属与经营缓存，全量重建在后台进行 */
+export function invalidateBusinessBoardCacheForDate(dateKey: string): void {
   clearScheduleAttributionCache()
-  logInfo('主播排班', `排班变更，刷新经营缓存（含 ${dateKey}）`)
-  await invalidateAndRebuildBusinessBoardCache(`anchor-schedule:${dateKey}`)
+  invalidateBusinessBoardCache()
+  logInfo('主播排班', `排班变更，后台刷新经营缓存（含 ${dateKey}）`)
+  scheduleBusinessBoardCacheRebuild(`anchor-schedule:${dateKey}`)
 }
 
-export async function recalculateAnchorDataForDate(dateKey: string): Promise<void> {
-  await invalidateBusinessBoardCacheForDate(dateKey)
+export function recalculateAnchorDataForDate(dateKey: string): void {
+  invalidateBusinessBoardCacheForDate(dateKey)
 }

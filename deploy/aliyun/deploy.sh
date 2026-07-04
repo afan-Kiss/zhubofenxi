@@ -102,10 +102,17 @@ install_deps_build() {
 
 write_deploy_build_meta() {
   local env_file="$DEPLOY_DIR/apps/server/.env"
-  local commit="unknown"
+  local commit="${DEPLOY_GIT_COMMIT:-unknown}"
   local app_version="0.2.0"
-  if command -v git >/dev/null 2>&1 && [[ -d "$DEPLOY_DIR/.git" ]]; then
+  if [[ "$commit" == "unknown" ]] && command -v git >/dev/null 2>&1 && [[ -d "$DEPLOY_DIR/.git" ]]; then
     commit="$(cd "$DEPLOY_DIR" && git rev-parse HEAD 2>/dev/null || echo unknown)"
+  fi
+  if [[ "$commit" == "unknown" ]] && [[ -f "$env_file" ]]; then
+    local existing
+    existing="$(grep -E '^GIT_COMMIT=' "$env_file" | tail -1 | cut -d= -f2- | tr -d ' "' || true)"
+    if [[ -n "$existing" && "$existing" != "unknown" ]]; then
+      commit="$existing"
+    fi
   fi
   if [[ -f "$DEPLOY_DIR/package.json" ]]; then
     app_version="$(node -p "require('./package.json').version || '0.2.0'" 2>/dev/null || echo 0.2.0)"

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowLeft, Calendar, ChevronDown, Copy, MoreHorizontal, Plus, RefreshCw, Save, Trash2, Wand2 } from 'lucide-react'
-import { apiRequest, API_PREFIX } from '../../lib/api'
+import { apiRequest } from '../../lib/api'
 import {
   conflictIndexes,
   rowConflictMessages,
@@ -226,10 +226,9 @@ export const AnchorSchedulePage: React.FC = () => {
     setError(null)
     setMessage(null)
     try {
-      const res = await fetch(`${API_PREFIX}/anchor-schedules`, {
+      const data = await apiRequest<ScheduleResponse>('/anchor-schedules', {
         method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
+        retryOnGateway: 2,
         body: JSON.stringify({
           date,
           schedules: rows.map((r) => ({
@@ -239,22 +238,11 @@ export const AnchorSchedulePage: React.FC = () => {
           confirm,
         }),
       })
-      const body = (await res.json()) as ScheduleResponse & {
-        ok?: boolean
-        message?: string
-        conflicts?: Array<{ message: string }>
-        data?: ScheduleResponse
-      }
-      const payload = body.data ?? body
-      if (!res.ok || body.ok === false) {
-        const conflictMsg = body.conflicts?.map((c) => c.message).join('；')
-        throw new Error(conflictMsg || body.message || '保存失败')
-      }
-      applyScheduleResponse(payload as ScheduleResponse)
+      applyScheduleResponse(data)
       setMessage(
         confirm
-          ? '排班已保存并确认，系统已按新排班重新计算当天业绩。'
-          : '排班已保存，系统已按新排班重新计算当天业绩。',
+          ? '排班已保存并确认，系统正在按新排班刷新当天业绩（约需数十秒）。'
+          : '排班已保存，系统正在按新排班刷新当天业绩（约需数十秒）。',
       )
       afterScheduleMutation()
       void reload()

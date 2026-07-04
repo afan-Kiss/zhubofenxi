@@ -14,7 +14,6 @@ import {
   confirmDailySchedules,
   getScheduleConfirmStatus,
 } from '../services/anchor-schedule-confirm.service'
-import { recalculateAnchorDataForDate } from '../services/anchor-schedule-cache.service'
 import { sendFail, sendOk } from '../utils/response'
 
 export const anchorSchedulesRouter = Router()
@@ -105,7 +104,6 @@ anchorSchedulesRouter.post('/', async (req, res, next) => {
       createdBy: req.user?.username,
       confirm: Boolean(body.confirm),
     })
-    await recalculateAnchorDataForDate(date)
     sendOk(res, { ok: true, ...data, ...buildScheduleMutationResult(date) })
   } catch (err) {
     if (err instanceof ScheduleSaveError) {
@@ -134,7 +132,6 @@ anchorSchedulesRouter.post('/confirm', async (req, res, next) => {
       confirmNote: req.body?.confirmNote ? String(req.body.confirmNote) : undefined,
     })
     const schedules = await listDailySchedulesForDate(date)
-    await recalculateAnchorDataForDate(date)
     sendOk(res, { ok: true, ...result, ...schedules, ...buildScheduleMutationResult(date) })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '确认排班失败', 400)

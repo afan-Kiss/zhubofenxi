@@ -402,7 +402,7 @@ export const AnchorPerformanceTab: React.FC = () => {
               })}
             </div>
           </MetricGridTransition>
-          <div className="rounded-2xl border border-rose-100/50 bg-white p-3 shadow-sm md:p-0">
+          <div className="rounded-2xl border border-rose-100/50 bg-white p-4 shadow-sm">
             <MetricGridTransition transitionKey={anchorTransitionKey} loading={isLoadingRange}>
               <AnchorLeaderboardPanel
                 rows={anchors}

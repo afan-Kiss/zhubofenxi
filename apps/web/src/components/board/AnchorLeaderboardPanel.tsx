@@ -58,7 +58,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1 md:px-4">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-2 pt-1">
         <div className="flex flex-wrap items-center gap-2">
           {canCompareTrend ? (
             <button
@@ -83,7 +83,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
       </div>
 
       {showCompareTrend && canCompareTrend ? (
-        <div className="mb-3 px-1 md:px-4">
+        <div className="mb-4">
           <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
             对比图展示当前日期范围内全部主播，下面列表可单独筛选。
           </p>
@@ -97,7 +97,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         onSelect={onRowClick}
         onQualityCountClick={onQualityCountClick}
         showLongPeriodRates={showRates}
-        showIndividualTrend={false}
+        showIndividualTrend={showCardsOnDesktop}
         showLivePeriod={showLivePeriod}
         className={cardClass}
       />

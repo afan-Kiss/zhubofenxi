@@ -182,6 +182,22 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               </div>
             ) : null}
 
+            {showTrend && trend ? (
+              <div
+                className="mt-3 rounded-xl border border-rose-50 bg-rose-50/20 p-2"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <p className="mb-1 px-1 text-[11px] font-medium text-slate-500">开播节奏</p>
+                <AnchorTrendChart
+                  variant="page"
+                  trend={trend}
+                  formatMoney={formatMoney}
+                  formatCount={(n) => `${formatCount(n)} 单`}
+                />
+              </div>
+            ) : null}
+
             <div className="mt-2 flex flex-wrap gap-2 border-t border-rose-50 pt-2.5">
               <button
                 type="button"
@@ -196,7 +212,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               >
                 {showExtraMetrics ? '收起更多指标' : '更多指标'}
               </button>
-              {trend ? (
+              {!showIndividualTrend && trend ? (
                 <button
                   type="button"
                   onClick={(e) => {
@@ -212,21 +228,6 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 </button>
               ) : null}
             </div>
-
-            {showTrend && trend ? (
-              <div
-                className="mt-3"
-                onClick={(e) => e.stopPropagation()}
-                onKeyDown={(e) => e.stopPropagation()}
-              >
-                <AnchorTrendChart
-                  variant="page"
-                  trend={trend}
-                  formatMoney={formatMoney}
-                  formatCount={(n) => `${formatCount(n)} 单`}
-                />
-              </div>
-            ) : null}
           </article>
         )
       })}

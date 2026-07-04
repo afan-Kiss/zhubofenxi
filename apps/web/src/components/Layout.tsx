@@ -109,7 +109,7 @@ export const Layout: React.FC = () => {
   }, [logout, mode, navigate])
 
   return (
-    <div className="flex min-h-screen min-w-0 flex-col">
+    <div className="flex min-h-screen min-w-0 flex-col overflow-x-hidden">
       <header className="sticky top-0 z-30 border-b border-white/60 bg-[var(--color-bg-warm)]/90 backdrop-blur-md transition-shadow duration-300">
         <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-2 px-3 py-3 md:flex-row md:items-center md:justify-between md:gap-4 md:px-4">
           <div className="flex min-w-0 items-start justify-between gap-2">
@@ -156,7 +156,7 @@ export const Layout: React.FC = () => {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl min-w-0 flex-1 px-3 py-4 md:px-4">
+      <main className="mx-auto w-full max-w-6xl min-w-0 flex-1 overflow-x-hidden px-3 py-4 md:px-4">
         <BoardLiveQueryProvider>
           <CookieHealthWatcher />
           <PageRequestStatusBar />

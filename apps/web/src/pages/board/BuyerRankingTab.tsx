@@ -418,7 +418,7 @@ export const BuyerRankingTab: React.FC = () => {
     undefined
 
   return (
-    <div className="mx-auto max-w-6xl space-y-3 px-1 sm:px-0" data-testid="buyer-ranking-page">
+    <div className="mx-auto min-w-0 max-w-6xl space-y-3 px-1 sm:px-0" data-testid="buyer-ranking-page">
       <CookieHealthBanner cookieHealth={cookieHealth} />
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
@@ -609,8 +609,8 @@ export const BuyerRankingTab: React.FC = () => {
 
       {showRankingContent && (
       <>
-      <div className="-mx-1 space-y-3 overflow-x-auto pb-1 board-fade-in">
-        <div className="min-w-max rounded-2xl border border-emerald-100/60 bg-white/80 p-1.5">
+      <div className="min-w-0 space-y-3 board-fade-in">
+        <div className="min-w-0 rounded-2xl border border-emerald-100/60 bg-white/80 p-1.5">
           <p className="mb-1.5 px-2 text-[11px] font-medium text-emerald-800">客户价值</p>
           <AnimatedTabs
             items={VALUE_RANKING_TABS}
@@ -621,11 +621,10 @@ export const BuyerRankingTab: React.FC = () => {
               setRankingTab(key)
             }}
             variant="pills"
-            className="flex-nowrap"
-            buttonClassName="whitespace-nowrap px-3 py-2 text-xs sm:px-4 sm:py-2.5 sm:text-sm"
+            compactMobile
           />
         </div>
-        <div className="min-w-max rounded-2xl border border-amber-100/60 bg-white/80 p-1.5">
+        <div className="min-w-0 rounded-2xl border border-amber-100/60 bg-white/80 p-1.5">
           <p className="mb-1.5 px-2 text-[11px] font-medium text-amber-800">售后风险</p>
           <AnimatedTabs
             items={RISK_RANKING_TABS}
@@ -636,8 +635,7 @@ export const BuyerRankingTab: React.FC = () => {
               setRankingTab(key)
             }}
             variant="pills"
-            className="flex-nowrap"
-            buttonClassName="whitespace-nowrap px-3 py-2 text-xs sm:px-4 sm:py-2.5 sm:text-sm"
+            compactMobile
           />
         </div>
       </div>

@@ -24,7 +24,7 @@ interface Props {
   showLongPeriodRates?: boolean
   /** 覆盖外层容器 className；默认手机端显示 */
   className?: string
-  /** 是否在卡片内展示单主播走势图；默认关闭，需点击展开 */
+  /** 是否在卡片内展示单主播走势图；默认展开 */
   showIndividualTrend?: boolean
   showLivePeriod?: boolean
 }
@@ -83,7 +83,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   onQualityCountClick,
   showLongPeriodRates: showRates = true,
   className = 'block md:hidden',
-  showIndividualTrend = false,
+  showIndividualTrend = true,
   showLivePeriod = false,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
@@ -111,8 +111,8 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
         const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
         const livePeriodMultiline = liveLines.primary?.includes('\n') ?? false
         const trend = anchorRowTrend(a)
-        const showTrend = showIndividualTrend || expandedTrendKeys[rowKey]
-        const showExtraMetrics = expandedMetricKeys[rowKey]
+        const showTrend = showIndividualTrend || (expandedTrendKeys[rowKey] ?? true)
+        const showExtraMetrics = expandedMetricKeys[rowKey] ?? true
 
         return (
           <article
@@ -205,7 +205,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   e.stopPropagation()
                   setExpandedMetricKeys((prev) => ({
                     ...prev,
-                    [rowKey]: !prev[rowKey],
+                    [rowKey]: !(prev[rowKey] ?? true),
                   }))
                 }}
                 className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
@@ -219,7 +219,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                     e.stopPropagation()
                     setExpandedTrendKeys((prev) => ({
                       ...prev,
-                      [rowKey]: !prev[rowKey],
+                      [rowKey]: !(prev[rowKey] ?? true),
                     }))
                   }}
                   className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"

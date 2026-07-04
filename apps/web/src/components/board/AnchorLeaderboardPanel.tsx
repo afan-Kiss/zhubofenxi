@@ -43,7 +43,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
-  const [showCompareTrend, setShowCompareTrend] = useState(false)
+  const [showCompareTrend, setShowCompareTrend] = useState(true)
   const [showExtraColumns, setShowExtraColumns] = useState(false)
 
   const trendCompareRows = compareRows ?? rows
@@ -97,7 +97,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         onSelect={onRowClick}
         onQualityCountClick={onQualityCountClick}
         showLongPeriodRates={showRates}
-        showIndividualTrend={showCardsOnDesktop}
+        showIndividualTrend
         showLivePeriod={showLivePeriod}
         className={cardClass}
       />

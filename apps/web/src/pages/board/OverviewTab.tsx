@@ -273,7 +273,7 @@ export const OverviewTab: React.FC = () => {
   } = useBoardLiveQuery()
 
   const [metricDrawer, setMetricDrawer] = useState<BoardMetricKey | null>(null)
-  const [moreMetricsOpen, setMoreMetricsOpen] = useState(false)
+  const [moreMetricsOpen, setMoreMetricsOpen] = useState(true)
   const [stableUpdateBusy, setStableUpdateBusy] = useState(false)
 
   const overviewMeta = data?.overviewMeta

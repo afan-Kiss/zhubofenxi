@@ -112,7 +112,7 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
     type: 'money',
     tone: 'green',
     hint: '点击查看明细',
-    helper: '支付金额减去退款金额',
+    helper: '已签收/已完成且无大额售后的成交金额',
     icon: Wallet,
   },
   {

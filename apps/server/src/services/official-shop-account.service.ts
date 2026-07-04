@@ -4,6 +4,7 @@ import { decryptText, encryptText } from '../utils/crypto'
 import {
   getGoodReviewShopName,
   isGoodReviewShopKey,
+  GOOD_REVIEW_SHOP_KEYS,
   resolveGoodReviewShopKey,
   type GoodReviewShopKey,
 } from '../config/good-review-shops.constants'
@@ -38,6 +39,58 @@ export function resolveShopKeyFromPlatformName(platformName: string): GoodReview
 
 export function resolveShopKeyFromAccountName(name: string): GoodReviewShopKey | null {
   return resolveGoodReviewShopKey(name)
+}
+
+/** 历史占位账号：platformName=xiaohongshu、displayName=默认，四店上线后不再展示 */
+export const LEGACY_DEFAULT_PLATFORM_NAME = 'xiaohongshu'
+
+export function isLegacyDefaultPlatformCredential(row: {
+  platformName: string
+}): boolean {
+  return row.platformName === LEGACY_DEFAULT_PLATFORM_NAME
+}
+
+export async function hasOfficialShopCredentials(): Promise<boolean> {
+  const count = await prisma.platformCredential.count({
+    where: { platformName: { in: [...GOOD_REVIEW_SHOP_KEYS] } },
+  })
+  return count > 0
+}
+
+/** 设置页/健康检查可见的 PlatformCredential（四店模式下隐藏 legacy 默认占位） */
+export async function listVisiblePlatformCredentials(): Promise<PlatformCredentialRow[]> {
+  const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
+  if (!(await hasOfficialShopCredentials())) return rows
+  return rows.filter((row) => !isLegacyDefaultPlatformCredential(row))
+}
+
+export interface DeleteLegacyDefaultPlatformCredentialResult {
+  deleted: boolean
+  id?: string
+  reason?: string
+}
+
+/** 四店已有官方账号时，删除无 Cookie 的 legacy 默认占位行 */
+export async function deleteLegacyDefaultPlatformCredentialIfUnused(): Promise<DeleteLegacyDefaultPlatformCredentialResult> {
+  if (!(await hasOfficialShopCredentials())) {
+    return { deleted: false, reason: 'no_official_shops' }
+  }
+  const row = await prisma.platformCredential.findUnique({
+    where: { platformName: LEGACY_DEFAULT_PLATFORM_NAME },
+  })
+  if (!row) return { deleted: false, reason: 'not_found' }
+  if (row.cookieEncrypted?.trim()) {
+    return { deleted: false, id: row.id, reason: 'has_cookie' }
+  }
+  const [orderCount, liveCount] = await Promise.all([
+    prisma.xhsRawOrder.count({ where: { liveAccountId: row.id } }),
+    prisma.xhsRawLiveSession.count({ where: { liveAccountId: row.id } }),
+  ])
+  if (orderCount > 0 || liveCount > 0) {
+    return { deleted: false, id: row.id, reason: 'has_history_data' }
+  }
+  await prisma.platformCredential.delete({ where: { id: row.id } })
+  return { deleted: true, id: row.id }
 }
 
 /** 历史重复账号行：displayName/别名匹配四店，但 platformName 不是官方 shopKey */

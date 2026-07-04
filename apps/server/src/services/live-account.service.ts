@@ -14,8 +14,12 @@ import { probeQualityBadcaseSignForAccount } from './quality-badcase-sign.servic
 import {
   isOfficialShopPlatformName,
   isLegacyDuplicateShopAccountRow,
+  isLegacyDefaultPlatformCredential,
   resolveShopKeyFromAccountName,
   deleteAllLegacyDuplicateShopAccounts,
+  deleteLegacyDefaultPlatformCredentialIfUnused,
+  listVisiblePlatformCredentials,
+  hasOfficialShopCredentials,
   type DeleteLegacyDuplicateShopAccountsResult,
 } from './official-shop-account.service'
 import {
@@ -184,6 +188,11 @@ function toPublicView(
 }
 
 export async function ensureDefaultLiveAccount(): Promise<void> {
+  const cleanup = await deleteLegacyDefaultPlatformCredentialIfUnused()
+  if (cleanup.deleted) {
+    console.log('[bootstrap] 已移除 legacy 默认直播号占位（四店官方账号已启用）')
+  }
+
   const existing = await prisma.platformCredential.findUnique({
     where: { platformName: DEFAULT_PLATFORM },
   })
@@ -216,6 +225,7 @@ export async function ensureDefaultLiveAccount(): Promise<void> {
     orderBy: { createdAt: 'asc' },
   })
   if (row) return
+  if (await hasOfficialShopCredentials()) return
 
   await prisma.platformCredential.create({
     data: {
@@ -229,13 +239,13 @@ export async function ensureDefaultLiveAccount(): Promise<void> {
 }
 
 export async function listLiveAccountsPublic(): Promise<LiveAccountPublicView[]> {
-  const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
+  const rows = await listVisiblePlatformCredentials()
   return rows.map((r) => toPublicView(r))
 }
 
 /** 系统设置页：返回完整 Cookie 供查看与复制 */
 export async function listLiveAccountsForSettings(): Promise<LiveAccountPublicView[]> {
-  const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
+  const rows = await listVisiblePlatformCredentials()
   const shopHealthList = await getAllShopCookieHealth({ fresh: false })
   const healthByShopKey = new Map(shopHealthList.map((h) => [h.shopCode, h]))
 
@@ -414,6 +424,7 @@ export async function deleteLiveAccount(id: string): Promise<void> {
 
 export async function deleteLegacyDuplicateLiveAccounts(): Promise<DeleteLegacyDuplicateShopAccountsResult> {
   const result = await deleteAllLegacyDuplicateShopAccounts()
+  await deleteLegacyDefaultPlatformCredentialIfUnused()
   clearShopCookieHealthCache()
   await refreshLiveAccountRowMapperContext()
   return result
@@ -784,7 +795,7 @@ export async function getCookieHealthPayload(options?: {
   summary: CookieHealthSummary
 }> {
   const shopHealthList = await getAllShopCookieHealth(options)
-  const rows = await prisma.platformCredential.findMany({ orderBy: { createdAt: 'asc' } })
+  const rows = await listVisiblePlatformCredentials()
   const rowById = new Map(rows.map((r) => [r.id, r]))
   const rowByShopKey = new Map<string, (typeof rows)[number]>()
   for (const row of rows) {
@@ -805,6 +816,7 @@ export async function getCookieHealthPayload(options?: {
   for (const row of rows) {
     if (isOfficialShopPlatformName(row.platformName)) continue
     if (isLegacyDuplicateShopAccountRow(row)) continue
+    if (isLegacyDefaultPlatformCredential(row)) continue
     enrichedAccounts.push(toPublicView(row))
   }
 

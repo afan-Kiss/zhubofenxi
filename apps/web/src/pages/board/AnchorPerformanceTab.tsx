@@ -18,7 +18,7 @@ import { BusinessSyncProgressCard } from '../../components/board/BusinessSyncPro
 import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
 import { OfficialQualitySyncNote } from '../../components/board/OfficialQualitySyncNote'
-import { anchorRowRate } from '../../lib/anchor-leaderboard-row'
+import { anchorRowRate, isSingleDayPreset } from '../../lib/anchor-leaderboard-row'
 import {
   BoardLiveQueryAutoRefresh,
   useBoardLiveQuery,
@@ -270,14 +270,16 @@ export const AnchorPerformanceTab: React.FC = () => {
           />
           <OfficialQualitySyncNote qualityFeedback={qualityFeedback} showLastUpdated={false} />
         </div>
-        <Link
-          to="/anchor-schedules"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
-          data-testid="anchor-schedule-entry"
-        >
-          <CalendarDays size={16} />
-          设置今日排班
-        </Link>
+        {(preset === 'today' || preset === 'yesterday') && startDate ? (
+          <Link
+            to={`/anchor-schedules?date=${encodeURIComponent(startDate)}`}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"
+            data-testid="anchor-schedule-entry"
+          >
+            <CalendarDays size={16} />
+            {preset === 'yesterday' ? '补录昨日排班' : '设置今日排班'}
+          </Link>
+        ) : null}
       </div>
       <RangeBar
         preset={preset}
@@ -388,6 +390,7 @@ export const AnchorPerformanceTab: React.FC = () => {
               <AnchorLeaderboardPanel
                 rows={anchors}
                 showLongPeriodRates={showRates}
+                showLivePeriod={isSingleDayPreset(preset)}
                 startDate={startDate}
                 endDate={endDate}
                 emptyText="当前范围暂无已同步数据"

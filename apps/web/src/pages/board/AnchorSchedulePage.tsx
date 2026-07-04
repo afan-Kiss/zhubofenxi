@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Calendar, ChevronDown, Copy, MoreHorizontal, Plus, RefreshCw, Save, Trash2, Wand2 } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
 import {
@@ -57,6 +57,12 @@ interface ConfirmStatus {
 }
 
 const todayKey = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+
+function resolveInitialScheduleDate(searchParams: URLSearchParams): string {
+  const raw = searchParams.get('date')?.trim()
+  if (raw && /^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+  return todayKey()
+}
 const yesterdayKey = () => {
   const d = new Date(`${todayKey()}T12:00:00+08:00`)
   d.setDate(d.getDate() - 1)
@@ -82,8 +88,9 @@ function defaultEndFromStart(startTime: string): string {
 
 export const AnchorSchedulePage: React.FC = () => {
   const { reload } = useBoardLiveQuery()
+  const [searchParams] = useSearchParams()
   const tableEndRef = useRef<HTMLTableRowElement>(null)
-  const [date, setDate] = useState(() => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }))
+  const [date, setDate] = useState(() => resolveInitialScheduleDate(searchParams))
   const [rows, setRows] = useState<ScheduleRow[]>([])
   const [warnings, setWarnings] = useState<string[]>([])
   const [loading, setLoading] = useState(false)

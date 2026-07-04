@@ -8,6 +8,7 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnRefundCount,
   anchorRowReturnRefundRate,
+  anchorRowLivePeriodLines,
   anchorRowLivePeriodText,
   anchorRowSignedCount,
   anchorRowValidSales,
@@ -30,6 +31,7 @@ interface Props {
   onRowClick?: (row: AnchorLeaderboardRow) => void
   onQualityCountClick?: (row: AnchorLeaderboardRow) => void
   showLongPeriodRates?: boolean
+  showLivePeriod?: boolean
   startDate?: string
   endDate?: string
 }
@@ -40,6 +42,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   onRowClick,
   onQualityCountClick,
   showLongPeriodRates: showRates = true,
+  showLivePeriod = false,
   startDate = '',
   endDate = '',
 }) => {
@@ -108,6 +111,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         onQualityCountClick={onQualityCountClick}
         showLongPeriodRates={showRates}
         showIndividualTrend={!showCompareTrend}
+        showLivePeriod={showLivePeriod}
         className={cardClass}
       />
 
@@ -151,7 +155,10 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                 const late = readLateStatus(a)
                 const timingLine = formatLateTimingLine(late)
                 const livePeriod = anchorRowLivePeriodText(a)
-                const livePeriodMultiline = livePeriod?.includes('\n') ?? false
+                const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
+                const livePeriodMultiline =
+                  (liveLines.primary?.includes('\n') ?? false) ||
+                  (livePeriod?.includes('\n') ?? false)
                 return (
                   <tr
                     key={String(a.anchorId ?? a.anchorName ?? idx)}
@@ -174,10 +181,17 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                           <span className="font-medium text-rose-800">{String(a.anchorName)}</span>
                           <AnchorLateStatusBadge row={late} />
                         </div>
-                        {livePeriod ? (
-                          <span className={`text-[12px] text-slate-600${livePeriodMultiline ? ' whitespace-pre-line' : ''}`}>
-                            直播 {livePeriod}
+                        {showLivePeriod && liveLines.primary ? (
+                          <span
+                            className={`text-[12px] ${
+                              liveLines.primary.includes('未') ? 'text-slate-500' : 'text-slate-600'
+                            }${livePeriodMultiline ? ' whitespace-pre-line' : ''}`}
+                          >
+                            {liveLines.primary}
                           </span>
+                        ) : null}
+                        {showLivePeriod && liveLines.secondary ? (
+                          <span className="text-[11px] text-slate-400">{liveLines.secondary}</span>
                         ) : null}
                         {timingLine ? (
                           <span className={`text-[12px] ${late.isLate || late.isEarlyLeave ? 'text-red-600' : 'text-slate-500'}`}>

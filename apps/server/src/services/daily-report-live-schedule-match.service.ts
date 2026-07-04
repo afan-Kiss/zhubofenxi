@@ -12,8 +12,15 @@ import {
   type AnchorAttendanceStatusPayload,
 } from '../utils/anchor-attendance-status.util'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
-import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
+import { orderLiveRoomMatchesSchedule, shopNamesMatch } from '../utils/shop-name-normalize.util'
 import { formatDateTimeShanghai, parseLiveSessionTimeMs } from '../utils/business-timezone'
+
+/** 真实直播与排班匹配时，允许的开播/下播容差（分钟）；同店相邻班次边界仍为硬切 */
+export const LIVE_SCHEDULE_GRACE_BEFORE_MINUTES = 30
+export const LIVE_SCHEDULE_GRACE_AFTER_MINUTES = 30
+
+const GRACE_BEFORE_MS = LIVE_SCHEDULE_GRACE_BEFORE_MINUTES * 60_000
+const GRACE_AFTER_MS = LIVE_SCHEDULE_GRACE_AFTER_MINUTES * 60_000
 
 export interface LiveSessionScheduleMatchResult {
   session: AnchorLiveSessionBrief
@@ -70,9 +77,7 @@ export function listSessionScheduleMatchCandidates(
   const candidates: LiveSessionScheduleMatchCandidate[] = []
   for (const row of scheduleRows) {
     if (!row.enabled) continue
-    const scheduleStart = new Date(row.startAt).getTime()
-    const scheduleEnd = new Date(row.endAt).getTime()
-    const overlap = computeScheduleOverlapMinutes(startMs, endMs, scheduleStart, scheduleEnd)
+    const overlap = computeGraceAwareScheduleOverlapMinutes(startMs, endMs, row, scheduleRows)
     const shopMatch = orderLiveRoomMatchesSchedule(liveName, row.shopName, row.liveRoomName)
     candidates.push({
       scheduleRow: row,
@@ -108,7 +113,59 @@ function resolveSessionShopLabelForScheduleMatch(session: AnchorLiveSessionBrief
 }
 
 function formatClockFromIso(iso: string): string {
-  return iso.slice(11, 16)
+  const timePart = iso.slice(11, 19)
+  if (timePart.endsWith(':00')) return timePart.slice(0, 5)
+  return timePart
+}
+
+function listSameShopScheduleRows(
+  scheduleRows: EffectiveScheduleRow[],
+  shopName: string,
+): EffectiveScheduleRow[] {
+  return scheduleRows
+    .filter((row) => row.enabled && shopNamesMatch(row.shopName, shopName))
+    .sort((a, b) => a.startAt.localeCompare(b.startAt))
+}
+
+/** 排班匹配/归属窗口：可向前后扩展容差，但同店相邻班次边界不跨段 */
+export function resolveGraceAttributionWindowMs(
+  scheduleRow: EffectiveScheduleRow,
+  scheduleRows: EffectiveScheduleRow[],
+): { matchStartMs: number; matchEndMs: number; attrStartMs: number; attrEndMs: number } {
+  const scheduleStartMs = new Date(scheduleRow.startAt).getTime()
+  const scheduleEndMs = new Date(scheduleRow.endAt).getTime()
+  const sameShop = listSameShopScheduleRows(scheduleRows, scheduleRow.shopName)
+
+  const hasPrevAdjacent = sameShop.some(
+    (row) =>
+      row.rowId !== scheduleRow.rowId &&
+      new Date(row.endAt).getTime() === scheduleStartMs,
+  )
+  const hasNextAdjacent = sameShop.some(
+    (row) =>
+      row.rowId !== scheduleRow.rowId &&
+      new Date(row.startAt).getTime() === scheduleEndMs,
+  )
+
+  const matchStartMs = hasPrevAdjacent ? scheduleStartMs : scheduleStartMs - GRACE_BEFORE_MS
+  const matchEndMs = hasNextAdjacent ? scheduleEndMs : scheduleEndMs + GRACE_AFTER_MS
+
+  return {
+    matchStartMs,
+    matchEndMs,
+    attrStartMs: matchStartMs,
+    attrEndMs: matchEndMs,
+  }
+}
+
+export function computeGraceAwareScheduleOverlapMinutes(
+  liveStartMs: number,
+  liveEndMs: number,
+  scheduleRow: EffectiveScheduleRow,
+  scheduleRows: EffectiveScheduleRow[],
+): number {
+  const { matchStartMs, matchEndMs } = resolveGraceAttributionWindowMs(scheduleRow, scheduleRows)
+  return computeScheduleOverlapMinutes(liveStartMs, liveEndMs, matchStartMs, matchEndMs)
 }
 
 /** 将真实场次时间按行展示（每场一行 start~end） */
@@ -188,9 +245,7 @@ export function matchLiveSessionToBestScheduleRow(
 
   for (const row of scheduleRows) {
     if (!row.enabled) continue
-    const scheduleStart = new Date(row.startAt).getTime()
-    const scheduleEnd = new Date(row.endAt).getTime()
-    const overlap = computeScheduleOverlapMinutes(startMs, endMs, scheduleStart, scheduleEnd)
+    const overlap = computeGraceAwareScheduleOverlapMinutes(startMs, endMs, row, scheduleRows)
     if (overlap <= 0) continue
 
     const shopMatch = orderLiveRoomMatchesSchedule(liveName, row.shopName, row.liveRoomName)
@@ -252,16 +307,17 @@ export function matchLiveSessionToScheduleSegments(
   const rawSegments: LiveSessionScheduleSegment[] = []
   for (const row of scheduleRows) {
     if (!row.enabled) continue
-    const scheduleStart = new Date(row.startAt).getTime()
-    const scheduleEnd = new Date(row.endAt).getTime()
-    const overlap = computeScheduleOverlapMinutes(startMs, endMs, scheduleStart, scheduleEnd)
+    const overlap = computeGraceAwareScheduleOverlapMinutes(startMs, endMs, row, scheduleRows)
     if (overlap <= 0) continue
 
     const shopMatch = orderLiveRoomMatchesSchedule(liveName, row.shopName, row.liveRoomName)
     if (!shopMatch) continue
 
-    const clippedStartMs = Math.max(startMs, scheduleStart)
-    const clippedEndMs = Math.min(endMs, scheduleEnd)
+    const { attrStartMs, attrEndMs } = resolveGraceAttributionWindowMs(row, scheduleRows)
+    const clippedStartMs = Math.max(startMs, attrStartMs)
+    const clippedEndMs = Math.min(endMs, attrEndMs)
+    if (clippedEndMs <= clippedStartMs) continue
+
     const clippedDurationMinutes = Math.round((clippedEndMs - clippedStartMs) / 60_000)
 
     rawSegments.push({

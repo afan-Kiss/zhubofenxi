@@ -8,6 +8,7 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnRefundCount,
   anchorRowReturnRefundRate,
+  anchorRowLivePeriodLines,
   anchorRowLivePeriodText,
   anchorRowSignedCount,
   anchorRowValidSales,
@@ -34,6 +35,7 @@ interface Props {
   className?: string
   /** 是否在卡片内展示单主播走势图；四主播对比模式下可关闭 */
   showIndividualTrend?: boolean
+  showLivePeriod?: boolean
 }
 
 function MetricCell({
@@ -91,6 +93,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   showLongPeriodRates: showRates = true,
   className = 'block md:hidden',
   showIndividualTrend = true,
+  showLivePeriod = false,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
 
@@ -114,8 +117,10 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
         const signRate = anchorRowRate(a, 'signRate')
         const late = readLateStatus(a)
         const timingLine = formatLateTimingLine(late)
-        const livePeriod = anchorRowLivePeriodText(a)
-        const livePeriodMultiline = livePeriod?.includes('\n') ?? false
+        const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
+        const livePeriodMultiline =
+          (liveLines.primary?.includes('\n') ?? false) ||
+          (anchorRowLivePeriodText(a)?.includes('\n') ?? false)
 
         return (
           <article
@@ -142,13 +147,18 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               <div>
                 <p className="text-[12px] text-slate-500">主播</p>
                 <p className="text-lg font-semibold text-rose-800">{name}</p>
-                {livePeriod ? (
-                  <p className={`mt-1 text-[12px] text-slate-600${livePeriodMultiline ? ' whitespace-pre-line' : ''}`}>
-                    直播 {livePeriod}
+                {showLivePeriod && liveLines.primary ? (
+                  <p
+                    className={`mt-1 text-[12px] ${
+                      liveLines.primary.includes('未') ? 'text-slate-500' : 'text-slate-600'
+                    }${livePeriodMultiline ? ' whitespace-pre-line' : ''}`}
+                  >
+                    {liveLines.primary}
                   </p>
-                ) : (
-                  <p className="mt-1 text-[12px] text-slate-500">未读取到直播场次</p>
-                )}
+                ) : null}
+                {showLivePeriod && liveLines.secondary ? (
+                  <p className="mt-0.5 text-[11px] text-slate-400">{liveLines.secondary}</p>
+                ) : null}
                 {timingLine ? (
                   <p className={`mt-1 text-[12px] ${late.isLate || late.isEarlyLeave ? 'font-medium text-red-600' : 'text-slate-500'}`}>
                     {timingLine}

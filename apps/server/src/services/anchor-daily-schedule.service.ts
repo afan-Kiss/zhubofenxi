@@ -1,14 +1,14 @@
 import { prisma } from '../lib/prisma'
-import { buildScheduleBounds, detectScheduleConflicts, filterVirtualSchedulesAgainstOccupied, type ScheduleConflict } from '../utils/anchor-schedule-time.util'
+import { buildScheduleBounds, detectScheduleConflicts, type ScheduleConflict } from '../utils/anchor-schedule-time.util'
 import {
-  buildVirtualSchedulesFromTemplates,
-  listActiveTemplatesForDate,
   validateScheduleDraft,
   xiaobaiWarningForDate,
 } from './anchor-schedule-template.service'
 import { invalidateBusinessBoardCacheForDate } from './anchor-schedule-cache.service'
 import { confirmDailySchedules } from './anchor-schedule-confirm.service'
 import { isDateScheduleConfirmed } from './anchor-schedule-confirm.service'
+import { buildEffectiveScheduleRowsForDate } from '../utils/anchor-effective-schedule.util'
+import { listActiveTemplatesForDate } from './anchor-schedule-template.service'
 
 export type DailyScheduleSource = 'manual' | 'generated_default' | 'virtual_template'
 
@@ -146,22 +146,6 @@ function hmFromDate(d: Date, scheduleDate: string): string {
   })
 }
 
-function occupiedIntervalFromDbRow(row: {
-  anchorName: string
-  shopName: string
-  liveRoomName: string
-  startAt: Date
-  endAt: Date
-}) {
-  return {
-    anchorName: row.anchorName,
-    shopName: row.shopName,
-    liveRoomName: row.liveRoomName,
-    startAt: row.startAt,
-    endAt: row.endAt,
-  }
-}
-
 function dbRowToEffective(
   row: {
     id: string
@@ -206,52 +190,28 @@ export async function getEffectiveScheduleTableForDate(dateKey: string): Promise
     orderBy: { startAt: 'asc' },
   })
 
-  const manualRows = dbRows.filter((r) => r.source === 'manual')
-  const generatedRows = dbRows.filter((r) => r.source === 'generated_default')
-  const hasManualDay = manualRows.length > 0
-  const occupiedRows = [...manualRows, ...generatedRows].map(occupiedIntervalFromDbRow)
+  const templates = await listActiveTemplatesForDate(dateKey)
+  const built = buildEffectiveScheduleRowsForDate({
+    dateKey,
+    dateConfirmed,
+    dbRows,
+    templates: templates.map((t) => ({
+      anchorName: t.anchorName,
+      shopName: t.shopName,
+      liveRoomName: t.liveRoomName,
+      startTime: t.startTime,
+      endTime: t.endTime,
+      effectiveFrom: t.effectiveFrom,
+      effectiveTo: t.effectiveTo,
+      sortOrder: t.sortOrder,
+      note: t.note ?? undefined,
+    })),
+    templateRecords: templates,
+  })
 
-  let virtualRows: ReturnType<typeof buildVirtualSchedulesFromTemplates> = []
-  let skippedVirtual: ReturnType<typeof buildVirtualSchedulesFromTemplates> = []
+  warnings.push(...built.warnings)
 
-  if (!hasManualDay) {
-    const templates = await listActiveTemplatesForDate(dateKey)
-    const allVirtual = buildVirtualSchedulesFromTemplates(dateKey, templates)
-    const filtered = filterVirtualSchedulesAgainstOccupied(allVirtual, occupiedRows)
-    virtualRows = filtered.kept
-    skippedVirtual = filtered.skipped
-    if (skippedVirtual.length > 0) {
-      warnings.push('部分系统模板存在冲突，已跳过，请人工补齐。')
-    }
-    for (const v of skippedVirtual) {
-      warnings.push(
-        `${v.liveRoomName} ${hmFromDate(v.startAt, dateKey)}-${hmFromDate(v.endAt, dateKey)} 模板与当天排班冲突，未参与业绩计算。`,
-      )
-    }
-  }
-
-  const effectiveRows: EffectiveScheduleRow[] = (
-    hasManualDay
-      ? manualRows.map((r) => dbRowToEffective(r, 'manual', dateConfirmed))
-      : [
-          ...manualRows.map((r) => dbRowToEffective(r, 'manual', dateConfirmed)),
-          ...generatedRows.map((r) => dbRowToEffective(r, 'generated_default', dateConfirmed)),
-          ...virtualRows.map((v) => ({
-            rowId: v.id,
-            source: 'virtual_template' as const,
-            anchorName: v.anchorName,
-            shopName: v.shopName,
-            liveRoomName: v.liveRoomName,
-            startTime: hmFromDate(v.startAt, dateKey),
-            endTime: hmFromDate(v.endAt, dateKey),
-            startAt: v.startAt.toISOString(),
-            endAt: v.endAt.toISOString(),
-            enabled: true,
-            confirmed: dateConfirmed,
-            note: v.note ?? '系统模板补齐',
-          })),
-        ]
-  ).sort((a, b) => a.startAt.localeCompare(b.startAt))
+  const effectiveRows = built.rows
 
   const conflicts = detectScheduleConflicts(
     effectiveRows.map((r) => ({
@@ -267,11 +227,7 @@ export async function getEffectiveScheduleTableForDate(dateKey: string): Promise
   return {
     date: dateKey,
     confirmed: dateConfirmed,
-    sourceSummary: {
-      manualCount: effectiveRows.filter((r) => r.source === 'manual').length,
-      generatedCount: effectiveRows.filter((r) => r.source === 'generated_default').length,
-      virtualCount: effectiveRows.filter((r) => r.source === 'virtual_template').length,
-    },
+    sourceSummary: built.sourceSummary,
     rows: effectiveRows,
     warnings,
   }

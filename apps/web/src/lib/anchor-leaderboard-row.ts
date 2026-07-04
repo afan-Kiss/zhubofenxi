@@ -86,6 +86,47 @@ export function anchorRowLivePeriodText(row: AnchorLeaderboardRow): string | nul
   return raw.replace(/~/g, '–')
 }
 
+export function anchorRowLivePeriodHint(row: AnchorLeaderboardRow): string | null {
+  const hint = String(row.livePeriodHint ?? '').trim()
+  return hint || null
+}
+
+export function anchorRowScheduleTimeRange(row: AnchorLeaderboardRow): string | null {
+  const raw = String(row.scheduleTimeRange ?? row.scheduledPeriodText ?? '').trim()
+  if (!raw || raw === '—') return null
+  return raw.replace(/~/g, '–')
+}
+
+/** 今日/昨日卡片：直播时间 + 可选排班对照 */
+export function anchorRowLivePeriodLines(row: AnchorLeaderboardRow): {
+  primary: string | null
+  secondary: string | null
+} {
+  const live = anchorRowLivePeriodText(row)
+  const schedule = anchorRowScheduleTimeRange(row)
+  const hint = anchorRowLivePeriodHint(row)
+
+  if (live) {
+    const secondary =
+      schedule && schedule !== live
+        ? `排班 ${schedule}｜实际 ${live}`
+        : schedule
+          ? `排班 ${schedule}`
+          : null
+    return { primary: `直播 ${live}`, secondary }
+  }
+
+  if (hint) {
+    return { primary: hint, secondary: schedule ? `排班 ${schedule}` : null }
+  }
+
+  return { primary: null, secondary: schedule ? `排班 ${schedule}` : null }
+}
+
+export function isSingleDayPreset(preset: string): boolean {
+  return preset === 'today' || preset === 'yesterday'
+}
+
 export function isHighRefundRate(rate: number | null): boolean {
   return rate != null && rate >= 0.5
 }

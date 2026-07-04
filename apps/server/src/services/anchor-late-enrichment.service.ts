@@ -2,7 +2,9 @@ import type { AnchorLiveSessionBrief } from './anchor-live-sessions.service'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import {
   getAssignedSessionsForAnchor,
+  resolveAnchorLiveMatchHint,
   resolveDailyReportLiveSessionAssignments,
+  resolveOriginalSessionsForAssignedAnchor,
   shouldUsePerShopRealLiveSessions,
   type DailyReportLiveSessionAssignments,
 } from './daily-report-live-sessions.service'
@@ -95,6 +97,11 @@ async function resolveLiveSessionsForAnchorRow(params: {
   liveAssignment?: DailyReportLiveSessionAssignments
 }): Promise<AnchorLiveSessionBrief[]> {
   if (shouldUsePerShopRealLiveSessions(params.startDate, params.endDate) && params.liveAssignment) {
+    const originals = resolveOriginalSessionsForAssignedAnchor(
+      params.liveAssignment,
+      params.anchorName,
+    )
+    if (originals.length > 0) return originals
     return getAssignedSessionsForAnchor(params.liveAssignment, params.anchorName)
   }
   return resolveAnchorLiveSessionsForRange({
@@ -199,11 +206,19 @@ export async function enrichAnchorLeaderboardWithLateStatus(
     const sessions = item?.sessions ?? []
     const livePeriodText = buildPerSessionLivePeriodText(sessions)
     const liveTimeRange = buildActualLivePeriodText(sessions)
+    const livePeriodHint = resolveAnchorLiveMatchHint({
+      anchorName: String(row.anchorName ?? ''),
+      scheduleRows: scheduleTable.rows,
+      assignment: liveAssignment,
+    })
     if (!attendance) {
       return {
         ...row,
         livePeriodText,
         liveTimeRange,
+        livePeriodHint:
+          livePeriodText && livePeriodText !== '—' ? null : livePeriodHint,
+        scheduleTimeRange: null,
       }
     }
     return {
@@ -211,6 +226,9 @@ export async function enrichAnchorLeaderboardWithLateStatus(
       ...attendance,
       livePeriodText,
       liveTimeRange,
+      livePeriodHint:
+        livePeriodText && livePeriodText !== '—' ? null : livePeriodHint,
+      scheduleTimeRange: attendance.scheduledPeriodText ?? null,
       sessionLabel: attendance.displaySessionLabel || row.sessionLabel,
       shopName: attendance.shopName || row.shopName,
     }

@@ -30,6 +30,7 @@ import {
 } from './daily-report-live-schedule-match.service'
 import { dedupeOverlappingLiveSessionsByShopDay } from './live-session-overlap-dedupe.util'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
+import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
 import { addDaysShanghai } from '../utils/business-timezone'
 import { isReportDateOnOrAfterShopSessionCutoff } from './anchor-performance-attribution.service'
 
@@ -522,6 +523,76 @@ export function getAssignedSessionsForAnchor(
     if (anchorNamesMatch(name, anchorName)) return sessions
   }
   return []
+}
+
+function baseLiveIdFromClippedSession(liveId: string): string {
+  const marker = '::seg::'
+  const idx = liveId.indexOf(marker)
+  return idx >= 0 ? liveId.slice(0, idx) : liveId
+}
+
+/** 归属段对应的平台原始场次（展示用真实开播/下播时间） */
+export function resolveOriginalSessionsForAssignedAnchor(
+  assignment: Pick<DailyReportLiveSessionAssignments, 'allSessions' | 'byAnchor'>,
+  anchorName: string,
+): DailyReportLiveSession[] {
+  const clipped = getAssignedSessionsForAnchor(assignment, anchorName)
+  if (clipped.length === 0) return []
+
+  const originalsByLiveId = new Map<string, DailyReportLiveSession>()
+  for (const session of assignment.allSessions) {
+    originalsByLiveId.set(session.liveId, session)
+  }
+
+  const seen = new Set<string>()
+  const result: DailyReportLiveSession[] = []
+  for (const clippedSession of clipped) {
+    const baseId = baseLiveIdFromClippedSession(clippedSession.liveId)
+    const original = originalsByLiveId.get(baseId)
+    if (!original) continue
+    if (seen.has(baseId)) continue
+    seen.add(baseId)
+    result.push(original)
+  }
+  return result.sort((a, b) => a.startTime.localeCompare(b.startTime))
+}
+
+export function resolveAnchorLiveMatchHint(params: {
+  anchorName: string
+  scheduleRows: EffectiveScheduleRow[]
+  assignment?: DailyReportLiveSessionAssignments
+}): string | null {
+  const anchorName = params.anchorName.trim()
+  if (!anchorName || anchorName === '未归属') return null
+
+  const hasSchedule = params.scheduleRows.some(
+    (row) => row.enabled && anchorNamesMatch(row.anchorName, anchorName),
+  )
+  if (!hasSchedule) return '今日未排班'
+
+  if (!params.assignment) return '未读取到真实直播场次'
+
+  const assigned = getAssignedSessionsForAnchor(params.assignment, anchorName)
+  if (assigned.length > 0) return null
+
+  const anchorShops = new Set(
+    params.scheduleRows
+      .filter((row) => row.enabled && anchorNamesMatch(row.anchorName, anchorName))
+      .map((row) => row.shopName.trim())
+      .filter(Boolean),
+  )
+
+  const shopHasLive = params.assignment.allSessions.some((session) =>
+    [...anchorShops].some((shop) => orderLiveRoomMatchesSchedule(session.sourceShopName, shop, shop)),
+  )
+
+  if (!params.assignment.allSessions.length) {
+    return '未读取到真实直播场次'
+  }
+  if (!shopHasLive) {
+    return '未读取到真实直播场次'
+  }
+  return '真实场次未匹配当前排班'
 }
 
 export function sumUniqueDailyReportLiveDurationMinutes(

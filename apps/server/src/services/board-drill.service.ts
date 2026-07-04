@@ -157,8 +157,7 @@ export async function buildAnchorDrill(params: {
   )
 
   const anchorViews = performanceScoped
-  const defaultStatusType = shouldExposeSignedDrillTab(params.preset) ? 'signed' : 'all'
-  const statusType = params.statusType ?? defaultStatusType
+  const statusType = params.statusType ?? 'all'
   const drillViews = filterDrillViewsByStatus(anchorViews, statusType)
   const signedCount = anchorViews.filter((v) => isEffectiveSignedView(v)).length
   const leaderboard = aggregateAnchorLeaderboard(performanceScoped)
@@ -221,8 +220,8 @@ export async function buildAnchorDrill(params: {
     blacklistedBuyerIds: [...blacklist],
     tabs: shouldExposeSignedDrillTab(params.preset)
       ? [
-          { key: 'signed', label: '实际签收', count: signedCount },
           { key: 'all', label: '全部订单', count: anchorViews.length },
+          { key: 'signed', label: '实际签收', count: signedCount },
         ]
       : [{ key: 'all', label: '全部订单', count: anchorViews.length }],
     pagination: {

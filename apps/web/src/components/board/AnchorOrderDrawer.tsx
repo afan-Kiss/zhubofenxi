@@ -130,7 +130,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
     setError(null)
     setCopyDone(false)
     setLiveSessionsOpen(false)
-    setOrderTab(showAnchorDrillSignedTab(preset) ? 'signed' : 'all')
+    setOrderTab('all')
     setAssignError(null)
     setAssigningOrderNo(null)
   }, [open, anchorName, anchorId, startDate, endDate, preset])
@@ -411,8 +411,8 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
         >
           <div className="mb-3 flex flex-wrap gap-1 rounded-2xl bg-white/80 p-1">
             {(data?.tabs ?? [
-              ...(showSignedTab ? [{ key: 'signed', label: '实际签收', count: 0 }] : []),
               { key: 'all', label: '全部订单', count: 0 },
+              ...(showSignedTab ? [{ key: 'signed', label: '实际签收', count: 0 }] : []),
             ]).map((t) => (
               <button
                 key={t.key}

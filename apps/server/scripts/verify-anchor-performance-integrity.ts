@@ -10,12 +10,8 @@ import { config } from 'dotenv'
 import { prisma } from '../src/lib/prisma'
 import { bootstrapQualityBadCaseCache } from '../src/services/quality-badcase-store.service'
 import { executeBoardLocalQuery } from '../src/services/board-local-query.service'
-import {
-  buildAndSetBusinessBoardCache,
-} from '../src/services/business-cache.service'
-import {
-  aggregateAnchorLeaderboard,
-} from '../src/services/board-metrics.service'
+import { buildAndSetBusinessBoardCache } from '../src/services/business-cache.service'
+import { aggregateAnchorLeaderboard } from '../src/services/board-metrics.service'
 import {
   getBoardScopedViewsForRange,
   getAnchorPerformanceViews,
@@ -31,6 +27,7 @@ import {
 import { parseDailyReportLiveSessionBounds } from '../src/services/anchor-live-session-order-attribution.service'
 import { getEffectiveScheduleTableForDate } from '../src/services/anchor-daily-schedule.service'
 import { orderLiveRoomMatchesSchedule } from '../src/utils/shop-name-normalize.util'
+import { formatDateTimeShanghai } from '../src/utils/business-timezone'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 import { resolveBusinessRange } from '../src/utils/business-range'
 
@@ -39,6 +36,7 @@ config({ path: path.resolve(__dirname, '../.env') })
 const DATE_ENV = process.env.DATE?.trim()
 const HAR_DIR = process.env.HAR_DIR?.trim()
 const POST_STREAM_GRACE_MS = 30 * 60 * 1000
+const LIVE_TIME_TOLERANCE_MS = 2 * 60 * 1000
 
 const failures: string[] = []
 const warnings: string[] = []
@@ -48,19 +46,11 @@ interface HarOrderRow {
   orderId: string
   paidAt: string
   orderedAt: string
-  updatedAt: string
-  status: string
   statusDesc: string
-  afterSaleStatus: string
   afterSaleStatusDesc: string
-  firstAfterSaleStatus: string
-  secondAfterSaleStatus: string
   actualPaid: number
   actualSellerReceiveAmount: number
   totalOrderAmount: number
-  sellerId: string
-  userId: string
-  skuSummary: string
   sourceFile: string
 }
 
@@ -70,16 +60,23 @@ interface HarLiveRow {
   liveEndTime: string
   liveAccountName: string
   sourceShopName: string
-  liveViewSessionCnt: number | null
-  serverLiveViewUserNum: number | null
-  liveFollowUserNum: number | null
-  newFollowUserNum: number | null
-  followUserNum: number | null
-  dealUserNum: number | null
-  dealGoodsCnt: number | null
-  avgOnlineUserCnt: number | null
-  avgViewDuration: number | null
   sourceFile: string
+}
+
+interface HarFileParseResult {
+  fileName: string
+  ok: boolean
+  orderEndpointCount: number
+  liveEndpointCount: number
+  orderRowCount: number
+  liveRowCount: number
+  error?: string
+}
+
+interface HarBundle {
+  orders: HarOrderRow[]
+  lives: HarLiveRow[]
+  fileResults: HarFileParseResult[]
 }
 
 interface PostStreamCandidate {
@@ -93,6 +90,12 @@ interface PostStreamCandidate {
   currentAnchor: string
   suggestedAnchor: string
 }
+
+const EXPECTED_HAR_LIVES_20260703 = [
+  { label: '拾玉居', start: '2026-07-03 09:24:12', end: '2026-07-03 14:02:19' },
+  { label: '和田雅玉早场', start: '2026-07-03 09:29:29', end: '2026-07-03 14:04:18' },
+  { label: '和田雅玉下午场', start: '2026-07-03 14:21:09', end: '2026-07-03 17:52:13' },
+] as const
 
 function section(title: string): void {
   console.log(`\n=== ${title} ===`)
@@ -120,37 +123,75 @@ function diffYuan(a: number, b: number): number {
   return Math.round((a - b) * 100) / 100
 }
 
+function decodeHarContentText(content: { text?: string; encoding?: string }): string {
+  const text = content?.text ?? ''
+  if (!text.trim()) return ''
+  if (content.encoding === 'base64') {
+    return Buffer.from(text, 'base64').toString('utf-8')
+  }
+
+  const trimmed = text.trim()
+  if (
+    !trimmed.startsWith('{') &&
+    !trimmed.startsWith('[') &&
+    /^[A-Za-z0-9+/=\r\n]+$/.test(trimmed.slice(0, 300))
+  ) {
+    try {
+      const decoded = Buffer.from(trimmed, 'base64').toString('utf-8')
+      if (decoded.trim().startsWith('{') || decoded.trim().startsWith('[')) return decoded
+    } catch {
+      // ignore
+    }
+  }
+
+  return text
+}
+
+function unwrapHarField(v: unknown): unknown {
+  if (v && typeof v === 'object' && 'value' in (v as Record<string, unknown>)) {
+    return (v as Record<string, unknown>).value
+  }
+  return v
+}
+
 function pickString(obj: Record<string, unknown>, keys: string[]): string {
   for (const k of keys) {
-    const v = obj[k]
-    if (v != null && String(v).trim()) return String(v).trim()
+    const raw = unwrapHarField(obj[k])
+    if (raw != null && String(raw).trim()) return String(raw).trim()
   }
   return ''
 }
 
 function pickNum(obj: Record<string, unknown>, keys: string[]): number | null {
   for (const k of keys) {
-    const v = obj[k]
-    if (v == null || v === '') continue
-    const n = Number(v)
+    const raw = unwrapHarField(obj[k])
+    if (raw == null || raw === '') continue
+    const n = Number(raw)
     if (Number.isFinite(n)) return n
   }
   return null
 }
 
-function parseHarJson(filePath: string): { entries: Array<{ request: { url: string }; response: { content: { text?: string } } }> } {
-  const raw = fs.readFileSync(filePath, 'utf-8')
-  const parsed = JSON.parse(raw) as { log?: { entries?: unknown[] } }
-  return { entries: (parsed.log?.entries ?? []) as Array<{ request: { url: string }; response: { content: { text?: string } } }> }
+type HarEntry = {
+  request?: { url?: string }
+  response?: { content?: { text?: string; encoding?: string } }
 }
 
-function parseOrderHarFile(filePath: string): HarOrderRow[] {
+function readHarEntries(filePath: string): HarEntry[] {
+  const raw = fs.readFileSync(filePath, 'utf-8')
+  const parsed = JSON.parse(raw) as { log?: { entries?: HarEntry[] } }
+  return parsed.log?.entries ?? []
+}
+
+function parseOrderHarFile(filePath: string): { rows: HarOrderRow[]; orderEndpointCount: number } {
   const base = path.basename(filePath)
   const rows: HarOrderRow[] = []
-  for (const entry of parseHarJson(filePath).entries) {
+  let orderEndpointCount = 0
+  for (const entry of readHarEntries(filePath)) {
     const url = entry.request?.url ?? ''
     if (!url.includes('/api/edith/fulfillment/order/page')) continue
-    const text = entry.response?.content?.text
+    orderEndpointCount += 1
+    const text = decodeHarContentText(entry.response?.content ?? {})
     if (!text) continue
     let body: Record<string, unknown>
     try {
@@ -161,45 +202,33 @@ function parseOrderHarFile(filePath: string): HarOrderRow[] {
     const data = (body.data ?? body) as Record<string, unknown>
     const packages = (data.packages ?? data.list ?? data.records ?? []) as Record<string, unknown>[]
     for (const pkg of packages) {
-      const skus = Array.isArray(pkg.skus) ? pkg.skus : []
-      const skuSummary = skus
-        .slice(0, 2)
-        .map((s) => pickString(s as Record<string, unknown>, ['skuName', 'displayName', 'name']))
-        .filter(Boolean)
-        .join(' / ')
       rows.push({
         packageId: pickString(pkg, ['packageId', 'package_id']),
         orderId: pickString(pkg, ['orderId', 'order_id']),
         paidAt: pickString(pkg, ['paidAt', 'paid_at', 'payTime']),
         orderedAt: pickString(pkg, ['orderedAt', 'ordered_at', 'orderTime']),
-        updatedAt: pickString(pkg, ['updatedAt', 'updated_at']),
-        status: pickString(pkg, ['status']),
         statusDesc: pickString(pkg, ['statusDesc', 'status_desc']),
-        afterSaleStatus: pickString(pkg, ['afterSaleStatus', 'after_sale_status']),
         afterSaleStatusDesc: pickString(pkg, ['afterSaleStatusDesc', 'after_sale_status_desc']),
-        firstAfterSaleStatus: pickString(pkg, ['firstAfterSaleStatus']),
-        secondAfterSaleStatus: pickString(pkg, ['secondAfterSaleStatus']),
         actualPaid: pickNum(pkg, ['actualPaid', 'actual_paid']) ?? 0,
         actualSellerReceiveAmount:
           pickNum(pkg, ['actualSellerReceiveAmount', 'actual_seller_receive_amount']) ?? 0,
         totalOrderAmount: pickNum(pkg, ['totalOrderAmount', 'total_order_amount']) ?? 0,
-        sellerId: pickString(pkg, ['sellerId', 'seller_id']),
-        userId: pickString(pkg, ['userId', 'user_id']),
-        skuSummary,
         sourceFile: base,
       })
     }
   }
-  return rows
+  return { rows, orderEndpointCount }
 }
 
-function parseLiveHarFile(filePath: string): HarLiveRow[] {
+function parseLiveHarFile(filePath: string): { rows: HarLiveRow[]; liveEndpointCount: number } {
   const base = path.basename(filePath)
   const rows: HarLiveRow[] = []
-  for (const entry of parseHarJson(filePath).entries) {
+  let liveEndpointCount = 0
+  for (const entry of readHarEntries(filePath)) {
     const url = entry.request?.url ?? ''
     if (!url.includes('sellerLiveDetailData')) continue
-    const text = entry.response?.content?.text
+    liveEndpointCount += 1
+    const text = decodeHarContentText(entry.response?.content ?? {})
     if (!text) continue
     let body: Record<string, unknown>
     try {
@@ -226,72 +255,291 @@ function parseLiveHarFile(filePath: string): HarLiveRow[] {
             'live_account_name',
           ]),
           sourceShopName: pickString(d, ['sourceShopName', 'shopName', 'sellerName']),
-          liveViewSessionCnt: pickNum(d, ['liveViewSessionCnt', 'viewSessionCnt']),
-          serverLiveViewUserNum: pickNum(d, ['serverLiveViewUserNum', 'joinUserNum']),
-          liveFollowUserNum: pickNum(d, ['liveFollowUserNum']),
-          newFollowUserNum: pickNum(d, ['newFollowUserNum', 'newFollowerCount']),
-          followUserNum: pickNum(d, ['followUserNum']),
-          dealUserNum: pickNum(d, ['dealUserNum', 'dealUserCount']),
-          dealGoodsCnt: pickNum(d, ['dealGoodsCnt']),
-          avgOnlineUserCnt: pickNum(d, ['avgOnlineUserCnt', 'avgOnlineUserCount']),
-          avgViewDuration: pickNum(d, ['avgViewDuration', 'avgViewDurationSeconds']),
           sourceFile: base,
         })
       }
     }
   }
-  return rows
+  return { rows, liveEndpointCount }
 }
 
-function loadHarBundle(harDir: string): {
-  orders: HarOrderRow[]
-  lives: HarLiveRow[]
-} {
-  if (!fs.existsSync(harDir)) {
-    warn(`HAR_DIR 不存在: ${harDir}`)
-    return { orders: [], lives: [] }
+function resolveHarDir(harDirEnv?: string): string {
+  if (harDirEnv?.trim()) {
+    const trimmed = harDirEnv.trim()
+    return path.isAbsolute(trimmed) ? trimmed : path.resolve(process.cwd(), trimmed)
   }
-  const files = fs.readdirSync(harDir).filter((f) => f.endsWith('.har'))
+  return path.resolve(process.cwd(), 'debug/har')
+}
+
+function loadHarBundle(harDir: string): HarBundle {
+  const fileResults: HarFileParseResult[] = []
   let orders: HarOrderRow[] = []
   let lives: HarLiveRow[] = []
+
+  if (!fs.existsSync(harDir)) {
+    warn(`HAR_DIR 不存在: ${harDir}`)
+    return { orders, lives, fileResults }
+  }
+
+  const files = fs.readdirSync(harDir).filter((f) => f.endsWith('.har')).sort()
   for (const f of files) {
     const full = path.join(harDir, f)
-    if (f.includes('订单')) orders = orders.concat(parseOrderHarFile(full))
-    if (f.includes('直播')) lives = lives.concat(parseLiveHarFile(full))
+    const result: HarFileParseResult = {
+      fileName: f,
+      ok: true,
+      orderEndpointCount: 0,
+      liveEndpointCount: 0,
+      orderRowCount: 0,
+      liveRowCount: 0,
+    }
+    try {
+      if (f.includes('订单')) {
+        const parsed = parseOrderHarFile(full)
+        result.orderEndpointCount = parsed.orderEndpointCount
+        result.orderRowCount = parsed.rows.length
+        orders = orders.concat(parsed.rows)
+      }
+      if (f.includes('直播')) {
+        const parsed = parseLiveHarFile(full)
+        result.liveEndpointCount = parsed.liveEndpointCount
+        result.liveRowCount = parsed.rows.length
+        lives = lives.concat(parsed.rows)
+      }
+    } catch (err) {
+      result.ok = false
+      result.error = err instanceof Error ? err.message : String(err)
+      warn(`HAR 文件损坏或未完整导出，已跳过：${f}`)
+    }
+    fileResults.push(result)
   }
-  return { orders, lives }
+
+  return { orders, lives, fileResults }
 }
 
-function printHarSummary(orders: HarOrderRow[], lives: HarLiveRow[], dateKey?: string): void {
+function orderDay(row: HarOrderRow): string {
+  const paid = row.paidAt || row.orderedAt
+  return paid.slice(0, 10) || 'unknown'
+}
+
+function printHarSummary(bundle: HarBundle, dateKey?: string): void {
   section('HAR 解析摘要')
-  if (orders.length === 0 && lives.length === 0) {
+
+  for (const file of bundle.fileResults) {
+    const status = file.ok ? '成功' : '跳过'
+    console.log(
+      `  文件 ${file.fileName}: ${status} | order endpoints=${file.orderEndpointCount} live endpoints=${file.liveEndpointCount} | 订单条数=${file.orderRowCount} 直播条数=${file.liveRowCount}`,
+    )
+    if (file.error) console.log(`    原因: ${file.error}`)
+  }
+
+  if (bundle.orders.length === 0 && bundle.lives.length === 0) {
     console.log('未读取到 HAR 数据（可设置 HAR_DIR 指向含 .har 文件的目录）')
     return
   }
-  const pkgIds = new Set(orders.map((o) => o.packageId || o.orderId).filter(Boolean))
-  console.log(`HAR 订单条目: ${orders.length}`)
+
+  const pkgIds = new Set(bundle.orders.map((o) => o.packageId || o.orderId).filter(Boolean))
+  const liveIds = new Set(bundle.lives.map((l) => l.liveId).filter(Boolean))
+
+  console.log(`HAR 订单条目: ${bundle.orders.length}`)
   console.log(`按 packageId 去重: ${pkgIds.size}`)
-  const byDate = new Map<string, number>()
-  for (const o of orders) {
-    const paid = o.paidAt || o.orderedAt
-    const day = paid.slice(0, 10) || 'unknown'
-    byDate.set(day, (byDate.get(day) ?? 0) + 1)
+  console.log(`HAR 直播条目: ${bundle.lives.length}`)
+  console.log(`按 liveId 去重: ${liveIds.size}`)
+
+  const paidByDate = new Map<string, number>()
+  for (const o of bundle.orders) {
+    const day = orderDay(o)
+    paidByDate.set(day, (paidByDate.get(day) ?? 0) + 1)
   }
   console.log('paidAt 日期分布:')
-  for (const [day, count] of [...byDate.entries()].sort()) {
+  for (const [day, count] of [...paidByDate.entries()].sort()) {
     console.log(`  ${day}: ${count}`)
   }
-  console.log(`HAR 直播场次: ${lives.length}`)
-  for (const live of lives.slice(0, 20)) {
-    console.log(
-      `  ${live.liveAccountName || live.sourceShopName} ${live.liveStartTime}~${live.liveEndTime}` +
-        ` 场观=${live.liveViewSessionCnt ?? '—'} 进房=${live.serverLiveViewUserNum ?? '—'}` +
-        ` 新增粉丝=${live.newFollowUserNum ?? live.liveFollowUserNum ?? '—'}`,
-    )
+
+  const liveByDate = new Map<string, number>()
+  for (const l of bundle.lives) {
+    const day = l.liveStartTime.slice(0, 10) || 'unknown'
+    liveByDate.set(day, (liveByDate.get(day) ?? 0) + 1)
   }
-  if (dateKey && lives.length > 0) {
-    section(`HAR 直播 vs 系统 ${dateKey}`)
-    console.log('（仅辅助核对实际开播时间，不用于归属还原）')
+  console.log('liveStartTime 日期分布:')
+  for (const [day, count] of [...liveByDate.entries()].sort()) {
+    console.log(`  ${day}: ${count}`)
+  }
+
+  if (dateKey) {
+    const dayOrders = bundle.orders.filter((o) => orderDay(o) === dateKey)
+    const dayPkgIds = new Set(dayOrders.map((o) => o.packageId || o.orderId).filter(Boolean))
+    const dayLives = bundle.lives.filter((l) => l.liveStartTime.slice(0, 10) === dateKey)
+    const dayLiveIds = new Set(dayLives.map((l) => l.liveId).filter(Boolean))
+    console.log(`${dateKey} HAR 订单条目: ${dayOrders.length} / 去重 ${dayPkgIds.size}`)
+    console.log(`${dateKey} HAR 直播条目: ${dayLives.length} / 去重 liveId ${dayLiveIds.size}`)
+  }
+}
+
+function parseDateTimeMs(text: string): number | null {
+  const normalized = text.trim().replace('T', ' ')
+  const ms = Date.parse(normalized.includes('+') ? normalized : `${normalized}+08:00`)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function dedupeHarOrders(orders: HarOrderRow[]): HarOrderRow[] {
+  const map = new Map<string, HarOrderRow>()
+  for (const row of orders) {
+    const key = row.packageId || row.orderId
+    if (!key) continue
+    map.set(key, row)
+  }
+  return [...map.values()]
+}
+
+function dedupeHarLives(lives: HarLiveRow[]): HarLiveRow[] {
+  const map = new Map<string, HarLiveRow>()
+  for (const row of lives) {
+    if (!row.liveId) continue
+    map.set(row.liveId, row)
+  }
+  return [...map.values()]
+}
+
+async function crossCheckHarLiveVsDb(dateKey: string, harLives: HarLiveRow[]): Promise<void> {
+  section(`HAR 直播 vs DB ${dateKey}`)
+  const dayLives = dedupeHarLives(harLives.filter((l) => l.liveStartTime.slice(0, 10) === dateKey))
+
+  const dayStart = new Date(`${dateKey}T00:00:00+08:00`)
+  const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000)
+  const dbSessions = await prisma.xhsRawLiveSession.findMany({
+    where: { startTime: { gte: dayStart, lt: dayEnd } },
+    select: { liveId: true, startTime: true, endTime: true, liveAccountName: true, liveName: true },
+  })
+  const dbByLiveId = new Map<string, (typeof dbSessions)[0]>()
+  for (const s of dbSessions) {
+    if (s.liveId) dbByLiveId.set(s.liveId, s)
+  }
+
+  for (const expected of EXPECTED_HAR_LIVES_20260703) {
+    const harMatch = dayLives.find((l) => {
+      const startMs = parseDateTimeMs(l.liveStartTime)
+      const expStartMs = parseDateTimeMs(expected.start)
+      return startMs != null && expStartMs != null && Math.abs(startMs - expStartMs) <= LIVE_TIME_TOLERANCE_MS
+    })
+
+    if (!harMatch) {
+      fail(`${expected.label} HAR 未找到 ${expected.start}~${expected.end}`)
+      continue
+    }
+
+    const db = dbByLiveId.get(harMatch.liveId)
+    if (!db || !db.startTime) {
+      fail(`${expected.label} 系统缺少 liveId=${harMatch.liveId}`)
+      continue
+    }
+
+    const dbStart = formatDateTimeShanghai(db.startTime)
+    const dbEnd = db.endTime ? formatDateTimeShanghai(db.endTime) : '—'
+    const startDiff = Math.abs((parseDateTimeMs(dbStart) ?? 0) - (parseDateTimeMs(harMatch.liveStartTime) ?? 0))
+    const endDiff =
+      db.endTime && harMatch.liveEndTime
+        ? Math.abs((parseDateTimeMs(dbEnd) ?? 0) - (parseDateTimeMs(harMatch.liveEndTime) ?? 0))
+        : 0
+
+    if (startDiff > LIVE_TIME_TOLERANCE_MS || endDiff > LIVE_TIME_TOLERANCE_MS) {
+      fail(
+        `${expected.label} 时间差超过2分钟: HAR ${harMatch.liveStartTime}~${harMatch.liveEndTime} vs DB ${dbStart}~${dbEnd}`,
+      )
+    } else {
+      ok(`${expected.label} liveId=${harMatch.liveId} HAR/DB 时间一致 (${harMatch.liveStartTime}~${harMatch.liveEndTime})`)
+    }
+  }
+}
+
+async function crossCheckHarOrdersVsDb(
+  dateKey: string,
+  harOrders: HarOrderRow[],
+  performanceViews: AnalyzedOrderView[],
+): Promise<void> {
+  section(`HAR 订单 vs DB ${dateKey}`)
+  const dayOrders = dedupeHarOrders(harOrders.filter((o) => orderDay(o) === dateKey))
+  const viewByOrderNo = new Map<string, AnalyzedOrderView>()
+  for (const v of dedupeViewsByMetricOrderNo(performanceViews)) {
+    const orderNo = resolveMetricOrderNo(v) || v.orderId
+    if (orderNo) viewByOrderNo.set(orderNo, v)
+  }
+
+  for (const har of dayOrders) {
+    const packageId = har.packageId || har.orderId
+    const view = viewByOrderNo.get(packageId)
+    const exists = Boolean(view)
+    const anchor = view?.anchorName?.trim() || '—'
+    const ex = view ? explainValidRevenueOrder(view) : null
+    const validYuan = view ? (view.effectiveGmvCent / 100).toFixed(2) : '—'
+    console.log(
+      `  ${packageId} paidAt=${har.paidAt || har.orderedAt} status=${har.statusDesc || '—'} afterSale=${har.afterSaleStatusDesc || '—'}` +
+        ` actualPaid=${har.actualPaid} receive=${har.actualSellerReceiveAmount} total=${har.totalOrderAmount}`,
+    )
+    console.log(
+      `    DB存在=${exists ? '是' : '否'} 归属=${anchor} 有效成交=¥${validYuan} reason=${ex?.reason ?? '—'}`,
+    )
+    if (!exists) {
+      fail(`HAR 订单 ${packageId} 在系统中不存在`)
+    }
+  }
+
+  const focus2017 = dayOrders.find((o) => (o.packageId || o.orderId) === 'P798605049367374181')
+  if (focus2017) {
+    const view = viewByOrderNo.get('P798605049367374181')
+    const ex = view ? explainValidRevenueOrder(view) : null
+    const validOk = view && view.anchorName === '子杰' && ex?.valid === true && view.effectiveGmvCent === 201700
+    if (validOk) {
+      ok('P798605049367374181 归子杰且有效成交 ¥2017')
+    } else {
+      fail(
+        `P798605049367374181 期望归子杰有效¥2017，实际 anchor=${view?.anchorName ?? '—'} valid=${ex?.valid ?? false} eff=${view?.effectiveGmvCent ?? 0}`,
+      )
+    }
+  } else {
+    warn('HAR 未包含 P798605049367374181（可能 HAR 翻页未抓全）')
+  }
+
+  const focus216 = dayOrders.find((o) => {
+    const pid = o.packageId || o.orderId
+    return Math.abs(o.actualPaid - 216) < 0.01 || (o.paidAt.includes('16:13:24') && Math.abs(o.actualPaid - 216) < 0.01)
+  })
+  if (focus216) {
+    const pid = focus216.packageId || focus216.orderId
+    const view = viewByOrderNo.get(pid)
+    const ex = view ? explainValidRevenueOrder(view) : null
+    const refundOk =
+      view &&
+      (view.anchorName === '小艺' || view.anchorName?.includes('小艺')) &&
+      ex?.valid === false &&
+      view.effectiveGmvCent === 0
+    if (refundOk) {
+      ok(`${pid} 归小艺，售后完成，有效成交 ¥0`)
+    } else {
+      fail(
+        `${pid} 期望归小艺有效¥0，实际 anchor=${view?.anchorName ?? '—'} valid=${ex?.valid ?? false} eff=${view?.effectiveGmvCent ?? 0} reason=${ex?.reason ?? '—'}`,
+      )
+    }
+  } else {
+    warn('HAR 未包含 216 元小艺订单（和田雅玉 16:13:24）')
+  }
+
+  const missingInHar = [...viewByOrderNo.entries()].filter(([orderNo, view]) => {
+    if (!view.includedInGmv) return false
+    const payMs = parseViewPayTimeMs(view)
+    const day =
+      payMs != null
+        ? formatDateTimeShanghai(new Date(payMs)).slice(0, 10)
+        : (view.orderTimeText ?? '').slice(0, 10)
+    if (day !== dateKey) return false
+    return !dayOrders.some((h) => (h.packageId || h.orderId) === orderNo)
+  })
+  if (missingInHar.length > 0) {
+    warn(`系统有 ${missingInHar.length} 单 ${dateKey} 支付订单未出现在 HAR（HAR 抓包可能不完整）`)
+    for (const [orderNo, view] of missingInHar.slice(0, 10)) {
+      console.log(
+        `    仅 DB: ${orderNo} pay=${view.orderTimeText} anchor=${view.anchorName} ¥${(view.paymentBaseCent / 100).toFixed(2)}`,
+      )
+    }
   }
 }
 
@@ -315,8 +563,9 @@ async function checkDateRange(params: {
   preset: string
   startDate: string
   endDate: string
+  harBundle?: HarBundle
 }): Promise<PostStreamCandidate[]> {
-  const { label, preset, startDate, endDate } = params
+  const { label, preset, startDate, endDate, harBundle } = params
   section(`范围 ${label} (${startDate}~${endDate})`)
 
   await buildAndSetBusinessBoardCache({ preset, startDate, endDate })
@@ -405,6 +654,18 @@ async function checkDateRange(params: {
     ok(`${label} 未发现下播后30分钟内未归属订单`)
   }
 
+  if (harBundle && fs.existsSync(resolveHarDir(HAR_DIR)) && startDate === endDate) {
+    const paidViews = dedupeViewsByMetricOrderNo(performanceViews).filter((v) => v.includedInGmv === true)
+    if (paidViews.length === 0) {
+      warn(
+        `${startDate} 本地 DB 无该日支付订单，跳过 HAR vs DB 交叉核对（HAR 解析摘要仍有效；请用已同步至该日的库验收）`,
+      )
+    } else {
+      await crossCheckHarLiveVsDb(startDate, harBundle.lives)
+      await crossCheckHarOrdersVsDb(startDate, harBundle.orders, performanceViews)
+    }
+  }
+
   return postStream
 }
 
@@ -440,15 +701,6 @@ async function checkAnchorDrawer(params: {
   const drawerPaid = num(stats.orderCount ?? stats.paidOrderCount)
   const rowRefund = m.refundCount
   const drawerRefund = num(stats.returnCount ?? stats.refundOrderCount)
-  const rowQuality = m.qualityCount
-  const drawerQuality = num(stats.qualityReturnCount)
-
-  let drawerPayCent = 0
-  let drawerPaidN = 0
-  for (const r of drill.rows ?? []) {
-    drawerPayCent += Math.round(num(r.payAmount) * 100)
-    if (num(r.payAmount) > 0) drawerPaidN += 1
-  }
 
   const mismatches: string[] = []
   if (Math.abs(diffYuan(rowGmv, drawerGmv)) > 1) mismatches.push(`gmv row=${rowGmv} stats=${drawerGmv}`)
@@ -549,9 +801,9 @@ async function main(): Promise<void> {
   console.log(`XhsRawOrder: ${await prisma.xhsRawOrder.count()}`)
   console.log(`XhsRawLiveSession: ${await prisma.xhsRawLiveSession.count()}`)
 
-  const harDir = HAR_DIR ? path.resolve(process.cwd(), HAR_DIR) : path.resolve(process.cwd(), 'debug/har')
-  const har = loadHarBundle(harDir)
-  printHarSummary(har.orders, har.lives, DATE_ENV)
+  const harDir = resolveHarDir(HAR_DIR)
+  const harBundle = loadHarBundle(harDir)
+  printHarSummary(harBundle, DATE_ENV)
 
   const ranges: Array<{ label: string; preset: string; startDate: string; endDate: string }> = []
   if (DATE_ENV && /^\d{4}-\d{2}-\d{2}$/.test(DATE_ENV)) {
@@ -565,7 +817,7 @@ async function main(): Promise<void> {
 
   const allPostStream: PostStreamCandidate[] = []
   for (const r of ranges) {
-    const found = await checkDateRange(r)
+    const found = await checkDateRange({ ...r, harBundle })
     allPostStream.push(...found)
   }
 

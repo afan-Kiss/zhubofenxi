@@ -7,6 +7,7 @@ import {
 } from './board-scoped-views.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { isValidRevenueOrder, resolveValidRevenueAmountCent } from './valid-revenue-order.service'
+import { viewCountsAsPaidOrder } from './business-metrics.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { resolveRequestCacheIdentity } from './operations-report-cache.service'
 import {
@@ -21,6 +22,8 @@ import {
   formatAfterSalesCategoryLabel,
   formatAfterSalesReasonDisplay,
   isActualAfterSaleOrder,
+  resolveOperationsAfterSalesReasonRaw,
+  viewCountsAsOperationsAfterSalesReasonOrder,
 } from './operations-after-sale-order.util'
 import { normalizeAfterSalesReason } from './after-sales-reason-normalize.service'
 import { mapViewToOperationsBiDrillRow } from './operations-bi-drill-row.mapper'
@@ -159,12 +162,9 @@ function viewMatchesAfterSales(
   category?: string,
   reason?: string,
 ): boolean {
-  const reasonRaw =
-    view.afterSaleReasonText ??
-    view.reasonText ??
-    view.afterSalesWorkbenchReason ??
-    ''
-  const normalized = normalizeAfterSalesReason(String(reasonRaw))
+  if (!viewCountsAsOperationsAfterSalesReasonOrder(view)) return false
+  const reasonRaw = resolveOperationsAfterSalesReasonRaw(view)
+  const normalized = normalizeAfterSalesReason(reasonRaw)
   if (category?.trim() && normalized.category !== category.trim()) return false
   if (reason?.trim()) {
     const q = reason.trim()
@@ -198,9 +198,27 @@ function filterViewsForTarget(
 
     if (mode === 'sold') return isValidRevenueOrder(view)
     if (mode === 'return') return isProductReturnOrder(view)
-    if (mode === 'after_sale') return isActualAfterSaleOrder(view)
+    if (mode === 'after_sale') return viewCountsAsOperationsAfterSalesReasonOrder(view)
     return Boolean(resolveMetricOrderNo(view) || view.paymentBaseCent > 0)
   })
+}
+
+function countPaidOrdersInScope(
+  views: AnalyzedOrderView[],
+  rawByMatch: Map<string, Record<string, unknown>>,
+  input: OperationsBiDrillRequest,
+): number {
+  const deduped = dedupeViewsByMetricOrderNo(views)
+  const keys = new Set<string>()
+  for (const view of deduped) {
+    if (!viewMatchesAnchor(view, input.anchorName)) continue
+    if (!viewMatchesProduct(view, rawByMatch, input.productKey)) continue
+    if (!viewMatchesPriceBand(view, input.priceBandLabel ?? input.priceBandKey)) continue
+    const orderKey = resolveMetricOrderNo(view) || view.orderId
+    if (!orderKey) continue
+    if (viewCountsAsPaidOrder(view)) keys.add(orderKey)
+  }
+  return keys.size
 }
 
 function resolveFilterMode(target: OperationsBiDrillTarget): FilterMode {
@@ -434,11 +452,26 @@ export async function buildOperationsBiDrill(
   }
 
   const soldCount = filtered.filter((v) => isValidRevenueOrder(v)).length
-  const returnCount = filtered.filter((v) => isActualAfterSaleOrder(v)).length
-  const validAmountYuan = filtered.reduce(
-    (sum, v) => sum + Math.round(resolveValidRevenueAmountCent(v) / 100),
-    0,
-  )
+  const afterSaleOrderCount = filtered.length
+  const returnCount =
+    mode === 'after_sale'
+      ? afterSaleOrderCount
+      : filtered.filter((v) => isActualAfterSaleOrder(v)).length
+  const validAmountYuan =
+    mode === 'after_sale'
+      ? 0
+      : filtered.reduce(
+          (sum, v) => sum + Math.round(resolveValidRevenueAmountCent(v) / 100),
+          0,
+        )
+  const refundAmountYuan =
+    mode === 'after_sale'
+      ? filtered.reduce(
+          (sum, v) => sum + Math.round((v.productRefundAmountCent ?? 0) / 100),
+          0,
+        )
+      : 0
+  const paidOrderCount = countPaidOrdersInScope(performanceViews, scoped.rawByMatch, input)
   const buyers = new Set<string>()
   for (const v of filtered) {
     if (!isValidRevenueOrder(v)) continue
@@ -479,11 +512,12 @@ export async function buildOperationsBiDrill(
     targetLabel: TARGET_LABELS[effectiveTarget],
     range: { startDate: input.startDate, endDate: input.endDate },
     summary: {
-      orderCount: soldCount,
+      orderCount: mode === 'after_sale' ? afterSaleOrderCount : soldCount,
       validAmountYuan,
+      refundAmountYuan,
       productReturnOrderCount: returnCount,
-      productReturnRate: computeProductReturnRateByOrder(soldCount, returnCount),
-      buyerCount: buyers.size,
+      productReturnRate: computeProductReturnRateByOrder(paidOrderCount, returnCount),
+      buyerCount: mode === 'after_sale' ? null : buyers.size,
     },
     filters,
     rows: paged.slice,

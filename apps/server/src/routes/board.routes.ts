@@ -414,7 +414,6 @@ boardRouter.get('/operations-rankings', async (req, res) => {
     const scope = req.query.scope
       ? (String(req.query.scope) as 'daily' | 'weekly' | 'custom')
       : 'custom'
-    const sections = req.query.sections ? String(req.query.sections).split(',') : undefined
     const { getOperationsRankings } = await import('../services/operations-rankings.service')
     const { getOrBuildOperationsReportCache, resolveRequestCacheIdentity } = await import(
       '../services/operations-report-cache.service'
@@ -428,7 +427,6 @@ boardRouter.get('/operations-rankings', async (req, res) => {
         preset,
         scope,
         limit,
-        sections,
         ...viewer,
       },
       () =>
@@ -437,7 +435,6 @@ boardRouter.get('/operations-rankings', async (req, res) => {
           endDate,
           preset,
           scope,
-          sections,
           limit,
           ...viewer,
         }),

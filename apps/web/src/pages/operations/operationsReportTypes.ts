@@ -36,6 +36,7 @@ export interface AnchorRankItem {
   shopName: string
   validAmountYuan: number
   soldOrderCount: number
+  paidOrderCount: number
   returnOrderCount: number
   returnRate: number | null
   liveDurationMinutes: number
@@ -61,6 +62,7 @@ export interface ProductRankListItem {
   barType: string
   soldCount: number
   soldOrderCount: number
+  paidOrderCount: number
   validAmountYuan: number
   buyerCount: number
   returnOrderCount: number
@@ -75,6 +77,7 @@ export interface PriceBandRankItem {
   bandLabel: string
   validAmountYuan: number
   soldOrderCount: number
+  paidOrderCount: number
   buyerCount: number
   amountSharePercent: number | null
   averageOrderValueYuan: number | null
@@ -330,6 +333,7 @@ export interface OperationsProductRow {
   barType: string
   soldCount: number
   soldOrderCount: number
+  paidOrderCount: number
   soldAmountYuan: number
   buyerCount: number
   returnOrderCount: number
@@ -341,6 +345,7 @@ export interface OperationsProductRow {
 export interface OperationsPriceBandRow {
   bandLabel: string
   orderCount: number
+  paidOrderCount: number
   amountYuan: number
   buyerCount: number
   amountSharePercent: number | null

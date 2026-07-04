@@ -28,7 +28,6 @@ export interface OperationsReportCacheKeyInput {
   role?: string
   username?: string
   limit?: number
-  sections?: string[]
 }
 
 export interface OperationsReportCacheEntry<T = unknown> {
@@ -109,7 +108,6 @@ function getCacheTtlMs(): number {
 
 export function buildOperationsReportCacheKey(input: OperationsReportCacheKeyInput): string {
   const normalized = normalizeCacheKeyInput(input)
-  const sections = (normalized.sections ?? []).slice().sort().join(',')
   return [
     normalized.kind,
     normalized.startDate,
@@ -120,7 +118,6 @@ export function buildOperationsReportCacheKey(input: OperationsReportCacheKeyInp
     normalized.role ?? '',
     normalized.username ?? '',
     normalized.limit != null ? String(normalized.limit) : '',
-    sections,
   ].join('|')
 }
 

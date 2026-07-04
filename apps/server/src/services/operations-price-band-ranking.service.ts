@@ -15,12 +15,14 @@ function toBandItem(
   sampleTooSmall = false,
 ): PriceBandRankItem {
   const soldOrderCount = row.orderCount
+  const paidOrderCount = row.paidOrderCount
   const productReturnOrderRate =
-    soldOrderCount > 0 ? row.returnOrderCount / soldOrderCount : null
+    paidOrderCount > 0 ? row.returnOrderCount / paidOrderCount : null
   return {
     bandLabel: row.bandLabel,
     validAmountYuan: row.amountYuan,
     soldOrderCount,
+    paidOrderCount,
     buyerCount: row.buyerCount,
     amountSharePercent: row.amountSharePercent,
     averageOrderValueYuan: row.avgOrderAmountYuan,
@@ -88,30 +90,30 @@ export function buildPriceBandRankingLists(
     ),
   }
 
-  const withReturns = pool.filter((r) => r.returnOrderCount > 0 && r.orderCount > 0)
-  const formal = withReturns.filter((r) => r.orderCount >= MIN_ORDERS)
-  const sample = withReturns.filter((r) => r.orderCount < MIN_ORDERS)
+  const withReturns = pool.filter((r) => r.returnOrderCount > 0 && r.paidOrderCount > 0)
+  const formal = withReturns.filter((r) => r.paidOrderCount >= MIN_ORDERS)
+  const sample = withReturns.filter((r) => r.paidOrderCount > 0 && r.paidOrderCount < MIN_ORDERS)
   const sortReturn = (a: OperationsPriceBandRow, b: OperationsPriceBandRow) => {
-    const ar = a.returnOrderCount / a.orderCount
-    const br = b.returnOrderCount / b.orderCount
+    const ar = a.returnOrderCount / a.paidOrderCount
+    const br = b.returnOrderCount / b.paidOrderCount
     return br - ar || b.returnOrderCount - a.returnOrderCount
   }
   const byReturnRate: RankingListPayload<PriceBandRankItem> = {
     rankingType: 'price_band_by_return_rate',
     title: '价格带退货率榜',
-    subtitle: '商品退货订单率 = 退货订单 / 有效成交订单；正式榜 ≥3 单',
+    subtitle: '商品退货订单率 = 退货订单 / 支付订单；正式榜 ≥3 单',
     rankReasonTemplate: '商品退货订单率最高',
     items: [...formal].sort(sortReturn).slice(0, limit).map((r) =>
-      toBandItem(r, `价格带商品退货订单率 ${r.returnOrderCount}/${r.orderCount}`),
+      toBandItem(r, `价格带商品退货订单率 ${r.returnOrderCount}/${r.paidOrderCount}`),
     ),
     sampleTooSmall: [...sample].sort(sortReturn).slice(0, limit).map((r) =>
-      toBandItem(r, `样本不足 ${r.returnOrderCount}/${r.orderCount}`, true),
+      toBandItem(r, `样本不足 ${r.returnOrderCount}/${r.paidOrderCount}`, true),
     ),
     dataQuality: makeRankingQuality(
       BASIS,
       formal.length > 0,
       formal.length > 0 ? 'high' : sample.length > 0 ? 'low' : 'insufficient',
-      sample.length > 0 ? [`成交不足 ${MIN_ORDERS} 单的价格带仅参考`] : [],
+      sample.length > 0 ? [`支付不足 ${MIN_ORDERS} 单的价格带仅参考`] : [],
     ),
   }
 

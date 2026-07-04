@@ -125,3 +125,22 @@ export function computeReturnOrderRateRatio(
 export function isReturnOrderRateAbnormal(rate: number | null | undefined): boolean {
   return rate != null && Number.isFinite(rate) && rate > 1
 }
+
+/** 售后原因榜 / 下钻：统一 reason 解析顺序 */
+export function resolveOperationsAfterSalesReasonRaw(view: AnalyzedOrderView): string {
+  return (
+    view.afterSalesWorkbenchReason?.trim() ||
+    view.finalAfterSaleReason?.trim() ||
+    view.afterSaleReasonText?.trim() ||
+    view.reasonText?.trim() ||
+    view.afterSaleStatusText?.trim() ||
+    view.afterSaleStatusLabel?.trim() ||
+    ''
+  )
+}
+
+/** 是否计入运营报表售后原因榜（排除纯运费补偿） */
+export function viewCountsAsOperationsAfterSalesReasonOrder(view: AnalyzedOrderView): boolean {
+  if (view.isFreightRefundOnly) return false
+  return isActualAfterSaleOrder(view)
+}

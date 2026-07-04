@@ -15,6 +15,7 @@ import { computeReturnOrderRateRatio } from './operations-after-sale-order.util'
 export interface OperationsPriceBandRow {
   bandLabel: OperationsPriceBandLabel
   orderCount: number
+  paidOrderCount: number
   amountYuan: number
   buyerCount: number
   amountSharePercent: number | null
@@ -72,6 +73,7 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
   return OPERATIONS_PRICE_BANDS.map((band) => {
     const bucket = buckets.get(band.label)!
     const orderCount = bucket.validRevenueOrderKeys.size
+    const paidOrderCount = bucket.paidOrderKeys.size
     const amountYuan = Math.round(centToYuan(bucket.amountCent))
     const returnOrderCount = [...bucket.returnOrderKeys].filter((key) =>
       bucket.paidOrderKeys.has(key),
@@ -79,12 +81,13 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
     return {
       bandLabel: band.label,
       orderCount,
+      paidOrderCount,
       amountYuan,
       buyerCount: bucket.buyers.size,
       amountSharePercent: safeRatioPercent(bucket.amountCent, totalAmountCent),
       avgOrderAmountYuan: Math.round(safeDivide(amountYuan, orderCount) ?? 0) || null,
       returnOrderCount,
-      returnRate: computeReturnOrderRateRatio(orderCount, returnOrderCount),
+      returnRate: computeReturnOrderRateRatio(paidOrderCount, returnOrderCount),
     }
   }).filter((row) => row.orderCount > 0 || row.returnOrderCount > 0)
 }

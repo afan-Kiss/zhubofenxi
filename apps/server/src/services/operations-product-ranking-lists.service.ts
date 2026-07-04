@@ -24,6 +24,8 @@ const MIN_AOV_ORDERS = 2
 function toListItem(p: ProductRankItem | OperationsProductRow, rankReason: string, sampleTooSmall = false): ProductRankListItem {
   const validAmountYuan = 'validAmountYuan' in p ? p.validAmountYuan : p.soldAmountYuan
   const soldOrderCount = p.soldOrderCount
+  const paidOrderCount =
+    'paidOrderCount' in p ? p.paidOrderCount : (p as OperationsProductRow).paidOrderCount ?? soldOrderCount
   return {
     productKey: p.productKey,
     productName: p.productName,
@@ -34,6 +36,7 @@ function toListItem(p: ProductRankItem | OperationsProductRow, rankReason: strin
     barType: p.barType,
     soldCount: p.soldCount,
     soldOrderCount,
+    paidOrderCount,
     validAmountYuan,
     buyerCount: p.buyerCount,
     returnOrderCount: p.returnOrderCount,
@@ -83,7 +86,7 @@ export function buildProductRankingLists(params: {
   slow: RankingListPayload<ProductRankListItem>
 } {
   const limit = params.limit ?? OPERATIONS_PRODUCT_RANKING.hotRankLimit
-  const hotItems = buildHotProductRankings(params.products).slice(0, limit)
+  const hotItems = buildHotProductRankings(params.products, limit)
   const hot = fromProductRankItems(
     hotItems,
     'product_hot',
@@ -159,20 +162,20 @@ export function buildProductRankingLists(params: {
     ),
   }
 
-  const { formal, sampleTooSmall } = buildHighReturnProductRankings(params.products)
+  const { formal, sampleTooSmall } = buildHighReturnProductRankings(params.products, limit)
   const highReturn: RankingListPayload<ProductRankListItem> = {
     rankingType: 'product_high_return',
     title: '商品高退货榜',
-    subtitle: `商品退货订单率；正式榜要求成交订单 ≥${OPERATIONS_PRODUCT_RANKING.minSoldOrderCountForHighReturn}`,
+    subtitle: `商品退货订单率 = 退款/退货订单数 ÷ 支付订单数；正式榜要求支付订单 ≥${OPERATIONS_PRODUCT_RANKING.minSoldOrderCountForHighReturn}`,
     rankReasonTemplate: '商品退货订单率最高',
-    items: formal.slice(0, limit).map((p) => toListItem(p, p.rankReason)),
-    sampleTooSmall: sampleTooSmall.slice(0, limit).map((p) => toListItem(p, p.rankReason, true)),
+    items: formal.map((p) => toListItem(p, p.rankReason)),
+    sampleTooSmall: sampleTooSmall.map((p) => toListItem(p, p.rankReason, true)),
     dataQuality: makeRankingQuality(
       BASIS,
       formal.length > 0,
       formal.length > 0 ? 'high' : sampleTooSmall.length > 0 ? 'low' : 'insufficient',
       formal.length === 0 && sampleTooSmall.length > 0
-        ? [`均未达 ${OPERATIONS_PRODUCT_RANKING.minSoldOrderCountForHighReturn} 单成交门槛，正式榜为空`]
+        ? [`均未达 ${OPERATIONS_PRODUCT_RANKING.minSoldOrderCountForHighReturn} 单支付门槛，正式榜为空`]
         : [],
     ),
   }
@@ -210,20 +213,20 @@ export function buildDailyProductRankings(params: {
 } {
   const limit = params.limit ?? OPERATIONS_PRODUCT_RANKING.hotRankLimit
   const hot = fromProductRankItems(
-    buildHotProductRankings(params.products).slice(0, limit),
+    buildHotProductRankings(params.products, limit),
     'product_hot',
     '热卖前10',
     '按有效成交金额、成交订单、成交件数排序',
     '有效成交金额最高',
   )
-  const { formal, sampleTooSmall } = buildHighReturnProductRankings(params.products)
+  const { formal, sampleTooSmall } = buildHighReturnProductRankings(params.products, limit)
   const highReturn: RankingListPayload<ProductRankListItem> = {
     rankingType: 'product_high_return',
     title: '高退货前10',
     subtitle: '按商品退货订单率排序',
     rankReasonTemplate: '商品退货订单率最高',
-    items: formal.slice(0, limit).map((p) => toListItem(p, p.rankReason)),
-    sampleTooSmall: sampleTooSmall.slice(0, limit).map((p) => toListItem(p, p.rankReason, true)),
+    items: formal.map((p) => toListItem(p, p.rankReason)),
+    sampleTooSmall: sampleTooSmall.map((p) => toListItem(p, p.rankReason, true)),
     dataQuality: makeRankingQuality(
       BASIS,
       formal.length > 0,

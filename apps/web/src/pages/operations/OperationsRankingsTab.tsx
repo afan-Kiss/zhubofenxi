@@ -48,7 +48,7 @@ function RankingsLimitedTable<T>({
           onClick={() => setExpanded((v) => !v)}
           className="mt-2 text-xs text-rose-700 hover:underline"
         >
-          {expanded ? '收起' : `查看完整榜单（共 ${rows.length} 条）`}
+          {expanded ? '收起' : `查看本次返回的全部 ${rows.length} 条`}
         </button>
       ) : null}
     </>
@@ -400,6 +400,7 @@ export const OperationsRankingsTab: React.FC<Props> = ({
           {(
             [
               data.products.hot,
+              data.products.byAmount,
               data.products.byOrders,
               data.products.byQuantity,
               data.products.highAverageOrderValue,

@@ -24,6 +24,7 @@ export interface ProductRankItem {
   barType: string
   soldCount: number
   soldOrderCount: number
+  paidOrderCount: number
   /** 有效成交金额（元） */
   validAmountYuan: number
   buyerCount: number
@@ -64,6 +65,7 @@ function rowToRankBase(p: OperationsProductRow): Omit<ProductRankItem, 'rankReas
     barType: p.barType,
     soldCount: p.soldCount,
     soldOrderCount: p.soldOrderCount,
+    paidOrderCount: p.paidOrderCount ?? p.soldOrderCount,
     validAmountYuan: p.soldAmountYuan,
     buyerCount: p.buyerCount,
     returnOrderCount: p.returnOrderCount,
@@ -153,6 +155,7 @@ function stubRowFromDimension(dim: ProductDimensionRow): OperationsProductRow {
     barType: dim.barType?.trim() || '未识别',
     soldCount: 0,
     soldOrderCount: 0,
+    paidOrderCount: 0,
     soldAmountYuan: 0,
     buyerCount: 0,
     returnOrderCount: 0,
@@ -162,35 +165,42 @@ function stubRowFromDimension(dim: ProductDimensionRow): OperationsProductRow {
   }
 }
 
-export function buildHotProductRankings(products: OperationsProductRow[]): ProductRankItem[] {
+export function buildHotProductRankings(
+  products: OperationsProductRow[],
+  limit?: number,
+): ProductRankItem[] {
   const reliableQuality: ProductRankDataQuality = {
     basis: 'valid_performance_view',
     reliable: true,
   }
-  return products
+  const sorted = products
     .filter((p) => p.soldOrderCount > 0 && p.soldAmountYuan > 0)
     .sort(sortHotProducts)
-    .slice(0, OPERATIONS_PRODUCT_RANKING.hotRankLimit)
-    .map((p) => ({
-      ...rowToRankBase(p),
-      rankReason: '按有效成交金额、成交订单、成交件数排序',
-      rankingType: 'hot' as const,
-      dataQuality: reliableQuality,
-      sampleTooSmall: false,
-    }))
+  const capped = limit != null ? sorted.slice(0, limit) : sorted
+  return capped.map((p) => ({
+    ...rowToRankBase(p),
+    rankReason: '按有效成交金额、成交订单、成交件数排序',
+    rankingType: 'hot' as const,
+    dataQuality: reliableQuality,
+    sampleTooSmall: false,
+  }))
 }
 
-export function buildHighReturnProductRankings(products: OperationsProductRow[]): {
+export function buildHighReturnProductRankings(
+  products: OperationsProductRow[],
+  limit?: number,
+): {
   formal: ProductRankItem[]
   sampleTooSmall: ProductRankItem[]
 } {
   const minOrders = OPERATIONS_PRODUCT_RANKING.minSoldOrderCountForHighReturn
-  const withReturns = products.filter(
-    (p) => p.returnOrderCount > 0 && p.returnRate != null && p.returnRate > 0,
-  )
-  const formalPool = withReturns.filter((p) => p.soldOrderCount >= minOrders)
+  const withReturns = products.filter((p) => {
+    const paid = p.paidOrderCount ?? 0
+    return p.returnOrderCount > 0 && paid > 0
+  })
+  const formalPool = withReturns.filter((p) => (p.paidOrderCount ?? 0) >= minOrders)
   const samplePool = withReturns.filter(
-    (p) => p.soldOrderCount > 0 && p.soldOrderCount < minOrders,
+    (p) => (p.paidOrderCount ?? 0) > 0 && (p.paidOrderCount ?? 0) < minOrders,
   )
 
   const formalQuality: ProductRankDataQuality = {
@@ -200,30 +210,38 @@ export function buildHighReturnProductRankings(products: OperationsProductRow[])
   const sampleQuality: ProductRankDataQuality = {
     basis: 'manual_product_dimension',
     reliable: false,
-    warning: `成交订单不足 ${minOrders} 单，样本不足，仅参考`,
+    warning: `支付订单不足 ${minOrders} 单，样本不足，仅参考`,
   }
 
   const formal = formalPool
     .sort(sortHighReturnProducts)
-    .slice(0, OPERATIONS_PRODUCT_RANKING.highReturnRankLimit)
-    .map((p) => ({
-      ...rowToRankBase(p),
-      rankReason: `商品退货订单率 ${p.returnOrderCount}/${p.soldOrderCount}`,
-      rankingType: 'high_return' as const,
-      dataQuality: formalQuality,
-      sampleTooSmall: false,
-    }))
+    .slice(0, limit ?? formalPool.length)
+    .map((p) => {
+      const paid = p.paidOrderCount ?? 0
+      return {
+        ...rowToRankBase(p),
+        returnRate: computeProductReturnRateByOrder(paid, p.returnOrderCount),
+        rankReason: `商品退货订单率 ${p.returnOrderCount}/${paid}`,
+        rankingType: 'high_return' as const,
+        dataQuality: formalQuality,
+        sampleTooSmall: false,
+      }
+    })
 
   const sampleTooSmall = samplePool
     .sort(sortHighReturnProducts)
-    .slice(0, OPERATIONS_PRODUCT_RANKING.highReturnRankLimit)
-    .map((p) => ({
-      ...rowToRankBase(p),
-      rankReason: `样本不足：退货订单 ${p.returnOrderCount} / 成交订单 ${p.soldOrderCount}`,
-      rankingType: 'sample_too_small' as const,
-      dataQuality: sampleQuality,
-      sampleTooSmall: true,
-    }))
+    .slice(0, limit ?? samplePool.length)
+    .map((p) => {
+      const paid = p.paidOrderCount ?? 0
+      return {
+        ...rowToRankBase(p),
+        returnRate: computeProductReturnRateByOrder(paid, p.returnOrderCount),
+        rankReason: `样本不足：退货订单 ${p.returnOrderCount} / 支付订单 ${paid}`,
+        rankingType: 'sample_too_small' as const,
+        dataQuality: sampleQuality,
+        sampleTooSmall: true,
+      }
+    })
 
   return { formal, sampleTooSmall }
 }
@@ -352,11 +370,12 @@ export function mergeProductRowsList(rows: OperationsProductRow[]): OperationsPr
     }
     existing.soldCount += p.soldCount
     existing.soldOrderCount += p.soldOrderCount
+    existing.paidOrderCount = (existing.paidOrderCount ?? 0) + (p.paidOrderCount ?? 0)
     existing.soldAmountYuan += p.soldAmountYuan
     existing.buyerCount += p.buyerCount
     existing.returnOrderCount += p.returnOrderCount
     existing.returnRate = computeProductReturnRateByOrder(
-      existing.soldOrderCount,
+      existing.paidOrderCount ?? 0,
       existing.returnOrderCount,
     )
   }

@@ -32,6 +32,7 @@ export interface OperationsProductRow {
   barType: string
   soldCount: number
   soldOrderCount: number
+  paidOrderCount: number
   soldAmountYuan: number
   buyerCount: number
   returnOrderCount: number
@@ -171,6 +172,7 @@ export async function buildOperationsProductAnalysis(
       barType,
       soldCount: bucket.soldCount,
       soldOrderCount,
+      paidOrderCount,
       soldAmountYuan: Math.round(bucket.soldAmountCent / 100),
       buyerCount: bucket.buyers.size,
       returnOrderCount,

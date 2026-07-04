@@ -52,6 +52,7 @@ function highlightToProductRow(
     barType: p.barType,
     soldCount: p.soldCount,
     soldOrderCount: p.soldOrderCount,
+    paidOrderCount: p.soldOrderCount,
     soldAmountYuan: p.validAmountYuan ?? p.soldAmountYuan,
     buyerCount: p.buyerCount,
     returnOrderCount: p.returnOrderCount,

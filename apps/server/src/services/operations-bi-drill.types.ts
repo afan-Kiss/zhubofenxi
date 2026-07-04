@@ -131,6 +131,7 @@ export interface OperationsBiDrillPayload {
   summary: {
     orderCount: number
     validAmountYuan: number
+    refundAmountYuan?: number
     productReturnOrderCount: number
     productReturnRate: number | null
     buyerCount?: number | null

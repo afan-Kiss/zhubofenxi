@@ -53,7 +53,12 @@ import {
 } from './operations-business-insights.service'
 import { attachBusinessInsightActions } from './operations-business-insight-action.service'
 import type { BusinessInsightsPayload } from './operations-business-insights.types'
-import { computeReturnOrderRateRatio, computeOperationsRefundMetricsFromViews } from './operations-after-sale-order.util'
+import {
+  computeReturnOrderRateRatio,
+  computeOperationsRefundMetricsFromViews,
+  resolveOperationsAfterSalesReasonRaw,
+  viewCountsAsOperationsAfterSalesReasonOrder,
+} from './operations-after-sale-order.util'
 import { prisma } from '../lib/prisma'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import { buildDailyReportLiveScheduleFields, buildLiveSessionCountSummary, buildPerSessionLivePeriodText } from './daily-report-live-schedule-match.service'
@@ -283,17 +288,11 @@ export function buildAfterSalesItemsFromViews(views: AnalyzedOrderView[]): Array
   const deduped = dedupeViewsByMetricOrderNo(views)
   const items: Array<{ rawReason: string; refundAmountCent: number; orderKey: string }> = []
   for (const v of deduped) {
-    if (!isProductReturnOrder(v)) continue
+    if (!viewCountsAsOperationsAfterSalesReasonOrder(v)) continue
     const orderKey = resolveMetricOrderNo(v) || v.orderId
     if (!orderKey) continue
-    const rawReason =
-      v.afterSalesWorkbenchReason?.trim() ||
-      v.afterSaleReasonText?.trim() ||
-      v.reasonText?.trim() ||
-      v.finalAfterSaleReason?.trim() ||
-      ''
     items.push({
-      rawReason,
+      rawReason: resolveOperationsAfterSalesReasonRaw(v),
       refundAmountCent: v.productRefundAmountCent,
       orderKey,
     })

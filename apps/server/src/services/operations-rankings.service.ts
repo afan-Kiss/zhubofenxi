@@ -125,7 +125,7 @@ function buildBossSummary(params: {
       primaryText: topHighReturn.productName,
       metrics: [
         { label: '退货订单', value: String(topHighReturn.returnOrderCount) },
-        { label: '成交订单', value: String(topHighReturn.soldOrderCount) },
+        { label: '支付订单', value: String(topHighReturn.paidOrderCount) },
       ],
       reason: topHighReturn.rankReason,
       basis: 'computed_from_valid_performance_view',
@@ -251,7 +251,6 @@ export async function getOperationsRankings(params: {
   endDate: string
   preset?: OperationsRankingsPreset | string
   scope?: 'daily' | 'weekly' | 'custom'
-  sections?: string[]
   limit?: number
   role?: UserRole
   username?: string

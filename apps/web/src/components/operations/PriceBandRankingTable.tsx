@@ -28,12 +28,14 @@ export const PriceBandRankingTable: React.FC<Props> = ({
   }
   return (
     <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-      <table className="min-w-[800px] w-full text-left text-xs">
+      <table className="min-w-[900px] w-full text-left text-xs">
         <thead className="bg-slate-50 text-slate-600">
           <tr>
             <th className="px-3 py-2">价格带</th>
             <th className="px-3 py-2">成交金额</th>
             <th className="px-3 py-2">成交订单</th>
+            <th className="px-3 py-2">支付订单</th>
+            <th className="px-3 py-2">买家数</th>
             <th className="px-3 py-2">占比</th>
             <th className="px-3 py-2">客单价</th>
             <th className="px-3 py-2">退货订单</th>
@@ -48,6 +50,8 @@ export const PriceBandRankingTable: React.FC<Props> = ({
               <td className="px-3 py-2 font-medium">{row.bandLabel}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
+              <td className="px-3 py-2">{formatOrderCount(row.paidOrderCount)}</td>
+              <td className="px-3 py-2">{formatOrderCount(row.buyerCount)}</td>
               <td className="px-3 py-2">{formatPercent(row.amountSharePercent)}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.averageOrderValueYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.productReturnOrderCount)}</td>

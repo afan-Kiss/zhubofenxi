@@ -8,6 +8,7 @@ import { OPERATIONS_ANCHOR_RANKING } from '../src/config/operations-anchor-ranki
 import { OPERATIONS_PRODUCT_RANKING } from '../src/config/operations-product-ranking.config'
 import { resolvePriceBandLabelFromCent } from '../src/config/operations-price-band.config'
 import type { DailyOperationsAnchorRow } from '../src/services/daily-operations-report.service'
+import { buildAfterSalesItemsFromViews } from '../src/services/daily-operations-report.service'
 import {
   buildAnchorRankingsByDealConversion,
   buildAnchorRankingsByHourlyAmount,
@@ -20,16 +21,24 @@ import {
   buildSlowProductRankings,
   sortHotProducts,
 } from '../src/services/operations-product-ranking.service'
+import { buildProductRankingLists } from '../src/services/operations-product-ranking-lists.service'
 import type { OperationsProductRow } from '../src/services/operations-product-analysis.service'
 import { buildPriceBandRankingLists } from '../src/services/operations-price-band-ranking.service'
 import type { OperationsPriceBandRow } from '../src/services/operations-price-band.service'
 import { buildAfterSalesRankingLists } from '../src/services/operations-after-sales-ranking.service'
-import { normalizeAfterSalesReason } from '../src/services/after-sales-reason-normalize.service'
+import {
+  aggregateAfterSalesReasons,
+  normalizeAfterSalesReason,
+} from '../src/services/after-sales-reason-normalize.service'
 import {
   buildOperationsDailyTrendFromSnapshots,
   detectSuspiciousDailyTrendRepeat,
 } from '../src/services/operations-daily-trend.service'
 import type { DailyOperationsReportPayload } from '../src/services/daily-operations-report.service'
+import type {
+  AnchorRankItem,
+  ProductRankListItem,
+} from '../src/services/operations-rankings.types'
 
 function mockDailySnapshot(
   date: string,
@@ -103,27 +112,48 @@ function mockAnchor(overrides: Partial<DailyOperationsAnchorRow> & { anchorName:
 }
 
 function mockProduct(overrides: Partial<OperationsProductRow> & { productKey: string }): OperationsProductRow {
+  const soldOrderCount = overrides.soldOrderCount ?? 0
+  const paidOrderCount = overrides.paidOrderCount ?? soldOrderCount
   return {
     productKey: overrides.productKey,
     itemId: overrides.productKey,
     productName: overrides.productName ?? overrides.productKey,
     skuName: overrides.skuName ?? '',
     shopName: overrides.shopName ?? '店',
-    productCode: null,
+    productCode: overrides.productCode ?? null,
     ringSize: '未识别',
     barType: '未识别',
     soldCount: overrides.soldCount ?? 0,
-    soldOrderCount: overrides.soldOrderCount ?? 0,
+    soldOrderCount,
+    paidOrderCount,
     soldAmountYuan: overrides.soldAmountYuan ?? 0,
-    buyerCount: 0,
+    buyerCount: overrides.buyerCount ?? 0,
     returnOrderCount: overrides.returnOrderCount ?? 0,
     returnRate: overrides.returnRate ?? null,
     productRole: 'normal',
-    productRoleLabel: '常规',
+    productRoleLabel: overrides.productRoleLabel ?? '常规',
   }
 }
 
+function testAnchorReturnRatePaidDenominator(issues: string[]) {
+  const row = mockAnchor({
+    anchorName: 'R',
+    paidOrderCount: 10,
+    soldOrderCount: 3,
+    returnOrderCount: 2,
+  })
+  const ret = buildAnchorRankingsByReturnRate([row])
+  const item = ret.items[0]
+  assert(item != null, '10 支付单应进正式退货榜', issues)
+  assert(item!.returnRate === 2 / 10, '主播 returnRate 必须是 2/10', issues)
+  assert(item!.rankReason.includes('2/10'), 'rankReason 必须包含 2/10', issues)
+  assert(!item!.rankReason.includes('2/3'), 'rankReason 不允许包含 2/3', issues)
+  assert(typeof item!.paidOrderCount === 'number', 'AnchorRankItem 必须有 paidOrderCount', issues)
+}
+
 function testAnchorRankings(issues: string[]) {
+  testAnchorReturnRatePaidDenominator(issues)
+
   const rows = [
     mockAnchor({ anchorName: 'A', validAmountYuan: 100, soldOrderCount: 2 }),
     mockAnchor({ anchorName: 'B', validAmountYuan: 200, soldOrderCount: 1 }),
@@ -151,14 +181,33 @@ function testAnchorRankings(issues: string[]) {
   assert(!deal.items.some((i) => i.anchorName === 'D'), 'dealUserCount 缺失不进成交率榜', issues)
 
   const ret = buildAnchorRankingsByReturnRate([
-    mockAnchor({ anchorName: 'R1', soldOrderCount: 3, returnOrderCount: 2 }),
-    mockAnchor({ anchorName: 'R2', soldOrderCount: 2, returnOrderCount: 2 }),
+    mockAnchor({ anchorName: 'R1', paidOrderCount: 3, returnOrderCount: 2 }),
+    mockAnchor({ anchorName: 'R2', paidOrderCount: 2, returnOrderCount: 2 }),
   ])
-  assert(ret.items.some((i) => i.anchorName === 'R1'), '3单应进正式退货榜', issues)
-  assert(!ret.items.some((i) => i.anchorName === 'R2'), '2单不进正式退货榜', issues)
+  assert(ret.items.some((i) => i.anchorName === 'R1'), '3 支付单应进正式退货榜', issues)
+  assert(!ret.items.some((i) => i.anchorName === 'R2'), '2 支付单不进正式退货榜', issues)
+}
+
+function testProductReturnRatePaidDenominator(issues: string[]) {
+  const product = mockProduct({
+    productKey: 'p-rate',
+    paidOrderCount: 10,
+    soldOrderCount: 3,
+    returnOrderCount: 2,
+    returnRate: 2 / 10,
+    soldAmountYuan: 100,
+  })
+  const { formal } = buildHighReturnProductRankings([product])
+  const item = formal[0]
+  assert(item != null, '高退货正式榜应有样本', issues)
+  assert(item!.returnRate === 2 / 10, '商品 returnRate 必须是 2/10', issues)
+  assert(item!.rankReason.includes('2/10'), '高退货 rankReason 必须包含 2/10', issues)
+  assert(!item!.rankReason.includes('2/3'), '高退货 rankReason 不允许包含 2/3', issues)
 }
 
 function testProductRankings(issues: string[]) {
+  testProductReturnRatePaidDenominator(issues)
+
   const pool = [
     mockProduct({ productKey: 'a', soldAmountYuan: 100, soldOrderCount: 2, soldCount: 3 }),
     mockProduct({ productKey: 'b', soldAmountYuan: 200, soldOrderCount: 1, soldCount: 5 }),
@@ -182,15 +231,78 @@ function testProductRankings(issues: string[]) {
   assert(!isDailyReportSoldOrder(closed), '关闭单不计有效成交', issues)
 
   const { formal, sampleTooSmall } = buildHighReturnProductRankings([
-    mockProduct({ productKey: 'hr1', soldOrderCount: 3, returnOrderCount: 2, returnRate: 2 / 3 }),
-    mockProduct({ productKey: 'hr2', soldOrderCount: 2, returnOrderCount: 2, returnRate: 1 }),
+    mockProduct({
+      productKey: 'hr1',
+      paidOrderCount: 3,
+      returnOrderCount: 2,
+      returnRate: 2 / 3,
+      soldAmountYuan: 100,
+    }),
+    mockProduct({
+      productKey: 'hr2',
+      paidOrderCount: 2,
+      returnOrderCount: 2,
+      returnRate: 1,
+      soldAmountYuan: 100,
+    }),
   ])
-  assert(formal.every((p) => p.soldOrderCount >= OPERATIONS_PRODUCT_RANKING.minSoldOrderCountForHighReturn), '高退货正式榜门槛', issues)
+  assert(
+    formal.every((p) => p.paidOrderCount >= OPERATIONS_PRODUCT_RANKING.minSoldOrderCountForHighReturn),
+    '高退货正式榜门槛按支付订单',
+    issues,
+  )
   assert(sampleTooSmall.some((p) => p.productKey === 'hr2'), '低样本进 sampleTooSmall', issues)
 
   const slow = buildSlowProductRankings({ products: pool, dimensions: [], reviewNote: null })
   assert(slow.items.length === 0, '无候选池不生成滞销', issues)
   assert(slow.dataQuality.basis === 'insufficient_data', '滞销 basis insufficient', issues)
+}
+
+function testProductLimit(issues: string[]) {
+  const products: OperationsProductRow[] = []
+  for (let i = 0; i < 20; i++) {
+    products.push(
+      mockProduct({
+        productKey: `hot-${i}`,
+        soldAmountYuan: 1000 - i,
+        soldOrderCount: 1,
+        productCode: `CODE-${i}`,
+        buyerCount: 1,
+        productRoleLabel: '常规',
+      }),
+    )
+  }
+  const hot15 = buildHotProductRankings(products, 15)
+  assert(hot15.length === 15, 'limit=15 时热卖榜应返回 15 条', issues)
+
+  const highReturnProducts: OperationsProductRow[] = []
+  for (let i = 0; i < 8; i++) {
+    highReturnProducts.push(
+      mockProduct({
+        productKey: `hr-${i}`,
+        paidOrderCount: 5,
+        returnOrderCount: 2 + i,
+        returnRate: (2 + i) / 5,
+        soldAmountYuan: 100,
+      }),
+    )
+  }
+  const { formal: high8 } = buildHighReturnProductRankings(highReturnProducts, 8)
+  assert(high8.length === 8, 'limit=8 时高退货榜应返回 8 条，不应被 5 条截断', issues)
+
+  const lists = buildProductRankingLists({
+    products,
+    dimensions: [],
+    reviewNote: null,
+    limit: 15,
+  })
+  assert(lists.hot.items.length === 15, 'buildProductRankingLists limit=15 热卖', issues)
+  assert(lists.byAmount.items.length === 15, 'byAmount 应与 hot 同批数据', issues)
+  const item = lists.hot.items[0] as ProductRankListItem
+  assert(typeof item.paidOrderCount === 'number', 'ProductRankListItem 含 paidOrderCount', issues)
+  assert(typeof item.productCode === 'string' || item.productCode === null, 'ProductRankListItem 含 productCode', issues)
+  assert(typeof item.buyerCount === 'number', 'ProductRankListItem 含 buyerCount', issues)
+  assert(typeof item.productRoleLabel === 'string', 'ProductRankListItem 含 productRoleLabel', issues)
 }
 
 function testPriceBandRankings(issues: string[]) {
@@ -200,23 +312,60 @@ function testPriceBandRankings(issues: string[]) {
   const rows: OperationsPriceBandRow[] = [
     {
       bandLabel: '400~599',
-      orderCount: 5,
+      orderCount: 3,
+      paidOrderCount: 10,
       amountYuan: 2000,
       buyerCount: 4,
       amountSharePercent: 50,
       avgOrderAmountYuan: 400,
       returnOrderCount: 2,
-      returnRate: 40,
+      returnRate: 2 / 10,
     },
   ]
   const lists = buildPriceBandRankingLists(rows)
   const ret = lists.byReturnRate.items[0]
-  assert(ret != null && ret.productReturnOrderRate === 2 / 5, '价格带退货率用订单维度', issues)
+  assert(ret != null && ret.productReturnOrderRate === 2 / 10, '价格带退货率用支付订单维度 2/10', issues)
+  assert(ret!.paidOrderCount === 10, 'PriceBandRankItem 含 paidOrderCount', issues)
+
+  const zeroPaid: OperationsPriceBandRow[] = [
+    {
+      bandLabel: '600~799',
+      orderCount: 0,
+      paidOrderCount: 0,
+      amountYuan: 0,
+      buyerCount: 0,
+      amountSharePercent: null,
+      avgOrderAmountYuan: null,
+      returnOrderCount: 0,
+      returnRate: null,
+    },
+  ]
+  const zeroLists = buildPriceBandRankingLists(zeroPaid)
+  assert(
+    zeroLists.byReturnRate.items.every((i) => i.productReturnOrderRate == null),
+    'paidOrderCount=0 时退货率为 null',
+    issues,
+  )
 }
 
 function testAfterSalesRankings(issues: string[]) {
   const norm = normalizeAfterSalesReason('尺寸不合适')
   assert(norm.category === 'size_mismatch', '售后归一化', issues)
+
+  const zeroRefundView = {
+    orderId: 'as1',
+    productRefundAmountCent: 0,
+    isReturnRefund: true,
+    isFreightRefundOnly: false,
+    afterSalesWorkbenchReason: '尺寸不合适',
+    paymentBaseCent: 10000,
+  } as AnalyzedOrderView
+  const items = buildAfterSalesItemsFromViews([zeroRefundView])
+  assert(items.length === 1, 'productRefundAmountCent=0 但 isReturnRefund 应进售后原因榜', issues)
+
+  const aggregated = aggregateAfterSalesReasons(items)
+  assert(aggregated[0]!.orderCount === 1, '售后原因榜 orderCount=1', issues)
+
   const lists = buildAfterSalesRankingLists([
     {
       category: 'size_mismatch',
@@ -232,6 +381,32 @@ function testAfterSalesRankings(issues: string[]) {
   for (const f of forbidden) {
     assert(!json.includes(f), `售后榜不应含 ${f}`, issues)
   }
+
+  const freightOnly = {
+    orderId: 'f1',
+    productRefundAmountCent: 0,
+    isFreightRefundOnly: true,
+    isReturnRefund: true,
+    afterSalesWorkbenchReason: '运费补偿',
+  } as AnalyzedOrderView
+  assert(
+    buildAfterSalesItemsFromViews([freightOnly]).length === 0,
+    '纯运费补偿不进商品售后原因榜',
+    issues,
+  )
+}
+
+function testTypeFields(issues: string[]) {
+  const anchor = buildAnchorRankingsByReturnRate([
+    mockAnchor({ anchorName: 'T', paidOrderCount: 5, returnOrderCount: 1 }),
+  ]).items[0] as AnchorRankItem | undefined
+  assert(anchor != null, 'anchor item exists', issues)
+  assert(typeof anchor!.paidOrderCount === 'number', 'anchor paidOrderCount', issues)
+  assert(
+    anchor!.followerConversionRate == null || typeof anchor!.followerConversionRate === 'number',
+    'anchor followerConversionRate',
+    issues,
+  )
 }
 
 function testDailyTrendHelpers(issues: string[]) {
@@ -265,8 +440,10 @@ function main() {
   const issues: string[] = []
   testAnchorRankings(issues)
   testProductRankings(issues)
+  testProductLimit(issues)
   testPriceBandRankings(issues)
   testAfterSalesRankings(issues)
+  testTypeFields(issues)
   testDailyTrendHelpers(issues)
 
   if (issues.length > 0) {

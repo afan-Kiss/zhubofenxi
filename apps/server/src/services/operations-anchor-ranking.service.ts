@@ -23,6 +23,7 @@ function anchorToBase(row: DailyOperationsAnchorRow): Omit<AnchorRankItem, 'rank
     shopName: row.shopName || '—',
     validAmountYuan: row.validAmountYuan,
     soldOrderCount: row.soldOrderCount,
+    paidOrderCount: row.paidOrderCount ?? 0,
     returnOrderCount: row.returnOrderCount,
     returnRate,
     liveDurationMinutes: row.liveDurationMinutes,
@@ -295,13 +296,13 @@ export function buildAnchorRankingsByReturnRate(
     items: [...formalPool].sort(sortReturn).slice(0, limit).map((r) =>
       buildAnchorItem(
         r,
-        `商品退货订单率 ${r.returnOrderCount}/${r.soldOrderCount}`,
+        `商品退货订单率 ${r.returnOrderCount}/${r.paidOrderCount}`,
       ),
     ),
     sampleTooSmall: [...samplePool].sort(sortReturn).slice(0, limit).map((r) =>
       buildAnchorItem(
         r,
-        `样本不足：商品退货订单率 ${r.returnOrderCount}/${r.soldOrderCount}`,
+        `样本不足：商品退货订单率 ${r.returnOrderCount}/${r.paidOrderCount}`,
         true,
       ),
     ),

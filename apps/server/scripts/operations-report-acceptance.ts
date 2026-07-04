@@ -241,7 +241,7 @@ function makeMinimalView(partial: Partial<AnalyzedOrderView>): AnalyzedOrderView
   }
 }
 
-function testLowPriceBrushExcludedFromPerformanceViews(issues: string[]) {
+async function testLowPriceBrushExcludedFromPerformanceViews(issues: string[]) {
   const normal = makeMinimalView({
     orderId: 'normal',
     matchOrderId: 'normal',
@@ -258,7 +258,7 @@ function testLowPriceBrushExcludedFromPerformanceViews(issues: string[]) {
 
   assert(isLowPriceBrushOrderView(lowPrice), '低价单应被识别为刷单', issues)
 
-  const filtered = getAnchorPerformanceViews(
+  const filtered = await getAnchorPerformanceViews(
     [normal, lowPrice],
     new Map([
       ['normal', {}],
@@ -387,6 +387,7 @@ function mockProduct(overrides: Partial<OperationsProductRow> & Pick<OperationsP
     barType: overrides.barType ?? '未识别',
     soldCount: overrides.soldCount ?? 0,
     soldOrderCount: overrides.soldOrderCount ?? 0,
+    paidOrderCount: overrides.paidOrderCount ?? overrides.soldOrderCount ?? 0,
     soldAmountYuan: overrides.soldAmountYuan ?? 0,
     buyerCount: overrides.buyerCount ?? 0,
     returnOrderCount: overrides.returnOrderCount ?? 0,
@@ -415,31 +416,41 @@ function testProductRankings(issues: string[]) {
   const highPool = [
     mockProduct({
       productKey: 'hr1',
+      paidOrderCount: 3,
       soldOrderCount: 3,
       returnOrderCount: 2,
       returnRate: 2 / 3,
+      soldAmountYuan: 100,
     }),
     mockProduct({
       productKey: 'hr2',
+      paidOrderCount: 2,
       soldOrderCount: 2,
       returnOrderCount: 2,
       returnRate: 1,
+      soldAmountYuan: 100,
     }),
     mockProduct({
       productKey: 'hr3',
+      paidOrderCount: 10,
       soldOrderCount: 10,
       returnOrderCount: 3,
       returnRate: 0.3,
+      soldAmountYuan: 100,
     }),
   ]
   const { formal, sampleTooSmall } = buildHighReturnProductRankings(highPool)
-  assert(formal.every((p) => p.soldOrderCount >= OPERATIONS_PRODUCT_RANKING.minSoldOrderCountForHighReturn), '高退货正式榜应满足最小样本', issues)
-  assert(!formal.some((p) => p.productKey === 'hr2'), '2单高退货不应进入正式榜', issues)
+  assert(
+    formal.every((p) => p.paidOrderCount >= OPERATIONS_PRODUCT_RANKING.minSoldOrderCountForHighReturn),
+    '高退货正式榜应满足最小支付订单样本',
+    issues,
+  )
+  assert(!formal.some((p) => p.productKey === 'hr2'), '2 支付单高退货不应进入正式榜', issues)
   assert(sampleTooSmall.some((p) => p.productKey === 'hr2'), '低样本应进入 sampleTooSmall', issues)
   assert(formal[0]!.productKey === 'hr1', '高退货正式榜应按退货率排序', issues)
   assert(
-    formal.every((p) => p.returnRate === p.returnOrderCount / p.soldOrderCount),
-    '高退货榜退货率应为订单维度',
+    formal.every((p) => p.returnRate === p.returnOrderCount / p.paidOrderCount),
+    '高退货榜退货率应为支付订单维度',
     issues,
   )
 
@@ -506,12 +517,12 @@ function testTrafficNullable(issues: string[]) {
   assert(zero.dealUserCount === 0, '官方返回 0 应保留 0', issues)
 }
 
-function main() {
+async function main() {
   const issues: string[] = []
   testPriceBands(issues)
   testProductReturnRateByOrder(issues)
   testWeeklyTrafficRates(issues)
-  testLowPriceBrushExcludedFromPerformanceViews(issues)
+  await testLowPriceBrushExcludedFromPerformanceViews(issues)
   testProductRole(issues)
   testAfterSalesReason(issues)
   testPrivacy(issues)

@@ -64,7 +64,7 @@ export interface BoardLiveQueryResult {
   endDate: string
   rangeKey?: string
   resolvedRange?: { preset: string; startDate: string; endDate: string }
-  source: 'live_api'
+  source: 'local_db' | 'live_api'
   isFromCache: boolean
   fetchedAt: string
   progress: {

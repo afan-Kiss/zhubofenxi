@@ -31,6 +31,9 @@ interface MetricDetailData {
     value?: number
     valueRaw?: number
     valueText?: string
+    stableValueRaw?: number
+    latestValueRaw?: number
+    diffAmount?: number
     productRefundAmount?: number
     refundRelatedOrderCount?: number
     refundWithAmountOrderCount?: number
@@ -45,6 +48,8 @@ interface MetricDetailData {
   pageSummary?: Record<string, unknown>
   blacklistedBuyerIds?: string[]
   source?: string
+  overviewStableWarning?: string
+  overviewStableSnapshot?: boolean
 }
 
 interface Props {
@@ -58,6 +63,7 @@ interface Props {
   anchorName?: string
   cardValueRaw?: number
   blacklistedBuyerIds?: string[]
+  overviewStableSnapshot?: boolean
 }
 
 export const BoardMetricDrawer: React.FC<Props> = ({
@@ -71,6 +77,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
   anchorName,
   cardValueRaw,
   blacklistedBuyerIds = [],
+  overviewStableSnapshot = false,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [loading, setLoading] = useState(false)
@@ -102,6 +109,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
         if (tab) qs.set('tab', tab)
         if (anchorId) qs.set('anchorId', anchorId)
         if (anchorName) qs.set('anchorName', anchorName)
+        if (overviewStableSnapshot) qs.set('overviewStableSnapshot', 'true')
         const res = await apiRequest<MetricDetailData>(`/api/board/metric-detail?${qs}`, {
           signal: controller.signal,
         })
@@ -119,7 +127,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     })()
 
     return () => controller.abort()
-  }, [open, metric, startDate, endDate, page, tab, preset, anchorId, anchorName, pageSize, reloadNonce])
+  }, [open, metric, startDate, endDate, page, tab, preset, anchorId, anchorName, pageSize, reloadNonce, overviewStableSnapshot])
 
   useEffect(() => {
     setPage(1)
@@ -148,10 +156,16 @@ export const BoardMetricDrawer: React.FC<Props> = ({
           : formatCount(data?.summary.matchedOrders ?? 0))
 
   const cardMismatch =
+    !overviewStableSnapshot &&
+    !data?.overviewStableSnapshot &&
     cardValueRaw != null &&
     data?.summary.valueRaw != null &&
     Math.abs(cardValueRaw - data.summary.valueRaw) > 0.02 &&
     !metric.includes('Rate')
+
+  const stableDrawerActive = Boolean(
+    overviewStableSnapshot || data?.overviewStableSnapshot || data?.overviewStableWarning,
+  )
 
   const drawerSubtitle = (() => {
     const rangePart =
@@ -196,6 +210,39 @@ export const BoardMetricDrawer: React.FC<Props> = ({
         </div>
       ) : data ? (
         <div className="animate-in fade-in space-y-4 duration-300">
+          {data.overviewStableWarning ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-900">
+              <p className="font-medium">{data.overviewStableWarning}</p>
+              {data.summary.stableValueRaw != null && data.summary.latestValueRaw != null ? (
+                <p className="mt-2">
+                  稳定版：
+                  {metric.includes('Rate')
+                    ? formatRate(data.summary.stableValueRaw)
+                    : metric.includes('Amount') || metric === 'gmv' || metric === 'effectiveGmv'
+                      ? formatMoney(data.summary.stableValueRaw)
+                      : formatCount(data.summary.stableValueRaw)}
+                  {' · '}
+                  最新重算：
+                  {metric.includes('Rate')
+                    ? formatRate(data.summary.latestValueRaw)
+                    : metric.includes('Amount') || metric === 'gmv' || metric === 'effectiveGmv'
+                      ? formatMoney(data.summary.latestValueRaw)
+                      : formatCount(data.summary.latestValueRaw)}
+                  {data.summary.diffAmount != null ? (
+                    <span>
+                      {' '}
+                      · 差异：
+                      {metric.includes('Rate')
+                        ? formatRate(data.summary.diffAmount)
+                        : metric.includes('Amount') || metric === 'gmv' || metric === 'effectiveGmv'
+                          ? formatMoney(data.summary.diffAmount)
+                          : formatCount(data.summary.diffAmount)}
+                    </span>
+                  ) : null}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="rounded-2xl bg-gradient-to-br from-rose-50 to-white p-4 text-xs text-slate-700 shadow-sm transition-all">
             <p className="font-medium text-rose-900">{data.formulaText}</p>
             {data.summary.description ? (
@@ -229,6 +276,10 @@ export const BoardMetricDrawer: React.FC<Props> = ({
             {cardMismatch ? (
               <p className="mt-1 text-[10px] text-amber-700">
                 明细数据来自最新查询结果，首页卡片以当前看板统计为准。
+              </p>
+            ) : stableDrawerActive && data.summary.stableValueRaw != null ? (
+              <p className="mt-1 text-[10px] text-amber-700">
+                下方订单明细按最新重算统计，合计金额可能与稳定版卡片不同。
               </p>
             ) : null}
             {isQualityMetric && unmatchedOfficialCount > 0 ? (

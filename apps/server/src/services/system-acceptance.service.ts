@@ -48,7 +48,7 @@ export async function runSystemAcceptanceChecks(
   let live: Awaited<ReturnType<typeof executeBoardLiveQuery>> | null = null
   try {
     live = await executeBoardLiveQuery({ preset: 'today' })
-    liveOk = live.source === 'live_api'
+    liveOk = live.source === 'live_api' || live.source === 'local_db'
     liveOrderCount = Number(live.summary.orderCount ?? 0)
   } catch {
     liveOk = false

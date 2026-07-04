@@ -17,6 +17,7 @@ import { filterViewsForCoreMetrics } from '../src/services/metrics-exclusion.ser
 import { resolveBusinessRange } from '../src/utils/business-range'
 import { buildBoardMetricDetail } from '../src/services/board-metric-detail.service'
 import { sumValidRevenueFromViews } from '../src/services/valid-revenue-order.service'
+import type { OverviewMeta } from '../src/services/overview-meta.service'
 
 config({ path: path.resolve(__dirname, '../.env') })
 
@@ -50,6 +51,10 @@ function warn(msg: string): void {
   console.log(`⚠ ${msg}`)
 }
 
+function ok(msg: string): void {
+  console.log(`✓ ${msg}`)
+}
+
 function num(v: unknown): number {
   return Number(v ?? 0)
 }
@@ -69,12 +74,41 @@ function printMetrics(label: string, s: Record<string, unknown>): void {
   console.log(`  qualityReturnCount: ${num(s.qualityReturnCount)}`)
 }
 
+function printLastMonthStableBlock(params: {
+  overviewMeta?: OverviewMeta
+  localValid: number
+  latestValid: number
+  metricDetailValue: number
+  drawerWarningExpected: boolean
+  drawerWarningPresent: boolean
+}): void {
+  const meta = params.overviewMeta
+  const needsManualUpdate = meta?.stableVsLatest?.needsManualUpdate ?? false
+  const displayedMode = needsManualUpdate ? 'stable_snapshot' : 'latest_recalculated'
+  const stableValid = meta?.stableVsLatest?.stableValidSalesAmount ?? params.localValid
+  const latestValid = meta?.stableVsLatest?.latestValidSalesAmount ?? params.latestValid
+  const diffAmount = meta?.stableVsLatest?.diffAmount ?? diff(latestValid, stableValid)
+
+  console.log('lastMonth:')
+  console.log(`  displayedMode: ${displayedMode}`)
+  console.log(`  stableValidSalesAmount: ${stableValid}`)
+  console.log(`  latestValidSalesAmount: ${latestValid}`)
+  console.log(`  diffAmount: ${diffAmount}`)
+  console.log(`  needsManualUpdate: ${needsManualUpdate}`)
+  console.log(`  sourceSyncJobId: ${meta?.sourceSyncJobId ?? '—'}`)
+  console.log(`  cacheBuiltAt: ${meta?.cacheBuiltAt ?? '—'}`)
+  console.log(`  metricDetailValue: ${params.metricDetailValue}`)
+  console.log(`  drawerWarningExpected: ${params.drawerWarningExpected}`)
+  console.log(`  drawerWarningPresent: ${params.drawerWarningPresent}`)
+  console.log(`  overviewWarningMessage: ${meta?.stableVsLatest?.message ?? '—'}`)
+}
+
 async function checkRange(params: {
   label: string
   preset: string
   startDate?: string
   endDate?: string
-}): Promise<{ lastMonthValid?: number; lastMonthRecalc?: number }> {
+}): Promise<{ lastMonthValid?: number; lastMonthRecalc?: number; overviewMeta?: OverviewMeta }> {
   const range = resolveBusinessRange(
     params.preset as import('../src/utils/business-range').BusinessRangePreset,
     params.startDate,
@@ -94,6 +128,12 @@ async function checkRange(params: {
     startDate: range.startDate,
     endDate: range.endDate,
   })
+
+  if (local.source !== 'local_db') {
+    fail(`${params.label} local-data source 应为 local_db，实际 ${local.source}`)
+  } else {
+    ok(`${params.label} source=local_db`)
+  }
 
   const cacheSummary = (cacheEntry?.summary ?? {}) as Record<string, unknown>
   const localSummary = (local.summary ?? {}) as Record<string, unknown>
@@ -139,18 +179,35 @@ async function checkRange(params: {
 
   const localValid = num(localSummary.validSalesAmount ?? localSummary.effectiveGmv)
   const cacheValid = num(cacheSummary.validSalesAmount)
-  if (Math.abs(diff(localValid, cacheValid)) > 1 && params.preset !== 'lastMonth') {
-    warn(`${params.label} local-data summary 与 cache summary 有效成交额不一致`)
-  }
+  const latestValid = num(realtimeSummary.validSalesAmount)
 
   if (params.preset === 'lastMonth') {
+    const needsManualUpdate = overviewMeta?.stableVsLatest?.needsManualUpdate ?? false
+    if (needsManualUpdate) {
+      if (!overviewMeta?.stableVsLatest?.message) {
+        fail('lastMonth needsManualUpdate=true 但缺少 overviewMeta.stableVsLatest.message')
+      } else {
+        ok('lastMonth 稳定版差异提示已返回')
+      }
+      if (Math.abs(diff(localValid, latestValid)) > 1) {
+        ok(`lastMonth 展示稳定版 ¥${localValid}，最新重算 ¥${latestValid}（差异属预期）`)
+      }
+    } else if (Math.abs(diff(localValid, cacheValid)) > 1) {
+      warn(`${params.label} local-data summary 与 cache summary 有效成交额不一致`)
+    }
+
     console.log('  lastMonth 稳定机制:')
     console.log(`  stableSnapshot: ${overviewMeta?.stableSnapshot?.label ?? '无'}`)
     console.log(`  stableVsLatest: ${overviewMeta?.stableVsLatest?.message ?? '—'}`)
     return {
       lastMonthValid: localValid,
-      lastMonthRecalc: num(realtimeSummary.validSalesAmount),
+      lastMonthRecalc: latestValid,
+      overviewMeta,
     }
+  }
+
+  if (Math.abs(diff(localValid, cacheValid)) > 1) {
+    warn(`${params.label} local-data summary 与 cache summary 有效成交额不一致`)
   }
 
   return {}
@@ -216,7 +273,7 @@ async function printCacheRebuilds(): Promise<void> {
   }
 }
 
-async function checkValidSalesCrossModule(): Promise<void> {
+async function checkValidSalesCrossModule(overviewMeta?: OverviewMeta): Promise<void> {
   section('有效成交额口径交叉验证 (lastMonth)')
   const range = resolveBusinessRange('lastMonth')
   await buildAndSetBusinessBoardCache({ preset: 'lastMonth', ...range })
@@ -225,6 +282,10 @@ async function checkValidSalesCrossModule(): Promise<void> {
 
   const overviewValid = num(local.summary?.validSalesAmount ?? local.summary?.effectiveGmv)
   const cacheValid = num(cacheEntry?.summary?.validSalesAmount)
+  const needsManualUpdate = local.overviewMeta?.stableVsLatest?.needsManualUpdate ?? false
+  const latestValid =
+    local.overviewMeta?.stableVsLatest?.latestValidSalesAmount ??
+    num(cacheEntry?.summary?.validSalesAmount)
 
   const detail = await buildBoardMetricDetail({
     metric: 'effectiveGmv',
@@ -233,8 +294,10 @@ async function checkValidSalesCrossModule(): Promise<void> {
     endDate: range.endDate,
     role: 'super_admin',
     username: 'verify-script',
+    overviewStableSnapshot: needsManualUpdate,
   })
   const detailValid = num(detail.summary?.valueRaw ?? detail.summary?.value)
+  const drawerWarningPresent = Boolean(detail.overviewStableWarning)
 
   const views = filterViewsForCoreMetrics(cacheEntry?.views ?? [])
   const opsValid = sumValidRevenueFromViews(views).validAmountYuan
@@ -243,6 +306,44 @@ async function checkValidSalesCrossModule(): Promise<void> {
   console.log(`  business-cache: ${cacheValid}`)
   console.log(`  metric-detail effectiveGmv: ${detailValid}`)
   console.log(`  operations(validAmountYuan口径): ${opsValid}`)
+
+  printLastMonthStableBlock({
+    overviewMeta: local.overviewMeta ?? overviewMeta,
+    localValid: overviewValid,
+    latestValid,
+    metricDetailValue: detailValid,
+    drawerWarningExpected: needsManualUpdate,
+    drawerWarningPresent,
+  })
+
+  if (needsManualUpdate) {
+    if (!local.overviewMeta?.stableVsLatest?.message) {
+      fail('lastMonth 稳定差异场景缺少 overviewMeta 提示文案')
+    }
+    if (!drawerWarningPresent) {
+      fail('lastMonth 稳定差异场景 metric-detail 缺少 overviewStableWarning')
+    }
+    if (detail.summary?.stableValueRaw == null || detail.summary?.latestValueRaw == null) {
+      fail('lastMonth 稳定差异场景 metric-detail 缺少 stableValueRaw/latestValueRaw')
+    } else {
+      ok('metric-detail 已返回稳定版/最新重算对比字段')
+    }
+    if (Math.abs(diff(overviewValid, detailValid)) > 1) {
+      ok(`overview 稳定版 ¥${overviewValid} vs metric-detail 最新重算 ¥${detailValid}（允许不一致）`)
+    }
+    const cacheOpsPairs: Array<[string, number, number]> = [
+      ['cache', cacheValid, opsValid],
+      ['metric-detail', detailValid, opsValid],
+    ]
+    for (const [aName, a, b] of cacheOpsPairs) {
+      const d = Math.abs(diff(a, b))
+      if (d > 1) {
+        if (aName === 'metric-detail') ok(`${aName} vs operations 差 ${d} 元（稳定版设计下允许）`)
+        else warn(`${aName} vs operations 差 ${d} 元`)
+      }
+    }
+    return
+  }
 
   const modules = [
     ['overview', overviewValid],
@@ -269,19 +370,21 @@ async function main(): Promise<void> {
 
   let lastMonthValid: number | undefined
   let lastMonthRecalc: number | undefined
+  let lastMonthMeta: OverviewMeta | undefined
 
   for (const r of CHECK_RANGES) {
     const out = await checkRange(r)
     if (r.preset === 'lastMonth') {
       lastMonthValid = out.lastMonthValid
       lastMonthRecalc = out.lastMonthRecalc
+      lastMonthMeta = out.overviewMeta
     }
   }
 
   await printSyncJobs()
   await printHistoricalAdjustments()
   await printCacheRebuilds()
-  await checkValidSalesCrossModule()
+  await checkValidSalesCrossModule(lastMonthMeta)
 
   section('汇总')
   if (lastMonthValid != null) {

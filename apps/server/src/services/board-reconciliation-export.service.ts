@@ -49,11 +49,14 @@ export function assertLiveQueryExportPayload(
     throw new Error('缺少实时查询数据，请先在经营看板完成数据刷新')
   }
   const d = data as BoardLiveQueryResult
-  if (d.source !== 'live_api' || d.isFromCache !== false) {
-    throw new Error('仅支持导出实时接口数据，请先刷新经营看板')
+  if (d.source !== 'local_db' && d.source !== 'live_api') {
+    throw new Error('数据来源无效，请先刷新经营看板')
+  }
+  if (d.source === 'live_api' && d.isFromCache !== false) {
+    throw new Error('仅支持导出本地已同步数据，请先刷新经营看板')
   }
   if (!d.summary || !Array.isArray(d.allOrders)) {
-    throw new Error('实时数据不完整，请重新刷新后再导出')
+    throw new Error('本地数据不完整，请重新刷新后再导出')
   }
 }
 

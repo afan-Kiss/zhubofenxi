@@ -1,3 +1,5 @@
+import type { BoardMetricValueKey } from './business-metrics.service'
+import { pickMetricValue } from './business-metrics.service'
 import type { BusinessBoardCacheEntry } from './business-cache.service'
 import { prisma } from '../lib/prisma'
 import { logInfo, logWarn } from '../utils/server-log'
@@ -140,6 +142,75 @@ export async function forceUpdateLastMonthStableSnapshot(): Promise<{
     monthKey,
     validSalesAmount,
     cacheBuiltAt: entry.lastBuiltAt,
+  }
+}
+
+export interface OverviewStableDrawerContext {
+  overviewStableWarning: string
+  stableValueRaw: number
+  latestValueRaw: number
+  diffAmount: number
+  needsManualUpdate: boolean
+}
+
+function snapshotPatchToBusinessMetrics(
+  patch: Record<string, unknown>,
+): import('./business-metrics.service').BusinessMetrics {
+  return {
+    totalGmv: Number(patch.totalGmv ?? patch.gmv ?? 0),
+    validSalesAmount: Number(patch.validSalesAmount ?? patch.effectiveGmv ?? 0),
+    actualSignedAmount: Number(patch.actualSignedAmount ?? 0),
+    refundAmount: Number(patch.returnAmount ?? patch.refundAmount ?? 0),
+    freightRefundAmount: Number(patch.freightRefundAmount ?? 0),
+    orderCount: Number(patch.orderCount ?? patch.paidOrderCount ?? 0),
+    signedOrderCount: Number(patch.signedCount ?? patch.signedOrderCount ?? 0),
+    refundOrderCount: Number(patch.returnCount ?? patch.refundOrderCount ?? 0),
+    qualityRefundOrderCount: Number(patch.qualityReturnCount ?? 0),
+    periodOrderCount: Number(patch.orderCount ?? 0),
+    refundRate: null,
+    qualityRefundRate: null,
+    returnOrderCount: Number(patch.returnCount ?? 0),
+    returnRate: null,
+    signRate: null,
+  } as import('./business-metrics.service').BusinessMetrics
+}
+
+export function pickStableMetricValueFromSnapshot(
+  snapshot: NonNullable<Awaited<ReturnType<typeof getOverviewMetricSnapshot>>>,
+  valueKey: BoardMetricValueKey,
+): number {
+  const patch = snapshotToSummaryPatch(snapshot)
+  return pickMetricValue(snapshotPatchToBusinessMetrics(patch), valueKey)
+}
+
+/** metric-detail 抽屉：上月稳定版 vs 最新重算提示 */
+export async function resolveOverviewStableDrawerContext(params: {
+  preset: string
+  startDate: string
+  valueKey: BoardMetricValueKey
+  latestValueRaw: number
+  overviewStableSnapshot?: boolean
+}): Promise<OverviewStableDrawerContext | null> {
+  if (params.preset !== 'lastMonth') return null
+
+  const monthKey = monthKeyFromStartDate(params.startDate)
+  const snapshot = await getOverviewMetricSnapshot(monthKey)
+  if (!snapshot) return null
+
+  const stableValueRaw = pickStableMetricValueFromSnapshot(snapshot, params.valueKey)
+  const latestValueRaw = params.latestValueRaw
+  const diffAmount = Math.round((latestValueRaw - stableValueRaw) * 100) / 100
+  const needsManualUpdate = Math.abs(diffAmount) > STABLE_AMOUNT_THRESHOLD_YUAN
+
+  if (!needsManualUpdate && !params.overviewStableSnapshot) return null
+
+  return {
+    overviewStableWarning:
+      '当前经营总览展示上月稳定版；下方明细为最新重算明细，仅供核对。',
+    stableValueRaw,
+    latestValueRaw,
+    diffAmount,
+    needsManualUpdate,
   }
 }
 

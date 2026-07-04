@@ -28,6 +28,9 @@ import {
   getBoardScopedViewsForRange,
 } from './board-scoped-views.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
+import { resolveOverviewStableDrawerContext } from './overview-metric-snapshot.service'
+
+export type BoardDataSource = 'local_db' | 'live_api'
 
 export type BoardMetricKey =
   | 'gmv'
@@ -227,6 +230,7 @@ export async function buildBoardMetricDetail(params: {
   sort?: string
   role: UserRole
   username: string
+  overviewStableSnapshot?: boolean
 }) {
   const def = METRIC_DEFS[params.metric]
   const preset = normalizeBoardPreset(params.preset ?? 'custom')
@@ -298,6 +302,14 @@ export async function buildBoardMetricDetail(params: {
     ? countUnmatchedOfficialQualityCases(getQualityBadCasesSync())
     : 0
 
+  const stableDrawer = await resolveOverviewStableDrawerContext({
+    preset: normalizedPreset,
+    startDate: range.startDate,
+    valueKey: def.valueKey,
+    latestValueRaw: valueRaw,
+    overviewStableSnapshot: params.overviewStableSnapshot,
+  })
+
   return {
     metric: params.metric,
     title: def.title,
@@ -323,6 +335,13 @@ export async function buildBoardMetricDetail(params: {
       qualityRefundOrderCount: totals.qualityRefundOrderCount,
       unmatchedOfficialQualityCount,
       description: def.description,
+      ...(stableDrawer
+        ? {
+            stableValueRaw: stableDrawer.stableValueRaw,
+            latestValueRaw: stableDrawer.latestValueRaw,
+            diffAmount: stableDrawer.diffAmount,
+          }
+        : {}),
     },
     tabs,
     pagination: {
@@ -334,7 +353,13 @@ export async function buildBoardMetricDetail(params: {
     rows,
     pageSummary: buildPageSummary(views),
     blacklistedBuyerIds: [...blacklist],
-    source: 'live_api' as const,
+    source: 'local_db' as BoardDataSource,
+    ...(stableDrawer
+      ? {
+          overviewStableWarning: stableDrawer.overviewStableWarning,
+          overviewStableSnapshot: true,
+        }
+      : {}),
   }
 }
 

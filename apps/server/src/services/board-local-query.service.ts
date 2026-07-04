@@ -281,7 +281,7 @@ export async function executeBoardLocalQuery(params: {
 
       resolvedRange,
 
-      source: 'live_api',
+      source: 'local_db',
 
       isFromCache: false,
 
@@ -548,7 +548,7 @@ export async function executeBoardLocalQuery(params: {
 
     resolvedRange,
 
-    source: 'live_api',
+    source: 'local_db',
     isFromCache: true,
 
     fetchedAt:

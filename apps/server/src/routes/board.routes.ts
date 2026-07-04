@@ -128,6 +128,9 @@ boardRouter.get('/metric-detail', async (req, res) => {
       pageSize: req.query.pageSize ? Number(req.query.pageSize) : 20,
       tab: req.query.tab ? String(req.query.tab) : undefined,
       sort: req.query.sort ? String(req.query.sort) : undefined,
+      overviewStableSnapshot:
+        req.query.overviewStableSnapshot === 'true' ||
+        req.query.overviewStableSnapshot === '1',
       role: req.user!.role as import('../types/roles').UserRole,
       username: req.user!.username,
     })

@@ -554,6 +554,9 @@ export const OverviewTab: React.FC = () => {
           preset={preset}
           blacklistedBuyerIds={blacklistedBuyerIds}
           cardValueRaw={summaryMetricValue(ds, metricDrawer)}
+          overviewStableSnapshot={
+            preset === 'lastMonth' && Boolean(overviewMeta?.stableVsLatest?.needsManualUpdate)
+          }
         />
       ) : null}
     </div>

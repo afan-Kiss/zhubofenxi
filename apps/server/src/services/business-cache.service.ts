@@ -339,6 +339,7 @@ export async function getOrBuildBusinessBoardCache(params: {
 
 export async function rebuildBusinessCacheForPresets(
   presets: BusinessRangePreset[] = BUSINESS_CACHE_PRESETS,
+  options?: { allowSnapshotUpdate?: boolean },
 ): Promise<{ rebuilt: number; totalMs: number }> {
   const started = Date.now()
   let rebuilt = 0
@@ -369,7 +370,7 @@ export async function rebuildBusinessCacheForPresets(
     lastMonthRange.startDate,
     lastMonthRange.endDate,
   )
-  if (lastMonthEntry && !lastMonthEntry.stale) {
+  if (options?.allowSnapshotUpdate && lastMonthEntry && !lastMonthEntry.stale) {
     const { tryUpdateLastMonthSnapshotAfterSync } = await import(
       './overview-metric-snapshot.service'
     )
@@ -384,11 +385,17 @@ export async function rebuildBusinessCacheForPresets(
   return { rebuilt, totalMs }
 }
 
+function isPostBusinessSyncRebuildReason(reason: string): boolean {
+  return /经营同步完成|API 同步完成|API 同步无订单/.test(reason)
+}
+
 function enqueueFullBusinessCacheRebuild(
   reason: string,
-  options?: { invalidateFirst?: boolean },
+  options?: { invalidateFirst?: boolean; allowSnapshotUpdate?: boolean },
 ): Promise<void> {
   const invalidateFirst = options?.invalidateFirst ?? true
+  const allowSnapshotUpdate =
+    options?.allowSnapshotUpdate ?? isPostBusinessSyncRebuildReason(reason)
   const task = async (): Promise<void> => {
     if (invalidateFirst) {
       invalidateBusinessBoardCache()
@@ -396,7 +403,7 @@ function enqueueFullBusinessCacheRebuild(
     } else {
       logInfo('经营缓存', reason)
     }
-    await rebuildBusinessCacheForPresets()
+    await rebuildBusinessCacheForPresets(BUSINESS_CACHE_PRESETS, { allowSnapshotUpdate })
     rebuildLog.unshift({ at: new Date().toISOString(), reason, presetCount: BUSINESS_CACHE_PRESETS.length })
     if (rebuildLog.length > 50) rebuildLog.length = 50
   }

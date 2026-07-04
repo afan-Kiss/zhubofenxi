@@ -124,6 +124,8 @@ export interface OverviewMeta {
   } | null
 }
 
+export type BoardDataSource = 'local_db' | 'live_api'
+
 export interface BoardLiveQueryData {
   requestId: string
   preset: string
@@ -131,7 +133,7 @@ export interface BoardLiveQueryData {
   endDate: string
   rangeKey?: string
   resolvedRange?: BoardResolvedRange
-  source: 'live_api'
+  source: BoardDataSource
   isFromCache: boolean
   fetchedAt: string
   dataDisplayStatus?: BoardDataDisplayStatus

@@ -188,7 +188,11 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month, onLoadingChang
             <OperationsMetricDrillCard
               label="每小时成交"
               value={formatHourly(s.hourlyAmountYuan)}
-              drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+              footer={
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                  每小时成交 = 有效成交金额 ÷ 直播时长
+                </p>
+              }
             />
             <MetricCard label="场观" value={formatPeopleCount(s.viewSessionCount)} />
             <MetricCard label="进房" value={formatPeopleCount(s.joinUserCount)} />

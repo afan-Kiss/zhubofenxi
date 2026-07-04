@@ -128,7 +128,7 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   }
 
   const mode = resolved!.mode
-  const title = resolved!.title || (mode === 'intraday' ? '直播时段走势' : '每日销售走势')
+  const title = resolved!.title || (mode === 'intraday' ? '当日时段走势' : '每日销售走势')
   const chartHeight = isReport ? 'h-[132px]' : 'h-[120px] md:h-[150px]'
   const titleClass = isReport ? 'text-[11px]' : 'text-[12px]'
   const tagClass = isReport ? 'text-[9px] px-1.5 py-0' : 'text-[10px] px-2 py-0.5'

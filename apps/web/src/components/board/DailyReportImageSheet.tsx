@@ -133,7 +133,7 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         />
       </div>
       <div className="mt-3 space-y-1">
-        <MetricLine label="本期销售额" value={formatMoney(row.gmvYuan)} strong />
+        <MetricLine label="支付金额" value={formatMoney(row.gmvYuan)} strong />
         <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} />
         <MetricLine label="真实卖出" value={formatOrderCount(row.soldOrderCount)} />
         <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />

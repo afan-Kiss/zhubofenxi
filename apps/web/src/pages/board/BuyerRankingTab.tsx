@@ -46,13 +46,16 @@ import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGri
 import { ViewportModal, FloatingToast } from '../../components/ui/ViewportModal'
 import { copyTextFromTextarea, copyTextToClipboard } from '../../lib/copy-to-clipboard'
 
-const RANKING_TABS: Array<{ key: string; label: string }> = [
-  { key: 'highValue', label: '高价值客户榜单' },
-  { key: 'highAov', label: '高客单榜' },
-  { key: 'stableSigned', label: '稳定签收榜' },
-  { key: 'repurchase', label: '复购榜' },
-  { key: 'badBuyer', label: '高风险售后客户' },
-  { key: 'quality', label: '品退榜' },
+const VALUE_RANKING_TABS: Array<{ key: string; label: string }> = [
+  { key: 'highValue', label: '高价值' },
+  { key: 'highAov', label: '高客单' },
+  { key: 'stableSigned', label: '稳定签收' },
+  { key: 'repurchase', label: '复购' },
+]
+
+const RISK_RANKING_TABS: Array<{ key: string; label: string }> = [
+  { key: 'badBuyer', label: '高风险售后' },
+  { key: 'quality', label: '品退客户' },
 ]
 
 const WECHAT_PRESET_OPTIONS: Array<{ key: string; label: string }> = [
@@ -606,11 +609,27 @@ export const BuyerRankingTab: React.FC = () => {
 
       {showRankingContent && (
       <>
-      <div className="-mx-1 overflow-x-auto pb-1 board-fade-in">
-        <div className="min-w-max rounded-2xl border border-rose-100/50 bg-white/80 p-1.5">
+      <div className="-mx-1 space-y-3 overflow-x-auto pb-1 board-fade-in">
+        <div className="min-w-max rounded-2xl border border-emerald-100/60 bg-white/80 p-1.5">
+          <p className="mb-1.5 px-2 text-[11px] font-medium text-emerald-800">客户价值</p>
           <AnimatedTabs
-            items={RANKING_TABS}
-            activeKey={rankingTab}
+            items={VALUE_RANKING_TABS}
+            activeKey={VALUE_RANKING_TABS.some((t) => t.key === rankingTab) ? rankingTab : ''}
+            onChange={(key) => {
+              if (key === rankingTab) return
+              setPage(1)
+              setRankingTab(key)
+            }}
+            variant="pills"
+            className="flex-nowrap"
+            buttonClassName="whitespace-nowrap px-3 py-2 text-xs sm:px-4 sm:py-2.5 sm:text-sm"
+          />
+        </div>
+        <div className="min-w-max rounded-2xl border border-amber-100/60 bg-white/80 p-1.5">
+          <p className="mb-1.5 px-2 text-[11px] font-medium text-amber-800">售后风险</p>
+          <AnimatedTabs
+            items={RISK_RANKING_TABS}
+            activeKey={RISK_RANKING_TABS.some((t) => t.key === rankingTab) ? rankingTab : ''}
             onChange={(key) => {
               if (key === rankingTab) return
               setPage(1)

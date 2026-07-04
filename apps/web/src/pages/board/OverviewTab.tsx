@@ -1,9 +1,14 @@
 import React, { useMemo, useState } from 'react'
 import {
   AlertTriangle,
+  Banknote,
+  ChevronDown,
   Package,
+  PackageCheck,
   Percent,
+  RotateCcw,
   TrendingUp,
+  Undo2,
   Wallet,
   type LucideIcon,
 } from 'lucide-react'
@@ -17,11 +22,8 @@ import {
   BoardMetricDrawer,
   type BoardMetricKey,
 } from '../../components/board/BoardMetricDrawer'
-import { BoardSyncStatusHeader } from '../../components/board/BoardSyncStatusHeader'
-import { DataLastUpdateBanner } from '../../components/board/DataLastUpdateBanner'
 import { BusinessSyncProgressCard } from '../../components/board/BusinessSyncProgressCard'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
-import { OfficialQualitySyncNote } from '../../components/board/OfficialQualitySyncNote'
 import type { QualityFeedbackStatus } from '../../components/board/OfficialQualitySyncNote'
 import {
   BoardLiveQueryAutoRefresh,
@@ -30,6 +32,7 @@ import {
 import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
 import { useDataFreshness } from '../../hooks/useDataFreshness'
+import { formatDataFreshnessTime, type DataFreshnessInfo } from '../../lib/data-freshness'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
 
 function summaryMetricValue(ds: Record<string, unknown>, metric: BoardMetricKey): number {
@@ -44,6 +47,16 @@ function summaryMetricValue(ds: Record<string, unknown>, metric: BoardMetricKey)
       return Number(ds.returnRate ?? 0)
     case 'qualityReturnCount':
       return Number(ds.qualityReturnCount ?? 0)
+    case 'actualSignedAmount':
+      return Number(ds.actualSignedAmount ?? 0)
+    case 'signedCount':
+      return Number(ds.signedOrderCount ?? ds.actualSignedCount ?? 0)
+    case 'signRate':
+      return Number(ds.signRate ?? 0)
+    case 'returnAmount':
+      return Number(ds.returnAmount ?? 0)
+    case 'returnCount':
+      return Number(ds.returnCount ?? 0)
     default:
       return 0
   }
@@ -70,6 +83,12 @@ const valuePickers = {
   orderCount: (ds: Record<string, unknown>) => Number(ds.orderCount ?? 0),
   returnRate: (ds: Record<string, unknown>) => Number(ds.returnRate ?? 0),
   qualityReturnCount: (ds: Record<string, unknown>) => Number(ds.qualityReturnCount ?? 0),
+  actualSignedAmount: (ds: Record<string, unknown>) => Number(ds.actualSignedAmount ?? 0),
+  signedOrderCount: (ds: Record<string, unknown>) =>
+    Number(ds.signedOrderCount ?? ds.actualSignedCount ?? 0),
+  signRate: (ds: Record<string, unknown>) => Number(ds.signRate ?? 0),
+  returnAmount: (ds: Record<string, unknown>) => Number(ds.returnAmount ?? 0),
+  returnCount: (ds: Record<string, unknown>) => Number(ds.returnCount ?? 0),
 } as const
 
 /** 经营总览首屏核心 5 卡 */
@@ -115,7 +134,7 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
     type: 'rate',
     tone: 'orange',
     hint: '点击查看明细',
-    helper: '退款订单数占本期订单比例',
+    helper: '退款订单占支付订单比例',
     icon: Percent,
   },
   {
@@ -131,6 +150,79 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
   },
 ]
 
+const MORE_SUMMARY_CARDS: SummaryCardDef[] = [
+  {
+    label: '签收金额',
+    metricExplainKey: 'actualSignedAmount',
+    drawerKey: 'actualSignedAmount',
+    valueKey: 'actualSignedAmount',
+    type: 'money',
+    tone: 'green',
+    hint: '点击查看明细',
+    helper: '符合签收口径的到账金额',
+    icon: Banknote,
+  },
+  {
+    label: '签收单数',
+    metricExplainKey: 'signedOrderCount',
+    drawerKey: 'signedCount',
+    valueKey: 'signedOrderCount',
+    type: 'count',
+    tone: 'green',
+    hint: '查看相关订单',
+    helper: '实际签收订单笔数',
+    icon: PackageCheck,
+  },
+  {
+    label: '签收率',
+    metricExplainKey: 'signRate',
+    drawerKey: 'signRate',
+    valueKey: 'signRate',
+    type: 'rate',
+    tone: 'teal',
+    hint: '点击查看明细',
+    helper: '签收订单占支付订单比例',
+    icon: Percent,
+  },
+  {
+    label: '退款金额',
+    metricExplainKey: 'returnAmount',
+    drawerKey: 'returnAmount',
+    valueKey: 'returnAmount',
+    type: 'money',
+    tone: 'rose',
+    hint: '点击查看明细',
+    helper: '本期退款金额合计',
+    icon: RotateCcw,
+  },
+  {
+    label: '退款单数',
+    metricExplainKey: 'returnCount',
+    drawerKey: 'returnCount',
+    valueKey: 'returnCount',
+    type: 'count',
+    tone: 'amber',
+    hint: '点击查看明细',
+    helper: '发生退款的订单笔数',
+    icon: Undo2,
+  },
+]
+
+function formatFreshnessLine(
+  freshness: DataFreshnessInfo | null | undefined,
+  syncSuccessAt: string | null | undefined,
+): string | null {
+  const parts: string[] = []
+  if (freshness?.latestOrderTime) {
+    parts.push(`数据更新 ${formatDataFreshnessTime(freshness.latestOrderTime)}`)
+  }
+  const syncAt = syncSuccessAt ?? freshness?.lastQianfanSyncAt
+  if (syncAt) {
+    parts.push(`同步 ${formatDataFreshnessTime(syncAt)}`)
+  }
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
 function qualityReturnCardNote(
   qualityFeedback: QualityFeedbackStatus | null | undefined,
 ): string | null {
@@ -138,7 +230,7 @@ function qualityReturnCardNote(
     return '官方品退正在同步，稍后会刷新。'
   }
   if (qualityFeedback?.unmatchedCount && qualityFeedback.unmatchedCount > 0) {
-    return `有 ${qualityFeedback.unmatchedCount} 条官方品退未匹配订单`
+    return `有 ${qualityFeedback.unmatchedCount} 条官方品退暂未匹配订单，当前品退可能偏低。`
   }
   if ((qualityFeedback?.caseCount ?? 0) === 0 && !qualityFeedback?.lastSyncedAt) {
     return '官方品退还没同步到订单，当前可能偏低'
@@ -184,6 +276,7 @@ export const OverviewTab: React.FC = () => {
   const { data: dataFreshness, loading: dataFreshnessLoading } = useDataFreshness(startDate, endDate)
 
   const [metricDrawer, setMetricDrawer] = useState<BoardMetricKey | null>(null)
+  const [moreMetricsOpen, setMoreMetricsOpen] = useState(false)
 
   const ds = displaySummary
   const blacklistedBuyerIds = data?.blacklistedBuyerIds ?? []
@@ -195,6 +288,10 @@ export const OverviewTab: React.FC = () => {
   const hasMetrics = Boolean(ds)
   const showMetrics = hasMetrics && boardDataVisible
   const qualityNote = qualityReturnCardNote(qualityFeedback)
+  const freshnessLine = formatFreshnessLine(
+    dataFreshness,
+    syncMeta?.businessSync?.lastSuccessAt ?? null,
+  )
 
   const overviewTransitionKey = [
     'overview',
@@ -280,16 +377,11 @@ export const OverviewTab: React.FC = () => {
         <div>
           <h2 className="text-xl font-semibold text-slate-900">经营总览</h2>
           <p className="mt-0.5 text-sm text-slate-500">本期经营大盘 · 支付、有效成交与品退</p>
-          <BoardSyncStatusHeader
-            syncMeta={syncMeta}
-            hasDisplayData={Boolean(ds)}
-            totalRawOrders={totalRawOrders}
-          />
-          <DataLastUpdateBanner
-            freshness={dataFreshness}
-            loading={dataFreshnessLoading}
-          />
-          <OfficialQualitySyncNote qualityFeedback={qualityFeedback} showLastUpdated={false} />
+          {freshnessLine ? (
+            <p className="mt-1 text-xs text-slate-500">{freshnessLine}</p>
+          ) : dataFreshnessLoading ? (
+            <p className="mt-1 text-xs text-slate-400">正在读取数据状态…</p>
+          ) : null}
         </div>
       </div>
       <RangeBar
@@ -378,6 +470,43 @@ export const OverviewTab: React.FC = () => {
                 </StaggerCard>
               )
             })}
+          </div>
+
+          <div className="mt-4">
+            <button
+              type="button"
+              onClick={() => setMoreMetricsOpen((open) => !open)}
+              className="flex w-full items-center justify-between rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+              aria-expanded={moreMetricsOpen}
+            >
+              <span>更多指标</span>
+              <ChevronDown
+                className={`h-4 w-4 text-slate-400 transition ${moreMetricsOpen ? 'rotate-180' : ''}`}
+              />
+            </button>
+            {moreMetricsOpen ? (
+              <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+                {MORE_SUMMARY_CARDS.map((card, index) => {
+                  const raw = valuePickers[card.valueKey](ds)
+                  const Icon = card.icon
+                  return (
+                    <StaggerCard key={card.drawerKey} index={index + 6} className="h-full">
+                      <BoardSummaryMetricCard
+                        label={
+                          <MetricStatLabel label={card.label} metricKey={card.metricExplainKey} />
+                        }
+                        value={renderStatValue(card, raw)}
+                        helper={card.helper}
+                        hint={card.hint}
+                        tone={card.tone}
+                        icon={Icon}
+                        onClick={() => setMetricDrawer(card.drawerKey)}
+                      />
+                    </StaggerCard>
+                  )
+                })}
+              </div>
+            ) : null}
           </div>
         </MetricGridTransition>
       ) : null}

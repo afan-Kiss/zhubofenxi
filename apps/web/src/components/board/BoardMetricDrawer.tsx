@@ -153,16 +153,23 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     Math.abs(cardValueRaw - data.summary.valueRaw) > 0.02 &&
     !metric.includes('Rate')
 
+  const drawerSubtitle = (() => {
+    const rangePart =
+      data?.dateRange?.startDate && data?.dateRange?.endDate
+        ? `${data.dateRange.startDate} ~ ${data.dateRange.endDate} · 本地已同步数据`
+        : '本地已同步数据'
+    if (data?.source === 'stale') {
+      return `${rangePart} · 当前展示本地缓存，最近同步时间见页面顶部`
+    }
+    return rangePart
+  })()
+
   return (
     <BoardDrawerShell
       open={open}
       onClose={onClose}
       title={data?.title ?? '指标明细'}
-      subtitle={
-        data?.dateRange
-          ? `${data.dateRange.startDate} ~ ${data.dateRange.endDate} · 实时接口`
-          : '实时接口拉取'
-      }
+      subtitle={drawerSubtitle}
       footer={
         data ? (
           <Pagination

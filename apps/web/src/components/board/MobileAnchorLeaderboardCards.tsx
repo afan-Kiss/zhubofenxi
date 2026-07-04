@@ -150,21 +150,17 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   <p className="mt-0.5 text-[11px] text-slate-400">{liveLines.secondary}</p>
                 ) : null}
               </div>
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] tabular-nums ${
-                  isHighRefundRate(refundRate)
-                    ? 'bg-rose-50 font-medium text-rose-700'
-                    : 'bg-slate-100 text-slate-600'
-                }`}
-              >
-                退款率 {formatRate(refundRate)}
-              </span>
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
               <MetricCell label="支付金额" value={formatMoney(anchorRowGmv(a))} />
               <MetricCell label="有效成交额" value={formatMoney(anchorRowValidSales(a))} />
               <MetricCell label="支付单数" value={formatCount(anchorRowPaidCount(a))} />
+              <MetricCell
+                label="退款率"
+                value={formatRate(refundRate)}
+                danger={isHighRefundRate(refundRate)}
+              />
               <MetricCell
                 label="品退单数"
                 value={qualityCount > 0 ? `品退 ${formatCount(qualityCount)} 单` : formatCount(qualityCount)}

@@ -10,6 +10,9 @@ import { getCookieHealthPayload, getLastAuthError } from './live-account.service
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { buildQualityRefundMonthDiagnostic } from './quality-refund-month-diagnostic.service'
 import { bootstrapQualityBadCaseCache } from './quality-badcase-store.service'
+import { buildAnchorQualityRefundAttributionDiagnostic } from './quality-refund-anchor-attribution.service'
+import { buildRawAnalyzeBundle } from './xhs-api-sync/xhs-analysis-from-raw.service'
+import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
 
 function parsePayTimeFromRaw(rawJson: unknown): Date | null {
   if (rawJson == null) return null
@@ -137,6 +140,14 @@ export async function buildBoardSyncDiagnose(params: {
     startDate: range.startDate,
     endDate: range.endDate,
   })
+  const dateRange = resolveDateRange(preset as DateRangePreset, range.startDate, range.endDate)
+  const liveBundle = await buildRawAnalyzeBundle(dateRange)
+  const boardQualityReturnCount = Number(cacheEntry?.summary?.qualityReturnCount ?? 0)
+  const anchorQualityRefundAttributionDiagnostic = buildAnchorQualityRefundAttributionDiagnostic({
+    views: coreViews,
+    liveSessions: liveBundle?.liveSessions ?? [],
+    boardQualityReturnCount,
+  })
 
   return {
     requestedRange: { preset, startDate: params.startDate, endDate: params.endDate },
@@ -210,5 +221,6 @@ export async function buildBoardSyncDiagnose(params: {
       note: qualityRefundDiagnostic.note,
       excludeSamples: qualityRefundDiagnostic.excludeSamples,
     },
+    anchorQualityRefundAttributionDiagnostic,
   }
 }

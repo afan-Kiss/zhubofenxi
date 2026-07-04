@@ -25,6 +25,7 @@ interface Props {
   rows: AnchorLeaderboardRow[]
   emptyText?: string
   onRowClick?: (row: AnchorLeaderboardRow) => void
+  onQualityCountClick?: (row: AnchorLeaderboardRow) => void
   showLongPeriodRates?: boolean
   startDate?: string
   endDate?: string
@@ -34,6 +35,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   rows,
   emptyText = '暂无数据',
   onRowClick,
+  onQualityCountClick,
   showLongPeriodRates: showRates = true,
   startDate = '',
   endDate = '',
@@ -60,9 +62,14 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         rows={rows}
         emptyText={emptyText}
         onSelect={onRowClick}
+        onQualityCountClick={onQualityCountClick}
         showLongPeriodRates={showRates}
         className={cardClass}
       />
+
+      <p className={`mb-2 px-1 text-[11px] leading-relaxed text-slate-500 ${showTableOnDesktop ? 'md:px-4' : ''}`}>
+        品退按订单下单时间匹配主播开播场次归属，不按售后发生时间。品退率 = 该主播品退单数 ÷ 支付订单数。
+      </p>
 
       <div className={`${tableWrapClass} overflow-x-auto md:px-0`}>
         <table className="w-full min-w-[1280px] text-left text-[13px]">
@@ -78,7 +85,9 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
               {showRates ? <th className="py-2 pr-2 text-right">签收单数</th> : null}
               <th className="py-2 pr-2 text-right">退款单数</th>
               <th className="py-2 pr-2 text-right">退货退款单数</th>
-              <th className="py-2 pr-2 text-right">商品问题单数</th>
+              <th className="py-2 pr-2 text-right" title="品退按订单下单时间匹配主播开播场次归属">
+                品退单数
+              </th>
               <th className="py-2 pr-2 text-right">退款率</th>
               {showRates && <th className="py-2 pr-2 text-right">退货率</th>}
               {showRates && <th className="py-2 pr-2 text-right">品退率</th>}
@@ -162,7 +171,17 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     <td className="py-2 text-right tabular-nums">
                       {formatCount(anchorRowReturnRefundCount(a))}
                     </td>
-                    <td className="py-2 text-right tabular-nums">
+                    <td
+                      className={`py-2 text-right tabular-nums ${onQualityCountClick ? 'cursor-pointer text-rose-700 hover:underline' : ''}`}
+                      onClick={
+                        onQualityCountClick
+                          ? (e) => {
+                              e.stopPropagation()
+                              onQualityCountClick(a)
+                            }
+                          : undefined
+                      }
+                    >
                       {formatCount(anchorRowNum(a, 'qualityReturnCount'))}
                     </td>
                     <td

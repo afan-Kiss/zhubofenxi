@@ -7,6 +7,7 @@ import { BoardStatRangeNote } from '../../components/board/BoardStatRangeNote'
 import { AnimatedStatValue } from '../../components/board/AnimatedStatValue'
 import { BoardSummaryMetricCard, type BoardSummaryMetricTone } from '../../components/board/BoardSummaryMetricCard'
 import { AnchorOrderDrawer } from '../../components/board/AnchorOrderDrawer'
+import { AnchorQualityRefundDrawer } from '../../components/board/AnchorQualityRefundDrawer'
 import { AnchorLeaderboardPanel } from '../../components/board/AnchorLeaderboardPanel'
 import { AnchorPocketSummaryPanel } from '../../components/board/AnchorPocketSummaryPanel'
 import { AnchorAuditExportPanel } from '../../components/board/AnchorAuditExportPanel'
@@ -126,6 +127,10 @@ export const AnchorPerformanceTab: React.FC = () => {
     anchorName: string
     anchorId?: string
     rowSnapshot: Record<string, unknown>
+  } | null>(null)
+  const [qualityDrawer, setQualityDrawer] = useState<{
+    anchorName: string
+    anchorId?: string
   } | null>(null)
 
   const allAnchors = (data?.anchorLeaderboard as Array<Record<string, unknown>>) ?? []
@@ -395,6 +400,14 @@ export const AnchorPerformanceTab: React.FC = () => {
                     rowSnapshot: a,
                   })
                 }}
+                onQualityCountClick={(a) => {
+                  const name = String(a.anchorName)
+                  setQualityDrawer({
+                    anchorName: name,
+                    anchorId:
+                      name === '未归属' ? undefined : String(a.anchorId ?? '').trim() || undefined,
+                  })
+                }}
               />
             </MetricGridTransition>
           </div>
@@ -417,6 +430,16 @@ export const AnchorPerformanceTab: React.FC = () => {
         startDate={startDate}
         endDate={endDate}
         rowSnapshot={anchorDrawer?.rowSnapshot}
+      />
+
+      <AnchorQualityRefundDrawer
+        open={qualityDrawer !== null}
+        onClose={() => setQualityDrawer(null)}
+        anchorName={qualityDrawer?.anchorName ?? ''}
+        anchorId={qualityDrawer?.anchorId}
+        preset={preset}
+        startDate={startDate}
+        endDate={endDate}
       />
     </div>
   )

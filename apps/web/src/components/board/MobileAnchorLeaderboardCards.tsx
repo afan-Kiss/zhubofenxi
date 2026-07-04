@@ -28,14 +28,47 @@ interface Props {
   rows: AnchorLeaderboardRow[]
   emptyText?: string
   onSelect?: (row: AnchorLeaderboardRow) => void
+  onQualityCountClick?: (row: AnchorLeaderboardRow) => void
   showLongPeriodRates?: boolean
   /** 覆盖外层容器 className；默认手机端显示 */
   className?: string
 }
 
-function MetricCell({ label, value, danger }: { label: string; value: string; danger?: boolean }) {
+function MetricCell({
+  label,
+  value,
+  danger,
+  onClick,
+}: {
+  label: string
+  value: string
+  danger?: boolean
+  onClick?: () => void
+}) {
   return (
-    <div className="rounded-xl bg-rose-50/40 px-2.5 py-2">
+    <div
+      className={`rounded-xl bg-rose-50/40 px-2.5 py-2 ${onClick ? 'cursor-pointer hover:bg-rose-100/60' : ''}`}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={
+        onClick
+          ? (e) => {
+              e.stopPropagation()
+              onClick()
+            }
+          : undefined
+      }
+      onKeyDown={
+        onClick
+          ? (e) => {
+              if (e.key === 'Enter') {
+                e.stopPropagation()
+                onClick()
+              }
+            }
+          : undefined
+      }
+    >
       <p className="text-[12px] leading-snug text-slate-500">{label}</p>
       <p
         className={`mt-0.5 text-base font-semibold tabular-nums ${
@@ -52,6 +85,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   rows,
   emptyText = '暂无数据',
   onSelect,
+  onQualityCountClick,
   showLongPeriodRates: showRates = true,
   className = 'block md:hidden',
 }) => {
@@ -154,10 +188,15 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 value={formatCount(anchorRowReturnRefundCount(a))}
               />
               <MetricCell
-                label="商品问题单数"
+                label="品退单数"
                 value={formatCount(anchorRowNum(a, 'qualityReturnCount'))}
+                onClick={onQualityCountClick ? () => onQualityCountClick(a) : undefined}
               />
             </div>
+
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+              品退按订单下单时间匹配主播开播场次归属，不按售后发生时间。
+            </p>
 
             <div className="mt-2 flex flex-wrap gap-2 border-t border-rose-50 pt-2.5">
               <span

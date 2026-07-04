@@ -11,6 +11,7 @@ import {
 } from '../services/board-metric-detail.service'
 import {
   buildAnchorDrill,
+  buildAnchorQualityRefundDrill,
   buildBuyerProfileDrill,
   syncBuyerProfileAfterSales,
 } from '../services/board-drill.service'
@@ -260,6 +261,31 @@ boardRouter.get('/anchor-drill', async (req, res) => {
     sendOk(res, data)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '获取主播下钻失败', 500)
+  }
+})
+
+boardRouter.get('/anchor-quality-refund-drill', async (req, res) => {
+  try {
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    if (!startDate || !endDate) {
+      sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    const data = await buildAnchorQualityRefundDrill({
+      preset: req.query.preset ? String(req.query.preset) : 'custom',
+      anchorId: req.query.anchorId ? String(req.query.anchorId) : undefined,
+      anchorName: req.query.anchorName ? String(req.query.anchorName) : undefined,
+      startDate,
+      endDate,
+      page: req.query.page ? Number(req.query.page) : 1,
+      pageSize: req.query.pageSize ? Number(req.query.pageSize) : 20,
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取品退明细失败', 500)
   }
 })
 

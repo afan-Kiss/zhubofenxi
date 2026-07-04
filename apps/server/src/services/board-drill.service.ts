@@ -43,8 +43,15 @@ import {
 } from './anchor-live-sessions.service'
 import {
   attachRawByMatchToViews,
+  filterViewsForAnchorPerformance,
   filterViewsForBuyerRanking,
 } from './low-price-brush-order.service'
+import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
+import {
+  aggregateQualityRefundByAnchor,
+  type QualityRefundAnchorAttribution,
+} from './quality-refund-anchor-attribution.service'
+import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
 import type { UserRole } from '../types/roles'
 import {
   assertStaffAnchorAccess,
@@ -203,6 +210,129 @@ export async function buildAnchorDrill(params: {
           { key: 'all', label: '全部订单', count: anchorViews.length },
         ]
       : [{ key: 'all', label: '全部订单', count: anchorViews.length }],
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    },
+    rows,
+  }
+}
+
+function qualityAttributionMatchesAnchor(
+  attr: QualityRefundAnchorAttribution,
+  query: { anchorId?: string; anchorName?: string },
+): boolean {
+  if (query.anchorName === '未归属') {
+    return attr.anchorName === '未归属'
+  }
+  return anchorLeaderboardRowMatches(
+    { anchorId: attr.anchorId, anchorName: attr.anchorName },
+    query,
+  )
+}
+
+export async function buildAnchorQualityRefundDrill(params: {
+  preset?: string
+  anchorId?: string
+  anchorName?: string
+  startDate: string
+  endDate: string
+  page?: number
+  pageSize?: number
+  role?: UserRole
+  username?: string
+}) {
+  if (params.role && params.username && isStaffUnbound(params.role, params.username)) {
+    throw new Error(STAFF_UNBOUND_MESSAGE)
+  }
+
+  const anchorQuery = normalizeAnchorDrillQuery({
+    anchorId: params.anchorId,
+    anchorName: params.anchorName,
+  })
+
+  if (params.role && params.username) {
+    assertStaffAnchorAccess(
+      params.role,
+      params.username,
+      anchorQuery.anchorId,
+      anchorQuery.anchorName,
+    )
+  }
+
+  const scoped = await getBoardScopedViewsForRange({
+    preset: params.preset ?? 'custom',
+    startDate: params.startDate,
+    endDate: params.endDate,
+    role: params.role,
+    username: params.username,
+  })
+
+  const coreViews = filterViewsForCoreMetrics(scoped.views)
+  const performanceViews = filterViewsForAnchorPerformance(
+    attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
+  )
+
+  const range = resolveDateRange(
+    (params.preset ?? 'custom') as DateRangePreset,
+    params.startDate,
+    params.endDate,
+  )
+  const liveBundle = await buildRawAnalyzeBundle(range)
+  const liveSessions = liveBundle?.liveSessions ?? []
+
+  const agg = aggregateQualityRefundByAnchor({ views: coreViews, liveSessions })
+  const matched = agg.attributions.filter((attr) =>
+    qualityAttributionMatchesAnchor(attr, anchorQuery),
+  )
+
+  const leaderboard = aggregateAnchorLeaderboard(performanceViews, undefined, { liveSessions })
+  const stats =
+    leaderboard.find((a) => anchorLeaderboardRowMatches(a, anchorQuery)) ??
+    (matched.length > 0
+      ? {
+          anchorId: anchorQuery.anchorId ?? matched[0]?.anchorId ?? '',
+          anchorName: anchorQuery.anchorName ?? matched[0]?.anchorName ?? '',
+          qualityReturnCount: matched.length,
+        }
+      : null)
+
+  const allRows = matched
+    .map((attr) => {
+      const raw = scoped.rawByMatch.get(attr.view.matchOrderId || attr.view.orderId)
+      const buyerNickname = String(
+        (raw as Record<string, unknown> | undefined)?._buyerNickname ??
+          attr.view.buyerId ??
+          '',
+      )
+      return {
+        orderNo: attr.orderNo,
+        buyerNickname,
+        orderTime: attr.orderTimeText,
+        qualityAttributionAnchorName: attr.anchorName,
+        matchedLiveSessionStart: attr.matchedLiveStartTime,
+        matchedLiveSessionEnd: attr.matchedLiveEndTime,
+        qualitySourceLabel: attr.qualitySourceLabel,
+        qualityReasonText: attr.qualityReasonText,
+        qualityUnassignedReason: attr.unassignedReason,
+        paymentAnchorName: attr.paymentAnchorName,
+      }
+    })
+    .sort((a, b) => b.orderTime.localeCompare(a.orderTime))
+
+  const page = Math.max(1, Math.floor(params.page ?? 1))
+  const pageSize = Math.min(100, Math.max(1, Math.floor(params.pageSize ?? 20)))
+  const total = allRows.length
+  const rows = allRows.slice((page - 1) * pageSize, page * pageSize)
+
+  return {
+    anchorId: stats && 'anchorId' in stats ? stats.anchorId : anchorQuery.anchorId ?? '',
+    anchorName:
+      stats && 'anchorName' in stats ? stats.anchorName : anchorQuery.anchorName ?? '',
+    attributionNote: '品退按订单下单时间匹配主播开播场次归属，不按售后发生时间。',
+    stats: stats as BoardAnchorMetrics | Record<string, unknown> | null,
     pagination: {
       page,
       pageSize,

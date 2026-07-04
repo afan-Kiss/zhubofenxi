@@ -1,4 +1,4 @@
-import type { AnalyzedOrderView } from '../types/analysis'
+import type { AnalyzedOrderView, AnchorConfig, LiveSession } from '../types/analysis'
 import { buildRawAnalyzeBundle } from './xhs-api-sync/xhs-analysis-from-raw.service'
 import { prepareAnalysisArtifactsFromRaw } from './business-analysis.service'
 import {
@@ -16,6 +16,11 @@ import {
   type BusinessMetrics,
 } from './business-metrics.service'
 import { logAnchorMetricsDebug } from './board-metrics-debug.service'
+import {
+  aggregateQualityRefundByAnchor,
+  getLiveSessionsForQualityRefundAttribution,
+  setLiveSessionsForQualityRefundAttribution,
+} from './quality-refund-anchor-attribution.service'
 
 export type { BusinessMetrics }
 
@@ -75,11 +80,73 @@ export function aggregateViewsMetrics(
   return toLegacyMetrics(calculateBusinessMetrics(views, warnCtx), views)
 }
 
+function applyQualityRefundAnchorCountsToLeaderboard(
+  rows: BoardAnchorMetrics[],
+  views: AnalyzedOrderView[],
+  liveSessions: LiveSession[],
+  config?: AnchorConfig,
+): void {
+  const resolvedConfig = config ?? getAnchorConfigSync()
+  const agg = aggregateQualityRefundByAnchor({
+    views,
+    liveSessions,
+    config: resolvedConfig,
+  })
+
+  /** 品退归属按展示名汇总，避免 anchorId 与支付归属 id 不一致时对不上行 */
+  const countByAnchorName = new Map<string, { count: number; anchorId: string }>()
+  for (const bucket of agg.byAnchorKey.values()) {
+    const prev = countByAnchorName.get(bucket.anchorName)
+    countByAnchorName.set(bucket.anchorName, {
+      count: (prev?.count ?? 0) + bucket.count,
+      anchorId: prev?.anchorId || bucket.anchorId,
+    })
+  }
+
+  const rowByName = new Map<string, BoardAnchorMetrics>()
+  for (const row of rows) {
+    rowByName.set(row.anchorName, row)
+  }
+
+  for (const [anchorName, { count, anchorId }] of countByAnchorName) {
+    if (count <= 0 || rowByName.has(anchorName)) continue
+    const cfg =
+      resolvedConfig.anchors.find((a) => a.name === anchorName) ??
+      resolvedConfig.anchors.find((a) => a.id === anchorId)
+    const resolvedId =
+      anchorName === '未归属' ? '' : cfg?.id ?? anchorId ?? `extra-${anchorName}`
+    const empty = aggregateViewsMetrics([], {
+      scope: 'anchor-leaderboard',
+      anchorId: resolvedId,
+      anchorName,
+    })
+    const row: BoardAnchorMetrics = {
+      anchorName,
+      anchorId: resolvedId,
+      color: cfg?.color ?? '#94a3b8',
+      ...empty,
+      gmv: empty.totalGmv,
+      actualSignedCount: empty.signedOrderCount,
+      afterSaleRecordCount: empty.afterSaleRecordCount,
+    }
+    rows.push(row)
+    rowByName.set(anchorName, row)
+  }
+
+  for (const row of rows) {
+    row.qualityReturnCount = countByAnchorName.get(row.anchorName)?.count ?? 0
+    row.qualityReturnRate =
+      row.orderCount > 0 ? row.qualityReturnCount / row.orderCount : null
+  }
+}
+
 export function aggregateAnchorLeaderboard(
   views: AnalyzedOrderView[],
   debugCtx?: import('./board-metrics-debug.service').BoardMetricsDebugContext,
+  options?: { liveSessions?: LiveSession[]; config?: AnchorConfig },
 ): BoardAnchorMetrics[] {
-  const config = getAnchorConfigSync()
+  const config = options?.config ?? getAnchorConfigSync()
+  const liveSessions = options?.liveSessions ?? getLiveSessionsForQualityRefundAttribution()
   const byKey = new Map<string, AnalyzedOrderView[]>()
 
   for (const v of views) {
@@ -120,6 +187,8 @@ export function aggregateAnchorLeaderboard(
       }
     })
 
+  applyQualityRefundAnchorCountsToLeaderboard(rows, views, liveSessions, config)
+
   return rows.sort((a, b) => {
     const orderA = config.anchors.findIndex((x) => x.name === a.anchorName)
     const orderB = config.anchors.findIndex((x) => x.name === b.anchorName)
@@ -149,6 +218,8 @@ export async function loadBoardArtifactsForRange(
   await bootstrapQualityBadCaseCache()
   const range = resolveDateRange(preset, startDate, endDate)
   const bundle = await buildRawAnalyzeBundle(range)
+  const liveSessions = bundle?.liveSessions ?? []
+  setLiveSessionsForQualityRefundAttribution(liveSessions)
   let artifacts: Awaited<ReturnType<typeof prepareAnalysisArtifactsFromRaw>> | null = null
   if (bundle) {
     const orderQueries = buildLiveAccountOrderQueries(bundle.orders)
@@ -162,7 +233,7 @@ export async function loadBoardArtifactsForRange(
   const rawByMatch = new Map(
     (artifacts?.dedupe.uniqueOrders ?? []).map((o) => [o.matchOrderId, o.raw]),
   )
-  return { range, views, rawByMatch, artifacts }
+  return { range, views, rawByMatch, artifacts, liveSessions }
 }
 
 /** 将前端 preset 统一为 DateRangePreset（保留 thisWeek，不再转为 custom） */

@@ -7,7 +7,7 @@ import {
   filterVirtualSchedulesAgainstOccupied,
   type ScheduleOverlapInterval,
 } from './anchor-schedule-time.util'
-import { anchorNamesMatch } from './anchor-name-normalize.util'
+import { anchorNamesMatch, normalizeAnchorName } from './anchor-name-normalize.util'
 
 export interface DbScheduleRowLike {
   id: string
@@ -86,6 +86,28 @@ function manualCoversFullBusinessDay(
   return enabledManual.length >= expectedTemplateCount
 }
 
+function warnDuplicateAnchorsInEffectiveRows(
+  effectiveRows: EffectiveScheduleRow[],
+  warnings: string[],
+): void {
+  const counts = new Map<string, { displayName: string; count: number }>()
+  for (const row of effectiveRows) {
+    const key = normalizeAnchorName(row.anchorName)
+    if (!key) continue
+    const hit = counts.get(key)
+    if (hit) {
+      hit.count += 1
+    } else {
+      counts.set(key, { displayName: row.anchorName, count: 1 })
+    }
+  }
+  for (const { displayName, count } of counts.values()) {
+    if (count > 1) {
+      warnings.push(`${displayName} 当天出现 ${count} 条生效排班，请检查人工与默认模板是否重复。`)
+    }
+  }
+}
+
 /**
  * 合并人工 / 默认 / 模板补齐排班：
  * - 完整人工日：仅人工
@@ -158,19 +180,37 @@ export function buildEffectiveScheduleRowsForDate(params: {
     }))
 
   const allVirtual = buildVirtualSchedulesFromTemplates(dateKey, templateInputs)
-  const filtered = filterVirtualSchedulesAgainstOccupied(allVirtual, occupiedRows)
 
-  for (const v of filtered.skipped) {
-    const manualSameAnchor = manualRows.some((m) => anchorNamesMatch(m.anchorName, v.anchorName))
-    if (manualSameAnchor) {
+  const skippedByOccupiedAnchor: typeof allVirtual = []
+  const eligibleVirtual = allVirtual.filter((v) => {
+    const hasManual = manualRows.some((m) => anchorNamesMatch(m.anchorName, v.anchorName))
+    const hasGenerated = generatedRows.some((g) => anchorNamesMatch(g.anchorName, v.anchorName))
+    if (hasManual || hasGenerated) {
+      skippedByOccupiedAnchor.push(v)
+      return false
+    }
+    return true
+  })
+
+  for (const v of skippedByOccupiedAnchor) {
+    const hasManual = manualRows.some((m) => anchorNamesMatch(m.anchorName, v.anchorName))
+    if (hasManual) {
       warnings.push(
         `${v.anchorName} 已有人工排班，默认模板 ${v.liveRoomName} ${hmFromDate(v.startAt, dateKey)}-${hmFromDate(v.endAt, dateKey)} 已跳过。`,
       )
     } else {
       warnings.push(
-        `${v.liveRoomName} ${hmFromDate(v.startAt, dateKey)}-${hmFromDate(v.endAt, dateKey)} 模板与当天排班冲突，未参与业绩计算。`,
+        `${v.anchorName} 当天已有默认排班，模板 ${v.liveRoomName} ${hmFromDate(v.startAt, dateKey)}-${hmFromDate(v.endAt, dateKey)} 已跳过。`,
       )
     }
+  }
+
+  const filtered = filterVirtualSchedulesAgainstOccupied(eligibleVirtual, occupiedRows)
+
+  for (const v of filtered.skipped) {
+    warnings.push(
+      `${v.liveRoomName} ${hmFromDate(v.startAt, dateKey)}-${hmFromDate(v.endAt, dateKey)} 模板与当天排班冲突，未参与业绩计算。`,
+    )
   }
 
   const effectiveRows: EffectiveScheduleRow[] = [
@@ -191,6 +231,8 @@ export function buildEffectiveScheduleRowsForDate(params: {
       note: v.note ?? '系统模板补齐',
     })),
   ].sort((a, b) => a.startAt.localeCompare(b.startAt))
+
+  warnDuplicateAnchorsInEffectiveRows(effectiveRows, warnings)
 
   return {
     rows: effectiveRows,

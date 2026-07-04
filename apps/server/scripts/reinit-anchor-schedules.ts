@@ -13,6 +13,7 @@ import {
   getEffectiveScheduleTableForDate,
   saveDailySchedules,
 } from '../src/services/anchor-daily-schedule.service'
+import { anchorNamesMatch } from '../src/utils/anchor-name-normalize.util'
 
 const MANUAL_DATE = '2026-07-04'
 const NEXT_DATE = '2026-07-05'
@@ -111,6 +112,31 @@ async function main(): Promise<void> {
   const manualRows = manualDay.rows.filter((r) => r.source === 'manual')
   if (manualRows.length !== 4) {
     throw new Error(`2026-07-04 应有 4 条 manual，实际 ${manualRows.length}`)
+  }
+  if (manualDay.rows.length !== 4) {
+    throw new Error(`2026-07-04 生效排班应有 4 条，实际 ${manualDay.rows.length}`)
+  }
+  const xiaohongRows = manualDay.rows.filter((r) => anchorNamesMatch(r.anchorName, '小红'))
+  if (xiaohongRows.length !== 1) {
+    throw new Error(`2026-07-04 小红生效排班应为 1 条，实际 ${xiaohongRows.length}`)
+  }
+  if (xiaohongRows[0]!.shopName !== 'XY祥钰珠宝' || xiaohongRows[0]!.startTime !== '14:15') {
+    throw new Error(
+      `2026-07-04 小红排班不符：${xiaohongRows[0]!.shopName} ${xiaohongRows[0]!.startTime}-${xiaohongRows[0]!.endTime}`,
+    )
+  }
+  if (manualDay.rows.some((r) => anchorNamesMatch(r.anchorName, '小白'))) {
+    throw new Error('2026-07-04 不应出现小白')
+  }
+  if (
+    manualDay.rows.some(
+      (r) =>
+        anchorNamesMatch(r.anchorName, '小红') &&
+        r.shopName === '和田雅玉' &&
+        r.startTime === '09:30',
+    )
+  ) {
+    throw new Error('2026-07-04 不应出现小红和田雅玉早场')
   }
 
   const nextDay = await getEffectiveScheduleTableForDate(NEXT_DATE)

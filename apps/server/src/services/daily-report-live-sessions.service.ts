@@ -22,9 +22,11 @@ import {
 import type { EffectiveScheduleRow, EffectiveScheduleSource } from './anchor-daily-schedule.service'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import {
-  matchLiveSessionToBestScheduleRow,
+  clipLiveSessionToScheduleOverlap,
   listSessionScheduleMatchCandidates,
+  matchLiveSessionToScheduleSegments,
   type LiveSessionScheduleMatchResult,
+  type LiveSessionScheduleSegment,
 } from './daily-report-live-schedule-match.service'
 import { dedupeOverlappingLiveSessionsByShopDay } from './live-session-overlap-dedupe.util'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
@@ -70,6 +72,9 @@ export interface DailyReportLiveSessionDebugRow {
   matchedScheduleTimeRange: string | null
   overlapMinutes: number
   skipReason: string | null
+  clippedStartAt: string | null
+  clippedEndAt: string | null
+  clippedDurationMinutes: number | null
   scheduleCandidates: ReturnType<typeof listSessionScheduleMatchCandidates>
 }
 
@@ -298,10 +303,10 @@ export async function loadPerShopDailyReportLiveSessions(params: {
 
 function toDebugRow(
   session: DailyReportLiveSession,
-  match: LiveSessionScheduleMatchResult,
+  segment: LiveSessionScheduleSegment | null,
   scheduleRows: EffectiveScheduleRow[],
 ): DailyReportLiveSessionDebugRow {
-  const scheduleRow = match.scheduleRow
+  const scheduleRow = segment?.scheduleRow ?? null
   return {
     sourceShopCode: session.sourceShopCode,
     sourceShopName: session.sourceShopName,
@@ -317,9 +322,143 @@ function toDebugRow(
     matchedScheduleTimeRange: scheduleRow
       ? `${scheduleRow.startTime}–${scheduleRow.endTime}`
       : null,
-    overlapMinutes: match.overlapMinutes,
-    skipReason: scheduleRow ? null : match.matchReason,
+    overlapMinutes: segment?.overlapMinutes ?? 0,
+    skipReason: segment ? null : '未匹配排班',
+    clippedStartAt: segment?.clippedStartTime ?? null,
+    clippedEndAt: segment?.clippedEndTime ?? null,
+    clippedDurationMinutes: segment?.clippedDurationMinutes ?? null,
     scheduleCandidates: listSessionScheduleMatchCandidates(session, scheduleRows),
+  }
+}
+
+function segmentToClippedSession(segment: LiveSessionScheduleSegment): DailyReportLiveSession {
+  return clipLiveSessionToScheduleOverlap(
+    segment.originalSession,
+    segment.clippedStartMs,
+    segment.clippedEndMs,
+    segment.scheduleRow.rowId,
+  ) as DailyReportLiveSession
+}
+
+function segmentToMatchResult(
+  segment: LiveSessionScheduleSegment,
+  clipped: DailyReportLiveSession,
+): LiveSessionScheduleMatchResult {
+  return {
+    session: clipped,
+    scheduleRow: segment.scheduleRow,
+    overlapMinutes: segment.overlapMinutes,
+    matchTier: 1,
+    matchReason: segment.matchReason,
+  }
+}
+
+/** 真实场次按排班交集切段归属：每个主播最多一段 */
+function assignDailyReportLiveSessionsByScheduleSegments(params: {
+  sessions: DailyReportLiveSession[]
+  scheduleRows: EffectiveScheduleRow[]
+  reportDate: string
+}): Omit<DailyReportLiveSessionAssignment, 'allSessions' | 'totalUniqueSessionCount'> & {
+  allSessions: DailyReportLiveSession[]
+  totalUniqueSessionCount: number
+} {
+  const { sessions, scheduleRows, reportDate } = params
+  const byAnchor = new Map<string, DailyReportLiveSession[]>()
+  const matchesByAnchor = new Map<string, LiveSessionScheduleMatchResult[]>()
+  const assignedSessions: DailyReportLiveSession[] = []
+  const unassignedSessions: DailyReportLiveSession[] = []
+  const debugRows: DailyReportLiveSessionDebugRow[] = []
+
+  const segmentsByAnchor = new Map<string, LiveSessionScheduleSegment[]>()
+
+  for (const session of sessions) {
+    const segments = matchLiveSessionToScheduleSegments(session, scheduleRows)
+    if (segments.length === 0) {
+      unassignedSessions.push(session)
+      debugRows.push(toDebugRow(session, null, scheduleRows))
+      logLiveSessionRow({
+        reportDate,
+        shopCode: session.sourceShopCode,
+        shopName: session.sourceShopName,
+        sellerLiveDetailDataCount: sessions.filter((s) => s.sourceShopCode === session.sourceShopCode)
+          .length,
+        session,
+        match: {
+          session,
+          scheduleRow: null,
+          overlapMinutes: 0,
+          matchTier: null,
+          matchReason: '未匹配排班',
+        },
+      })
+      continue
+    }
+
+    for (const segment of segments) {
+      const anchorName = segment.anchorName.trim()
+      if (!segmentsByAnchor.has(anchorName)) segmentsByAnchor.set(anchorName, [])
+      segmentsByAnchor.get(anchorName)!.push(segment)
+      debugRows.push(toDebugRow(session, segment, scheduleRows))
+    }
+  }
+
+  for (const [anchorName, segments] of segmentsByAnchor) {
+    if (segments.length > 1) {
+      console.warn(
+        LOG_TAG,
+        JSON.stringify({
+          reportDate,
+          reason: 'multiple_segments_for_anchor_pick_best',
+          anchorName,
+          count: segments.length,
+          segments: segments.map((s) => ({
+            liveId: s.originalSession.liveId,
+            clipped: `${s.clippedStartTime}~${s.clippedEndTime}`,
+            overlapMinutes: s.overlapMinutes,
+          })),
+        }),
+      )
+    }
+
+    const best =
+      segments.length === 1
+        ? segments[0]!
+        : segments.reduce((a, b) =>
+            b.overlapMinutes > a.overlapMinutes ||
+            (b.overlapMinutes === a.overlapMinutes && b.clippedStartMs > a.clippedStartMs)
+              ? b
+              : a,
+          )
+
+    const clipped = segmentToClippedSession(best)
+    const match = segmentToMatchResult(best, clipped)
+
+    logLiveSessionRow({
+      reportDate,
+      shopCode: clipped.sourceShopCode,
+      shopName: clipped.sourceShopName,
+      sellerLiveDetailDataCount: sessions.filter((s) => s.sourceShopCode === clipped.sourceShopCode)
+        .length,
+      session: clipped,
+      match,
+    })
+
+    assignedSessions.push(clipped)
+    byAnchor.set(anchorName, [clipped])
+    matchesByAnchor.set(anchorName, [match])
+  }
+
+  return {
+    byAnchor,
+    matchesByAnchor,
+    allSessions: sessions,
+    totalUniqueSessionCount: sessions.length,
+    assignedSessions,
+    unassignedSessions,
+    assignedLiveDurationMinutes: sumUniqueDailyReportLiveDurationMinutes(assignedSessions),
+    unassignedLiveDurationMinutes: sumUniqueDailyReportLiveDurationMinutes(unassignedSessions),
+    unassignedLiveSessionCount: unassignedSessions.length,
+    debugRows,
   }
 }
 
@@ -335,107 +474,30 @@ export async function resolveDailyReportLiveSessionAssignments(
     endDate: dateKey,
   })
 
-  const byAnchor = new Map<string, DailyReportLiveSession[]>()
-  const matchesByAnchor = new Map<string, LiveSessionScheduleMatchResult[]>()
-  const assignedSessions: DailyReportLiveSession[] = []
-  const unassignedSessions: DailyReportLiveSession[] = []
-  const debugRows: DailyReportLiveSessionDebugRow[] = []
-
-  for (const session of allSessions) {
-    const match = matchLiveSessionToBestScheduleRow(session, scheduleRows)
-    logLiveSessionRow({
-      reportDate: dateKey,
-      shopCode: session.sourceShopCode,
-      shopName: session.sourceShopName,
-      sellerLiveDetailDataCount: allSessions.filter((s) => s.sourceShopCode === session.sourceShopCode)
-        .length,
-      session,
-      match,
-    })
-    debugRows.push(toDebugRow(session, match, scheduleRows))
-
-    if (!match.scheduleRow) {
-      unassignedSessions.push(session)
-      continue
-    }
-
-    assignedSessions.push(session)
-    const anchorName = match.scheduleRow.anchorName
-    if (!byAnchor.has(anchorName)) byAnchor.set(anchorName, [])
-    if (!matchesByAnchor.has(anchorName)) matchesByAnchor.set(anchorName, [])
-    byAnchor.get(anchorName)!.push(session)
-    matchesByAnchor.get(anchorName)!.push(match)
-  }
-
-  const assignedLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(assignedSessions)
-  const unassignedLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(unassignedSessions)
+  const assignment = assignDailyReportLiveSessionsByScheduleSegments({
+    sessions: allSessions,
+    scheduleRows,
+    reportDate: dateKey,
+  })
 
   return {
     dateKey,
     effectiveSchedules: scheduleRows,
-    allSessions,
-    assignedSessions,
-    unassignedSessions,
-    byAnchor,
-    matchesByAnchor,
-    debugRows,
-    totalUniqueSessionCount: allSessions.length,
-    assignedLiveDurationMinutes,
-    unassignedLiveDurationMinutes,
-    unassignedLiveSessionCount: unassignedSessions.length,
+    ...assignment,
   }
 }
 
-/** 真实场次 → 排班主播（每场只归一个主播，取重叠分钟最大） */
+/** 真实场次 → 排班主播（按排班交集切段，每主播最多一段） */
 export function assignDailyReportLiveSessionsToAnchors(
   sessions: DailyReportLiveSession[],
   scheduleRows: EffectiveScheduleRow[],
   reportDate: string,
 ): DailyReportLiveSessionAssignment {
-  const byAnchor = new Map<string, DailyReportLiveSession[]>()
-  const matchesByAnchor = new Map<string, LiveSessionScheduleMatchResult[]>()
-  const assignedSessions: DailyReportLiveSession[] = []
-  const unassignedSessions: DailyReportLiveSession[] = []
-  const debugRows: DailyReportLiveSessionDebugRow[] = []
-
-  for (const session of sessions) {
-    const match = matchLiveSessionToBestScheduleRow(session, scheduleRows)
-    logLiveSessionRow({
-      reportDate,
-      shopCode: session.sourceShopCode,
-      shopName: session.sourceShopName,
-      sellerLiveDetailDataCount: sessions.filter((s) => s.sourceShopCode === session.sourceShopCode)
-        .length,
-      session,
-      match,
-    })
-    debugRows.push(toDebugRow(session, match, scheduleRows))
-
-    if (!match.scheduleRow) {
-      unassignedSessions.push(session)
-      continue
-    }
-
-    assignedSessions.push(session)
-    const anchorName = match.scheduleRow.anchorName
-    if (!byAnchor.has(anchorName)) byAnchor.set(anchorName, [])
-    if (!matchesByAnchor.has(anchorName)) matchesByAnchor.set(anchorName, [])
-    byAnchor.get(anchorName)!.push(session)
-    matchesByAnchor.get(anchorName)!.push(match)
-  }
-
-  return {
-    byAnchor,
-    matchesByAnchor,
-    allSessions: sessions,
-    totalUniqueSessionCount: sessions.length,
-    assignedSessions,
-    unassignedSessions,
-    assignedLiveDurationMinutes: sumUniqueDailyReportLiveDurationMinutes(assignedSessions),
-    unassignedLiveDurationMinutes: sumUniqueDailyReportLiveDurationMinutes(unassignedSessions),
-    unassignedLiveSessionCount: unassignedSessions.length,
-    debugRows,
-  }
+  return assignDailyReportLiveSessionsByScheduleSegments({
+    sessions,
+    scheduleRows,
+    reportDate,
+  })
 }
 
 export async function loadAndAssignDailyReportLiveSessions(params: {

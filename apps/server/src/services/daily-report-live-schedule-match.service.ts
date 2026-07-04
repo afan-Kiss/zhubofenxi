@@ -13,7 +13,7 @@ import {
 } from '../utils/anchor-attendance-status.util'
 import { anchorNamesMatch } from '../utils/anchor-name-normalize.util'
 import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
-import { parseLiveSessionTimeMs } from '../utils/business-timezone'
+import { formatDateTimeShanghai, parseLiveSessionTimeMs } from '../utils/business-timezone'
 
 export interface LiveSessionScheduleMatchResult {
   session: AnchorLiveSessionBrief
@@ -27,6 +27,33 @@ export interface LiveSessionScheduleMatchCandidate {
   scheduleRow: EffectiveScheduleRow
   overlapMinutes: number
   shopMatch: boolean
+  matchReason: string
+}
+
+/** 真实直播与一条排班的交集段（用于主播业绩显示与订单归属） */
+export interface LiveSessionScheduleSegment {
+  anchorName: string
+  scheduleRow: EffectiveScheduleRow
+  originalSession: AnchorLiveSessionBrief
+  overlapMinutes: number
+  clippedStartMs: number
+  clippedEndMs: number
+  clippedStartTime: string
+  clippedEndTime: string
+  clippedDurationMinutes: number
+  matchReason: string
+}
+
+/** @deprecated 使用 LiveSessionScheduleSegment */
+export interface LiveSessionScheduleOverlapMatch {
+  session: AnchorLiveSessionBrief
+  scheduleRow: EffectiveScheduleRow
+  overlapMinutes: number
+  clippedStartMs: number
+  clippedEndMs: number
+  clippedStartTime: string
+  clippedEndTime: string
+  clippedDurationMinutes: number
   matchReason: string
 }
 
@@ -198,6 +225,130 @@ export function matchLiveSessionToBestScheduleRow(
     overlapMinutes: best.overlapMinutes,
     matchTier: best.matchTier,
     matchReason: best.matchReason,
+  }
+}
+
+const SEGMENT_LOG_TAG = '[live-session-segment]'
+
+function pickBestSegmentForAnchor(segments: LiveSessionScheduleSegment[]): LiveSessionScheduleSegment {
+  return segments.reduce((best, cur) =>
+    cur.overlapMinutes > best.overlapMinutes ||
+    (cur.overlapMinutes === best.overlapMinutes && cur.clippedStartMs > best.clippedStartMs)
+      ? cur
+      : best,
+  )
+}
+
+/** 单场真实直播 → 与各有效排班的交集段；同一主播多条时只保留 overlap 最大的一段 */
+export function matchLiveSessionToScheduleSegments(
+  session: AnchorLiveSessionBrief,
+  scheduleRows: EffectiveScheduleRow[],
+): LiveSessionScheduleSegment[] {
+  const liveName = resolveSessionShopLabelForScheduleMatch(session)
+  const startMs = parseLiveSessionTimeMs(session.startTime)
+  const endMs = resolveSessionEndMs(session)
+  if (startMs == null || endMs == null) return []
+
+  const rawSegments: LiveSessionScheduleSegment[] = []
+  for (const row of scheduleRows) {
+    if (!row.enabled) continue
+    const scheduleStart = new Date(row.startAt).getTime()
+    const scheduleEnd = new Date(row.endAt).getTime()
+    const overlap = computeScheduleOverlapMinutes(startMs, endMs, scheduleStart, scheduleEnd)
+    if (overlap <= 0) continue
+
+    const shopMatch = orderLiveRoomMatchesSchedule(liveName, row.shopName, row.liveRoomName)
+    if (!shopMatch) continue
+
+    const clippedStartMs = Math.max(startMs, scheduleStart)
+    const clippedEndMs = Math.min(endMs, scheduleEnd)
+    const clippedDurationMinutes = Math.round((clippedEndMs - clippedStartMs) / 60_000)
+
+    rawSegments.push({
+      anchorName: row.anchorName,
+      scheduleRow: row,
+      originalSession: session,
+      overlapMinutes: overlap,
+      clippedStartMs,
+      clippedEndMs,
+      clippedStartTime: formatDateTimeShanghai(new Date(clippedStartMs)),
+      clippedEndTime: formatDateTimeShanghai(new Date(clippedEndMs)),
+      clippedDurationMinutes,
+      matchReason: `店铺(${row.shopName})+时间重叠${overlap}分钟→${row.anchorName}`,
+    })
+  }
+
+  const byAnchor = new Map<string, LiveSessionScheduleSegment[]>()
+  for (const seg of rawSegments) {
+    const key = seg.anchorName.trim()
+    if (!byAnchor.has(key)) byAnchor.set(key, [])
+    byAnchor.get(key)!.push(seg)
+  }
+
+  const deduped: LiveSessionScheduleSegment[] = []
+  for (const [anchorName, segs] of byAnchor) {
+    if (segs.length > 1) {
+      console.warn(
+        SEGMENT_LOG_TAG,
+        JSON.stringify({
+          reason: 'multiple_schedule_rows_for_anchor_in_one_session',
+          anchorName,
+          liveId: session.liveId,
+          segments: segs.map((s) => ({
+            rowId: s.scheduleRow.rowId,
+            clipped: `${s.clippedStartTime}~${s.clippedEndTime}`,
+            overlapMinutes: s.overlapMinutes,
+          })),
+        }),
+      )
+    }
+    deduped.push(pickBestSegmentForAnchor(segs))
+  }
+
+  return deduped.sort(
+    (a, b) =>
+      a.clippedStartMs - b.clippedStartMs ||
+      b.overlapMinutes - a.overlapMinutes ||
+      a.scheduleRow.rowId.localeCompare(b.scheduleRow.rowId),
+  )
+}
+
+/** @deprecated 使用 matchLiveSessionToScheduleSegments */
+export function matchLiveSessionToOverlappingScheduleRows(
+  session: AnchorLiveSessionBrief,
+  scheduleRows: EffectiveScheduleRow[],
+): LiveSessionScheduleOverlapMatch[] {
+  return matchLiveSessionToScheduleSegments(session, scheduleRows).map((seg) => ({
+    session: seg.originalSession,
+    scheduleRow: seg.scheduleRow,
+    overlapMinutes: seg.overlapMinutes,
+    clippedStartMs: seg.clippedStartMs,
+    clippedEndMs: seg.clippedEndMs,
+    clippedStartTime: seg.clippedStartTime,
+    clippedEndTime: seg.clippedEndTime,
+    clippedDurationMinutes: seg.clippedDurationMinutes,
+    matchReason: seg.matchReason,
+  }))
+}
+
+/** 将真实场次裁剪为与排班重叠的时间段（保留扩展字段，liveId 加 segment 后缀防去重） */
+export function clipLiveSessionToScheduleOverlap(
+  session: AnchorLiveSessionBrief,
+  clippedStartMs: number,
+  clippedEndMs: number,
+  scheduleRowId?: string,
+): AnchorLiveSessionBrief {
+  const clippedDurationMinutes = Math.max(0, Math.round((clippedEndMs - clippedStartMs) / 60_000))
+  const segmentKey = scheduleRowId
+    ? `${scheduleRowId}::${clippedStartMs}`
+    : String(clippedStartMs)
+  return {
+    ...session,
+    liveId: `${session.liveId}::seg::${segmentKey}`,
+    startTime: formatDateTimeShanghai(new Date(clippedStartMs)),
+    endTime: formatDateTimeShanghai(new Date(clippedEndMs)),
+    durationMinutes: clippedDurationMinutes,
+    durationText: formatLiveDurationMinutes(clippedDurationMinutes),
   }
 }
 

@@ -77,6 +77,24 @@ export function validateScheduleRows(rows: ScheduleRowDraft[]): {
   }
 
   const conflicts: ScheduleConflict[] = []
+
+  const anchorGroups = new Map<string, Array<{ row: ScheduleRowDraft; index: number }>>()
+  for (const item of enabled) {
+    const key = item.row.anchorName.trim()
+    if (!key) continue
+    if (!anchorGroups.has(key)) anchorGroups.set(key, [])
+    anchorGroups.get(key)!.push(item)
+  }
+
+  for (const [anchorName, group] of anchorGroups) {
+    if (group.length <= 1) continue
+    conflicts.push({
+      type: 'anchor_overlap',
+      message: `${anchorName}今天已经有一条排班了，不能再给她排第二场`,
+      rowIndexes: group.map((g) => g.index),
+    })
+  }
+
   const intervals = enabled
     .map(({ row, index }) => ({ row, index, iv: rowInterval(row) }))
     .filter((item): item is { row: ScheduleRowDraft; index: number; iv: { start: number; end: number } } =>
@@ -96,16 +114,12 @@ export function validateScheduleRows(rows: ScheduleRowDraft[]): {
       const aRange = formatIntervalRange(aStart, aEnd)
       const bRange = formatIntervalRange(bStart, bEnd)
 
+      if (a.row.anchorName.trim() === b.row.anchorName.trim()) continue
+
       if (sameShop(a.row, b.row)) {
         conflicts.push({
           type: 'shop_overlap',
-          message: `${roomLabel(a.row)} ${aRange} 同时安排了${a.row.anchorName.trim()}和${b.row.anchorName.trim()}，请保留一个。`,
-          rowIndexes: [a.index, b.index],
-        })
-      } else if (a.row.anchorName.trim() === b.row.anchorName.trim()) {
-        conflicts.push({
-          type: 'anchor_overlap',
-          message: `${a.row.anchorName.trim()}在 ${aRange} 已排 ${roomLabel(a.row)}，同时又排了 ${roomLabel(b.row)} ${bRange}，请删掉一条或调整时间。`,
+          message: `${roomLabel(a.row)} ${bRange} 已经排了${b.row.anchorName.trim()}，不能再排其他主播`,
           rowIndexes: [a.index, b.index],
         })
       }

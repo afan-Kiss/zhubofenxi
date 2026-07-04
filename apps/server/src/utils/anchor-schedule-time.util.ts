@@ -171,22 +171,35 @@ export function detectScheduleConflicts(rows: IntervalLike[]): ScheduleConflict[
   const conflicts: ScheduleConflict[] = []
   const enabled = rows.filter((r) => r.startAt < r.endAt)
 
+  const anchorGroups = new Map<string, IntervalLike[]>()
+  for (const row of enabled) {
+    const key = row.anchorName.trim()
+    if (!key) continue
+    if (!anchorGroups.has(key)) anchorGroups.set(key, [])
+    anchorGroups.get(key)!.push(row)
+  }
+
+  for (const [anchorName, group] of anchorGroups) {
+    if (group.length <= 1) continue
+    conflicts.push({
+      type: 'anchor_overlap',
+      message: `${anchorName}今天已经有一条排班了，不能再给她排第二场`,
+    })
+  }
+
   for (let i = 0; i < enabled.length; i++) {
     for (let j = i + 1; j < enabled.length; j++) {
       const a = enabled[i]!
       const b = enabled[j]!
+      if (a.anchorName.trim() === b.anchorName.trim()) continue
       if (!scheduleIntervalsOverlap(a.startAt, a.endAt, b.startAt, b.endAt)) continue
 
       const dateKey = scheduleDateFromInterval(a)
       if (sameShop(a, b)) {
+        const range = formatIntervalRange(b, dateKey)
         conflicts.push({
           type: 'shop_overlap',
-          message: `${roomLabel(a)} ${formatIntervalRange(a, dateKey)} 同时安排了${a.anchorName}和${b.anchorName}，请保留一个。`,
-        })
-      } else if (a.anchorName === b.anchorName) {
-        conflicts.push({
-          type: 'anchor_overlap',
-          message: `${a.anchorName}在 ${formatIntervalRange(a, dateKey)} 已排 ${roomLabel(a)}，同时又排了 ${roomLabel(b)} ${formatIntervalRange(b, dateKey)}，请删掉一条或调整时间。`,
+          message: `${roomLabel(a)} ${range} 已经排了${b.anchorName}，不能再排其他主播`,
         })
       }
     }

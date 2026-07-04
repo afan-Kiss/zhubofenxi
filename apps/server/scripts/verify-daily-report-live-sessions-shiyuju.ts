@@ -190,7 +190,10 @@ function assertAnchorSessions(
 ) {
   assert.equal(sessions.length, expected.count, `${anchorName} session count`)
   if (expected.liveId) {
-    assert.equal(sessions[0]!.liveId, expected.liveId, `${anchorName} liveId`)
+    assert.ok(
+      sessions[0]!.liveId.startsWith(expected.liveId),
+      `${anchorName} liveId should start with ${expected.liveId}, got ${sessions[0]!.liveId}`,
+    )
   }
   const built = buildDailyReportLiveScheduleFields({
     anchorName,
@@ -290,8 +293,8 @@ const feiyunSessions = assignment.byAnchor.get('飞云') ?? []
 assertAnchorSessions('子杰', zijieSessions, {
   count: 1,
   liveId: '570343544189288405',
-  timeLines: ['09:44~14:12'],
-  forbiddenTimeLines: ['09:55~13:57', '14:19~14:30', '14:20~14:30'],
+  timeLines: ['09:44~14:00'],
+  forbiddenTimeLines: ['09:55~13:57', '14:19~14:30', '14:20~14:30', '09:44~14:12'],
   incomeYuan: 7179,
   dealOrderCnt: 5,
   refundAmtYuan: 0,
@@ -300,7 +303,7 @@ assertAnchorSessions('子杰', zijieSessions, {
 assertAnchorSessions('飞云', feiyunSessions, {
   count: 1,
   liveId: '570344088694093157',
-  timeLines: ['18:35~23:09'],
+  timeLines: ['18:35~23:00'],
   incomeYuan: 11347,
   dealOrderCnt: 5,
   refundAmtYuan: 1999,

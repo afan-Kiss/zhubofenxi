@@ -7,6 +7,8 @@ import { GOOD_REVIEW_SHOP_KEYS } from '../src/config/good-review-shops.constants
 import { runDailyStrategySyncJob } from '../src/services/daily-sync-strategy.service'
 import { getShopCookieHealth } from '../src/services/shop-cookie-health.service'
 
+const TERMINAL_SUCCESS_STATUSES = new Set(['success', 'partial_success', 'success_empty'])
+
 async function countTable(table: string): Promise<number> {
   const rows = await prisma.$queryRawUnsafe<Array<{ c: number | bigint }>>(
     `SELECT COUNT(*) AS c FROM ${table}`,
@@ -114,7 +116,7 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, 5000))
     const job = await prisma.xhsSyncJob.findUnique({ where: { id: targetJobId } })
     if (!job) break
-    if (i % 6 === 0 || job.status === 'success' || job.status === 'failed') {
+    if (i % 6 === 0 || TERMINAL_SUCCESS_STATUSES.has(job.status) || job.status === 'failed') {
       console.log(
         JSON.stringify({
           poll: i,
@@ -125,12 +127,12 @@ async function main(): Promise<void> {
         }),
       )
     }
-    if (job.status === 'success' || job.status === 'failed') {
-      if (job.status === 'failed') {
-        await diagnoseFailure()
-        throw new Error(job.errorMessage || '同步任务失败')
-      }
+    if (TERMINAL_SUCCESS_STATUSES.has(job.status)) {
       break
+    }
+    if (job.status === 'failed') {
+      await diagnoseFailure()
+      throw new Error(job.errorMessage || '同步任务失败')
     }
   }
 

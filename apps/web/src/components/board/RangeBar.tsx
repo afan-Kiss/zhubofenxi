@@ -30,8 +30,8 @@ export const RangeBar: React.FC<Props> = ({
   const tabItems = BOARD_RANGE_PRESETS.map((p) => ({ key: p.key, label: p.label }))
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="rounded-2xl border border-rose-100/50 bg-white/80 p-1.5">
+    <div className="flex flex-col gap-2.5">
+      <div className="rounded-2xl border border-slate-100/90 bg-white/90 p-1.5 shadow-sm">
         <AnimatedTabs
           items={tabItems}
           activeKey={preset}

@@ -136,6 +136,17 @@ function validateOverviewTabUi(issues: string[]) {
   assert(!src.includes('showLongPeriodRates'), 'OverviewTab 不应再按短周期隐藏签收率/退款率', issues)
   assert(!src.includes('validSalesAmount'), 'OverviewTab 不应绑定有效成交额卡片', issues)
   assert(!src.includes('qualityReturnRate'), 'OverviewTab 不应展示品退率卡片', issues)
+
+  assert(
+    src.includes('xl:grid-cols-5') || src.includes('SUMMARY_CARDS'),
+    'OverviewTab 应使用统一 grid 渲染 9 卡片',
+    issues,
+  )
+  assert(
+    !/lg:grid-cols-5[\s\S]{0,800}lg:grid-cols-4/.test(src),
+    'OverviewTab 不应分两行不同列数的顶部卡片 grid',
+    issues,
+  )
 }
 
 async function main(): Promise<void> {

@@ -320,7 +320,7 @@ export interface AnalyzedOrderView {
   officialQualityItemId?: string
   officialQualityItemName?: string
   qualitySource?: 'official_bad_case' | 'after_sale' | 'both' | 'none'
-  qualityMainSource?: 'official_bad_case' | 'none'
+  qualityMainSource?: 'official_bad_case' | 'after_sale' | 'none'
   qualityVerifySource?: 'after_sale_time_search' | 'after_sale_workbench' | 'none'
   qualityVerifyStatus?: 'verified' | 'official_only' | 'after_sale_only' | 'conflict' | 'unmatched' | 'none'
   qualityVerifyDisplayLabel?: string

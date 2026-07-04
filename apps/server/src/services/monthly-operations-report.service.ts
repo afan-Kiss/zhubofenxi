@@ -152,6 +152,7 @@ function buildMonthlySummary(
   )
 
   return {
+    validAmountCent: base.validAmountCent,
     validAmountYuan: base.validAmountYuan,
     soldOrderCount: base.soldOrderCount,
     soldCount,

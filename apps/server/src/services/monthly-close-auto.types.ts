@@ -45,6 +45,12 @@ export interface BuyerDrawerDiffRow {
   possibleReasons: string[]
 }
 
+export interface QualityRefundDiagnosticRow {
+  orderNo: string
+  packageId: string
+  reason: string
+}
+
 export interface DataAccuracyCheck {
   key: string
   title: string
@@ -68,9 +74,17 @@ export interface DataAccuracyCheck {
     onlyInAggregate?: OrderPoolDiffRow[]
     amountMismatch?: OrderPoolDiffRow[]
     roundingNote?: string
+    widePoolExcludedSamples?: OrderPoolDiffRow[]
   }
   buyerDrawerDiffs?: BuyerDrawerDiffRow[]
   badBuyerDrawerDiffs?: BuyerDrawerDiffRow[]
+  qualityRefundDiagnostic?: {
+    officialRawCount: number
+    matchedOrderCount: number
+    unmatchedOrderCount: number
+    periodQualityRefundOrderCount: number
+    excludeSamples: QualityRefundDiagnosticRow[]
+  }
 }
 
 export interface DataAccuracyAuditReport {

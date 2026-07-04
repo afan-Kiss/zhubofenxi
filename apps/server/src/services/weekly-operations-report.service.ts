@@ -124,7 +124,7 @@ export function aggregateProductsFromSnapshots(
 function aggregateWeeklySummary(
   snapshots: DailyOperationsReportPayload[],
 ): DailyOperationsReportPayload['summary'] {
-  let validAmountYuan = 0
+  let validAmountCent = 0
   let soldOrderCount = 0
   let invalidOrderCount = 0
   let returnOrderCount = 0
@@ -141,7 +141,7 @@ function aggregateWeeklySummary(
   const liveRoomMap = new Map<string, number>()
 
   for (const snap of snapshots) {
-    validAmountYuan += snap.summary.validAmountYuan
+    validAmountCent += snap.summary.validAmountCent ?? Math.round(snap.summary.validAmountYuan * 100)
     soldOrderCount += snap.summary.soldOrderCount
     invalidOrderCount += snap.summary.invalidOrderCount
     returnOrderCount += snap.summary.returnOrderCount
@@ -172,8 +172,10 @@ function aggregateWeeklySummary(
   }
 
   const totalLiveHours = totalLiveDurationMinutes / 60
+  const validAmountYuan = validAmountCent / 100
 
   return {
+    validAmountCent,
     validAmountYuan,
     soldOrderCount,
     invalidOrderCount,

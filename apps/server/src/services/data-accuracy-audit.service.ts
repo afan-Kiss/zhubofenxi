@@ -14,9 +14,8 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { resolveDateRange } from '../utils/date-range'
 import { buildBuyerRankingAllItems } from './buyer-ranking.service'
 import {
-  buildBadBuyerProfile,
-  capBadBuyerRate,
-  isBadBuyerCandidate,
+  buildBadBuyerRankingEnrichedItems,
+  loadBadBuyerRankingAuditContext,
 } from './bad-buyer-ranking.service'
 import { centToYuan } from '../utils/money'
 import { runPayTimePrefilterDiagnostic } from './order-pay-time-prefilter-diagnostic.service'
@@ -44,6 +43,7 @@ import {
   buildDailyRevenueDiffRows,
   compareValidRevenueOrderPools,
 } from './data-accuracy-audit-diff.util'
+import { buildQualityRefundMonthDiagnostic } from './quality-refund-month-diagnostic.service'
 import type {
   DataAccuracyAuditReport,
   DataAccuracyCheck,
@@ -62,6 +62,7 @@ const CHECK_CATEGORY_BY_KEY: Record<string, DataAccuracyCheckCategory> = {
   buyer_ranking_vs_drawer: 'blocking',
   bad_buyer_vs_drawer: 'blocking',
   refund_metrics_consistency: 'blocking',
+  quality_refund_diagnostic: 'info',
   raw_full_db_info: 'info',
   raw_vs_normalized: 'info',
 }
@@ -272,12 +273,12 @@ export async function runDataAccuracyAudit(params: {
       })
       snapshots.push(daily)
       dailyByDate.set(dateKey, {
-        cent: Math.round(daily.summary.validAmountYuan * 100),
+        cent: daily.summary.validAmountCent ?? Math.round(daily.summary.validAmountYuan * 100),
         orders: daily.summary.soldOrderCount,
       })
     }
     const dailySum = aggregateWeeklySummaryForAcceptance(snapshots)
-    dailySumCent = Math.round(dailySum.validAmountYuan * 100)
+    dailySumCent = dailySum.validAmountCent ?? Math.round(dailySum.validAmountYuan * 100)
     dailySumOrders = dailySum.soldOrderCount
     const boardByDate = buildDailyBoardRevenueByDate(coreViews, days)
     dailyDiffs = buildDailyRevenueDiffRows({ dateKeys: days, boardByDate, dailyByDate })
@@ -294,7 +295,7 @@ export async function runDataAccuracyAudit(params: {
       role: LOCAL_VIEWER_USER.role,
       username: LOCAL_VIEWER_USER.username,
     })
-    monthlyReportCent = Math.round(monthly.summary.validAmountYuan * 100)
+    monthlyReportCent = monthly.summary.validAmountCent ?? Math.round(monthly.summary.validAmountYuan * 100)
     monthlyReportOrders = monthly.summary.soldOrderCount
   } catch {
     /* optional for non-full-month ranges */
@@ -395,9 +396,10 @@ export async function runDataAccuracyAudit(params: {
   const poolNote =
     orderPoolCompare.roundingNote ??
     (orderPoolCompare.onlyInBoard.length > 0 ||
-    orderPoolCompare.onlyInAggregate.length > 0
-      ? '有效成交订单池与发货单订单池存在差异，见下方差异订单'
-      : '经营总览有效成交与标准订单聚合必须同口径（cent）')
+    orderPoolCompare.onlyInAggregate.length > 0 ||
+    orderPoolCompare.amountMismatch.length > 0
+      ? '有效成交订单池与标准订单聚合存在差异，见下方差异订单'
+      : '经营总览有效成交与标准订单聚合同口径（isValidRevenueOrder / cent）')
 
   pushCheck(
     checks,
@@ -420,6 +422,7 @@ export async function runDataAccuracyAudit(params: {
         onlyInAggregate: orderPoolCompare.onlyInAggregate,
         amountMismatch: orderPoolCompare.amountMismatch,
         roundingNote: orderPoolCompare.roundingNote,
+        widePoolExcludedSamples: orderPoolCompare.widePoolExcludedSamples,
       },
     },
     blockers,
@@ -530,9 +533,15 @@ export async function runDataAccuracyAudit(params: {
     })
     const periodCtx = await loadBuyerRankingPeriodContext(startDate, endDate)
 
-    const badCandidates = rankingItems.filter(isBadBuyerCandidate)
+    const badRankingItems = await buildBadBuyerRankingEnrichedItems({
+      preset: 'custom',
+      startDate,
+      endDate,
+    })
+    const badAuditCtx = await loadBadBuyerRankingAuditContext('custom', startDate, endDate)
+
     const buyerLimit = resolveBuyerAuditSampleLimit(fullScan, rankingItems.length)
-    const badLimit = resolveBadBuyerAuditSampleLimit(fullScan, badCandidates.length)
+    const badLimit = resolveBadBuyerAuditSampleLimit(fullScan, badRankingItems.length)
 
     let buyerDiff = 0
     const buyerSampleKeys: string[] = []
@@ -605,14 +614,17 @@ export async function runDataAccuracyAudit(params: {
     const badSampleOrderIds: string[] = []
     const badBuyerDrawerDiffs: import('./monthly-close-auto.types').BuyerDrawerDiffRow[] = []
 
-    for (const item of badCandidates.slice(0, badLimit)) {
+    for (const item of badRankingItems.slice(0, badLimit)) {
       const drawer = buildBadBuyerDrawerAuditMetrics({
         buyerKey: item.buyerKey,
-        allViews: periodCtx.views,
-        rawByMatch: periodCtx.rawByMatch,
+        allViews: badAuditCtx.views,
+        rawByMatch: badAuditCtx.rawByMatch,
       })
-      const profile = buildBadBuyerProfile(item)
-      const listRefundRate = capBadBuyerRate(profile.refundOrderCount, profile.paidCount)
+      const profile = item.badBuyerProfile
+      const listRefundRate =
+        profile.paidCount > 0
+          ? Math.min(profile.refundOrderCount / profile.paidCount, 1)
+          : 0
 
       const diffRow = buildBadBuyerDrawerDiffRow({
         buyerDisplayName: item.buyerDisplayName ?? item.nickname ?? item.buyerKey,
@@ -677,6 +689,41 @@ export async function runDataAccuracyAudit(params: {
       actualCount: boardMetrics.refundOrderCount,
       diffCount: refundMetrics.refundOrderCount - boardMetrics.refundOrderCount,
       note: '退款单数与经营总览退款指标交叉核对',
+    },
+    blockers,
+    warnings,
+    infoNotes,
+  )
+
+  const qualityDiag = buildQualityRefundMonthDiagnostic({
+    views: coreViews,
+    startDate,
+    endDate,
+  })
+  const qualityDiagStatus: DataAccuracyStatus =
+    qualityDiag.matchedOrderCount > 0 &&
+    qualityDiag.periodQualityRefundOrderCount === 0
+      ? 'warning'
+      : 'pass'
+
+  pushCheck(
+    checks,
+    {
+      key: 'quality_refund_diagnostic',
+      title: '品退订单数诊断',
+      status: qualityDiagStatus,
+      expectedCount: qualityDiag.matchedOrderCount,
+      actualCount: qualityDiag.periodQualityRefundOrderCount,
+      diffCount: qualityDiag.matchedOrderCount - qualityDiag.periodQualityRefundOrderCount,
+      excludeFromTotals: true,
+      note: qualityDiag.note,
+      qualityRefundDiagnostic: {
+        officialRawCount: qualityDiag.officialRawCount,
+        matchedOrderCount: qualityDiag.matchedOrderCount,
+        unmatchedOrderCount: qualityDiag.unmatchedOrderCount,
+        periodQualityRefundOrderCount: qualityDiag.periodQualityRefundOrderCount,
+        excludeSamples: qualityDiag.excludeSamples,
+      },
     },
     blockers,
     warnings,

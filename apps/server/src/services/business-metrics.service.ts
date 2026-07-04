@@ -12,11 +12,6 @@ import { aggregateRefundAmountCentByOrderNo } from './order-refund-metrics.servi
 import { dedupeOrderCountByOrderNo } from './order-master-match.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
 import { sumValidRevenueFromViews } from './valid-revenue-order.service'
-/** 计入发货单金额的订单（与 shippedOrderCount 同一口径，宽于有效成交池） */
-function countsAsShippedOrderView(v: AnalyzedOrderView): boolean {
-  return v.includedInGmv === true && v.effectiveGmvCent > 0
-}
-
 /** 全站经营指标统一计算（看板 / 排行 / 钻取 / 导出共用） */
 
 export const BUSINESS_METRICS_VERSION = 'v11-valid-revenue-pool-2026-06'
@@ -70,7 +65,7 @@ export interface BusinessMetrics {
 
   signRate: number | null
 
-  /** 发货单订单数：有效销售额>0 的已支付订单（按 P 单号去重，与发货单金额一致） */
+  /** 有效成交订单数（与 validSalesAmount 同一口径，按 P 单号去重） */
   shippedOrderCount: number
 
 }
@@ -157,8 +152,6 @@ export function calculateBusinessMetrics(
 
   let freightRefundCent = 0
 
-  const shippedOrderNos = new Set<string>()
-
   for (const v of views) {
 
     if (v.includedInGmv) {
@@ -170,11 +163,6 @@ export function calculateBusinessMetrics(
     }
 
     freightRefundCent += v.freightRefundAmountCent
-
-    if (countsAsShippedOrderView(v)) {
-      const no = resolveMetricOrderNo(v)
-      if (no) shippedOrderNos.add(no)
-    }
   }
 
   const validRevenue = sumValidRevenueFromViews(views)
@@ -227,7 +215,7 @@ export function calculateBusinessMetrics(
 
     signRate: metricSets.signRate,
 
-    shippedOrderCount: shippedOrderNos.size,
+    shippedOrderCount: validRevenue.soldOrderCount,
 
   }
 

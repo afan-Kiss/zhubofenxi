@@ -14,15 +14,20 @@ interface Props {
   onClick?: () => void
 }
 
+export function buildGoodReviewImageProxyUrl(rawUrl: string | null | undefined): string {
+  if (!rawUrl) return PLACEHOLDER
+  const params = new URLSearchParams()
+  params.set('url', rawUrl)
+  const sessionId = sessionStorage.getItem('good-review-image-session-id')
+  if (sessionId) params.set('sessionId', sessionId)
+  return `/api/good-reviews/image-proxy?${params.toString()}`
+}
+
 export const GoodReviewImage: React.FC<Props> = ({ rawUrl, alt, className, onClick }) => {
   const [failed, setFailed] = useState(false)
   const src = useMemo(() => {
     if (!rawUrl || failed) return PLACEHOLDER
-    const params = new URLSearchParams()
-    params.set('url', rawUrl)
-    const sessionId = sessionStorage.getItem('good-review-image-session-id')
-    if (sessionId) params.set('sessionId', sessionId)
-    return `/api/good-reviews/image-proxy?${params.toString()}`
+    return buildGoodReviewImageProxyUrl(rawUrl)
   }, [rawUrl, failed])
 
   return (

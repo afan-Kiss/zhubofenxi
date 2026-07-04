@@ -434,11 +434,13 @@ function buildAftersaleApplyCountByBuyer(views: AnalyzedOrderView[]): Map<string
   return map
 }
 
-async function loadBadBuyerContextForRange(
+export async function loadBadBuyerRankingAuditContext(
   preset: string,
   startDate?: string,
   endDate?: string,
 ): Promise<{
+  views: AnalyzedOrderView[]
+  rawByMatch: Map<string, Record<string, unknown>>
   shopMap: Map<string, BuyerShopAggregate>
   aftersaleApplyByBuyer: Map<string, number>
 }> {
@@ -448,7 +450,12 @@ async function loadBadBuyerContextForRange(
   )
   const bundle = await buildRawAnalyzeBundle(allAnalysisRange)
   if (!bundle) {
-    return { shopMap: new Map(), aftersaleApplyByBuyer: new Map() }
+    return {
+      views: [],
+      rawByMatch: new Map(),
+      shopMap: new Map(),
+      aftersaleApplyByBuyer: new Map(),
+    }
   }
   const artifacts = prepareAnalysisArtifactsFromRaw(bundle)
   const rawByMatch = new Map<string, Record<string, unknown>>()
@@ -465,9 +472,57 @@ async function loadBadBuyerContextForRange(
     )
   })
   return {
+    views,
+    rawByMatch,
     shopMap: buildBuyerShopMapFromViews(views),
     aftersaleApplyByBuyer: buildAftersaleApplyCountByBuyer(views),
   }
+}
+
+async function loadBadBuyerContextForRange(
+  preset: string,
+  startDate?: string,
+  endDate?: string,
+): Promise<{
+  shopMap: Map<string, BuyerShopAggregate>
+  aftersaleApplyByBuyer: Map<string, number>
+}> {
+  const ctx = await loadBadBuyerRankingAuditContext(preset, startDate, endDate)
+  return {
+    shopMap: ctx.shopMap,
+    aftersaleApplyByBuyer: ctx.aftersaleApplyByBuyer,
+  }
+}
+
+/** 高风险售后客户榜统一聚合：页面、微信文本、数据健康核对共用 */
+export async function buildBadBuyerRankingEnrichedItems(params: {
+  preset?: string
+  startDate?: string
+  endDate?: string
+}): Promise<BadBuyerRankingItem[]> {
+  const preset = params.preset ?? 'recent30'
+  const items = await buildBadBuyerRankingAllItems({
+    preset,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    type: 'all',
+  })
+  const ctx = await loadBadBuyerRankingAuditContext(preset, params.startDate, params.endDate)
+
+  return items
+    .filter(isBadBuyerCandidate)
+    .map((item) => {
+      const badBuyerProfile = buildBadBuyerProfile(item, ctx.shopMap.get(item.buyerKey), {
+        aftersaleApplyCount: ctx.aftersaleApplyByBuyer.get(item.buyerKey),
+      })
+      return { ...item, badBuyerProfile }
+    })
+    .filter((item) =>
+      isBadBuyerRefundStatsConsistent({
+        refundOrderCount: item.badBuyerProfile.refundOrderCount,
+        refundAmountCent: Math.round(item.badBuyerProfile.refundAmountYuan * 100),
+      }),
+    )
 }
 
 export async function buildBadBuyerRanking(params: {
@@ -491,41 +546,19 @@ export async function buildBadBuyerRanking(params: {
   const range = resolveBuyerRankingDateRange(preset, params.startDate, params.endDate)
   const limit = Math.min(10, Math.max(1, Math.floor(params.limit ?? 10)))
 
-  const items = await buildBadBuyerRankingAllItems({
+  const enriched = await buildBadBuyerRankingEnrichedItems({
     preset,
     startDate: params.startDate,
     endDate: params.endDate,
-    type: 'all',
   })
 
-  const { shopMap, aftersaleApplyByBuyer } = await loadBadBuyerContextForRange(
-    preset,
-    params.startDate,
-    params.endDate,
-  )
-
-  const enriched: BadBuyerRankingItem[] = items
-    .filter(isBadBuyerCandidate)
-    .map((item) => {
-      const badBuyerProfile = buildBadBuyerProfile(item, shopMap.get(item.buyerKey), {
-        aftersaleApplyCount: aftersaleApplyByBuyer.get(item.buyerKey),
-      })
-      return { ...item, badBuyerProfile }
-    })
-    .filter((item) =>
-      isBadBuyerRefundStatsConsistent({
-        refundOrderCount: item.badBuyerProfile.refundOrderCount,
-        refundAmountCent: Math.round(item.badBuyerProfile.refundAmountYuan * 100),
-      }),
-    )
-    .sort(compareBadBuyerRankingItems)
-    .slice(0, limit)
+  const enrichedSorted = [...enriched].sort(compareBadBuyerRankingItems).slice(0, limit)
 
   const presetLabel =
     BUYER_RANKING_PRESET_LABELS[range.preset as BuyerRankingPreset] ?? range.preset
 
   return {
-    items: enriched,
+    items: enrichedSorted,
     range: {
       preset: range.preset,
       presetLabel,
@@ -533,7 +566,7 @@ export async function buildBadBuyerRanking(params: {
       endDate: range.endDate,
     },
     limit,
-    empty: enriched.length === 0,
+    empty: enrichedSorted.length === 0,
     dataNote: '不按主播区分；所有主播共用同一份公司公共客户榜。',
   }
 }

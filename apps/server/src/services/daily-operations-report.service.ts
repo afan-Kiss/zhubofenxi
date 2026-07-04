@@ -31,6 +31,7 @@ import {
   safeRatioPercent,
 } from './daily-report-order.util'
 import { sumValidRevenueFromViews } from './valid-revenue-order.service'
+import { centToYuan } from '../utils/money'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { aggregateAfterSalesReasons } from './after-sales-reason-normalize.service'
 import { buildOperationsPriceBandAnalysis } from './operations-price-band.service'
@@ -81,6 +82,7 @@ export interface DailyOperationsAnchorRow extends AnchorAttendanceStatusPayload 
   scheduleMatchReason: string | null
   liveDurationText: string
   liveDurationMinutes: number
+  validAmountCent: number
   validAmountYuan: number
   soldOrderCount: number
   invalidOrderCount: number
@@ -101,6 +103,7 @@ export interface DailyOperationsAnchorRow extends AnchorAttendanceStatusPayload 
 }
 
 export interface DailyOperationsSummary {
+  validAmountCent: number
   validAmountYuan: number
   soldOrderCount: number
   invalidOrderCount: number
@@ -212,6 +215,7 @@ function buildAnchorRow(params: {
   shopName: string
   sessionLabel?: string
   reportDate: string
+  validAmountCent: number
   validAmountYuan: number
   soldOrderCount: number
   invalidOrderCount: number
@@ -256,6 +260,7 @@ function buildAnchorRow(params: {
     scheduleMatchReason: params.scheduleMatchReason,
     liveDurationText: buildLiveSessionCountSummary(params.sessions),
     liveDurationMinutes,
+    validAmountCent: params.validAmountCent,
     validAmountYuan: params.validAmountYuan,
     soldOrderCount: params.soldOrderCount,
     invalidOrderCount: params.invalidOrderCount,
@@ -337,6 +342,7 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
       anchor.anchorName,
     )
     const validRevenue = sumValidRevenueFromViews(performanceViews)
+    const validAmountCent = validRevenue.validAmountCent
     const validAmountYuan = validRevenue.validAmountYuan
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
     const { soldOrderCount } = validRevenue
@@ -381,6 +387,7 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
         sessionLabel: scheduleAttendance.hasSchedule
           ? scheduleAttendance.displaySessionLabel
           : fixedDisplay?.sessionLabel,
+        validAmountCent,
         validAmountYuan,
         soldOrderCount,
         invalidOrderCount: invalidFromAll,
@@ -399,7 +406,8 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
     )
   }
 
-  const validAmountYuan = anchorRows.reduce((sum, row) => sum + row.validAmountYuan, 0)
+  const validAmountCent = anchorRows.reduce((sum, row) => sum + row.validAmountCent, 0)
+  const validAmountYuan = centToYuan(validAmountCent)
   for (const row of anchorRows) {
     row.amountRatio = safeRatioPercent(row.validAmountYuan, validAmountYuan)
   }
@@ -431,7 +439,9 @@ export async function buildDailyOperationsReport(params: {
 
   const soldOrderCount = anchorRows.reduce((sum, row) => sum + row.soldOrderCount, 0)
   const invalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)
-  const validAmountYuan = anchorRows.reduce((sum, row) => sum + row.validAmountYuan, 0)
+  const summaryValidAmountCent = anchorRows.reduce((sum, row) => sum + row.validAmountCent, 0)
+  const validAmountCent = summaryValidAmountCent
+  const validAmountYuan = centToYuan(validAmountCent)
   const summaryRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViewsAll)
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
@@ -533,6 +543,7 @@ export async function buildDailyOperationsReport(params: {
     startDate: params.startDate,
     endDate: params.endDate,
     summary: {
+      validAmountCent,
       validAmountYuan,
       soldOrderCount,
       invalidOrderCount,

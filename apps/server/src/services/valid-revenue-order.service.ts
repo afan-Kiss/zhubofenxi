@@ -246,7 +246,7 @@ export function sumValidRevenueFromViews(views: AnalyzedOrderView[]): {
   }
   return {
     validAmountCent,
-    validAmountYuan: Math.round(centToYuan(validAmountCent)),
+    validAmountYuan: centToYuan(validAmountCent),
     soldOrderCount,
   }
 }

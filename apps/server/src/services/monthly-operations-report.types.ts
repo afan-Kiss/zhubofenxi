@@ -14,6 +14,7 @@ export interface MonthlyOperationsReportRange {
 }
 
 export interface MonthlyOperationsReportSummary {
+  validAmountCent: number
   validAmountYuan: number
   soldOrderCount: number
   soldCount: number

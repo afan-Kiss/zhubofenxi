@@ -31,10 +31,6 @@ function viewToOrderPoolRow(v: AnalyzedOrderView, reason: string): OrderPoolDiff
   }
 }
 
-function countsAsShippedOrderView(v: AnalyzedOrderView): boolean {
-  return v.includedInGmv === true && v.effectiveGmvCent > 0
-}
-
 export function buildValidRevenueOrderKeySet(views: AnalyzedOrderView[]): Map<string, AnalyzedOrderView> {
   const map = new Map<string, AnalyzedOrderView>()
   for (const v of dedupeViewsByMetricOrderNo(views)) {
@@ -46,15 +42,22 @@ export function buildValidRevenueOrderKeySet(views: AnalyzedOrderView[]): Map<st
   return map
 }
 
-function buildShippedOrderKeySet(views: AnalyzedOrderView[]): Map<string, AnalyzedOrderView> {
-  const map = new Map<string, AnalyzedOrderView>()
+function buildAggregateValidRevenueKeySet(views: AnalyzedOrderView[]): Map<string, AnalyzedOrderView> {
+  return buildValidRevenueOrderKeySet(views)
+}
+
+function buildWideShippedExcludedSamples(views: AnalyzedOrderView[], limit = ORDER_DIFF_LIMIT): OrderPoolDiffRow[] {
+  const validPool = buildValidRevenueOrderKeySet(views)
+  const rows: OrderPoolDiffRow[] = []
   for (const v of dedupeViewsByMetricOrderNo(views)) {
+    if (rows.length >= limit) break
     const orderNo = resolveMetricOrderNo(v)
     if (!orderNo) continue
-    if (!countsAsShippedOrderView(v)) continue
-    map.set(orderNo, v)
+    if (validPool.has(orderNo)) continue
+    if (v.includedInGmv !== true || v.effectiveGmvCent <= 0) continue
+    rows.push(viewToOrderPoolRow(v, explainValidRevenueOrder(v).reason))
   }
-  return map
+  return rows
 }
 
 export function compareValidRevenueOrderPools(
@@ -68,39 +71,50 @@ export function compareValidRevenueOrderPools(
   onlyInAggregate: OrderPoolDiffRow[]
   amountMismatch: OrderPoolDiffRow[]
   roundingNote?: string
+  widePoolExcludedSamples?: OrderPoolDiffRow[]
 } {
   const direct = sumValidRevenueFromViews(views)
   const metrics = calculateBusinessMetrics(views)
-  const aggregateCent = Math.round(metrics.validSalesAmount * 100)
+  const aggregateCent = direct.validAmountCent
 
   const boardPool = buildValidRevenueOrderKeySet(views)
-  const shippedPool = buildShippedOrderKeySet(views)
+  const aggregatePool = buildAggregateValidRevenueKeySet(views)
 
   const onlyInBoard: OrderPoolDiffRow[] = []
   const onlyInAggregate: OrderPoolDiffRow[] = []
   const amountMismatch: OrderPoolDiffRow[] = []
 
   for (const [orderNo, v] of boardPool) {
-    if (!shippedPool.has(orderNo)) {
+    if (!aggregatePool.has(orderNo)) {
       onlyInBoard.push(viewToOrderPoolRow(v, explainValidRevenueOrder(v).reason))
+    } else {
+      const other = aggregatePool.get(orderNo)!
+      if (other.effectiveGmvCent !== v.effectiveGmvCent) {
+        amountMismatch.push(
+          viewToOrderPoolRow(
+            v,
+            `有效成交金额不一致：经营总览 ${v.effectiveGmvCent} 分 vs 标准聚合 ${other.effectiveGmvCent} 分`,
+          ),
+        )
+      }
     }
   }
-  for (const [orderNo, v] of shippedPool) {
+  for (const [orderNo, v] of aggregatePool) {
     if (!boardPool.has(orderNo)) {
-      onlyInAggregate.push(
-        viewToOrderPoolRow(v, '计入发货单金额但未计入有效成交池'),
-      )
+      onlyInAggregate.push(viewToOrderPoolRow(v, explainValidRevenueOrder(v).reason))
     }
   }
 
   let roundingNote: string | undefined
+  const metricsCent = Math.round(metrics.validSalesAmount * 100)
   if (
     onlyInBoard.length === 0 &&
     onlyInAggregate.length === 0 &&
-    direct.validAmountCent !== aggregateCent
+    amountMismatch.length === 0 &&
+    direct.validAmountCent !== metricsCent
   ) {
     roundingNote =
-      '订单池一致，金额差异来自 validSalesAmount 经 centToYuan 再乘 100 的四舍五入；核对应统一用 cent 分。'
+      '订单池一致，金额差异来自 validSalesAmount 经 centToYuan 再乘 100 的浮点误差；核对应统一用 cent 分。'
   }
 
   return {
@@ -112,6 +126,7 @@ export function compareValidRevenueOrderPools(
     onlyInAggregate: onlyInAggregate.slice(0, ORDER_DIFF_LIMIT),
     amountMismatch: amountMismatch.slice(0, ORDER_DIFF_LIMIT),
     roundingNote,
+    widePoolExcludedSamples: buildWideShippedExcludedSamples(views),
   }
 }
 

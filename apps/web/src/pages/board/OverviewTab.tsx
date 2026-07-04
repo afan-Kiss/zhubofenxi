@@ -380,27 +380,28 @@ export const OverviewTab: React.FC = () => {
         <MetricGridTransition
           transitionKey={overviewTransitionKey}
           loading={isLoadingRange}
-          className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5"
         >
-          {SUMMARY_CARDS.map((card, index) => {
-            const raw = valuePickers[card.valueKey](ds)
-            const Icon = card.icon
-            return (
-              <StaggerCard key={card.drawerKey} index={index + 1}>
-                <BoardSummaryMetricCard
-                  label={
-                    <MetricStatLabel label={card.label} metricKey={card.metricExplainKey} />
-                  }
-                  value={renderStatValue(card, raw)}
-                  helper={card.helper}
-                  hint={card.hint}
-                  tone={card.tone}
-                  icon={Icon}
-                  onClick={() => setMetricDrawer(card.drawerKey)}
-                />
-              </StaggerCard>
-            )
-          })}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+            {SUMMARY_CARDS.map((card, index) => {
+              const raw = valuePickers[card.valueKey](ds)
+              const Icon = card.icon
+              return (
+                <StaggerCard key={card.drawerKey} index={index + 1} className="h-full">
+                  <BoardSummaryMetricCard
+                    label={
+                      <MetricStatLabel label={card.label} metricKey={card.metricExplainKey} />
+                    }
+                    value={renderStatValue(card, raw)}
+                    helper={card.helper}
+                    hint={card.hint}
+                    tone={card.tone}
+                    icon={Icon}
+                    onClick={() => setMetricDrawer(card.drawerKey)}
+                  />
+                </StaggerCard>
+              )
+            })}
+          </div>
         </MetricGridTransition>
       ) : null}
 

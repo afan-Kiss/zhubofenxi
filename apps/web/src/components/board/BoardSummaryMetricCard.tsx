@@ -93,7 +93,7 @@ export const BoardSummaryMetricCard: React.FC<Props> = ({
             }
           : undefined
       }
-      className={`group relative flex min-h-[132px] min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-100/80 bg-white/95 px-4 py-3.5 shadow-sm transition duration-200 ${styles.hoverBorder} ${
+      className={`group relative flex h-full min-h-[132px] min-w-0 flex-col overflow-hidden rounded-2xl border border-slate-100/80 bg-white/95 px-4 py-3.5 shadow-sm transition duration-200 ${styles.hoverBorder} ${
         clickable
           ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-rose-300'
           : ''

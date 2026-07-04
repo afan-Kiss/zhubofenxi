@@ -143,6 +143,11 @@ function validateOverviewTabUi(issues: string[]) {
     issues,
   )
   assert(
+    src.includes('grid-cols-2'),
+    'OverviewTab 手机端应使用双列 grid',
+    issues,
+  )
+  assert(
     !/lg:grid-cols-5[\s\S]{0,800}lg:grid-cols-4/.test(src),
     'OverviewTab 不应分两行不同列数的顶部卡片 grid',
     issues,

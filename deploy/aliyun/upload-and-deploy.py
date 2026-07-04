@@ -327,7 +327,11 @@ chmod +x "$DEPLOY_DIR"/deploy/aliyun/*.sh "$DEPLOY_DIR"/scripts/install-xhs-sign
 """,
         )
 
-        code = run(client, f"cd {DEPLOY_DIR} && USE_GIT=0 SKIP_BACKUP=1 bash deploy/aliyun/deploy.sh", timeout=3600)
+        code = run(
+            client,
+            f"cd {DEPLOY_DIR} && DEPLOY_GIT_COMMIT={resolve_deploy_git_commit()} USE_GIT=0 SKIP_BACKUP=1 bash deploy/aliyun/deploy.sh",
+            timeout=3600,
+        )
         if code != 0:
             sys.exit(code)
 

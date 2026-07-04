@@ -54,7 +54,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   const cardClass = showCardsOnDesktop ? 'block' : 'block md:hidden'
   const tableWrapClass = showTableOnDesktop ? 'hidden md:block' : 'hidden'
 
-  const colCount = showExtraColumns ? (showRates ? 9 : 8) : 5
+  const colCount = showExtraColumns ? (showRates ? 9 : 8) : 6
 
   return (
     <div>
@@ -110,14 +110,17 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
               <th className="py-2 pr-2 text-right">支付金额</th>
               <th className="py-2 pr-2 text-right">有效成交额</th>
               <th className="py-2 pr-2 text-right">支付单数</th>
-              <th className="py-2 pr-4 text-right">退款率</th>
+              <th className="py-2 pr-2 text-right">退款率</th>
+              <th
+                className="py-2 pr-4 text-right"
+                title="品退按订单下单时间匹配主播开播场次归属"
+              >
+                品退单数
+              </th>
               {showExtraColumns ? (
                 <>
                   <th className="py-2 pr-2 text-right">退款金额</th>
                   <th className="py-2 pr-2 text-right">退货退款单数</th>
-                  <th className="py-2 pr-2 text-right" title="品退按订单下单时间匹配主播开播场次归属">
-                    品退单数
-                  </th>
                   {showRates ? <th className="pr-4 py-2 text-right">签收率</th> : null}
                 </>
               ) : null}
@@ -133,6 +136,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
             ) : (
               rows.map((a, idx) => {
                 const refundRate = anchorRowRate(a, 'returnRate')
+                const qualityCount = anchorRowNum(a, 'qualityReturnCount')
                 const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
                 const livePeriodMultiline = liveLines.primary?.includes('\n') ?? false
                 return (
@@ -170,11 +174,26 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                       {formatCount(anchorRowPaidCount(a))}
                     </td>
                     <td
-                      className={`py-2 pr-4 text-right tabular-nums ${
+                      className={`py-2 pr-2 text-right tabular-nums ${
                         isHighRefundRate(refundRate) ? 'font-semibold text-rose-600' : ''
                       }`}
                     >
                       {formatRate(refundRate)}
+                    </td>
+                    <td
+                      className={`py-2 pr-4 text-right tabular-nums ${
+                        qualityCount > 0 ? 'font-medium text-rose-700' : ''
+                      } ${onQualityCountClick ? 'cursor-pointer hover:underline' : ''}`}
+                      onClick={
+                        onQualityCountClick
+                          ? (e) => {
+                              e.stopPropagation()
+                              onQualityCountClick(a)
+                            }
+                          : undefined
+                      }
+                    >
+                      {formatCount(qualityCount)}
                     </td>
                     {showExtraColumns ? (
                       <>
@@ -183,19 +202,6 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                         </td>
                         <td className="py-2 text-right tabular-nums">
                           {formatCount(anchorRowReturnRefundCount(a))}
-                        </td>
-                        <td
-                          className={`py-2 text-right tabular-nums ${onQualityCountClick ? 'cursor-pointer text-rose-700 hover:underline' : ''}`}
-                          onClick={
-                            onQualityCountClick
-                              ? (e) => {
-                                  e.stopPropagation()
-                                  onQualityCountClick(a)
-                                }
-                              : undefined
-                          }
-                        >
-                          {formatCount(anchorRowNum(a, 'qualityReturnCount'))}
                         </td>
                         {showRates ? (
                           <td className="py-2 pr-4 text-right tabular-nums">

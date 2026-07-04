@@ -1,13 +1,10 @@
 import React, { useMemo, useState } from 'react'
 import {
   AlertTriangle,
-  Banknote,
   Package,
-  PackageCheck,
   Percent,
-  RotateCcw,
   TrendingUp,
-  Undo2,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
@@ -25,6 +22,7 @@ import { DataLastUpdateBanner } from '../../components/board/DataLastUpdateBanne
 import { BusinessSyncProgressCard } from '../../components/board/BusinessSyncProgressCard'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
 import { OfficialQualitySyncNote } from '../../components/board/OfficialQualitySyncNote'
+import type { QualityFeedbackStatus } from '../../components/board/OfficialQualitySyncNote'
 import {
   BoardLiveQueryAutoRefresh,
   useBoardLiveQuery,
@@ -38,22 +36,14 @@ function summaryMetricValue(ds: Record<string, unknown>, metric: BoardMetricKey)
   switch (metric) {
     case 'gmv':
       return Number(ds.totalGmv ?? 0)
-    case 'actualSignedAmount':
-      return Number(ds.actualSignedAmount ?? 0)
-    case 'returnAmount':
-      return Number(ds.returnAmount ?? 0)
+    case 'effectiveGmv':
+      return Number(ds.validSalesAmount ?? ds.effectiveGmv ?? 0)
     case 'orderCount':
       return Number(ds.orderCount ?? 0)
-    case 'signedCount':
-      return Number(ds.signedOrderCount ?? 0)
-    case 'returnCount':
-      return Number(ds.returnCount ?? 0)
-    case 'qualityReturnCount':
-      return Number(ds.qualityReturnCount ?? 0)
-    case 'signRate':
-      return Number(ds.signRate ?? 0)
     case 'returnRate':
       return Number(ds.returnRate ?? 0)
+    case 'qualityReturnCount':
+      return Number(ds.qualityReturnCount ?? 0)
     default:
       return 0
   }
@@ -74,31 +64,18 @@ interface SummaryCardDef {
 }
 
 const valuePickers = {
-  orderCount: (ds: Record<string, unknown>) => Number(ds.orderCount ?? 0),
   totalGmv: (ds: Record<string, unknown>) => Number(ds.totalGmv ?? 0),
-  actualSignedAmount: (ds: Record<string, unknown>) => Number(ds.actualSignedAmount ?? 0),
-  signedOrderCount: (ds: Record<string, unknown>) => Number(ds.signedOrderCount ?? 0),
-  signRate: (ds: Record<string, unknown>) => Number(ds.signRate ?? 0),
-  returnAmount: (ds: Record<string, unknown>) => Number(ds.returnAmount ?? 0),
+  validSalesAmount: (ds: Record<string, unknown>) =>
+    Number(ds.validSalesAmount ?? ds.effectiveGmv ?? 0),
+  orderCount: (ds: Record<string, unknown>) => Number(ds.orderCount ?? 0),
   returnRate: (ds: Record<string, unknown>) => Number(ds.returnRate ?? 0),
   qualityReturnCount: (ds: Record<string, unknown>) => Number(ds.qualityReturnCount ?? 0),
-  returnCount: (ds: Record<string, unknown>) => Number(ds.returnCount ?? 0),
 } as const
 
+/** 经营总览首屏核心 5 卡 */
 const SUMMARY_CARDS: SummaryCardDef[] = [
   {
-    label: '本期总订单数',
-    metricExplainKey: 'orderCount',
-    drawerKey: 'orderCount',
-    valueKey: 'orderCount',
-    type: 'count',
-    tone: 'blue',
-    hint: '查看相关订单',
-    helper: '本期已支付订单数',
-    icon: Package,
-  },
-  {
-    label: '本期销售额[GMV]',
+    label: '支付金额',
     metricExplainKey: 'totalGmv',
     drawerKey: 'gmv',
     valueKey: 'totalGmv',
@@ -109,48 +86,26 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
     icon: TrendingUp,
   },
   {
-    label: '实际签收金额',
-    metricExplainKey: 'actualSignedAmount',
-    drawerKey: 'actualSignedAmount',
-    valueKey: 'actualSignedAmount',
+    label: '有效成交额',
+    metricExplainKey: 'validSalesAmount',
+    drawerKey: 'effectiveGmv',
+    valueKey: 'validSalesAmount',
     type: 'money',
     tone: 'green',
     hint: '点击查看明细',
-    helper: '符合签收口径的到账金额',
-    icon: Banknote,
+    helper: '支付金额减去退款金额',
+    icon: Wallet,
   },
   {
-    label: '实际签收订单数',
-    metricExplainKey: 'signedOrderCount',
-    drawerKey: 'signedCount',
-    valueKey: 'signedOrderCount',
+    label: '支付单数',
+    metricExplainKey: 'orderCount',
+    drawerKey: 'orderCount',
+    valueKey: 'orderCount',
     type: 'count',
-    tone: 'green',
+    tone: 'blue',
     hint: '查看相关订单',
-    helper: '实际签收订单笔数',
-    icon: PackageCheck,
-  },
-  {
-    label: '签收率',
-    metricExplainKey: 'signRate',
-    drawerKey: 'signRate',
-    valueKey: 'signRate',
-    type: 'rate',
-    tone: 'teal',
-    hint: '点击查看明细',
-    helper: '签收订单数占本期订单比例',
-    icon: Percent,
-  },
-  {
-    label: '退款金额',
-    metricExplainKey: 'returnAmount',
-    drawerKey: 'returnAmount',
-    valueKey: 'returnAmount',
-    type: 'money',
-    tone: 'rose',
-    hint: '点击查看明细',
-    helper: '本期退款金额合计',
-    icon: RotateCcw,
+    helper: '本期已支付订单数',
+    icon: Package,
   },
   {
     label: '退款率',
@@ -164,28 +119,35 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
     icon: Percent,
   },
   {
-    label: '品退订单数',
+    label: '品退单数',
     metricExplainKey: 'qualityReturnCount',
     drawerKey: 'qualityReturnCount',
     valueKey: 'qualityReturnCount',
     type: 'count',
     tone: 'rose',
     hint: '点击查看明细',
-    helper: '官方品退与售后商品问题订单数',
+    helper: '官方品退 + 商品质量售后',
     icon: AlertTriangle,
   },
-  {
-    label: '退款订单数',
-    metricExplainKey: 'returnCount',
-    drawerKey: 'returnCount',
-    valueKey: 'returnCount',
-    type: 'count',
-    tone: 'amber',
-    hint: '点击查看明细',
-    helper: '发生退款的订单笔数',
-    icon: Undo2,
-  },
 ]
+
+function qualityReturnCardNote(
+  qualityFeedback: QualityFeedbackStatus | null | undefined,
+): string | null {
+  if (qualityFeedback?.autoSyncStatus === 'running') {
+    return '官方品退正在同步，稍后会刷新。'
+  }
+  if (qualityFeedback?.unmatchedCount && qualityFeedback.unmatchedCount > 0) {
+    return `有 ${qualityFeedback.unmatchedCount} 条官方品退未匹配订单`
+  }
+  if ((qualityFeedback?.caseCount ?? 0) === 0 && !qualityFeedback?.lastSyncedAt) {
+    return '官方品退还没同步到订单，当前可能偏低'
+  }
+  if (qualityFeedback?.statusMessage?.trim()) {
+    return qualityFeedback.statusMessage.trim()
+  }
+  return null
+}
 
 export const OverviewTab: React.FC = () => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
@@ -232,6 +194,7 @@ export const OverviewTab: React.FC = () => {
   const isLoadingRange = isDisplayStale && isLoading
   const hasMetrics = Boolean(ds)
   const showMetrics = hasMetrics && boardDataVisible
+  const qualityNote = qualityReturnCardNote(qualityFeedback)
 
   const overviewTransitionKey = [
     'overview',
@@ -240,6 +203,7 @@ export const OverviewTab: React.FC = () => {
     syncMeta?.businessSync?.lastSuccessAt ?? data?.fetchedAt,
     String(ds?.totalGmv ?? ''),
     String(ds?.orderCount ?? ''),
+    String(ds?.qualityReturnCount ?? ''),
   ]
     .filter((v) => v != null && v !== '')
     .join('|')
@@ -315,7 +279,7 @@ export const OverviewTab: React.FC = () => {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">经营总览</h2>
-          <p className="mt-0.5 text-sm text-slate-500">本期经营大盘 · 销售、签收与售后风险</p>
+          <p className="mt-0.5 text-sm text-slate-500">本期经营大盘 · 支付、有效成交与品退</p>
           <BoardSyncStatusHeader
             syncMeta={syncMeta}
             hasDisplayData={Boolean(ds)}
@@ -391,19 +355,26 @@ export const OverviewTab: React.FC = () => {
             {SUMMARY_CARDS.map((card, index) => {
               const raw = valuePickers[card.valueKey](ds)
               const Icon = card.icon
+              const cardNote =
+                card.drawerKey === 'qualityReturnCount' ? qualityNote : null
               return (
                 <StaggerCard key={card.drawerKey} index={index + 1} className="h-full">
-                  <BoardSummaryMetricCard
-                    label={
-                      <MetricStatLabel label={card.label} metricKey={card.metricExplainKey} />
-                    }
-                    value={renderStatValue(card, raw)}
-                    helper={card.helper}
-                    hint={card.hint}
-                    tone={card.tone}
-                    icon={Icon}
-                    onClick={() => setMetricDrawer(card.drawerKey)}
-                  />
+                  <div className="flex h-full flex-col">
+                    <BoardSummaryMetricCard
+                      label={
+                        <MetricStatLabel label={card.label} metricKey={card.metricExplainKey} />
+                      }
+                      value={renderStatValue(card, raw)}
+                      helper={card.helper}
+                      hint={card.hint}
+                      tone={card.tone}
+                      icon={Icon}
+                      onClick={() => setMetricDrawer(card.drawerKey)}
+                    />
+                    {cardNote ? (
+                      <p className="mt-1 px-1 text-[11px] leading-snug text-amber-700">{cardNote}</p>
+                    ) : null}
+                  </div>
                 </StaggerCard>
               )
             })}

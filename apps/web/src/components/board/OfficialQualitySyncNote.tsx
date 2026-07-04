@@ -5,6 +5,7 @@ export interface QualityFeedbackStatus {
   autoSyncStatus: 'idle' | 'running' | 'failed'
   statusMessage: string
   caseCount?: number
+  unmatchedCount?: number
   windowDays?: number
 }
 

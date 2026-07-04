@@ -1,7 +1,7 @@
 /**
  * 经营总览 / 主播业绩内存缓存：以数据准确和实时为第一优先级
  */
-import type { AnalyzedOrderView } from '../types/analysis'
+import type { AnalyzedOrderView, LiveSession } from '../types/analysis'
 import { resolveBusinessRange, type BusinessRangePreset } from '../utils/business-range'
 import type { DateRangePreset, DateRangeResolved } from '../utils/date-range'
 import {
@@ -42,6 +42,8 @@ export interface BusinessBoardCacheEntry {
   anchorLeaderboard: Array<Record<string, unknown>>
   views: AnalyzedOrderView[]
   rawByMatch: Map<string, Record<string, unknown>>
+  /** 构建缓存时的直播场次，供主播品退归属 */
+  liveSessions: LiveSession[]
   blacklistedBuyerIds: string[]
   orderCount: number
   lastBuiltAt: string
@@ -173,7 +175,7 @@ export async function buildAndSetBusinessBoardCache(params: {
   const previous = cache.get(key)
 
   try {
-    const { views, rawByMatch, artifacts } = await loadBoardArtifactsForRange(
+    const { views, rawByMatch, artifacts, liveSessions } = await loadBoardArtifactsForRange(
       datePreset,
       range.startDate,
       range.endDate,
@@ -191,7 +193,18 @@ export async function buildAndSetBusinessBoardCache(params: {
       summary.dataWarning = `有 ${abnormalOrderCount} 笔订单时间异常，未计入本期统计`
     }
 
-    const anchorLeaderboard = aggregateAnchorLeaderboard(performanceViews)
+    const anchorLeaderboard = aggregateAnchorLeaderboard(performanceViews, undefined, {
+      liveSessions,
+    })
+    if (
+      Number(summary.qualityReturnCount ?? 0) > 0 &&
+      liveSessions.length === 0
+    ) {
+      logWarn(
+        '经营缓存',
+        `${presetLabel(params.preset)} 有品退订单，但缺少直播场次，主播品退归属可能偏低。`,
+      )
+    }
     const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(coreViews)]
     const sourceDataMaxTime = await resolveSourceDataMaxTime()
     const workbenchCacheMaxUpdatedAt = (await getLatestWorkbenchCacheUpdatedAt())?.toISOString() ?? null
@@ -207,6 +220,7 @@ export async function buildAndSetBusinessBoardCache(params: {
       anchorLeaderboard: anchorLeaderboard as unknown as Array<Record<string, unknown>>,
       views,
       rawByMatch,
+      liveSessions,
       blacklistedBuyerIds,
       orderCount: views.length,
       lastBuiltAt: new Date().toISOString(),

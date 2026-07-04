@@ -35,6 +35,7 @@ export interface QualityFeedbackPublicStatus {
   autoSyncStatus: QualityBadCaseAutoSyncStatus
   statusMessage: string
   caseCount: number
+  unmatchedCount: number
   windowDays: number
 }
 
@@ -84,8 +85,9 @@ function statusMessage(): string {
 }
 
 export async function buildQualityFeedbackPublicStatus(): Promise<QualityFeedbackPublicStatus> {
-  const [caseCount, coverage] = await Promise.all([
+  const [caseCount, unmatchedCount, coverage] = await Promise.all([
     prisma.qualityBadCase.count(),
+    prisma.qualityBadCase.count({ where: { matchStatus: 'unmatched' } }),
     getQualityBadCaseCoverage(),
   ])
   const msg = statusMessage()
@@ -94,6 +96,7 @@ export async function buildQualityFeedbackPublicStatus(): Promise<QualityFeedbac
     autoSyncStatus,
     statusMessage: msg,
     caseCount,
+    unmatchedCount,
     windowDays: coverage.windowDays,
   }
 }

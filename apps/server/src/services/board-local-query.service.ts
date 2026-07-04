@@ -88,14 +88,18 @@ function logAnchorLeaderboardReconcile(
   preset: string,
   startDate: string,
   endDate: string,
+  liveSessions: import('../types/analysis').LiveSession[] = [],
 ): void {
   const topGmvCent = Math.round(Number(summary.totalGmv ?? summary.gmv ?? 0) * 100)
   const topCount = Number(summary.orderCount ?? summary.paidOrderCount ?? 0)
+  const summaryQuality = Number(summary.qualityReturnCount ?? 0)
   let cardsGmvCent = 0
   let cardsCount = 0
+  let cardsQuality = 0
   for (const row of leaderboard) {
     cardsGmvCent += Math.round(Number(row.totalGmv ?? row.gmv ?? 0) * 100)
     cardsCount += Number(row.orderCount ?? row.paidOrderCount ?? 0)
+    cardsQuality += Number(row.qualityReturnCount ?? 0)
   }
   const unassigned = leaderboard.find((r) => r.anchorName === '未归属')
   if (topGmvCent !== cardsGmvCent || topCount !== cardsCount) {
@@ -108,6 +112,21 @@ function logAnchorLeaderboardReconcile(
       `${preset} ${startDate}~${endDate} 主播卡片合计与顶部不一致：顶部支付 ¥${(topGmvCent / 100).toFixed(2)}/${topCount} 单，` +
         `卡片合计 ¥${(cardsGmvCent / 100).toFixed(2)}/${cardsCount} 单；` +
         `未归属 ${unassignedCount} 单、¥${unassignedGmv}`,
+    )
+  }
+  if (summaryQuality > 0 && cardsQuality === 0) {
+    logWarn(
+      '经营看板',
+      `${preset} ${startDate}~${endDate} 品退总览有值(${summaryQuality})，但主播榜品退合计为 0，` +
+        (liveSessions.length === 0
+          ? '缺少直播场次，请检查 liveSessions 显式传入。'
+          : '请检查品退归属逻辑。'),
+    )
+  }
+  if (summaryQuality > 0 && liveSessions.length === 0) {
+    logWarn(
+      '经营看板',
+      `${preset} ${startDate}~${endDate} 有品退订单(${summaryQuality})，但缺少直播场次，主播品退归属可能偏低。`,
     )
   }
 }
@@ -388,11 +407,16 @@ export async function executeBoardLocalQuery(params: {
   )
   const anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
 
+  const cacheLiveSessions = boardCache.liveSessions ?? []
   const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
-    aggregateAnchorLeaderboard(performanceViews, {
-      scope: 'local-query-anchor-performance',
-      dateRange: { startDate, endDate, preset: params.preset },
-    }) as import('./board-metrics.service').BoardAnchorMetrics[],
+    aggregateAnchorLeaderboard(
+      performanceViews,
+      {
+        scope: 'local-query-anchor-performance',
+        dateRange: { startDate, endDate, preset: params.preset },
+      },
+      { liveSessions: cacheLiveSessions },
+    ) as import('./board-metrics.service').BoardAnchorMetrics[],
     endDate,
   ) as unknown as Array<Record<string, unknown>>
 
@@ -414,6 +438,7 @@ export async function executeBoardLocalQuery(params: {
     params.preset,
     startDate,
     endDate,
+    cacheLiveSessions,
   )
 
   const blacklistedBuyerIds = boardCache.blacklistedBuyerIds

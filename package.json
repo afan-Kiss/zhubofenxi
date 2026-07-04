@@ -61,6 +61,7 @@
     "verify:data-display-consistency": "tsx apps/server/scripts/verify-data-display-consistency.ts",
     "verify:overview-stability": "tsx apps/server/scripts/verify-overview-stability.ts",
     "verify:overview-integrity": "tsx apps/server/scripts/verify-overview-integrity.ts",
+    "verify:overview-full-integrity": "tsx apps/server/scripts/verify-overview-full-integrity.ts",
     "verify:statistics-integrity": "tsx apps/server/scripts/verify-statistics-integrity.ts",
     "verify:anchor-performance-integrity": "tsx apps/server/scripts/verify-anchor-performance-integrity.ts",
     "update:overview-stable-snapshot": "tsx apps/server/scripts/update-overview-stable-snapshot.ts",

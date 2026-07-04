@@ -8,7 +8,6 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnRefundCount,
   anchorRowLivePeriodLines,
-  anchorRowLivePeriodText,
   anchorRowValidSales,
   isHighRefundRate,
   type AnchorLeaderboardRow,
@@ -17,8 +16,6 @@ import { anchorCardTestId } from '../../lib/anchor-test-id'
 import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
 import { MobileAnchorLeaderboardCards } from './MobileAnchorLeaderboardCards'
 import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
-
-type TrendViewMode = 'single' | 'compare'
 
 interface Props {
   rows: AnchorLeaderboardRow[]
@@ -46,60 +43,46 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
-  const [trendViewMode, setTrendViewMode] = useState<TrendViewMode>('single')
+  const [showCompareTrend, setShowCompareTrend] = useState(false)
+  const [showExtraColumns, setShowExtraColumns] = useState(false)
 
   const trendCompareRows = compareRows ?? rows
   const canCompareTrend = trendCompareRows.length >= 2
   const showCardsOnDesktop = viewMode === 'cards'
   const showTableOnDesktop = viewMode === 'table'
-  const showCompareTrend = canCompareTrend && trendViewMode === 'compare'
 
   const cardClass = showCardsOnDesktop ? 'block' : 'block md:hidden'
   const tableWrapClass = showTableOnDesktop ? 'hidden md:block' : 'hidden'
 
-  const colCount = showRates ? 9 : 8
+  const colCount = showExtraColumns ? (showRates ? 9 : 8) : 5
 
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1 md:px-4">
-        {canCompareTrend ? (
-          <div
-            className="inline-flex items-center gap-1 rounded-full border border-rose-100 bg-white p-0.5"
-            role="tablist"
-            aria-label="走势展示方式"
-          >
+        <div className="flex flex-wrap items-center gap-2">
+          {canCompareTrend ? (
             <button
               type="button"
-              role="tab"
-              aria-selected={trendViewMode === 'single'}
-              onClick={() => setTrendViewMode('single')}
-              className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
-                trendViewMode === 'single'
-                  ? 'bg-rose-500 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-rose-50'
-              }`}
+              onClick={() => setShowCompareTrend((open) => !open)}
+              className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 transition hover:bg-rose-50"
             >
-              单人走势
+              {showCompareTrend ? '收起开播节奏对比' : '看开播节奏对比'}
             </button>
+          ) : null}
+          {showTableOnDesktop ? (
             <button
               type="button"
-              role="tab"
-              aria-selected={trendViewMode === 'compare'}
-              onClick={() => setTrendViewMode('compare')}
-              className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
-                trendViewMode === 'compare'
-                  ? 'bg-rose-500 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-rose-50'
-              }`}
+              onClick={() => setShowExtraColumns((open) => !open)}
+              className="hidden rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-600 transition hover:bg-slate-50 md:inline-flex"
             >
-              开播节奏对比
+              {showExtraColumns ? '收起更多列' : '展开更多列'}
             </button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
         <ListViewToggle mode={viewMode} onChange={setViewMode} />
       </div>
 
-      {showCompareTrend ? (
+      {showCompareTrend && canCompareTrend ? (
         <div className="mb-3 px-1 md:px-4">
           <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
             对比图展示当前日期范围内全部主播，下面列表可单独筛选。
@@ -114,30 +97,30 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         onSelect={onRowClick}
         onQualityCountClick={onQualityCountClick}
         showLongPeriodRates={showRates}
-        showIndividualTrend={!showCompareTrend}
+        showIndividualTrend={false}
         showLivePeriod={showLivePeriod}
         className={cardClass}
       />
 
-      <p className={`mb-2 px-1 text-[11px] leading-relaxed text-slate-500 ${showTableOnDesktop ? 'md:px-4' : ''}`}>
-        品退按订单下单时间匹配主播开播场次归属，不按售后发生时间。品退率 = 该主播品退单数 ÷ 支付订单数。
-      </p>
-
       <div className={`${tableWrapClass} overflow-x-auto md:px-0`}>
-        <table className="w-full min-w-[960px] text-left text-[13px]">
+        <table className="w-full min-w-[720px] text-left text-[13px]">
           <thead className="bg-rose-50/40 text-slate-500">
             <tr>
               <th className="py-2.5 pl-4 pr-2">主播</th>
               <th className="py-2 pr-2 text-right">支付金额</th>
               <th className="py-2 pr-2 text-right">有效成交额</th>
               <th className="py-2 pr-2 text-right">支付单数</th>
-              <th className="py-2 pr-2 text-right">退款金额</th>
-              <th className="py-2 pr-2 text-right">退货退款单数</th>
-              <th className="py-2 pr-2 text-right" title="品退按订单下单时间匹配主播开播场次归属">
-                品退单数
-              </th>
-              <th className="py-2 pr-2 text-right">退款率</th>
-              {showRates && <th className="pr-4 py-2 text-right">签收率</th>}
+              <th className="py-2 pr-4 text-right">退款率</th>
+              {showExtraColumns ? (
+                <>
+                  <th className="py-2 pr-2 text-right">退款金额</th>
+                  <th className="py-2 pr-2 text-right">退货退款单数</th>
+                  <th className="py-2 pr-2 text-right" title="品退按订单下单时间匹配主播开播场次归属">
+                    品退单数
+                  </th>
+                  {showRates ? <th className="pr-4 py-2 text-right">签收率</th> : null}
+                </>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -150,11 +133,8 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
             ) : (
               rows.map((a, idx) => {
                 const refundRate = anchorRowRate(a, 'returnRate')
-                const livePeriod = anchorRowLivePeriodText(a)
                 const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
-                const livePeriodMultiline =
-                  (liveLines.primary?.includes('\n') ?? false) ||
-                  (livePeriod?.includes('\n') ?? false)
+                const livePeriodMultiline = liveLines.primary?.includes('\n') ?? false
                 return (
                   <tr
                     key={String(a.anchorId ?? a.anchorName ?? idx)}
@@ -189,37 +169,41 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     <td className="py-2 text-right tabular-nums">
                       {formatCount(anchorRowPaidCount(a))}
                     </td>
-                    <td className="py-2 text-right font-medium text-rose-600 tabular-nums">
-                      {formatMoney(anchorRowRefundAmount(a))}
-                    </td>
-                    <td className="py-2 text-right tabular-nums">
-                      {formatCount(anchorRowReturnRefundCount(a))}
-                    </td>
                     <td
-                      className={`py-2 text-right tabular-nums ${onQualityCountClick ? 'cursor-pointer text-rose-700 hover:underline' : ''}`}
-                      onClick={
-                        onQualityCountClick
-                          ? (e) => {
-                              e.stopPropagation()
-                              onQualityCountClick(a)
-                            }
-                          : undefined
-                      }
-                    >
-                      {formatCount(anchorRowNum(a, 'qualityReturnCount'))}
-                    </td>
-                    <td
-                      className={`py-2 text-right tabular-nums ${
+                      className={`py-2 pr-4 text-right tabular-nums ${
                         isHighRefundRate(refundRate) ? 'font-semibold text-rose-600' : ''
                       }`}
                     >
                       {formatRate(refundRate)}
                     </td>
-                    {showRates && (
-                      <td className="py-2 pr-4 text-right tabular-nums">
-                        {formatRate(anchorRowRate(a, 'signRate'))}
-                      </td>
-                    )}
+                    {showExtraColumns ? (
+                      <>
+                        <td className="py-2 text-right font-medium text-rose-600 tabular-nums">
+                          {formatMoney(anchorRowRefundAmount(a))}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {formatCount(anchorRowReturnRefundCount(a))}
+                        </td>
+                        <td
+                          className={`py-2 text-right tabular-nums ${onQualityCountClick ? 'cursor-pointer text-rose-700 hover:underline' : ''}`}
+                          onClick={
+                            onQualityCountClick
+                              ? (e) => {
+                                  e.stopPropagation()
+                                  onQualityCountClick(a)
+                                }
+                              : undefined
+                          }
+                        >
+                          {formatCount(anchorRowNum(a, 'qualityReturnCount'))}
+                        </td>
+                        {showRates ? (
+                          <td className="py-2 pr-4 text-right tabular-nums">
+                            {formatRate(anchorRowRate(a, 'signRate'))}
+                          </td>
+                        ) : null}
+                      </>
+                    ) : null}
                   </tr>
                 )
               })

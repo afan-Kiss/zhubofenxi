@@ -80,10 +80,22 @@ export function anchorRowReturnRefundRate(row: AnchorLeaderboardRow): number | n
   return anchorRowRate(row, 'returnRefundRate')
 }
 
+export function anchorRowReturnCount(row: AnchorLeaderboardRow): number {
+  return anchorRowNum(row, 'returnCount') || anchorRowNum(row, 'refundOrderCount')
+}
+
 export function anchorRowLivePeriodText(row: AnchorLeaderboardRow): string | null {
   const attribution = normalizeLivePeriodText(row.livePeriodText)
   if (attribution) return attribution
   return normalizeLivePeriodText(row.liveTimeRange)
+}
+
+export function anchorRowActualLivePeriodText(row: AnchorLeaderboardRow): string | null {
+  return normalizeLivePeriodText(row.liveTimeRange)
+}
+
+export function anchorRowAttributionLivePeriodText(row: AnchorLeaderboardRow): string | null {
+  return normalizeLivePeriodText(row.livePeriodText)
 }
 
 function normalizeLivePeriodText(raw: unknown): string | null {
@@ -117,27 +129,39 @@ export function anchorRowScheduleTimeRange(row: AnchorLeaderboardRow): string | 
   return raw.replace(/~/g, '–')
 }
 
-/** 今日/昨日卡片：归属直播时段；与排班不一致时合并为一行 */
+/** 今日/昨日卡片：实际/归属/排班时段文案 */
 export function anchorRowLivePeriodLines(row: AnchorLeaderboardRow): {
   primary: string | null
   secondary: string | null
 } {
-  const live = anchorRowLivePeriodText(row)
+  const actual = anchorRowActualLivePeriodText(row)
+  const attribution = anchorRowAttributionLivePeriodText(row)
   const schedule = anchorRowScheduleTimeRange(row)
   const hint = anchorRowLivePeriodHint(row)
 
-  if (live) {
-    if (schedule && !livePeriodsLooselyEqual(schedule, live)) {
-      return { primary: `直播 ${live} · 排班 ${schedule}`, secondary: null }
-    }
-    return { primary: `直播 ${live}`, secondary: null }
-  }
+  const scheduleSuffix =
+    schedule &&
+    (!attribution || !livePeriodsLooselyEqual(schedule, attribution)) &&
+    (!actual || !livePeriodsLooselyEqual(schedule, actual))
+      ? ` · 排班 ${schedule}`
+      : ''
 
+  if (actual && attribution && !livePeriodsLooselyEqual(actual, attribution)) {
+    return { primary: `实际 ${actual} · 归属 ${attribution}${scheduleSuffix}`, secondary: null }
+  }
+  if (attribution) {
+    return { primary: `归属 ${attribution}${scheduleSuffix}`, secondary: null }
+  }
+  if (actual) {
+    return {
+      primary: `实际 ${actual}`,
+      secondary: schedule ? `排班 ${schedule}` : null,
+    }
+  }
   if (hint) {
     return { primary: hint, secondary: schedule ? `排班 ${schedule}` : null }
   }
-
-  return { primary: null, secondary: schedule ? `排班 ${schedule}` : null }
+  return { primary: schedule ? `排班 ${schedule}` : null, secondary: null }
 }
 
 export function isSingleDayRange(startDate: string, endDate: string): boolean {
@@ -160,21 +184,22 @@ export function aggregateSummaryFromAnchorRows(
 ): Record<string, unknown> {
   if (rows.length === 0) return {}
   let totalGmv = 0
-  let actualSignedAmount = 0
-  let orderCount = 0
-  let returnAmount = 0
+  let validSalesAmount = 0
+  let paidOrderCount = 0
+  let returnCount = 0
   for (const row of rows) {
     totalGmv += anchorRowGmv(row)
-    actualSignedAmount += anchorRowNum(row, 'actualSignedAmount')
-    orderCount += anchorRowPaidCount(row)
-    returnAmount += anchorRowRefundAmount(row)
+    validSalesAmount += anchorRowValidSales(row)
+    paidOrderCount += anchorRowPaidCount(row)
+    returnCount += anchorRowReturnCount(row)
   }
   return {
     totalGmv,
     gmv: totalGmv,
-    actualSignedAmount,
-    orderCount,
-    returnRate: totalGmv > 0 ? returnAmount / totalGmv : null,
+    validSalesAmount,
+    effectiveGmv: validSalesAmount,
+    orderCount: paidOrderCount,
+    returnRate: paidOrderCount > 0 ? returnCount / paidOrderCount : null,
   }
 }
 

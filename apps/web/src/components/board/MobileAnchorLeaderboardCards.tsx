@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import {
   anchorRowGmv,
@@ -8,14 +8,13 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnRefundCount,
   anchorRowLivePeriodLines,
-  anchorRowLivePeriodText,
   anchorRowValidSales,
   isHighRefundRate,
+  anchorRowTrend,
   type AnchorLeaderboardRow,
 } from '../../lib/anchor-leaderboard-row'
 import { anchorCardTestId } from '../../lib/anchor-test-id'
 import { AnchorTrendChart } from './AnchorTrendChart'
-import { anchorRowTrend } from '../../lib/anchor-leaderboard-row'
 
 interface Props {
   rows: AnchorLeaderboardRow[]
@@ -25,7 +24,7 @@ interface Props {
   showLongPeriodRates?: boolean
   /** 覆盖外层容器 className；默认手机端显示 */
   className?: string
-  /** 是否在卡片内展示单主播走势图；四主播对比模式下可关闭 */
+  /** 是否在卡片内展示单主播走势图；默认关闭，需点击展开 */
   showIndividualTrend?: boolean
   showLivePeriod?: boolean
 }
@@ -84,10 +83,12 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   onQualityCountClick,
   showLongPeriodRates: showRates = true,
   className = 'block md:hidden',
-  showIndividualTrend = true,
+  showIndividualTrend = false,
   showLivePeriod = false,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
+  const [expandedTrendKeys, setExpandedTrendKeys] = useState<Record<string, boolean>>({})
+  const [expandedMetricKeys, setExpandedMetricKeys] = useState<Record<string, boolean>>({})
 
   if (rows.length === 0) {
     return (
@@ -103,16 +104,18 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
     <div className={`space-y-3 ${className}`}>
       {rows.map((a, idx) => {
         const name = String(a.anchorName ?? '—')
+        const rowKey = String(a.anchorId ?? name ?? idx)
         const refundRate = anchorRowRate(a, 'returnRate')
         const signRate = anchorRowRate(a, 'signRate')
         const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
-        const livePeriodMultiline =
-          (liveLines.primary?.includes('\n') ?? false) ||
-          (anchorRowLivePeriodText(a)?.includes('\n') ?? false)
+        const livePeriodMultiline = liveLines.primary?.includes('\n') ?? false
+        const trend = anchorRowTrend(a)
+        const showTrend = showIndividualTrend || expandedTrendKeys[rowKey]
+        const showExtraMetrics = expandedMetricKeys[rowKey]
 
         return (
           <article
-            key={String(a.anchorId ?? name ?? idx)}
+            key={rowKey}
             data-testid={anchorCardTestId(name)}
             role={onSelect ? 'button' : undefined}
             tabIndex={onSelect ? 0 : undefined}
@@ -130,7 +133,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
             style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
           >
             <div className="flex items-start justify-between gap-2">
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-[12px] text-slate-500">主播</p>
                 <p className="text-lg font-semibold text-rose-800">{name}</p>
                 {showLivePeriod && liveLines.primary ? (
@@ -148,49 +151,80 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               </div>
             </div>
 
-            <div className="mt-3">
-              {showIndividualTrend ? (
-                <AnchorTrendChart
-                  variant="page"
-                  trend={anchorRowTrend(a)}
-                  formatMoney={formatMoney}
-                  formatCount={(n) => `${formatCount(n)} 单`}
-                />
-              ) : null}
-            </div>
-
             <div className="mt-3 grid grid-cols-2 gap-2">
               <MetricCell label="支付金额" value={formatMoney(anchorRowGmv(a))} />
               <MetricCell label="有效成交额" value={formatMoney(anchorRowValidSales(a))} />
               <MetricCell label="支付单数" value={formatCount(anchorRowPaidCount(a))} />
-              <MetricCell label="退款金额" value={formatMoney(anchorRowRefundAmount(a))} danger />
               <MetricCell
-                label="退货退款单数"
-                value={formatCount(anchorRowReturnRefundCount(a))}
-              />
-              <MetricCell
-                label="品退单数"
-                value={formatCount(anchorRowNum(a, 'qualityReturnCount'))}
-                onClick={onQualityCountClick ? () => onQualityCountClick(a) : undefined}
+                label="退款率"
+                value={formatRate(refundRate)}
+                danger={isHighRefundRate(refundRate)}
               />
             </div>
 
+            {showExtraMetrics ? (
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <MetricCell label="退款金额" value={formatMoney(anchorRowRefundAmount(a))} danger />
+                <MetricCell
+                  label="退货退款单数"
+                  value={formatCount(anchorRowReturnRefundCount(a))}
+                />
+                <MetricCell
+                  label="品退单数"
+                  value={formatCount(anchorRowNum(a, 'qualityReturnCount'))}
+                  onClick={onQualityCountClick ? () => onQualityCountClick(a) : undefined}
+                />
+                {showRates ? (
+                  <MetricCell label="签收率" value={formatRate(signRate)} />
+                ) : null}
+              </div>
+            ) : null}
+
             <div className="mt-2 flex flex-wrap gap-2 border-t border-rose-50 pt-2.5">
-              <span
-                className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                  isHighRefundRate(refundRate)
-                    ? 'bg-rose-100 text-rose-700'
-                    : 'bg-slate-100 text-slate-600'
-                }`}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setExpandedMetricKeys((prev) => ({
+                    ...prev,
+                    [rowKey]: !prev[rowKey],
+                  }))
+                }}
+                className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
               >
-                退款率 {formatRate(refundRate)}
-              </span>
-              {showRates && (
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-medium text-slate-600">
-                  签收率 {formatRate(signRate)}
-                </span>
-              )}
+                {showExtraMetrics ? '收起更多指标' : '更多指标'}
+              </button>
+              {trend ? (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setExpandedTrendKeys((prev) => ({
+                      ...prev,
+                      [rowKey]: !prev[rowKey],
+                    }))
+                  }}
+                  className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"
+                >
+                  {showTrend ? '收起走势' : '查看走势'}
+                </button>
+              ) : null}
             </div>
+
+            {showTrend && trend ? (
+              <div
+                className="mt-3"
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => e.stopPropagation()}
+              >
+                <AnchorTrendChart
+                  variant="page"
+                  trend={trend}
+                  formatMoney={formatMoney}
+                  formatCount={(n) => `${formatCount(n)} 单`}
+                />
+              </div>
+            ) : null}
           </article>
         )
       })}

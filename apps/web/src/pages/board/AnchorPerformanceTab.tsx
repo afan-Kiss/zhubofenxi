@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Banknote, CalendarDays, Package, Percent, TrendingUp, type LucideIcon } from 'lucide-react'
+import { CalendarDays, ChevronDown, Package, Percent, TrendingUp, Wallet, type LucideIcon } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { RangeBar } from '../../components/board/RangeBar'
 import { BoardStatRangeNote } from '../../components/board/BoardStatRangeNote'
@@ -12,13 +12,14 @@ import { AnchorLeaderboardPanel } from '../../components/board/AnchorLeaderboard
 import { AnchorPocketSummaryPanel } from '../../components/board/AnchorPocketSummaryPanel'
 import { AnchorAuditExportPanel } from '../../components/board/AnchorAuditExportPanel'
 import { MetricStatLabel } from '../../components/board/MetricStatLabel'
-import { BoardSyncStatusHeader } from '../../components/board/BoardSyncStatusHeader'
-import { DataLastUpdateBanner } from '../../components/board/DataLastUpdateBanner'
 import { BusinessSyncProgressCard } from '../../components/board/BusinessSyncProgressCard'
 import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
-import { OfficialQualitySyncNote } from '../../components/board/OfficialQualitySyncNote'
-import { anchorRowRate, isSingleDayPreset, aggregateSummaryFromAnchorRows } from '../../lib/anchor-leaderboard-row'
+import {
+  anchorRowRate,
+  isSingleDayPreset,
+  aggregateSummaryFromAnchorRows,
+} from '../../lib/anchor-leaderboard-row'
 import {
   BoardLiveQueryAutoRefresh,
   useBoardLiveQuery,
@@ -28,6 +29,7 @@ import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGri
 import { DailyReportPreviewButton } from '../../components/board/DailyReportPreviewButton'
 import { AnchorEffectiveSchedulePanel } from '../../components/board/AnchorEffectiveSchedulePanel'
 import { useDataFreshness } from '../../hooks/useDataFreshness'
+import { formatDataFreshnessTime, type DataFreshnessInfo } from '../../lib/data-freshness'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
 
 type AnchorSummaryCardType = 'money' | 'count' | 'rate'
@@ -39,7 +41,7 @@ interface AnchorSummaryCardDef {
   tone: BoardSummaryMetricTone
   helper: string
   icon: LucideIcon
-  valueKey: 'totalGmv' | 'actualSignedAmount' | 'orderCount' | 'returnRate'
+  valueKey: 'totalGmv' | 'validSalesAmount' | 'orderCount' | 'returnRate'
 }
 
 const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
@@ -53,13 +55,13 @@ const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
     valueKey: 'totalGmv',
   },
   {
-    label: '签收金额',
-    metricExplainKey: 'actualSignedAmount',
+    label: '有效成交额',
+    metricExplainKey: 'validSalesAmount',
     type: 'money',
     tone: 'green',
-    helper: '实际签收到账金额',
-    icon: Banknote,
-    valueKey: 'actualSignedAmount',
+    helper: '支付金额减去退款金额',
+    icon: Wallet,
+    valueKey: 'validSalesAmount',
   },
   {
     label: '支付单数',
@@ -83,9 +85,26 @@ const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
 
 function anchorCardRawValue(cards: Record<string, unknown>, key: AnchorSummaryCardDef['valueKey']): number {
   if (key === 'totalGmv') return Number(cards.totalGmv ?? cards.gmv ?? 0)
-  if (key === 'actualSignedAmount') return Number(cards.actualSignedAmount ?? 0)
+  if (key === 'validSalesAmount') {
+    return Number(cards.validSalesAmount ?? cards.effectiveGmv ?? 0)
+  }
   if (key === 'orderCount') return Number(cards.orderCount ?? 0)
   return Number(cards.returnRate ?? 0)
+}
+
+function formatFreshnessLine(
+  freshness: DataFreshnessInfo | null | undefined,
+  syncSuccessAt: string | null | undefined,
+): string | null {
+  const parts: string[] = []
+  if (freshness?.latestOrderTime) {
+    parts.push(`数据更新 ${formatDataFreshnessTime(freshness.latestOrderTime)}`)
+  }
+  const syncAt = syncSuccessAt ?? freshness?.lastQianfanSyncAt
+  if (syncAt) {
+    parts.push(`同步 ${formatDataFreshnessTime(syncAt)}`)
+  }
+  return parts.length > 0 ? parts.join(' · ') : null
 }
 
 export const AnchorPerformanceTab: React.FC = () => {
@@ -111,7 +130,6 @@ export const AnchorPerformanceTab: React.FC = () => {
     startDate,
     endDate,
     resolvedRange,
-    qualityFeedback,
     reload,
     boardSyncUiMode,
     activeSyncJob,
@@ -123,6 +141,7 @@ export const AnchorPerformanceTab: React.FC = () => {
   const { data: dataFreshness, loading: dataFreshnessLoading } = useDataFreshness(startDate, endDate)
 
   const [anchorFilter, setAnchorFilter] = useState('全部')
+  const [toolsOpen, setToolsOpen] = useState(false)
   const [anchorDrawer, setAnchorDrawer] = useState<{
     anchorName: string
     anchorId?: string
@@ -164,6 +183,11 @@ export const AnchorPerformanceTab: React.FC = () => {
   const isLoadingRange = isDisplayStale && isLoading
   const showInitialSkeleton = isLoading && !hasPerformanceData && !data
   const showMetrics = hasPerformanceData && boardDataVisible
+
+  const freshnessLine = formatFreshnessLine(
+    dataFreshness,
+    syncMeta?.businessSync?.lastSuccessAt ?? null,
+  )
 
   const summaryTransitionKey = [
     'anchor-summary',
@@ -262,19 +286,10 @@ export const AnchorPerformanceTab: React.FC = () => {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">主播业绩</h2>
-          <p className="mt-0.5 text-sm text-slate-500">
-            基于后台自动同步的本地订单 · 6.13 起按真实直播时段归属主播（支付时间须落在开播~下播内）
-          </p>
-          <BoardSyncStatusHeader
-            syncMeta={syncMeta}
-            hasDisplayData={hasPerformanceData || Boolean(displaySummary)}
-            totalRawOrders={totalRawOrders}
-          />
-          <DataLastUpdateBanner
-            freshness={dataFreshness}
-            loading={dataFreshnessLoading}
-          />
-          <OfficialQualitySyncNote qualityFeedback={qualityFeedback} showLastUpdated={false} />
+          <p className="mt-0.5 text-sm text-slate-500">按归属时段汇总各主播经营表现</p>
+          {!dataFreshnessLoading && freshnessLine ? (
+            <p className="mt-1 text-xs text-slate-400">{freshnessLine}</p>
+          ) : null}
         </div>
         {(preset === 'today' || preset === 'yesterday') && startDate ? (
           <Link
@@ -303,15 +318,6 @@ export const AnchorPerformanceTab: React.FC = () => {
       {resolvedRange.startDate && resolvedRange.endDate && (
         <BoardStatRangeNote startDate={resolvedRange.startDate} endDate={resolvedRange.endDate} />
       )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <DailyReportPreviewButton
-          preset={preset}
-          startDate={startDate}
-          endDate={endDate}
-          disabled={!boardDataVisible || isLoading}
-        />
-      </div>
 
       {showProgressCard ? (
         <BusinessSyncProgressCard
@@ -426,12 +432,37 @@ export const AnchorPerformanceTab: React.FC = () => {
               />
             </MetricGridTransition>
           </div>
-      {startDate && endDate ? (
-        <>
-          <AnchorEffectiveSchedulePanel startDate={startDate} endDate={endDate} />
-          <AnchorPocketSummaryPanel preset={preset} startDate={startDate} endDate={endDate} />
-              <AnchorAuditExportPanel startDate={startDate} endDate={endDate} />
-            </>
+
+          {startDate && endDate ? (
+            <div className="rounded-2xl border border-slate-200 bg-white">
+              <button
+                type="button"
+                onClick={() => setToolsOpen((open) => !open)}
+                className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                aria-expanded={toolsOpen}
+              >
+                <span>更多工具</span>
+                <ChevronDown
+                  size={18}
+                  className={`shrink-0 text-slate-400 transition ${toolsOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {toolsOpen ? (
+                <div className="space-y-4 border-t border-slate-100 px-4 pb-4 pt-3">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <DailyReportPreviewButton
+                      preset={preset}
+                      startDate={startDate}
+                      endDate={endDate}
+                      disabled={!boardDataVisible || isLoading}
+                    />
+                  </div>
+                  <AnchorEffectiveSchedulePanel startDate={startDate} endDate={endDate} />
+                  <AnchorPocketSummaryPanel preset={preset} startDate={startDate} endDate={endDate} />
+                  <AnchorAuditExportPanel startDate={startDate} endDate={endDate} />
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </>
       ) : null}

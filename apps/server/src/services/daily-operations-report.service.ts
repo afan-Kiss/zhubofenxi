@@ -110,6 +110,8 @@ export interface DailyOperationsSummary {
   unassignedValidOrderCount: number
   soldOrderCount: number
   invalidOrderCount: number
+  anchorAssignedInvalidOrderCount: number
+  unassignedInvalidOrderCount: number
   returnOrderCount: number
   returnOrderRate: number | null
   paidOrderCount: number
@@ -457,7 +459,20 @@ export async function buildDailyOperationsReport(params: {
     row.amountRatio = safeRatioPercent(row.validAmountYuan, validAmountYuan)
   }
 
-  const invalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)
+  const remappedAll = remapViewsForAnchorPerformance(
+    attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
+  )
+  const storeWideInvalid = countDailyReportOrders(remappedAll)
+  const invalidOrderCount = storeWideInvalid.invalidOrderCount
+  const anchorAssignedInvalidOrderCount = anchorRows.reduce(
+    (sum, row) => sum + row.invalidOrderCount,
+    0,
+  )
+  const unassignedInvalidViews = dedupeViewsByMetricOrderNo(remappedAll).filter(
+    (v) => v.attributionType === 'unassigned',
+  )
+  const unassignedInvalidOrderCount =
+    countDailyReportOrders(unassignedInvalidViews).invalidOrderCount
   const summaryRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViewsAll)
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
@@ -504,6 +519,11 @@ export async function buildDailyOperationsReport(params: {
   if (unassignedValid.soldOrderCount > 0) {
     statisticsIntegrityWarnings.push(
       `有 ${unassignedValid.soldOrderCount} 单有效成交未归属主播（${unassignedValid.validAmountYuan.toFixed(2)} 元），全店汇总已计入、主播表为已归属口径。`,
+    )
+  }
+  if (unassignedInvalidOrderCount > 0) {
+    statisticsIntegrityWarnings.push(
+      `有 ${unassignedInvalidOrderCount} 单无效/刷单未归属主播，全店汇总已计入、主播表为已归属口径。`,
     )
   }
   if (liveAssignment.unassignedLiveSessionCount > 0) {
@@ -582,6 +602,8 @@ export async function buildDailyOperationsReport(params: {
       unassignedValidOrderCount: unassignedValid.soldOrderCount,
       soldOrderCount,
       invalidOrderCount,
+      anchorAssignedInvalidOrderCount,
+      unassignedInvalidOrderCount,
       returnOrderCount: summaryRefundMetrics.refundOrderCount,
       returnOrderRate: summaryRefundMetrics.rate,
       paidOrderCount: summaryRefundMetrics.paidOrderCount,

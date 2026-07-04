@@ -42,6 +42,7 @@ export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
             <th className="px-3 py-2">开播时间</th>
             <th className="px-3 py-2">归属有效成交</th>
             <th className="px-3 py-2">订单</th>
+            <th className="px-3 py-2">归属无效/刷单</th>
             <th className="px-3 py-2">退货单</th>
             <th className="px-3 py-2">退货单率</th>
             <th className="px-3 py-2">直播时长</th>
@@ -61,6 +62,7 @@ export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
               <td className="px-3 py-2 text-slate-600">{formatAnchorSessionTiming(row)}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
+              <td className="px-3 py-2">{formatOrderCount(row.invalidOrderCount)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.returnOrderCount)}</td>
               <td className="px-3 py-2">{formatRatePercent(row.returnOrderRate)}</td>
               <td className="px-3 py-2">{formatDuration(row.liveDurationMinutes)}</td>

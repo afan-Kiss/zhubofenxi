@@ -25,6 +25,9 @@ import {
 import { buildDailyOperationsReport } from '../src/services/daily-operations-report.service'
 import { getBoardScopedViewsForRange, getAnchorPerformanceViews } from '../src/services/board-scoped-views.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from '../src/services/calc-refund-rate.service'
+import { countDailyReportOrders } from '../src/services/daily-report-order.util'
+import { attachRawByMatchToViews } from '../src/services/low-price-brush-order.service'
+import { remapViewsForAnchorPerformance } from '../src/services/anchor-performance-attribution.service'
 import { loadAndAssignDailyReportLiveSessions } from '../src/services/daily-report-live-sessions.service'
 import { getEffectiveScheduleTableForDate } from '../src/services/anchor-daily-schedule.service'
 import { centToYuan } from '../src/utils/money'
@@ -293,6 +296,44 @@ async function checkDailyReport(dateKey: string): Promise<void> {
     fail(`${dateKey} 每小时成交公式不一致: ${hourly} vs ${expectedHourly}`)
   } else {
     ok(`${dateKey} 每小时成交 = 全店有效成交 ÷ 直播时长`)
+  }
+
+  const remappedAll = remapViewsForAnchorPerformance(
+    attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
+  )
+  const expectedStoreWideInvalid = countDailyReportOrders(remappedAll).invalidOrderCount
+  const anchorInvalidSum = report.anchors.reduce((s, r) => s + r.invalidOrderCount, 0)
+  const summaryInvalid = report.summary.invalidOrderCount
+  const anchorAssignedInvalid = report.summary.anchorAssignedInvalidOrderCount
+  const unassignedInvalid = report.summary.unassignedInvalidOrderCount
+
+  console.log(`  全店无效/刷单 summary: ${summaryInvalid}`)
+  console.log(`  countDailyReportOrders(remappedAll): ${expectedStoreWideInvalid}`)
+  console.log(`  主播归属无效/刷单: ${anchorAssignedInvalid}`)
+  console.log(`  未归属无效/刷单: ${unassignedInvalid}`)
+  console.log(`  主播行无效合计: ${anchorInvalidSum}`)
+
+  if (summaryInvalid !== expectedStoreWideInvalid) {
+    fail(
+      `${dateKey} 日报 summary.invalidOrderCount=${summaryInvalid} ≠ 全店=${expectedStoreWideInvalid}`,
+    )
+  } else {
+    ok(`${dateKey} 日报 summary.invalidOrderCount 使用全店无效/刷单口径`)
+  }
+
+  if (anchorAssignedInvalid !== anchorInvalidSum) {
+    fail(
+      `${dateKey} anchorAssignedInvalidOrderCount=${anchorAssignedInvalid} ≠ 主播行合计=${anchorInvalidSum}`,
+    )
+  }
+
+  const invalidPartitionSum = anchorAssignedInvalid + unassignedInvalid
+  if (invalidPartitionSum !== summaryInvalid) {
+    fail(
+      `${dateKey} 主播归属无效(${anchorAssignedInvalid}) + 未归属无效(${unassignedInvalid}) = ${invalidPartitionSum} ≠ 全店无效(${summaryInvalid})`,
+    )
+  } else {
+    ok(`${dateKey} 主播归属无效 + 未归属无效 = 全店无效/刷单`)
   }
 }
 

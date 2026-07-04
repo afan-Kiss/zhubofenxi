@@ -136,6 +136,8 @@ function aggregateWeeklySummary(
   let anchorAssignedValidCent = 0
   let unassignedValidCent = 0
   let unassignedValidOrderCount = 0
+  let anchorAssignedInvalidOrderCount = 0
+  let unassignedInvalidOrderCount = 0
   let totalNewFollowerCount = 0
   let dealUserCount: number | null = null
   let joinUserCount: number | null = null
@@ -159,6 +161,8 @@ function aggregateWeeklySummary(
     anchorAssignedValidCent += Math.round((snap.summary.anchorAssignedValidAmountYuan ?? 0) * 100)
     unassignedValidCent += Math.round((snap.summary.unassignedValidAmountYuan ?? 0) * 100)
     unassignedValidOrderCount += snap.summary.unassignedValidOrderCount ?? 0
+    anchorAssignedInvalidOrderCount += snap.summary.anchorAssignedInvalidOrderCount ?? 0
+    unassignedInvalidOrderCount += snap.summary.unassignedInvalidOrderCount ?? 0
     totalNewFollowerCount += snap.summary.totalNewFollowerCount
     if (snap.summary.dealUserCount != null) {
       dealUserCount = (dealUserCount ?? 0) + snap.summary.dealUserCount
@@ -194,6 +198,8 @@ function aggregateWeeklySummary(
     unassignedValidOrderCount,
     soldOrderCount,
     invalidOrderCount,
+    anchorAssignedInvalidOrderCount,
+    unassignedInvalidOrderCount,
     returnOrderCount,
     returnOrderRate: computeReturnOrderRateRatio(paidOrderCount, returnOrderCount),
     paidOrderCount,

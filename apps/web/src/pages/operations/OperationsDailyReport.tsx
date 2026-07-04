@@ -180,6 +180,10 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
               drillRequest={{ ...drillBase, target: 'summary_orders' }}
             />
             <OperationsMetricDrillCard
+              label="全店无效/刷单"
+              value={formatOrderCount(s.invalidOrderCount)}
+            />
+            <OperationsMetricDrillCard
               label="退货单率"
               value={formatRatePercent(s.returnOrderRate)}
               drillRequest={{ ...drillBase, target: 'summary_return_rate' }}

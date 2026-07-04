@@ -383,6 +383,8 @@ export interface DailyOperationsSummary {
   unassignedValidOrderCount?: number
   soldOrderCount: number
   invalidOrderCount: number
+  anchorAssignedInvalidOrderCount?: number
+  unassignedInvalidOrderCount?: number
   returnOrderCount: number
   returnOrderRate: number | null
   dealUserCount: number | null

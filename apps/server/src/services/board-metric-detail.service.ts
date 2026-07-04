@@ -29,6 +29,7 @@ import {
 } from './board-scoped-views.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { resolveOverviewStableDrawerContext } from './overview-metric-snapshot.service'
+import { isValidRevenueOrder } from './valid-revenue-order.service'
 
 export type BoardDataSource = 'local_db' | 'live_api'
 
@@ -140,7 +141,7 @@ function matchMetricViews(views: AnalyzedOrderView[], metric: BoardMetricKey, ta
     case 'gmv':
       return views.filter((v) => v.includedInGmv)
     case 'effectiveGmv':
-      return views.filter((v) => v.effectiveGmvCent > 0 || v.includedInGmv)
+      return views.filter((v) => isValidRevenueOrder(v))
     case 'actualSignedAmount':
     case 'signedCount':
       if (tab === 'unsigned') return views.filter((v) => !isEffectiveSignedView(v))
@@ -263,7 +264,7 @@ export async function buildBoardMetricDetail(params: {
   const isQualityMetric =
     params.metric === 'qualityReturnCount' || params.metric === 'qualityReturnRate'
   let sourceViews = matchMetricViews(views, params.metric, params.tab)
-  if (isQualityMetric) {
+  if (isQualityMetric || params.metric === 'effectiveGmv') {
     sourceViews = dedupeViewsByMetricOrderNo(sourceViews)
   }
   const blacklist = buildBlacklistedBuyerIds(views)
@@ -323,7 +324,9 @@ export async function buildBoardMetricDetail(params: {
       totalOrders: totals.periodOrderCount,
       matchedOrders: isQualityMetric
         ? totals.qualityRefundOrderCount
-        : sourceViews.length,
+        : params.metric === 'effectiveGmv'
+          ? totals.shippedOrderCount
+          : sourceViews.length,
       value: valueRaw,
       valueRaw,
       valueText: formatValueText(params.metric, valueRaw),

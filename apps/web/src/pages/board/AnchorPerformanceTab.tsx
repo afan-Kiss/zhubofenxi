@@ -59,7 +59,7 @@ const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
     metricExplainKey: 'validSalesAmount',
     type: 'money',
     tone: 'green',
-    helper: '已签收/已完成且无大额售后的成交金额',
+    helper: '已完成/已签收，且无在途售后、未成功退款的成交金额',
     icon: Wallet,
     valueKey: 'validSalesAmount',
   },

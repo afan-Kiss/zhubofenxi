@@ -16,6 +16,14 @@ import {
   isQualityBadCaseMatchStatusMatched,
 } from './quality-badcase.types'
 
+function pickString(rec: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = rec[k]
+    if (v != null && String(v).trim()) return String(v).trim()
+  }
+  return ''
+}
+
 export type QualityVerifyStatus =
   | 'verified'
   | 'official_only'
@@ -47,6 +55,14 @@ export interface QualityRefundCrossVerify {
   /** 售后疑似品退但官方未命中，不计入主指标 */
   suspectedQualityRefund: boolean
   verifyDisplayLabel: string
+  /** 官方品退原因（与 officialReasonText 一致，供明细展示） */
+  officialQualityReasonText: string
+  /** 售后最终理由（买家可能后续修改） */
+  afterSaleFinalReasonText: string
+  /** 售后最终理由与官方品退原因不一致 */
+  afterSaleReasonChanged: boolean
+  /** 运营向补充说明 */
+  extraHint: string
 }
 
 function pickAfterSaleSuccessTime(rec: Record<string, unknown>): string {
@@ -77,6 +93,73 @@ function pickAfterSaleType(rec: Record<string, unknown>): string {
   return parts.join(' ') || ''
 }
 
+/** 售后工作台无 rawDetail 时，用官方品退已匹配的售后字段补全展示（不影响是否计入品退） */
+export function buildAfterSaleRecordsFromOfficialCase(
+  officialCase?: NormalizedQualityBadCase,
+  view?: AnalyzedOrderView,
+): Record<string, unknown>[] {
+  if (!officialCase) return []
+  const returnsId =
+    officialCase.matchedAfterSaleId?.trim() || officialCase.sourceBizId?.trim() || ''
+  const reasonFromView =
+    view?.finalAfterSaleReason?.trim() || view?.afterSaleReasonText?.trim() || ''
+  const statusFromView =
+    view?.finalAfterSaleStatus?.trim() || view?.afterSaleStatusText?.trim() || ''
+  const refundFromView =
+    view?.successfulRefundAmountCent && view.successfulRefundAmountCent > 0
+      ? view.successfulRefundAmountCent / 100
+      : 0
+  const refundFee =
+    officialCase.afterSaleRefundAmount > 0
+      ? officialCase.afterSaleRefundAmount
+      : refundFromView
+  const hasAfterSaleMeta =
+    Boolean(returnsId) ||
+    Boolean(officialCase.afterSaleReason?.trim()) ||
+    Boolean(officialCase.afterSaleStatus?.trim()) ||
+    Boolean(reasonFromView) ||
+    Boolean(statusFromView) ||
+    refundFee > 0
+  if (!hasAfterSaleMeta) return []
+  return [
+    {
+      returns_id: returnsId,
+      reason_name_zh: officialCase.afterSaleReason?.trim() || reasonFromView,
+      refund_status_name:
+        officialCase.afterSaleStatus?.trim() || statusFromView || '退款成功',
+      refund_fee: refundFee,
+    },
+  ]
+}
+
+function pickReturnsIdFromRecords(records: Record<string, unknown>[]): string {
+  const pickFrom = (rec: Record<string, unknown>): string =>
+    pickString(rec, [
+      'returns_id',
+      'returnsId',
+      'return_id',
+      'returnId',
+      'after_sale_id',
+      'afterSaleId',
+    ])
+
+  const successful = records.filter((r) => isSuccessfulAfterSale(r))
+  const ordered =
+    successful.length > 0
+      ? [...successful].sort((a, b) => {
+          const ta = Date.parse(pickAfterSaleSuccessTime(a)) || 0
+          const tb = Date.parse(pickAfterSaleSuccessTime(b)) || 0
+          return tb - ta
+        })
+      : records
+
+  for (const rec of ordered) {
+    const rid = pickFrom(rec)
+    if (rid) return rid
+  }
+  return ''
+}
+
 function summarizeAfterSaleRecords(records: Record<string, unknown>[]): {
   hasAny: boolean
   hasSuccessful: boolean
@@ -87,6 +170,7 @@ function summarizeAfterSaleRecords(records: Record<string, unknown>[]): {
   typeText: string
   refundCent: number
   successTime: string
+  returnsId: string
 } {
   const strictAgg = aggregateStrictAfterSaleForOrder(records)
   let hasSuccessful = strictAgg.successfulRecordCount > 0
@@ -149,15 +233,21 @@ function summarizeAfterSaleRecords(records: Record<string, unknown>[]): {
     typeText: bestType,
     refundCent,
     successTime: bestTime,
+    returnsId: pickReturnsIdFromRecords(records),
   }
 }
 
-export function qualityVerifyDisplayLabel(status: QualityVerifyStatus): string {
+export function qualityVerifyDisplayLabel(
+  status: QualityVerifyStatus,
+  opts?: { afterSaleMatched?: boolean },
+): string {
   switch (status) {
     case 'verified':
-      return '官方品退，售后已印证'
+      return opts?.afterSaleMatched === false
+        ? '官方品退，售后已印证'
+        : '官方品退，售后单已匹配'
     case 'official_only':
-      return '官方品退，暂未匹配到售后单'
+      return '官方品退，暂无售后单信息'
     case 'conflict':
       return '官方品退，售后原因存在差异'
     case 'after_sale_only':
@@ -176,7 +266,11 @@ export function resolveQualityRefundCrossVerify(params: {
   officialCase?: NormalizedQualityBadCase
   verifySource?: 'after_sale_time_search' | 'after_sale_workbench'
 }): QualityRefundCrossVerify {
-  const { view: v, afterSaleRecords = [], matchedOfficialPackageIds, officialCase } = params
+  const { view: v, matchedOfficialPackageIds, officialCase } = params
+  let afterSaleRecords = params.afterSaleRecords ?? []
+  if (afterSaleRecords.length === 0) {
+    afterSaleRecords = buildAfterSaleRecordsFromOfficialCase(officialCase, v)
+  }
   const no = resolveMetricOrderNo(v)
   const officialPackageId = no || officialCase?.packageId || ''
 
@@ -210,9 +304,8 @@ export function resolveQualityRefundCrossVerify(params: {
     isQualityRefund = true
     if (!afterSale.hasAny) {
       qualityVerifyStatus = 'official_only'
-    } else if (afterSale.hasNonQualityReason && !afterSale.hasQualityReason) {
-      qualityVerifyStatus = 'conflict'
     } else {
+      // 官方品退为主来源：售后单仅补充展示，最终理由变更不影响计入品退
       qualityVerifyStatus = 'verified'
     }
   } else if ((strictQualityRefund || afterSaleQualityCandidate) && v.includedInGmv) {
@@ -227,6 +320,19 @@ export function resolveQualityRefundCrossVerify(params: {
       ? params.verifySource ?? 'after_sale_workbench'
       : 'none'
 
+  const afterSaleReasonChanged =
+    afterSale.hasAny &&
+    Boolean(officialReasonText) &&
+    Boolean(afterSale.reasonText) &&
+    afterSale.hasNonQualityReason &&
+    !afterSale.hasQualityReason
+
+  const extraHint = afterSaleReasonChanged
+    ? '买家后续可能改过售后理由，本单仍按官方品退计入品退'
+    : ''
+
+  const afterSaleMatched = afterSale.hasAny && qualityVerifyStatus === 'verified'
+
   return {
     isQualityRefund,
     qualityMainSource: isQualityRefund
@@ -240,7 +346,7 @@ export function resolveQualityRefundCrossVerify(params: {
     officialReasonText,
     afterSaleReasonText: afterSale.reasonText,
     officialPackageId,
-    afterSaleOrderNo: no,
+    afterSaleOrderNo: afterSale.returnsId,
     afterSaleStatus: afterSale.statusText || v.finalAfterSaleStatus || v.afterSaleStatusText || '',
     afterSaleType: afterSale.typeText || v.afterSaleDisplayType || v.afterSaleCategory || '',
     afterSaleRefundAmountCent:
@@ -260,7 +366,13 @@ export function resolveQualityRefundCrossVerify(params: {
     qualitySourceBizId:
       v.officialQualitySourceBizId?.trim() || officialCase?.sourceBizId || '',
     suspectedQualityRefund: qualityVerifyStatus === 'after_sale_only',
-    verifyDisplayLabel: qualityVerifyDisplayLabel(qualityVerifyStatus),
+    verifyDisplayLabel: qualityVerifyDisplayLabel(qualityVerifyStatus, {
+      afterSaleMatched,
+    }),
+    officialQualityReasonText: officialReasonText,
+    afterSaleFinalReasonText: afterSale.reasonText,
+    afterSaleReasonChanged,
+    extraHint,
   }
 }
 

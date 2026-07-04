@@ -146,6 +146,7 @@ export function resolveQualityRefundAnchorByOrderTime(params: {
   view: AnalyzedOrderView & { raw?: Record<string, unknown> }
   liveSessions: LiveSession[]
   config?: AnchorConfig
+  afterSaleRecords?: Record<string, unknown>[]
 }): QualityRefundAnchorAttribution | null {
   const { view, liveSessions } = params
   if (!viewCountsAsQualityRefund(view)) return null
@@ -153,7 +154,11 @@ export function resolveQualityRefundAnchorByOrderTime(params: {
   const config = params.config ?? getAnchorConfigSync()
   const orderNo = resolveMetricOrderNo(view)
   const { date: orderTime, text: orderTimeText } = resolveOrderPlaceTime(view)
-  const qualityInfo = resolveQualityRefundInfo({ view })
+  const qualityInfo = resolveQualityRefundInfo({
+    view,
+    afterSaleRecords: params.afterSaleRecords,
+    verifySource: 'after_sale_workbench',
+  })
   const paymentAnchorName = view.anchorName?.trim() || '未归属'
 
   let anchorId = ''

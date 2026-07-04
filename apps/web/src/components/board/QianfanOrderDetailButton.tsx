@@ -9,12 +9,14 @@ interface Props {
   orderNo: string
   compact?: boolean
   className?: string
+  label?: string
 }
 
 export const QianfanOrderDetailButton: React.FC<Props> = ({
   orderNo,
   compact = false,
   className = '',
+  label = '查看千帆详情',
 }) => {
   const [loading, setLoading] = useState(false)
   const trimmed = orderNo.trim()
@@ -42,7 +44,7 @@ export const QianfanOrderDetailButton: React.FC<Props> = ({
       className={`inline-flex items-center gap-1 rounded-full border border-rose-100 bg-rose-50 px-2 py-0.5 font-medium text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50 ${compact ? 'text-[10px]' : 'text-[11px]'} ${className}`}
     >
       <ExternalLink size={compact ? 11 : 12} />
-      {loading ? '打开中…' : '千帆详情'}
+      {loading ? '打开中…' : label}
     </button>
   )
 }

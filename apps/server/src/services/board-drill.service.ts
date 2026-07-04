@@ -33,6 +33,7 @@ import {
   bootstrapWorkbenchCache,
   buildLiveAccountOrderQueries,
   getWorkbenchRefundFromMemory,
+  loadAfterSalesBundleForOrderNos,
   loadWorkbenchRefundMapFromDb,
   mergeWorkbenchIntoMemory,
 } from './xhs-after-sales-workbench.service'
@@ -54,8 +55,17 @@ import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import {
   aggregateQualityRefundByAnchor,
   type QualityRefundAnchorAttribution,
+  resolveQualityRefundAnchorByOrderTime,
 } from './quality-refund-anchor-attribution.service'
+import { resolveQualityRefundInfo } from './quality-refund-resolution.service'
+import { liveAccountOrderKey, liveAccountPackageKey } from '../utils/live-account-cache-key.util'
+import {
+  bootstrapQualityBadCaseCache,
+  loadAllQualityBadCases,
+} from './quality-badcase-store.service'
 import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
+import { loadAfterSalesTimeSearchByOrderNo } from './xhs-after-sales-time-search.service'
+import { buildAfterSaleRecordsFromOfficialCase } from './quality-refund-cross-verify.service'
 import type { UserRole } from '../types/roles'
 import {
   assertStaffAnchorAccess,
@@ -302,6 +312,31 @@ export async function buildAnchorQualityRefundDrill(params: {
     qualityAttributionMatchesAnchor(attr, anchorQuery),
   )
 
+  const orderQueries = buildLiveAccountOrderQueries(
+    matched.map((attr) => ({
+      liveAccountId: attr.view.liveAccountId,
+      displayOrderNo: attr.orderNo,
+      packageId: attr.view.packageId,
+      officialOrderNo: attr.view.officialOrderNo,
+    })),
+  )
+  await bootstrapWorkbenchCache()
+  const { rawAfterSalesByOrderNo } = await loadAfterSalesBundleForOrderNos(orderQueries)
+  const timeSearchMap = await loadAfterSalesTimeSearchByOrderNo(range, orderQueries)
+  await bootstrapQualityBadCaseCache()
+  const officialCases = await loadAllQualityBadCases()
+  const officialByOrderKey = new Map(
+    officialCases.flatMap((c) => {
+      const keys = [
+        liveAccountPackageKey(c.liveAccountId, c.packageId),
+        c.matchedOrderNo
+          ? liveAccountPackageKey(c.liveAccountId, c.matchedOrderNo)
+          : '',
+      ].filter(Boolean)
+      return keys.map((k) => [k, c] as const)
+    }),
+  )
+
   const leaderboard = aggregateAnchorLeaderboard(performanceViews, undefined, { liveSessions })
   const stats =
     leaderboard.find((a) => anchorLeaderboardRowMatches(a, anchorQuery)) ??
@@ -321,15 +356,63 @@ export async function buildAnchorQualityRefundDrill(params: {
           attr.view.buyerId ??
           '',
       )
+      const cacheKey = liveAccountOrderKey(attr.view.liveAccountId, attr.orderNo)
+      const officialCase = officialByOrderKey.get(
+        liveAccountPackageKey(attr.view.liveAccountId, attr.orderNo),
+      )
+      const afterSaleRecords = [
+        ...(rawAfterSalesByOrderNo.get(cacheKey) ?? []),
+        ...(timeSearchMap.get(cacheKey) ?? []),
+      ]
+      const workbench = getWorkbenchRefundFromMemory(attr.view.liveAccountId, attr.orderNo)
+      const fromOfficialCase = buildAfterSaleRecordsFromOfficialCase(officialCase, attr.view)
+      const mergedAfterSaleRecords =
+        afterSaleRecords.length > 0
+          ? afterSaleRecords
+          : fromOfficialCase.length > 0
+            ? fromOfficialCase
+            : workbench?.returnsIds?.length
+              ? [
+                  {
+                    returns_id: workbench.returnsIds[0],
+                    refund_status_name: workbench.afterSaleStatus,
+                    reason_name: workbench.afterSaleReason,
+                    refund_fee: workbench.officialRefundAmountCent / 100,
+                  },
+                ]
+              : []
+      const qualityInfo = resolveQualityRefundInfo({
+        view: attr.view,
+        afterSaleRecords: mergedAfterSaleRecords,
+        officialCase,
+        verifySource: 'after_sale_workbench',
+      })
+      const attrWithAfterSale = resolveQualityRefundAnchorByOrderTime({
+        view: attr.view,
+        liveSessions,
+        afterSaleRecords: mergedAfterSaleRecords,
+      })
+      const anchorNameResolved = attrWithAfterSale?.anchorName ?? attr.anchorName
       return {
         orderNo: attr.orderNo,
         buyerNickname,
         orderTime: attr.orderTimeText,
-        qualityAttributionAnchorName: attr.anchorName,
+        qualityAttributionAnchorName: anchorNameResolved,
         matchedLiveSessionStart: attr.matchedLiveStartTime,
         matchedLiveSessionEnd: attr.matchedLiveEndTime,
-        qualitySourceLabel: attr.qualitySourceLabel,
-        qualityReasonText: attr.qualityReasonText,
+        qualityMainSource: qualityInfo.qualityMainSource,
+        qualitySourceLabel: qualityInfo.verifyDisplayLabel,
+        officialQualityReasonText: qualityInfo.officialQualityReasonText,
+        qualityReasonText: qualityInfo.officialQualityReasonText || qualityInfo.qualityReasonText,
+        afterSaleOrderNo: qualityInfo.afterSaleOrderNo,
+        afterSaleStatus: qualityInfo.afterSaleStatus,
+        afterSaleReasonText: qualityInfo.afterSaleReasonText,
+        afterSaleFinalReasonText: qualityInfo.afterSaleFinalReasonText,
+        afterSaleRefundAmountYuan: qualityInfo.afterSaleRefundAmountCent / 100,
+        afterSaleReasonChanged: qualityInfo.afterSaleReasonChanged,
+        extraHint: qualityInfo.extraHint,
+        isQualityRefund: qualityInfo.isQualityRefund,
+        qianfanDetailAvailable: Boolean(attr.orderNo?.trim()),
         qualityUnassignedReason: attr.unassignedReason,
         paymentAnchorName: attr.paymentAnchorName,
       }

@@ -19,7 +19,10 @@ import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
 import { MobileAnchorLeaderboardCards } from './MobileAnchorLeaderboardCards'
 import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
 import { AnchorLateMultiDayNote } from './AnchorLateMultiDayNote'
+import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
 import { formatLateTimingLine, readLateStatus } from '../../lib/anchor-late-status'
+
+type TrendViewMode = 'single' | 'compare'
 
 interface Props {
   rows: AnchorLeaderboardRow[]
@@ -42,9 +45,11 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
+  const [trendViewMode, setTrendViewMode] = useState<TrendViewMode>('single')
 
   const showCardsOnDesktop = viewMode === 'cards'
   const showTableOnDesktop = viewMode === 'table'
+  const showCompareTrend = trendViewMode === 'compare'
 
   const cardClass = showCardsOnDesktop ? 'block' : 'block md:hidden'
   const tableWrapClass = showTableOnDesktop ? 'hidden md:block' : 'hidden'
@@ -54,9 +59,47 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   return (
     <div>
       <AnchorLateMultiDayNote startDate={startDate} endDate={endDate} className="mb-2 px-1 md:px-4" />
-      <div className="mb-3 flex items-center justify-end px-1 md:px-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1 md:px-4">
+        <div
+          className="inline-flex items-center gap-1 rounded-full border border-rose-100 bg-white p-0.5"
+          role="tablist"
+          aria-label="走势展示方式"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={trendViewMode === 'single'}
+            onClick={() => setTrendViewMode('single')}
+            className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
+              trendViewMode === 'single'
+                ? 'bg-rose-500 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-rose-50'
+            }`}
+          >
+            单人走势
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={trendViewMode === 'compare'}
+            onClick={() => setTrendViewMode('compare')}
+            className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition ${
+              trendViewMode === 'compare'
+                ? 'bg-rose-500 text-white shadow-sm'
+                : 'text-slate-600 hover:bg-rose-50'
+            }`}
+          >
+            四主播对比
+          </button>
+        </div>
         <ListViewToggle mode={viewMode} onChange={setViewMode} />
       </div>
+
+      {showCompareTrend ? (
+        <div className="mb-3 px-1 md:px-4">
+          <AnchorTrendCompareChart rows={rows} formatMoney={formatMoney} />
+        </div>
+      ) : null}
 
       <MobileAnchorLeaderboardCards
         rows={rows}
@@ -64,6 +107,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         onSelect={onRowClick}
         onQualityCountClick={onQualityCountClick}
         showLongPeriodRates={showRates}
+        showIndividualTrend={!showCompareTrend}
         className={cardClass}
       />
 

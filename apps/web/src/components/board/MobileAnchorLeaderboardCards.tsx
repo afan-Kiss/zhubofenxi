@@ -32,6 +32,8 @@ interface Props {
   showLongPeriodRates?: boolean
   /** 覆盖外层容器 className；默认手机端显示 */
   className?: string
+  /** 是否在卡片内展示单主播走势图；四主播对比模式下可关闭 */
+  showIndividualTrend?: boolean
 }
 
 function MetricCell({
@@ -88,6 +90,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   onQualityCountClick,
   showLongPeriodRates: showRates = true,
   className = 'block md:hidden',
+  showIndividualTrend = true,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
 
@@ -156,12 +159,14 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
             </div>
 
             <div className="mt-3">
-              <AnchorTrendChart
-                variant="page"
-                trend={anchorRowTrend(a)}
-                formatMoney={formatMoney}
-                formatCount={(n) => `${formatCount(n)} 单`}
-              />
+              {showIndividualTrend ? (
+                <AnchorTrendChart
+                  variant="page"
+                  trend={anchorRowTrend(a)}
+                  formatMoney={formatMoney}
+                  formatCount={(n) => `${formatCount(n)} 单`}
+                />
+              ) : null}
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">

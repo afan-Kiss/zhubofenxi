@@ -373,7 +373,7 @@ export const AnchorSchedulePage: React.FC = () => {
       </div>
 
       <div className="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-        编辑下方排班后点「保存并确认」，系统会按新排班重算当天业绩，并用于日报迟到判断。
+        编辑下方排班后点「保存并确认」，系统会按新排班重算当天业绩，并用于日报排班对照。
         {effectiveSummary ? <span className="mt-1 block text-sky-800">{effectiveSummary}</span> : null}
       </div>
 

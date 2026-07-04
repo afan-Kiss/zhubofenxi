@@ -18,10 +18,7 @@ import {
 import { anchorCardTestId } from '../../lib/anchor-test-id'
 import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
 import { MobileAnchorLeaderboardCards } from './MobileAnchorLeaderboardCards'
-import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
-import { AnchorLateMultiDayNote } from './AnchorLateMultiDayNote'
 import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
-import { formatLateTimingLine, readLateStatus } from '../../lib/anchor-late-status'
 
 type TrendViewMode = 'single' | 'compare'
 
@@ -43,8 +40,8 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   onQualityCountClick,
   showLongPeriodRates: showRates = true,
   showLivePeriod = false,
-  startDate = '',
-  endDate = '',
+  startDate: _startDate = '',
+  endDate: _endDate = '',
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
@@ -61,7 +58,6 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
 
   return (
     <div>
-      <AnchorLateMultiDayNote startDate={startDate} endDate={endDate} className="mb-2 px-1 md:px-4" />
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1 md:px-4">
         <div
           className="inline-flex items-center gap-1 rounded-full border border-rose-100 bg-white p-0.5"
@@ -152,8 +148,6 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
             ) : (
               rows.map((a, idx) => {
                 const refundRate = anchorRowRate(a, 'returnRate')
-                const late = readLateStatus(a)
-                const timingLine = formatLateTimingLine(late)
                 const livePeriod = anchorRowLivePeriodText(a)
                 const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
                 const livePeriodMultiline =
@@ -164,23 +158,14 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     key={String(a.anchorId ?? a.anchorName ?? idx)}
                     data-testid={anchorCardTestId(String(a.anchorName))}
                     style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
-                    className={`board-list-row-enter border-t transition hover:bg-rose-50/40 ${
-                      late.isLate || late.isEarlyLeave
-                        ? late.isLate && late.isEarlyLeave
-                          ? 'border-orange-100 bg-orange-50/30'
-                          : late.isLate
-                            ? 'border-red-100 bg-red-50/30'
-                            : 'border-amber-100 bg-amber-50/30'
-                        : 'border-rose-50/80'
-                    } ${onRowClick ? 'cursor-pointer' : ''}`}
+                    className={`board-list-row-enter border-t border-rose-50/80 transition hover:bg-rose-50/40 ${
+                      onRowClick ? 'cursor-pointer' : ''
+                    }`}
                     onClick={onRowClick ? () => onRowClick(a) : undefined}
                   >
                     <td className="py-2.5 pl-4">
                       <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium text-rose-800">{String(a.anchorName)}</span>
-                          <AnchorLateStatusBadge row={late} />
-                        </div>
+                        <span className="font-medium text-rose-800">{String(a.anchorName)}</span>
                         {showLivePeriod && liveLines.primary ? (
                           <span
                             className={`text-[12px] ${
@@ -192,11 +177,6 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                         ) : null}
                         {showLivePeriod && liveLines.secondary ? (
                           <span className="text-[11px] text-slate-400">{liveLines.secondary}</span>
-                        ) : null}
-                        {timingLine ? (
-                          <span className={`text-[12px] ${late.isLate || late.isEarlyLeave ? 'text-red-600' : 'text-slate-500'}`}>
-                            {timingLine}
-                          </span>
                         ) : null}
                       </div>
                     </td>

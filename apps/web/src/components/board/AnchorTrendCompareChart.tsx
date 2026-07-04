@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import {
   CartesianGrid,
   Legend,
@@ -28,9 +28,33 @@ export interface AnchorTrendCompareSeries {
 
 interface CompareChartRow {
   label: string
+  tickLabel: string
   key: string
   bucketIndex: number
   [dataKey: string]: string | number | null
+}
+
+function useCompactChart(): boolean {
+  const [compact, setCompact] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(max-width: 639px)').matches : false,
+  )
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 639px)')
+    const sync = () => setCompact(mq.matches)
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [])
+
+  return compact
+}
+
+function computeXTickInterval(len: number, compact: boolean, isIntraday: boolean): number {
+  if (len <= 1) return 0
+  const targetTicks = compact ? (isIntraday ? 4 : 5) : isIntraday ? 8 : 10
+  if (len <= targetTicks) return 0
+  return Math.max(1, Math.ceil(len / targetTicks) - 1)
 }
 
 function isValidAnchorRow(row: AnchorLeaderboardRow): boolean {
@@ -44,6 +68,13 @@ function relativeBucketLabel(bucketIndex: number): string {
   const start = bucketIndex * INTRADAY_BUCKET_MINUTES
   const end = (bucketIndex + 1) * INTRADAY_BUCKET_MINUTES
   return `${start}-${end}分钟`
+}
+
+function relativeBucketTickLabel(bucketIndex: number, compact: boolean): string {
+  const start = bucketIndex * INTRADAY_BUCKET_MINUTES
+  if (compact) return String(start)
+  const end = (bucketIndex + 1) * INTRADAY_BUCKET_MINUTES
+  return `${start}~${end}`
 }
 
 function relativeBucketTooltipLabel(bucketIndex: number): string {
@@ -72,9 +103,11 @@ function buildDailyComparePayload(
   }))
 
   const chartData: CompareChartRow[] = keyOrder.map((key, bucketIndex) => {
+    const label = keyLabels.get(key) ?? key
     const row: CompareChartRow = {
       key,
-      label: keyLabels.get(key) ?? key,
+      label,
+      tickLabel: label.length > 5 ? label.slice(5) : label,
       bucketIndex,
     }
     for (let i = 0; i < matched.length; i++) {
@@ -138,6 +171,7 @@ function buildIntradayRelativeComparePayload(
     const row: CompareChartRow = {
       key: String(bucketIndex),
       label: relativeBucketLabel(bucketIndex),
+      tickLabel: relativeBucketTickLabel(bucketIndex, false),
       bucketIndex,
     }
     for (let i = 0; i < perAnchor.length; i++) {
@@ -293,15 +327,25 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
   formatMoney,
   className = '',
 }) => {
+  const compact = useCompactChart()
   const { series, chartData, skippedModeMismatch, hasComparableData, isRelativeIntraday } =
     useMemo(() => buildComparePayload(rows), [rows])
 
-  const xInterval = useMemo(() => {
-    const len = chartData.length
-    if (len <= 12) return 0
-    if (len <= 24) return 1
-    return Math.ceil(len / 10)
-  }, [chartData.length])
+  const chartDataWithTicks = useMemo(
+    () =>
+      isRelativeIntraday && compact
+        ? chartData.map((row) => ({
+            ...row,
+            tickLabel: relativeBucketTickLabel(row.bucketIndex, true),
+          }))
+        : chartData,
+    [chartData, compact, isRelativeIntraday],
+  )
+
+  const xInterval = useMemo(
+    () => computeXTickInterval(chartData.length, compact, isRelativeIntraday),
+    [chartData.length, compact, isRelativeIntraday],
+  )
 
   if (!hasComparableData || series.length === 0) {
     return (
@@ -317,8 +361,12 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
 
   const title = isRelativeIntraday ? '主播开播后成交节奏对比' : '主播每日销售走势对比'
   const subtitle = isRelativeIntraday
-    ? '按「开播后第几分钟」对齐，不按自然时间'
+    ? compact
+      ? '按开播后分钟对齐（横轴为起始分钟）'
+      : '按「开播后第几分钟」对齐，不按自然时间'
     : '按日期对比每日销售额'
+
+  const xAxisKey = compact ? 'tickLabel' : 'label'
 
   return (
     <div
@@ -337,20 +385,28 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
         ) : null}
       </div>
 
-      <div className="h-[220px] w-full md:h-[260px]">
+      <div className={`w-full ${compact ? 'h-[248px]' : 'h-[220px] md:h-[260px]'}`}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
-            data={chartData}
-            margin={{ top: 4, right: 8, left: -12, bottom: 0 }}
+            data={chartDataWithTicks}
+            margin={{
+              top: 4,
+              right: compact ? 4 : 8,
+              left: compact ? -18 : -12,
+              bottom: compact ? 2 : 0,
+            }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#f8fafc" vertical={false} />
             <XAxis
-              dataKey="label"
-              tick={{ fontSize: 10, fill: '#94a3b8' }}
+              dataKey={xAxisKey}
+              tick={{ fontSize: compact ? 9 : 10, fill: '#94a3b8' }}
               axisLine={false}
               tickLine={false}
               interval={xInterval}
-              minTickGap={20}
+              minTickGap={compact ? 8 : 20}
+              angle={compact ? -35 : 0}
+              textAnchor={compact ? 'end' : 'middle'}
+              height={compact ? 48 : 30}
             />
             <YAxis hide domain={[0, (max: number) => Math.max(max, 1)]} />
             <Tooltip
@@ -358,7 +414,8 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
                 const bucketIndex =
                   typeof payload?.[0]?.payload?.bucketIndex === 'number'
                     ? payload[0]!.payload.bucketIndex
-                    : chartData.find((r) => r.label === label)?.bucketIndex
+                    : chartDataWithTicks.find((r) => r.label === label || r.tickLabel === label)
+                        ?.bucketIndex
                 return (
                   <CompareTooltip
                     active={active}
@@ -374,7 +431,8 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
             />
             <Legend
               verticalAlign="bottom"
-              height={28}
+              height={compact ? 36 : 28}
+              wrapperStyle={compact ? { fontSize: 10, lineHeight: '14px' } : undefined}
               iconType="circle"
               iconSize={8}
               formatter={(value: string) => {

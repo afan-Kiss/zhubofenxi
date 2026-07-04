@@ -16,14 +16,8 @@ import {
   type AnchorLeaderboardRow,
 } from '../../lib/anchor-leaderboard-row'
 import { anchorCardTestId } from '../../lib/anchor-test-id'
-import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
 import { AnchorTrendChart } from './AnchorTrendChart'
 import { anchorRowTrend } from '../../lib/anchor-leaderboard-row'
-import {
-  formatLateTimingLine,
-  lateCardBorderClass,
-  readLateStatus,
-} from '../../lib/anchor-late-status'
 
 interface Props {
   rows: AnchorLeaderboardRow[]
@@ -115,8 +109,6 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
         const returnRate = anchorRowReturnRefundRate(a)
         const qualityRate = anchorRowRate(a, 'qualityReturnRate')
         const signRate = anchorRowRate(a, 'signRate')
-        const late = readLateStatus(a)
-        const timingLine = formatLateTimingLine(late)
         const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
         const livePeriodMultiline =
           (liveLines.primary?.includes('\n') ?? false) ||
@@ -136,9 +128,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   }
                 : undefined
             }
-            className={`board-list-row-enter rounded-2xl border p-4 shadow-sm ${
-              lateCardBorderClass(late.isLate, late.isEarlyLeave)
-            } shadow-rose-100/40 ${
+            className={`board-list-row-enter rounded-2xl border border-rose-100 bg-white p-4 shadow-sm shadow-rose-100/40 ${
               onSelect ? 'cursor-pointer transition active:scale-[0.99] hover:shadow-md' : ''
             }`}
             style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
@@ -159,13 +149,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 {showLivePeriod && liveLines.secondary ? (
                   <p className="mt-0.5 text-[11px] text-slate-400">{liveLines.secondary}</p>
                 ) : null}
-                {timingLine ? (
-                  <p className={`mt-1 text-[12px] ${late.isLate || late.isEarlyLeave ? 'font-medium text-red-600' : 'text-slate-500'}`}>
-                    {timingLine}
-                  </p>
-                ) : null}
               </div>
-              <AnchorLateStatusBadge row={late} />
             </div>
 
             <div className="mt-3">

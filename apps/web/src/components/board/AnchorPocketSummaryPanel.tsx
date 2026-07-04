@@ -2,11 +2,8 @@ import React, { useEffect, useState } from 'react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { apiRequest } from '../../lib/api'
 import { BOARD_LIVE_QUERY_INVALIDATE_EVENT } from '../../lib/board-live-query-cache'
-import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
-import { AnchorLateMultiDayNote } from './AnchorLateMultiDayNote'
-import { formatLateTimingLine, readLateStatus, type AnchorLateStatusView } from '../../lib/anchor-late-status'
 
-export interface AnchorPocketRow extends AnchorLateStatusView {
+export interface AnchorPocketRow {
   anchorName: string
   shopName: string
   sessionName: string
@@ -18,6 +15,8 @@ export interface AnchorPocketRow extends AnchorLateStatusView {
   brushAmount: number
   refundRate: number | null
   explainText: string
+  actualStartText?: string | null
+  actualEndText?: string | null
   detail?: {
     rawOrderCount: number
     performanceOrderCount: number
@@ -42,6 +41,15 @@ interface Props {
   preset: string
   startDate: string
   endDate: string
+}
+
+function formatPocketLiveClock(row: AnchorPocketRow): string {
+  const start = row.actualStartText?.trim()
+  const end = row.actualEndText?.trim()
+  if (start && end) return `${start}~${end}`
+  if (start) return start
+  const session = row.sessionName?.trim()
+  return session || '—'
 }
 
 export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, endDate }) => {
@@ -114,7 +122,6 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
         {caliber?.settlementNote ? (
           <p className="mt-1 text-xs text-slate-400">{caliber.settlementNote}</p>
         ) : null}
-        <AnchorLateMultiDayNote startDate={startDate} endDate={endDate} className="mt-2" />
       </div>
 
       {summary?.dataQualityWarnings?.length ? (
@@ -151,38 +158,20 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
                 </td>
               </tr>
             ) : (
-              rows.map((row) => {
-                const late = readLateStatus(row)
-                const timingLine = formatLateTimingLine(late)
-                return (
+              rows.map((row) => (
                 <tr
                   key={row.anchorName}
-                  className={`border-b hover:bg-slate-50/80 ${
-                    late.isLate || late.isEarlyLeave
-                      ? late.isLate && late.isEarlyLeave
-                        ? 'border-orange-100 bg-orange-50/30'
-                        : late.isLate
-                          ? 'border-red-100 bg-red-50/30'
-                          : 'border-amber-100 bg-amber-50/30'
-                      : 'border-slate-50'
-                  }`}
+                  className="border-b border-slate-50 hover:bg-slate-50/80"
                   title={
                     row.detail
                       ? `业绩内 ${row.detail.performanceOrderCount} 单 · 刷单 ${row.detail.brushOrderCount} 单 · 退款完成 ${row.detail.refundFinishedOrderCount} 单`
                       : undefined
                   }
                 >
-                  <td className="px-3 py-2">
-                    <div className="flex items-center gap-2 font-medium text-slate-900">
-                      <span>{row.anchorName}</span>
-                      <AnchorLateStatusBadge row={late} />
-                    </div>
-                  </td>
+                  <td className="px-3 py-2 font-medium text-slate-900">{row.anchorName}</td>
                   <td className="px-3 py-2 text-slate-600">{row.shopName}</td>
                   <td className="px-3 py-2 text-slate-600">{row.sessionName}</td>
-                  <td className={`px-3 py-2 text-xs ${late.isLate || late.isEarlyLeave ? 'font-medium text-red-600' : 'text-slate-600'}`}>
-                    {timingLine ?? '—'}
-                  </td>
+                  <td className="px-3 py-2 text-xs text-slate-600">{formatPocketLiveClock(row)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{formatMoney(row.performanceAmount)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-rose-600">
                     {formatMoney(row.refundFinishedAmount)}
@@ -206,8 +195,7 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
                     {row.explainText}
                   </td>
                 </tr>
-                )
-              })
+              ))
             )}
           </tbody>
         </table>

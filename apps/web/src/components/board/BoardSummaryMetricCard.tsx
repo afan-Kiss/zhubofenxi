@@ -68,7 +68,7 @@ interface Props {
   onClick?: () => void
 }
 
-/** 经营总览顶部 9 指标卡：统一高度、色条分组、可下钻 */
+/** 经营看板指标卡：统一高度、色条分组、可下钻 */
 export const BoardSummaryMetricCard: React.FC<Props> = ({
   label,
   value,

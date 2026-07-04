@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarDays } from 'lucide-react'
+import { Banknote, CalendarDays, Package, Percent, TrendingUp, type LucideIcon } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { RangeBar } from '../../components/board/RangeBar'
 import { BoardStatRangeNote } from '../../components/board/BoardStatRangeNote'
 import { AnimatedStatValue } from '../../components/board/AnimatedStatValue'
+import { BoardSummaryMetricCard, type BoardSummaryMetricTone } from '../../components/board/BoardSummaryMetricCard'
 import { AnchorOrderDrawer } from '../../components/board/AnchorOrderDrawer'
 import { AnchorLeaderboardPanel } from '../../components/board/AnchorLeaderboardPanel'
 import { AnchorPocketSummaryPanel } from '../../components/board/AnchorPocketSummaryPanel'
@@ -26,6 +27,65 @@ import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGri
 import { DailyReportPreviewButton } from '../../components/board/DailyReportPreviewButton'
 import { AnchorEffectiveSchedulePanel } from '../../components/board/AnchorEffectiveSchedulePanel'
 import { useDataFreshness } from '../../hooks/useDataFreshness'
+import type { BoardMetricExplainKey } from '../../lib/metricExplain'
+
+type AnchorSummaryCardType = 'money' | 'count' | 'rate'
+
+interface AnchorSummaryCardDef {
+  label: string
+  metricExplainKey: BoardMetricExplainKey
+  type: AnchorSummaryCardType
+  tone: BoardSummaryMetricTone
+  helper: string
+  icon: LucideIcon
+  valueKey: 'totalGmv' | 'actualSignedAmount' | 'orderCount' | 'returnRate'
+}
+
+const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
+  {
+    label: '支付金额',
+    metricExplainKey: 'totalGmv',
+    type: 'money',
+    tone: 'violet',
+    helper: '主播归属订单支付金额',
+    icon: TrendingUp,
+    valueKey: 'totalGmv',
+  },
+  {
+    label: '签收金额',
+    metricExplainKey: 'actualSignedAmount',
+    type: 'money',
+    tone: 'green',
+    helper: '实际签收到账金额',
+    icon: Banknote,
+    valueKey: 'actualSignedAmount',
+  },
+  {
+    label: '支付订单数',
+    metricExplainKey: 'orderCount',
+    type: 'count',
+    tone: 'blue',
+    helper: '已支付订单笔数',
+    icon: Package,
+    valueKey: 'orderCount',
+  },
+  {
+    label: '退款率',
+    metricExplainKey: 'returnRate',
+    type: 'rate',
+    tone: 'orange',
+    helper: '退款订单占支付订单比例',
+    icon: Percent,
+    valueKey: 'returnRate',
+  },
+]
+
+function anchorCardRawValue(cards: Record<string, unknown>, key: AnchorSummaryCardDef['valueKey']): number {
+  if (key === 'totalGmv') return Number(cards.totalGmv ?? cards.gmv ?? 0)
+  if (key === 'actualSignedAmount') return Number(cards.actualSignedAmount ?? 0)
+  if (key === 'orderCount') return Number(cards.orderCount ?? 0)
+  return Number(cards.returnRate ?? 0)
+}
 
 export const AnchorPerformanceTab: React.FC = () => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
@@ -148,6 +208,42 @@ export const AnchorPerformanceTab: React.FC = () => {
     dataDisplayStatus === 'empty' &&
     !showProgressCard
 
+  const renderAnchorCardValue = (card: AnchorSummaryCardDef): React.ReactNode => {
+    const className = 'inline-block font-bold tracking-tight text-slate-900'
+    if (card.type === 'rate' && anchorRowRate(cards, 'returnRate') == null) {
+      return <span className={className}>--</span>
+    }
+    const raw = anchorCardRawValue(cards, card.valueKey)
+    if (card.type === 'money') {
+      return (
+        <AnimatedStatValue
+          transitionKey={statTransitionKey}
+          value={raw}
+          format={(v) => formatMoney(v)}
+          className={className}
+        />
+      )
+    }
+    if (card.type === 'rate') {
+      return (
+        <AnimatedStatValue
+          transitionKey={statTransitionKey}
+          value={raw}
+          format={(v) => formatRate(v)}
+          className={className}
+        />
+      )
+    }
+    return (
+      <AnimatedStatValue
+        transitionKey={statTransitionKey}
+        value={raw}
+        format={(v) => formatCount(v)}
+        className={className}
+      />
+    )
+  }
+
   return (
     <div className="space-y-4" data-testid="anchor-performance-page">
       <BoardLiveQueryAutoRefresh />
@@ -230,9 +326,9 @@ export const AnchorPerformanceTab: React.FC = () => {
       )}
 
       {showInitialSkeleton ? (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {[1, 2, 3, 4].map((i) => (
-            <div key={i} className="h-24 animate-pulse rounded-2xl bg-rose-50/70" />
+            <div key={i} className="h-[132px] animate-pulse rounded-2xl bg-slate-100/80" />
           ))}
         </div>
       ) : null}
@@ -263,55 +359,23 @@ export const AnchorPerformanceTab: React.FC = () => {
             transitionKey={summaryTransitionKey}
             loading={isLoadingRange}
           >
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <StaggerCard index={0} className="rounded-2xl border border-rose-100 bg-white p-4 shadow-sm">
-                <div className="text-sm text-slate-500">
-                  <MetricStatLabel label="支付金额" metricKey="totalGmv" />
-                </div>
-                <AnimatedStatValue
-                  transitionKey={statTransitionKey}
-                  className="text-lg font-semibold text-slate-900"
-                  value={Number(cards.totalGmv ?? cards.gmv ?? 0)}
-                  format={formatMoney}
-                />
-              </StaggerCard>
-              <StaggerCard index={1} className="rounded-2xl border border-rose-100 bg-white p-4 shadow-sm">
-                <div className="text-sm text-slate-500">
-                  <MetricStatLabel label="签收金额" metricKey="actualSignedAmount" />
-                </div>
-                <AnimatedStatValue
-                  transitionKey={statTransitionKey}
-                  className="text-lg font-semibold text-slate-900"
-                  value={Number(cards.actualSignedAmount ?? 0)}
-                  format={formatMoney}
-                />
-              </StaggerCard>
-              <StaggerCard index={2} className="rounded-2xl border border-rose-100 bg-white p-4 shadow-sm">
-                <div className="text-sm text-slate-500">
-                  <MetricStatLabel label="支付订单数" metricKey="orderCount" />
-                </div>
-                <AnimatedStatValue
-                  transitionKey={statTransitionKey}
-                  className="text-lg font-semibold text-slate-900"
-                  value={Number(cards.orderCount ?? 0)}
-                  format={(v) => formatCount(v)}
-                />
-              </StaggerCard>
-              <StaggerCard index={3} className="rounded-2xl border border-rose-100 bg-white p-4 shadow-sm">
-                <div className="text-sm text-slate-500">
-                  <MetricStatLabel label="退款率" metricKey="returnRate" />
-                </div>
-                {anchorRowRate(cards, 'returnRate') == null ? (
-                  <span className="text-lg font-semibold text-slate-900">--</span>
-                ) : (
-                  <AnimatedStatValue
-                    transitionKey={statTransitionKey}
-                    className="text-lg font-semibold text-slate-900"
-                    value={Number(cards.returnRate)}
-                    format={(v) => formatRate(v)}
-                  />
-                )}
-              </StaggerCard>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {ANCHOR_SUMMARY_CARDS.map((card, index) => {
+                const Icon = card.icon
+                return (
+                  <StaggerCard key={card.valueKey} index={index} className="h-full">
+                    <BoardSummaryMetricCard
+                      label={
+                        <MetricStatLabel label={card.label} metricKey={card.metricExplainKey} />
+                      }
+                      value={renderAnchorCardValue(card)}
+                      helper={card.helper}
+                      tone={card.tone}
+                      icon={Icon}
+                    />
+                  </StaggerCard>
+                )
+              })}
             </div>
           </MetricGridTransition>
           <div className="rounded-2xl border border-rose-100/50 bg-white p-3 shadow-sm md:p-0">

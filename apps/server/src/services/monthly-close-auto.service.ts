@@ -15,6 +15,7 @@ import { logError, logInfo } from '../utils/server-log'
 import {
   isMonthlyCloseReportBuildStale,
   resolveReportBuildMeta,
+  shouldReuseMonthlyCloseReport,
 } from '../utils/report-build-meta'
 import {
   buildConclusionReasonSummaryFromChecks,
@@ -50,10 +51,10 @@ export async function runMonthlyCloseAuto(params?: {
 
   if (!params?.force && (await hasSuccessfulMonthlyCloseReport(month))) {
     const existing = await readMonthlyCloseReport(month)
-    if (existing && !isMonthlyCloseReportBuildStale(existing, buildMeta)) {
+    if (existing && shouldReuseMonthlyCloseReport(existing, buildMeta)) {
       return existing
     }
-    if (existing && isMonthlyCloseReportBuildStale(existing, buildMeta)) {
+    if (existing && !shouldReuseMonthlyCloseReport(existing, buildMeta)) {
       logInfo(
         '月度结账',
         `${month} 已有报告但 buildMeta 不一致（schema=${existing.schemaVersion ?? '?'} commit=${existing.gitCommit?.slice(0, 8) ?? '?'} fullScan=${existing.fullScan}），将重跑`,

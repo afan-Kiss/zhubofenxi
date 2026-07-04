@@ -2,9 +2,11 @@
 """Upload project bundle and run deploy on Aliyun server. Requires SSH_PASS env."""
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
+import subprocess
 import sys
 import tempfile
 import time
@@ -116,6 +118,32 @@ def build_zip(zip_path: Path) -> None:
     print(f"Packed {count} files")
 
 
+def resolve_deploy_git_commit() -> str:
+    try:
+        r = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        commit = (r.stdout or "").strip()
+        if r.returncode == 0 and commit:
+            return commit
+    except Exception:
+        pass
+    return "unknown"
+
+
+def resolve_app_version() -> str:
+    try:
+        pkg = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+        return str(pkg.get("version") or "0.2.0")
+    except Exception:
+        return "0.2.0"
+
+
 def build_env_content() -> str:
     src = ROOT / "apps/server/.env"
     lines: list[str] = []
@@ -138,6 +166,8 @@ def build_env_content() -> str:
         "XHS_SIGNER_ENABLED": "true",
         "XHS_SIGNER_PYTHON": "tools/xhs_signer/.venv/bin/python",
         "DATABASE_URL": "file:../data/app.db",
+        "GIT_COMMIT": resolve_deploy_git_commit(),
+        "APP_VERSION": resolve_app_version(),
     }
 
     if not any(l.startswith("SESSION_SECRET=") and "请替换" not in l for l in lines):

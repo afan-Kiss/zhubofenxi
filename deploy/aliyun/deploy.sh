@@ -100,6 +100,29 @@ install_deps_build() {
   npm run build
 }
 
+write_deploy_build_meta() {
+  local env_file="$DEPLOY_DIR/apps/server/.env"
+  local commit="unknown"
+  local app_version="0.2.0"
+  if command -v git >/dev/null 2>&1 && [[ -d "$DEPLOY_DIR/.git" ]]; then
+    commit="$(cd "$DEPLOY_DIR" && git rev-parse HEAD 2>/dev/null || echo unknown)"
+  fi
+  if [[ -f "$DEPLOY_DIR/package.json" ]]; then
+    app_version="$(node -p "require('./package.json').version || '0.2.0'" 2>/dev/null || echo 0.2.0)"
+  fi
+  upsert_env_var() {
+    local key="$1" val="$2"
+    if grep -q "^${key}=" "$env_file"; then
+      sed -i "s|^${key}=.*|${key}=${val}|" "$env_file"
+    else
+      echo "${key}=${val}" >> "$env_file"
+    fi
+  }
+  upsert_env_var "GIT_COMMIT" "$commit"
+  upsert_env_var "APP_VERSION" "$app_version"
+  log "写入 build meta: GIT_COMMIT=${commit:0:8} APP_VERSION=$app_version"
+}
+
 install_signer() {
   if [[ -x "$DEPLOY_DIR/scripts/install-xhs-signer.sh" ]]; then
     log "install xhs signer"
@@ -159,6 +182,7 @@ main() {
   clone_or_update
   check_env
   install_deps_build
+  write_deploy_build_meta
   install_signer
   start_pm2
   wait_health

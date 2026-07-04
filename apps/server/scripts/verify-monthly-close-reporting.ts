@@ -6,7 +6,7 @@ import {
   buildConclusionReasonSummaryFromChecks,
   resolveValidRevenueCentFromSectionB,
 } from '../src/services/monthly-close-conclusion.util'
-import { isMonthlyCloseReportBuildStale } from '../src/utils/report-build-meta'
+import { isMonthlyCloseReportBuildStale, shouldReuseMonthlyCloseReport } from '../src/utils/report-build-meta'
 import type { DataAccuracyCheck } from '../src/services/monthly-close-auto.types'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
@@ -83,6 +83,30 @@ function main(): void {
   assert(
     resolveValidRevenueCentFromSectionB({ validAmountYuan: 2397.9 }) === 239790,
     '无 cent 时 fallback yuan*100',
+    issues,
+  )
+
+  const buildMeta = { schemaVersion: 2, gitCommit: 'def456', fullScan: true }
+  const staleReport = { schemaVersion: 2, gitCommit: 'abc123', fullScan: true }
+  assert(
+    !shouldReuseMonthlyCloseReport(staleReport, buildMeta),
+    'gitCommit 不一致时不应复用旧报告',
+    issues,
+  )
+  assert(
+    shouldReuseMonthlyCloseReport(
+      { schemaVersion: 2, gitCommit: 'def456', fullScan: true },
+      buildMeta,
+    ),
+    'buildMeta 一致时应复用旧报告',
+    issues,
+  )
+  assert(
+    isMonthlyCloseReportBuildStale(
+      { schemaVersion: 2, gitCommit: 'abc123', fullScan: false },
+      { schemaVersion: 2, gitCommit: 'abc123', fullScan: true },
+    ),
+    'fullScan 不一致应 stale',
     issues,
   )
 

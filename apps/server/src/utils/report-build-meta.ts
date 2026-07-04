@@ -48,3 +48,11 @@ export function isMonthlyCloseReportBuildStale(
   }
   return false
 }
+
+/** 已有成功报告且 buildMeta 一致时可复用；否则必须重跑 */
+export function shouldReuseMonthlyCloseReport(
+  existing: { schemaVersion?: number; gitCommit?: string; fullScan?: boolean },
+  buildMeta: { schemaVersion: number; gitCommit: string; fullScan: boolean },
+): boolean {
+  return !isMonthlyCloseReportBuildStale(existing, buildMeta)
+}

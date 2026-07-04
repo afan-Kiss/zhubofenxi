@@ -67,13 +67,30 @@ function pickNum(obj: Record<string, unknown>, keys: string[]): number | null {
   return null
 }
 
-function decodeHarResponseText(entry: HarEntry): string {
-  const content = entry.response?.content ?? {}
-  let text = content.text ?? ''
-  if (content.encoding === 'base64' && text) {
-    text = Buffer.from(text, 'base64').toString('utf-8')
+export function decodeHarContentText(content: { text?: string; encoding?: string }): string {
+  const text = content?.text ?? ''
+  if (!text.trim()) return ''
+  if (content.encoding === 'base64') {
+    return Buffer.from(text, 'base64').toString('utf-8')
+  }
+  const trimmed = text.trim()
+  if (
+    !trimmed.startsWith('{') &&
+    !trimmed.startsWith('[') &&
+    /^[A-Za-z0-9+/=\r\n]+$/.test(trimmed.slice(0, 300))
+  ) {
+    try {
+      const decoded = Buffer.from(trimmed, 'base64').toString('utf-8')
+      if (decoded.trim().startsWith('{') || decoded.trim().startsWith('[')) return decoded
+    } catch {
+      // ignore
+    }
   }
   return text
+}
+
+function decodeHarResponseText(entry: HarEntry): string {
+  return decodeHarContentText(entry.response?.content ?? {})
 }
 
 function parseHarEntries(filePath: string): HarEntry[] {

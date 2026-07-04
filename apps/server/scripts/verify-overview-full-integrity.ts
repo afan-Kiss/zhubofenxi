@@ -51,6 +51,7 @@ import { orderLiveRoomMatchesSchedule } from '../src/utils/shop-name-normalize.u
 import {
   loadHarBundle,
   resolveHarDir,
+  decodeHarContentText,
   type HarOrderRow as HarOrderRowBasic,
 } from './lib/har-platform-bundle'
 import type { AnalyzedOrderView } from '../src/types/analysis'
@@ -183,26 +184,6 @@ function matchMetricViewsForAudit(views: AnalyzedOrderView[], metric: BoardMetri
     default:
       return views
   }
-}
-
-function decodeHarContentText(content: { text?: string; encoding?: string }): string {
-  const text = content?.text ?? ''
-  if (!text.trim()) return ''
-  if (content.encoding === 'base64') return Buffer.from(text, 'base64').toString('utf-8')
-  const trimmed = text.trim()
-  if (
-    !trimmed.startsWith('{') &&
-    !trimmed.startsWith('[') &&
-    /^[A-Za-z0-9+/=\r\n]+$/.test(trimmed.slice(0, 300))
-  ) {
-    try {
-      const decoded = Buffer.from(trimmed, 'base64').toString('utf-8')
-      if (decoded.trim().startsWith('{') || decoded.trim().startsWith('[')) return decoded
-    } catch {
-      // ignore
-    }
-  }
-  return text
 }
 
 function unwrapHarField(v: unknown): unknown {

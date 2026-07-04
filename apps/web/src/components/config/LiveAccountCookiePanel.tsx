@@ -1153,13 +1153,10 @@ export const LiveAccountCookiePanel: React.FC = () => {
       ) : null}
 
       <div className="mt-4 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-600">
-        <p className="font-medium text-slate-700">外部程序自动上传</p>
+        <p className="font-medium text-slate-700">Cookie 维护方式</p>
         <p className="mt-1">
-          接口 <code className="rounded bg-white px-1 py-0.5 text-[10px]">POST /api/shop-cookies/update</code>
-          ，按店铺 key 提交：<code className="rounded bg-white px-1 py-0.5 text-[10px]">shiyuju</code>、
-          <code className="rounded bg-white px-1 py-0.5 text-[10px]">hetianyayu</code>、
-          <code className="rounded bg-white px-1 py-0.5 text-[10px]">xiangyu</code>、
-          <code className="rounded bg-white px-1 py-0.5 text-[10px]">xyxiangyu</code>。无需登录鉴权。
+          请在下方各直播号行内手动粘贴 Cookie 并保存。外部程序 API 上传已关闭，不再接收
+          <code className="rounded bg-white px-1 py-0.5 text-[10px]">POST /api/shop-cookies/update</code>。
         </p>
       </div>
 

@@ -3,6 +3,10 @@ import type { NextFunction, Request, Response } from 'express'
 import { attachRequestUser } from '../middleware/local-viewer.middleware'
 import { allowShopCookieAccess } from '../middleware/shop-cookie-upload.middleware'
 import {
+  SHOP_COOKIE_API_UPLOAD_DISABLED_MESSAGE,
+  isShopCookieApiUploadEnabled,
+} from '../config/shop-cookie-api-upload.config'
+import {
   getShopCookieStatusPayload,
   uploadShopCookies,
 } from '../services/shop-cookie-upload.service'
@@ -79,8 +83,12 @@ shopCookiesRouter.get('/health', allowShopCookieAccess, async (req, res, next) =
 const uploadHandler = async (
   req: import('express').Request,
   res: import('express').Response,
-  next: import('express').NextFunction,
+  _next: import('express').NextFunction,
 ) => {
+  if (!isShopCookieApiUploadEnabled()) {
+    sendFail(res, SHOP_COOKIE_API_UPLOAD_DISABLED_MESSAGE, 403)
+    return
+  }
   try {
     const updatedBy = req.user?.id ?? 'shop-cookie-upload'
     const result = await uploadShopCookies({

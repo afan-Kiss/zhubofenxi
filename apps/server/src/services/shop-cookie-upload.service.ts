@@ -1,6 +1,10 @@
 import { decryptText } from '../utils/crypto'
 import { getShopCookieUploadToken } from '../config/env'
 import {
+  isShopCookieApiUploadEnabled,
+  SHOP_COOKIE_API_UPLOAD_DISABLED_MESSAGE,
+} from '../config/shop-cookie-api-upload.config'
+import {
   GOOD_REVIEW_SHOPS,
   getGoodReviewShopName,
   resolveGoodReviewShopKey,
@@ -176,6 +180,9 @@ export async function uploadShopCookies(params: {
   body: unknown
   updatedBy: string
 }): Promise<ShopCookieUploadResult> {
+  if (!isShopCookieApiUploadEnabled()) {
+    throw new Error(SHOP_COOKIE_API_UPLOAD_DISABLED_MESSAGE)
+  }
   const items = normalizeUploadPayload(params.body)
   if (items.length === 0) {
     throw new Error('请提供至少一个店铺的 Cookie（shops.shiyuju / shops.hetianyayu / shops.xiangyu / shops.xyxiangyu）')
@@ -292,6 +299,7 @@ export async function getShopCookieStatus(): Promise<ShopCookieStatusItem[]> {
 
 export async function getShopCookieStatusPayload(): Promise<{
   ok: true
+  apiUploadEnabled: boolean
   serverTokenConfigured: boolean
   tokenRequired: false
   shops: ShopCookieStatusItem[]
@@ -336,6 +344,7 @@ export async function getShopCookieStatusPayload(): Promise<{
 
   return {
     ok: true,
+    apiUploadEnabled: isShopCookieApiUploadEnabled(),
     serverTokenConfigured: Boolean(getShopCookieUploadToken()),
     tokenRequired: false,
     shops,

@@ -9,6 +9,7 @@ import {
   GOOD_REVIEW_SHOP_KEYS,
 } from '../src/config/good-review-shops.constants'
 import { getShopCookieUploadToken } from '../src/config/env'
+import { isShopCookieApiUploadEnabled } from '../src/config/shop-cookie-api-upload.config'
 import { prisma } from '../src/lib/prisma'
 import { encryptText } from '../src/utils/crypto'
 import {
@@ -19,6 +20,7 @@ import { listLiveAccountsForSettings } from '../src/services/live-account.servic
 import {
   isOfficialShopPlatformName,
   resolveOfficialShopAccount,
+  upsertOfficialShopAccountCookie,
 } from '../src/services/official-shop-account.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
@@ -30,27 +32,29 @@ function makeCookie(tag: string): string {
 }
 
 async function runAsyncChecks(issues: string[]): Promise<void> {
+  assert(!isShopCookieApiUploadEnabled(), 'API Cookie 上传应默认关闭', issues)
+  let apiBlocked = false
+  try {
+    await uploadShopCookies({
+      body: { shops: { xyxiangyu: makeCookie('blocked') } },
+      updatedBy: 'verify-shop-cookie-upload',
+    })
+  } catch {
+    apiBlocked = true
+  }
+  assert(apiBlocked, 'uploadShopCookies 在 API 关闭时应 throw', issues)
+
   const shopKey = 'xyxiangyu' as const
   const cookieA = makeCookie('upload_a_' + Date.now())
   const cookieB = makeCookie('upload_b_' + Date.now())
 
-  const first = await uploadShopCookies({
-    body: { shops: { [shopKey]: cookieA } },
-    updatedBy: 'verify-shop-cookie-upload',
-  })
-  const firstItem = first.shops.find((s) => s.shopKey === shopKey)
-  assert(Boolean(firstItem?.success), '第一次 xyxiangyu 上传应成功', issues)
-  const accountId1 = firstItem?.savedAccountId ?? firstItem?.accountId
-  assert(Boolean(accountId1), '第一次上传应返回 savedAccountId', issues)
+  const first = await upsertOfficialShopAccountCookie(shopKey, cookieA, 'verify-shop-cookie-upload')
+  assert(Boolean(first.savedAccountId), '第一次 xyxiangyu 手动落库应成功', issues)
+  const accountId1 = first.savedAccountId
 
-  const second = await uploadShopCookies({
-    body: { shops: { [shopKey]: cookieB } },
-    updatedBy: 'verify-shop-cookie-upload',
-  })
-  const secondItem = second.shops.find((s) => s.shopKey === shopKey)
-  assert(Boolean(secondItem?.success), '第二次 xyxiangyu 上传应成功', issues)
-  const accountId2 = secondItem?.savedAccountId ?? secondItem?.accountId
-  assert(accountId1 === accountId2, '连续两次上传 xyxiangyu 必须更新同一 accountId', issues)
+  const second = await upsertOfficialShopAccountCookie(shopKey, cookieB, 'verify-shop-cookie-upload')
+  const accountId2 = second.savedAccountId
+  assert(accountId1 === accountId2, '连续两次手动落库 xyxiangyu 必须更新同一 accountId', issues)
 
   const officialCount = await prisma.platformCredential.count({
     where: { platformName: shopKey },
@@ -68,21 +72,13 @@ async function runAsyncChecks(issues: string[]): Promise<void> {
     },
   })
 
-  const afterDupUpload = await uploadShopCookies({
-    body: { shops: { [shopKey]: cookieB } },
-    updatedBy: 'verify-shop-cookie-upload',
-  })
-  const afterItem = afterDupUpload.shops.find((s) => s.shopKey === shopKey)
+  await upsertOfficialShopAccountCookie(shopKey, cookieB, 'verify-shop-cookie-upload')
   const status = await getShopCookieStatusPayload()
   const statusXy = status.shops.find((s) => s.shopKey === shopKey)
   const settings = await listLiveAccountsForSettings()
   const settingsOfficial = settings.find((a) => a.officialShopKey === shopKey)
 
-  assert(
-    afterItem?.savedAccountId === accountId2,
-    '存在历史重复账号时，上传仍应覆盖官方账号',
-    issues,
-  )
+  assert(status.apiUploadEnabled === false, 'status 应标记 apiUploadEnabled=false', issues)
   assert(statusXy?.accountId === accountId2, 'shop-cookies/status 应指向官方 accountId', issues)
   assert(settingsOfficial?.id === accountId2, 'settings/live-accounts 官方账号 ID 应一致', issues)
 
@@ -97,15 +93,15 @@ async function runAsyncChecks(issues: string[]): Promise<void> {
     })
   }
 
-  const disabledUpload = await uploadShopCookies({
-    body: { shops: { [shopKey]: cookieA } },
-    updatedBy: 'verify-shop-cookie-upload',
-  })
-  const disabledItem = disabledUpload.shops.find((s) => s.shopKey === shopKey)
-  assert(Boolean(disabledItem?.success), 'disabled 官方账号上传应成功', issues)
+  const disabledSaved = await upsertOfficialShopAccountCookie(
+    shopKey,
+    cookieA,
+    'verify-shop-cookie-upload',
+  )
+  assert(Boolean(disabledSaved.savedAccountId), 'disabled 官方账号手动落库应成功', issues)
   assert(
-    disabledItem?.savedAccountId === accountId2,
-    'disabled 官方账号上传不能新建第二条',
+    disabledSaved.savedAccountId === accountId2,
+    'disabled 官方账号落库不能新建第二条',
     issues,
   )
   assert(
@@ -119,16 +115,16 @@ async function runAsyncChecks(issues: string[]): Promise<void> {
   assert(Boolean(pageOfficial?.cookieText?.includes('verify_tag=upload_a_')), '页面 cookieText 应与上传明文一致', issues)
 
   const noA1 = 'session=only_no_a1; test_cookie_field=should_not_apply'
-  const beforeReject = pageOfficial?.cookieText ?? ''
-  const reject = await uploadShopCookies({
-    body: { shops: { [shopKey]: noA1 } },
-    updatedBy: 'verify-shop-cookie-upload',
-  })
-  const rejectItem = reject.shops.find((s) => s.shopKey === shopKey)
-  assert(rejectItem?.skipped === true, '缺少 a1 的上传应被拒绝', issues)
-  const settingsReject = await listLiveAccountsForSettings()
-  const afterReject = settingsReject.find((a) => a.id === accountId2)?.cookieText ?? ''
-  assert(afterReject === beforeReject || afterReject.includes('verify_tag=upload_a_'), '缺少 a1 不应覆盖已有 Cookie', issues)
+  let apiNoA1Blocked = false
+  try {
+    await uploadShopCookies({
+      body: { shops: { [shopKey]: noA1 } },
+      updatedBy: 'verify-shop-cookie-upload',
+    })
+  } catch {
+    apiNoA1Blocked = true
+  }
+  assert(apiNoA1Blocked, 'API 关闭后缺少 a1 的批量上传应被拒绝', issues)
 
   await prisma.platformCredential.delete({ where: { id: dup.id } }).catch(() => undefined)
   if (official) {

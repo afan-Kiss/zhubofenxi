@@ -13,7 +13,7 @@ import {
   isCookieHealthBlocking,
 } from '../src/services/shop-cookie-health.service'
 import { getCookieHealthPayload } from '../src/services/live-account.service'
-import { uploadShopCookies } from '../src/services/shop-cookie-upload.service'
+import { upsertOfficialShopAccountCookie } from '../src/services/official-shop-account.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -47,20 +47,14 @@ async function main() {
   const incompleteCookie = makeCookie('incomplete_no_ark', false)
   assert(!cookieHasArkToken(incompleteCookie), '测试 Cookie 应缺 ark', issues)
 
-  await uploadShopCookies({
-    body: { shops: { xiangyu: incompleteCookie } },
-    updatedBy: 'verify-shop-cookie-health',
-  })
+  await upsertOfficialShopAccountCookie('xiangyu', incompleteCookie, 'verify-shop-cookie-health')
   clearShopCookieHealthCache()
   const uploadedNoArk = await getShopCookieHealth('xiangyu')
-  assert(uploadedNoArk.status === 'ok', '上传后缺 ark 仍应视为已收到 Cookie（信任上传）', issues)
-  assert(uploadedNoArk.ok, '上传后应可用', issues)
+  assert(uploadedNoArk.status === 'ok', '手动粘贴后缺 ark 仍应视为已收到 Cookie（信任上传）', issues)
+  assert(uploadedNoArk.ok, '手动粘贴后应可用', issues)
 
   const validCookie = makeCookie('valid_cookie_' + Date.now(), true)
-  await uploadShopCookies({
-    body: { shops: { xiangyu: validCookie } },
-    updatedBy: 'verify-shop-cookie-health',
-  })
+  await upsertOfficialShopAccountCookie('xiangyu', validCookie, 'verify-shop-cookie-health')
   clearShopCookieHealthCache()
 
   const dup = await prisma.platformCredential.create({

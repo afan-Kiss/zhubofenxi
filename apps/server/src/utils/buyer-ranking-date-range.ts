@@ -104,7 +104,7 @@ export function resolveBuyerRankingDateRange(
     case 'thisMonth': {
       const { year, month } = shanghaiMonthParts(now)
       startDate = startOfMonthKey(year, month)
-      endDate = endOfMonthKey(year, month)
+      endDate = todayKey
       break
     }
     case 'lastMonth': {

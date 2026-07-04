@@ -3,6 +3,10 @@ import type { AnalyzedOrderView } from '../types/analysis'
 /** 订单支付基数低于 29 元视为低价刷单，不纳入主播业绩 / 买家排行 */
 export const LOW_PRICE_BRUSH_THRESHOLD_CENT = 2900
 
+/** 买家榜/客户榜统一说明文案 */
+export const LOW_PRICE_BRUSH_BUYER_RANKING_NOTE =
+  '支付基数低于 ¥29.00 的低价刷单订单已自动排除。'
+
 const PRODUCT_UNIT_PRICE_KEYS = [
   'productPrice',
   'salePrice',

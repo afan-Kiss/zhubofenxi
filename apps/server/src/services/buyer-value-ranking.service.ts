@@ -16,6 +16,7 @@ import { prepareAnalysisArtifactsFromRaw } from './business-analysis.service'
 import { buyerRankingRangeToAnalysisRange } from '../utils/buyer-ranking-date-range'
 import { filterViewsForBuyerRanking, attachRawByMatchToViews } from './low-price-brush-order.service'
 import { mapViewToBuyerOrderStandard } from './buyer-order-standard.service'
+import { countAftersaleAppliesForViewRow } from './buyer-aftersale-event.util'
 import { resolveBuyerIdentityFromView } from './buyer-identity.service'
 import {
   buildBuyerValueRankingProfile,
@@ -69,24 +70,7 @@ export {
 }
 
 function countAftersaleAppliesForView(v: AnalyzedOrderView): number {
-  if (v.isFreightRefundOnly) return 0
-  const row = mapViewToBuyerOrderStandard(v)
-  if (row.afterSaleNo) {
-    const ids = row.afterSaleNo.split('、').map((s) => s.trim()).filter(Boolean)
-    if (ids.length > 0) return ids.length
-  }
-  if (
-    row.hasEffectiveAfterSale ||
-    row.refundAmountPending ||
-    row.refundAmountCent > 0 ||
-    v.isReturnRefund ||
-    v.isRefundOnly ||
-    v.afterSaleClosedNoRefund ||
-    v.isQualityReturn
-  ) {
-    return 1
-  }
-  return 0
+  return countAftersaleAppliesForViewRow(v, mapViewToBuyerOrderStandard(v))
 }
 
 function buildAftersaleApplyCountByBuyer(views: AnalyzedOrderView[]): Map<string, number> {

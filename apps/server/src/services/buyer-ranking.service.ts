@@ -8,6 +8,7 @@ import {
   buyerRankingRangeToAnalysisRange,
   type BuyerRankingPreset,
   BUYER_RANKING_PRESET_LABELS,
+  type BuyerRankingDateRange,
 } from '../utils/buyer-ranking-date-range'
 import {
   isHighValueBuyer,
@@ -32,11 +33,16 @@ import {
   resolveBuyerOrderQualityRefund,
   type BuyerOrderSummary,
 } from './buyer-order-standard.service'
+import {
+  viewAfterSaleEventInBuyerRankingRange,
+  viewPayTimeInBuyerRankingRange,
+} from './buyer-aftersale-event.util'
 import { formatDateTime, parseDateTime } from '../utils/time'
 import { resolveDisplayEarnedAmountCent } from './buyer-earned-amount.service'
 import {
   attachRawByMatchToViews,
   filterViewsForBuyerRanking,
+  LOW_PRICE_BRUSH_BUYER_RANKING_NOTE,
 } from './low-price-brush-order.service'
 
 export type BuyerRankingType = 'all' | 'good' | 'risk'
@@ -292,6 +298,18 @@ function toItem(agg: BuyerAgg): BuyerRankingItem {
   return item
 }
 
+/** 买家排行退款率排序口径：refundOrderCount / paidOrderCount，封顶 100% */
+export function buyerRankingRefundSortRate(item: BuyerRankingItem): number {
+  const paid = item.buyerSummary?.paidOrderCount ?? item.paidOrderCount ?? 0
+  const refundOrders = item.buyerSummary?.refundOrderCount ?? item.refundCount ?? 0
+  if (paid <= 0) return 0
+  return Math.min(refundOrders / paid, 1)
+}
+
+export function rankingItemFromAgg(agg: BuyerAgg): BuyerRankingItem {
+  return toItem(agg)
+}
+
 function emptyBuyerSummary(): BuyerOrderSummary {
   return {
     receivableAmountCent: 0,
@@ -422,6 +440,164 @@ function aggregateViews(views: AnalyzedOrderView[]): BuyerAgg[] {
   return [...map.values()].map(({ standardRows: _rows, ...agg }) => agg)
 }
 
+function mergeBadBuyerBuyerSummary(
+  rows: ReturnType<typeof mapViewToBuyerOrderStandard>[],
+  views: AnalyzedOrderView[],
+  range: BuyerRankingDateRange,
+): BuyerOrderSummary {
+  const payRows: ReturnType<typeof mapViewToBuyerOrderStandard>[] = []
+  const afterSaleRows: ReturnType<typeof mapViewToBuyerOrderStandard>[] = []
+  for (let i = 0; i < rows.length; i += 1) {
+    const row = rows[i]!
+    const view = views[i]!
+    if (viewPayTimeInBuyerRankingRange(view, range)) payRows.push(row)
+    if (viewAfterSaleEventInBuyerRankingRange(view, range, row)) afterSaleRows.push(row)
+  }
+  const paySummary = buildBuyerOrderSummary(payRows)
+  const afterSaleSummary = buildBuyerOrderSummary(afterSaleRows)
+  const orderNos = new Set([...payRows, ...afterSaleRows].map((r) => r.orderNo))
+  return {
+    ...afterSaleSummary,
+    orderCount: orderNos.size,
+    paidOrderCount: paySummary.paidOrderCount,
+    payAmountCent: paySummary.payAmountCent,
+    receivableAmountCent: paySummary.receivableAmountCent,
+    realDealOrderCount: paySummary.realDealOrderCount,
+    netDealAmountCent: paySummary.netDealAmountCent,
+    realDealAmountCent: paySummary.realDealAmountCent,
+    displayEarnedAmountCent: paySummary.displayEarnedAmountCent,
+  }
+}
+
+function aggregateViewsForBadBuyerRanking(
+  views: Array<AnalyzedOrderView & { raw?: Record<string, unknown> }>,
+  range: BuyerRankingDateRange,
+): BuyerAgg[] {
+  const scoped = views.filter((v) => {
+    const row = mapViewToBuyerOrderStandard(v)
+    return (
+      viewPayTimeInBuyerRankingRange(v, range) ||
+      viewAfterSaleEventInBuyerRankingRange(v, range, row)
+    )
+  })
+  const map = new Map<
+    string,
+    BuyerAgg & {
+      standardRows: ReturnType<typeof mapViewToBuyerOrderStandard>[]
+      scopedViews: Array<AnalyzedOrderView & { raw?: Record<string, unknown> }>
+    }
+  >()
+
+  for (const v of scoped) {
+    const identity = resolveBuyerIdentityFromView(v)
+    if (!identity) continue
+
+    let agg = map.get(identity.key)
+    if (!agg) {
+      agg = {
+        buyerKey: identity.buyerKey,
+        buyerId: identity.buyerId ?? identity.buyerKey,
+        nickname: identity.buyerDisplayName,
+        buyerNickname: identity.buyerNickname,
+        buyerDisplayName: identity.buyerDisplayName,
+        buyerDisplayLabel: identity.buyerDisplayLabel,
+        buyerShortCode: identity.buyerShortCode,
+        identitySource: identity.identitySource,
+        orderCount: 0,
+        paidOrderCount: 0,
+        paymentBaseCent: 0,
+        receivableAmountCent: 0,
+        statPaidAmountCent: 0,
+        signedOrderCount: 0,
+        unsignedOrderCount: 0,
+        completedOrderCount: 0,
+        returnRefundCount: 0,
+        refundOnlyCount: 0,
+        freightRefundCount: 0,
+        afterSaleClosedNoRefundCount: 0,
+        signedAmountCent: 0,
+        productRefundCent: 0,
+        freightRefundCent: 0,
+        effectiveGmvCent: 0,
+        qualityReturnCount: 0,
+        qualityReturnAmountCent: 0,
+        lastQualityReturnReason: '',
+        refundCount: 0,
+        afterSaleCount: 0,
+        sizeMismatchCount: 0,
+        lastOrderTime: v.orderTimeText,
+        anchors: new Set(),
+        buyerSummary: emptyBuyerSummary(),
+        standardRows: [],
+        scopedViews: [],
+      }
+      map.set(identity.key, agg)
+    }
+
+    applyIdentityDisplay(agg, identity)
+    mergeViewNickname(agg, v)
+    const row = mapViewToBuyerOrderStandard(v)
+    agg.standardRows.push(row)
+    agg.scopedViews.push(v)
+
+    if (!viewIsUnpaid(v)) {
+      agg.orderCount += 1
+    }
+    const receivable =
+      v.buyerReceivableAmountCent ??
+      ((v.productAmountCent || 0) + (v.freightCent || 0) || v.receivableAmountCent || 0)
+    agg.receivableAmountCent += receivable
+
+    const officialPaid = v.officialPaidAmountCent ?? 0
+    if (officialPaid > 0 && (v.officialPaidConfirmed ?? true)) {
+      agg.statPaidAmountCent += officialPaid
+      agg.paidOrderCount += 1
+    }
+    if (v.includedInGmv) {
+      agg.paymentBaseCent += v.paymentBaseCent || 0
+    }
+    agg.effectiveGmvCent += v.effectiveGmvCent
+
+    if (v.isEffectiveSigned) {
+      agg.signedOrderCount += 1
+      agg.signedAmountCent += v.actualSignAmountCent ?? v.actualSignedAmountCent
+    } else if (v.isSigned || v.afterSaleClosedNoRefund) {
+      agg.completedOrderCount += 1
+    } else {
+      agg.unsignedOrderCount += 1
+    }
+
+    if (v.isReturnRefund) agg.returnRefundCount += 1
+    if (v.isRefundOnly && !v.isFreightRefundOnly) agg.refundOnlyCount += 1
+    if (v.isFreightRefundOnly) agg.freightRefundCount += 1
+    if (v.afterSaleClosedNoRefund) agg.afterSaleClosedNoRefundCount += 1
+    if (buyerOrderProductRefundCent(v) > 0 && !v.isFreightRefundOnly) agg.refundCount += 1
+    if (orderCountsAsBuyerRefundRelated(v) && !v.isFreightRefundOnly) agg.afterSaleCount += 1
+    agg.productRefundCent += buyerOrderProductRefundCent(v)
+    agg.freightRefundCent += v.freightRefundAmountCent
+    const qualityRefund = resolveBuyerOrderQualityRefund(v)
+    if (qualityRefund.isQualityRefund) {
+      agg.qualityReturnCount += 1
+      if (v.strictQualityRefund === true) {
+        agg.qualityReturnAmountCent += buyerOrderProductRefundCent(v)
+      }
+      const reason = (qualityRefund.qualityRefundReasonMatched || v.afterSalesWorkbenchReason || v.reasonText || '').trim()
+      if (reason) agg.lastQualityReturnReason = reason
+    }
+    if (v.isSizeMismatch) agg.sizeMismatchCount += 1
+    if (v.anchorName) agg.anchors.add(v.anchorName)
+    if (v.orderTimeText && v.orderTimeText > agg.lastOrderTime) {
+      agg.lastOrderTime = v.orderTimeText
+    }
+  }
+
+  for (const agg of map.values()) {
+    agg.buyerSummary = mergeBadBuyerBuyerSummary(agg.standardRows, agg.scopedViews, range)
+  }
+
+  return [...map.values()].map(({ standardRows: _rows, scopedViews: _views, ...agg }) => agg)
+}
+
 function sortItems(
   items: BuyerRankingItem[],
   sortBy: BuyerRankingSortBy,
@@ -447,9 +623,7 @@ function sortItems(
         cmp = a.productRefundAmount - b.productRefundAmount
         break
       case 'refundRate':
-        cmp =
-          (a.orderCount ? (a.returnRefundCount + a.refundOnlyCount) / a.orderCount : 0) -
-          (b.orderCount ? (b.returnRefundCount + b.refundOnlyCount) / b.orderCount : 0)
+        cmp = buyerRankingRefundSortRate(a) - buyerRankingRefundSortRate(b)
         break
       case 'qualityReturnCount':
         cmp = a.qualityReturnCount - b.qualityReturnCount
@@ -538,6 +712,39 @@ export async function buildBuyerRankingAllItems(
   }
   let items = aggregateViews(views).map((a) => toItem(a))
   return filterByType(items, params.type ?? 'all')
+}
+
+/** 高风险售后客户榜：支付时间 + 本期售后发生时间双口径（含历史订单本期售后） */
+export async function buildBadBuyerRankingAllItems(
+  params: Omit<Parameters<typeof buildBuyerRanking>[0], 'page' | 'pageSize'>,
+): Promise<BuyerRankingItem[]> {
+  const range = resolveBuyerRankingDateRange(
+    params.preset ?? 'today',
+    params.startDate,
+    params.endDate,
+  )
+  const allAnalysisRange = buyerRankingRangeToAnalysisRange(
+    resolveBuyerRankingDateRange('all'),
+  )
+  const bundle = await buildRawAnalyzeBundle(allAnalysisRange)
+  const artifacts = bundle ? prepareAnalysisArtifactsFromRaw(bundle) : null
+  const rawByMatch = new Map<string, Record<string, unknown>>()
+  for (const o of artifacts?.dedupe.uniqueOrders ?? []) {
+    if (o.raw) rawByMatch.set(o.matchOrderId, o.raw as Record<string, unknown>)
+  }
+  let views = filterViewsForBuyerRanking(
+    attachRawByMatchToViews(artifacts?.views ?? [], rawByMatch),
+  )
+  if (params.anchorName) {
+    views = views.filter((v) => v.anchorName === params.anchorName)
+  } else if (params.anchorId) {
+    const cfg = getAnchorConfigSync()
+    const anchor = cfg.anchors.find((a) => a.id === params.anchorId)
+    if (anchor) {
+      views = views.filter((v) => v.anchorName === anchor.name || v.anchorId === anchor.id)
+    }
+  }
+  return aggregateViewsForBadBuyerRanking(views, range).map((a) => toItem(a))
 }
 
 export async function buildBuyerRanking(params: {
@@ -700,6 +907,6 @@ export function buildBuyerRankingSampleMetaFromViews(
     sampleEndTime: Number.isFinite(maxPayMs) ? formatDateTime(new Date(maxPayMs)) : null,
     sampleTimeField: 'payTime',
     sampleDescription:
-      '按订单支付时间统计，未支付订单不计入核心金额，客户按买家ID去重。单价低于 ¥20.00 的低价刷单订单已自动排除。',
+      `按订单支付时间统计，未支付订单不计入核心金额，客户按买家ID去重。${LOW_PRICE_BRUSH_BUYER_RANKING_NOTE}`,
   }
 }

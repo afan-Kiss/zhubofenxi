@@ -15,6 +15,7 @@ import {
   extractBuyerValueCustomerMetrics,
   isTrueHighValueCustomer,
 } from '../src/services/buyer-value-ranking.service'
+import { buildHighValueCustomerDefinition } from '../src/services/buyer-ranking-classification'
 import type { BuyerRankingItem } from '../src/services/buyer-ranking.service'
 import { LOW_PRICE_BRUSH_THRESHOLD_CENT } from '../src/services/low-price-brush-order.service'
 
@@ -176,6 +177,15 @@ function main() {
   )
 
   assert(LOW_PRICE_BRUSH_THRESHOLD_CENT === 2900, '低价刷单阈值应为 2900 分', issues)
+
+  const highValueDef = buildHighValueCustomerDefinition()
+  assert(highValueDef.amountThreshold === 3000, '高价值签收金额阈值应为 3000', issues)
+  assert(highValueDef.orderCountThreshold === 2, '高价值签收单数阈值应为 2', issues)
+  assert(
+    highValueDef.ruleText.includes('3000') && highValueDef.ruleText.includes('2'),
+    '高价值规则文案应与真实阈值一致',
+    issues,
+  )
 
   const unsignedOnly = mockBuyer({
     buyerKey: 'un1',

@@ -8,6 +8,7 @@ import {
   resolveBuyerRankingDateRange,
 } from '../src/utils/buyer-ranking-date-range'
 import { formatDateKeyShanghai } from '../src/utils/business-timezone'
+import { buyerRankingRefundSortRate, type BuyerRankingItem } from '../src/services/buyer-ranking.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -84,6 +85,163 @@ function main() {
     `2026-07-03 recent30 应为 2026-06-04~2026-07-03，实际 ${recent30.startDate}~${recent30.endDate}`,
     issues,
   )
+
+  const jul4 = shanghaiNoonUtc(2026, 7, 4)
+  const thisMonthJul4 = resolveBuyerRankingDateRange('thisMonth', undefined, undefined, jul4)
+  assert(
+    thisMonthJul4.startDate === '2026-07-01' && thisMonthJul4.endDate === '2026-07-04',
+    `2026-07-04 本月应为 2026-07-01~2026-07-04，实际 ${thisMonthJul4.startDate}~${thisMonthJul4.endDate}`,
+    issues,
+  )
+
+  const jul31 = shanghaiNoonUtc(2026, 7, 31)
+  const thisMonthJul31 = resolveBuyerRankingDateRange('thisMonth', undefined, undefined, jul31)
+  assert(
+    thisMonthJul31.startDate === '2026-07-01' && thisMonthJul31.endDate === '2026-07-31',
+    `2026-07-31 本月应为 2026-07-01~2026-07-31，实际 ${thisMonthJul31.startDate}~${thisMonthJul31.endDate}`,
+    issues,
+  )
+
+  const lastMonthJul4 = resolveBuyerRankingDateRange('lastMonth', undefined, undefined, jul4)
+  assert(
+    lastMonthJul4.startDate === '2026-06-01' && lastMonthJul4.endDate === '2026-06-30',
+    `2026-07-04 上月应为完整自然月 2026-06-01~2026-06-30，实际 ${lastMonthJul4.startDate}~${lastMonthJul4.endDate}`,
+    issues,
+  )
+
+  const refundSortBuyers: BuyerRankingItem[] = [
+    {
+      buyerKey: 'a',
+      buyerId: 'a',
+      nickname: 'A',
+      buyerDisplayName: 'A',
+      orderCount: 10,
+      signedOrderCount: 0,
+      unsignedOrderCount: 0,
+      completedOrderCount: 0,
+      returnRefundCount: 0,
+      refundOnlyCount: 0,
+      freightRefundCount: 0,
+      afterSaleClosedNoRefundCount: 0,
+      afterSaleCount: 0,
+      gmv: 0,
+      signedAmount: 0,
+      productRefundAmount: 0,
+      freightRefundAmount: 0,
+      actualDealAmount: 0,
+      earnedAmount: 0,
+      qualityReturnCount: 0,
+      refundCount: 2,
+      lastOrderTime: '2026-07-01',
+      buyerSummary: {
+        orderCount: 10,
+        paidOrderCount: 10,
+        realDealOrderCount: 10,
+        refundOrderCount: 2,
+        qualityRefundOrderCount: 0,
+        returnRefundOrderCount: 0,
+        afterSaleOrderCount: 0,
+        pendingAfterSaleOrderCount: 0,
+        receivableAmountCent: 0,
+        payAmountCent: 0,
+        refundAmountCent: 0,
+        freightRefundAmountCent: 0,
+        netDealAmountCent: 0,
+        realDealAmountCent: 0,
+        displayEarnedAmountCent: 0,
+      },
+    },
+    {
+      buyerKey: 'b',
+      buyerId: 'b',
+      nickname: 'B',
+      buyerDisplayName: 'B',
+      orderCount: 5,
+      signedOrderCount: 0,
+      unsignedOrderCount: 0,
+      completedOrderCount: 0,
+      returnRefundCount: 0,
+      refundOnlyCount: 0,
+      freightRefundCount: 0,
+      afterSaleClosedNoRefundCount: 0,
+      afterSaleCount: 0,
+      gmv: 0,
+      signedAmount: 0,
+      productRefundAmount: 0,
+      freightRefundAmount: 0,
+      actualDealAmount: 0,
+      earnedAmount: 0,
+      qualityReturnCount: 0,
+      refundCount: 2,
+      lastOrderTime: '2026-07-01',
+      buyerSummary: {
+        orderCount: 5,
+        paidOrderCount: 5,
+        realDealOrderCount: 5,
+        refundOrderCount: 2,
+        qualityRefundOrderCount: 0,
+        returnRefundOrderCount: 0,
+        afterSaleOrderCount: 0,
+        pendingAfterSaleOrderCount: 0,
+        receivableAmountCent: 0,
+        payAmountCent: 0,
+        refundAmountCent: 0,
+        freightRefundAmountCent: 0,
+        netDealAmountCent: 0,
+        realDealAmountCent: 0,
+        displayEarnedAmountCent: 0,
+      },
+    },
+    {
+      buyerKey: 'c',
+      buyerId: 'c',
+      nickname: 'C',
+      buyerDisplayName: 'C',
+      orderCount: 10,
+      signedOrderCount: 0,
+      unsignedOrderCount: 0,
+      completedOrderCount: 0,
+      returnRefundCount: 0,
+      refundOnlyCount: 0,
+      freightRefundCount: 0,
+      afterSaleClosedNoRefundCount: 0,
+      afterSaleCount: 0,
+      gmv: 0,
+      signedAmount: 0,
+      productRefundAmount: 0,
+      freightRefundAmount: 0,
+      actualDealAmount: 0,
+      earnedAmount: 0,
+      qualityReturnCount: 0,
+      refundCount: 0,
+      lastOrderTime: '2026-07-01',
+      buyerSummary: {
+        orderCount: 10,
+        paidOrderCount: 0,
+        realDealOrderCount: 0,
+        refundOrderCount: 1,
+        qualityRefundOrderCount: 0,
+        returnRefundOrderCount: 0,
+        afterSaleOrderCount: 0,
+        pendingAfterSaleOrderCount: 0,
+        receivableAmountCent: 0,
+        payAmountCent: 0,
+        refundAmountCent: 0,
+        freightRefundAmountCent: 0,
+        netDealAmountCent: 0,
+        realDealAmountCent: 0,
+        displayEarnedAmountCent: 0,
+      },
+    },
+  ]
+  assert(buyerRankingRefundSortRate(refundSortBuyers[0]!) === 0.2, 'A 退款率应为 20%', issues)
+  assert(buyerRankingRefundSortRate(refundSortBuyers[1]!) === 0.4, 'B 退款率应为 40%', issues)
+  assert(buyerRankingRefundSortRate(refundSortBuyers[2]!) === 0, '无支付单时分母为 0 应返回 0 非 NaN', issues)
+  const sorted = [...refundSortBuyers].sort(
+    (x, y) => buyerRankingRefundSortRate(y) - buyerRankingRefundSortRate(x),
+  )
+  assert(sorted[0]?.buyerKey === 'b', '退款率排序 B(40%) 应高于 A(20%)', issues)
+  assert(sorted[1]?.buyerKey === 'a', '退款率排序 A(20%) 应高于 C(0%)', issues)
 
   if (issues.length > 0) {
     console.error('[verify:buyer-ranking-week-range] FAIL')

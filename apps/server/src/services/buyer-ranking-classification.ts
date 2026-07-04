@@ -1,11 +1,11 @@
 import type { BuyerRankingItem } from './buyer-ranking.service'
 import { isTrueHighValueCustomer } from './buyer-value-score.service'
 
-/** 高价值客户：实际签收金额 ≥ 1000 元 */
-export const HIGH_VALUE_MIN_SIGNED_YUAN = 1000
+/** 高价值客户展示口径：与 isTrueHighValueCustomer 规则一致 */
+export const HIGH_VALUE_MIN_SIGNED_YUAN = 3000
 
-/** 高价值客户：至少签收单数 */
-export const HIGH_VALUE_MIN_SIGNED_ORDER_COUNT = 1
+/** 高价值客户：至少有效签收单数 */
+export const HIGH_VALUE_MIN_SIGNED_ORDER_COUNT = 2
 
 export function isQualityHeavyBuyer(item: BuyerRankingItem): boolean {
   const qualityCount = item.buyerSummary?.qualityRefundOrderCount ?? item.qualityReturnCount

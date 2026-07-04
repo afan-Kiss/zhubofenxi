@@ -114,7 +114,7 @@ export function buildBuyerRankingTabSummary(items: BuyerRankingItem[]): {
     repurchaseCount: items.filter((i) => isRepurchaseBuyer(i)).length,
     refundCount: items.filter((i) => isRefundRankingBuyer(i)).length,
     qualityHeavyCount: items.filter((i) => isQualityRankingBuyer(i)).length,
-    blacklistCount: 0,
+    blacklistCount: items.filter((i) => isBlacklistRankingBuyer(i)).length,
   }
 }
 

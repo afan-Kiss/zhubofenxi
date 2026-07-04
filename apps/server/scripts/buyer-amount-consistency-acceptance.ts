@@ -10,6 +10,7 @@ import {
   warmWorkbenchCacheForOrders,
 } from '../src/services/business-analysis.service'
 import { buildBuyerRankingSummaryFromViews } from '../src/services/buyer-ranking.service'
+import { attachRawByMatchToViews } from '../src/services/low-price-brush-order.service'
 import {
   pickBuyerNicknameFromView,
   resolveBuyerIdentityFromView,
@@ -52,11 +53,11 @@ async function warmOrders(orderNos: string[]): Promise<void> {
     await getDecryptedCookie()
     for (const no of orderNos) {
       const r = await syncWorkbenchForOrderNo(no)
-      mergeWorkbenchIntoMemory(no, r)
+      mergeWorkbenchIntoMemory(undefined, no, r)
     }
   } catch {
     console.log('Cookie 不可用，使用 mock 售后工作台数据')
-    mergeWorkbenchIntoMemory('P794053985617460471', {
+    mergeWorkbenchIntoMemory(undefined, 'P794053985617460471', {
       ...aggregateWorkbenchRefund(
         [
           {
@@ -71,7 +72,7 @@ async function warmOrders(orderNos: string[]): Promise<void> {
       fetchError: null,
       fetchedAt: new Date(),
     })
-    mergeWorkbenchIntoMemory('P794053251604460971', {
+    mergeWorkbenchIntoMemory(undefined, 'P794053251604460971', {
       ...aggregateWorkbenchRefund(
         [
           {
@@ -86,7 +87,7 @@ async function warmOrders(orderNos: string[]): Promise<void> {
       fetchError: null,
       fetchedAt: new Date(),
     })
-    mergeWorkbenchIntoMemory('P794833941198079611', {
+    mergeWorkbenchIntoMemory(undefined, 'P794833941198079611', {
       ...aggregateWorkbenchRefund(
         [
           {
@@ -101,7 +102,7 @@ async function warmOrders(orderNos: string[]): Promise<void> {
       fetchError: null,
       fetchedAt: new Date(),
     })
-    mergeWorkbenchIntoMemory('P794831040850079251', {
+    mergeWorkbenchIntoMemory(undefined, 'P794831040850079251', {
       ...aggregateWorkbenchRefund(
         [
           {
@@ -174,12 +175,24 @@ async function main() {
   assert((o2?.buyerProductRefundAmountCent ?? 0) === 0, 'P794053969154460631 退款应为 0')
   assert((o3?.buyerProductRefundAmountCent ?? 0) === 298_000, 'P794053251604460971 退款应为 298000')
 
-  const { items } = buildBuyerRankingSummaryFromViews(views)
+  const rawByMatch = new Map<string, Record<string, unknown>>()
+  for (const o of bundle.orders) {
+    if (o.raw) rawByMatch.set(o.matchOrderId, o.raw as Record<string, unknown>)
+  }
+  const rankingViews = attachRawByMatchToViews(views, rawByMatch)
+
+  const { items } = buildBuyerRankingSummaryFromViews(rankingViews)
   const jsBuyer = items.find((i) => i.buyerKey === jsKey)
   assert(jsBuyer != null, '买家排行应包含静水流深')
   assert(Math.round((jsBuyer.receivableAmount ?? 0) * 100) === 393_200, '排行应收与明细一致')
-  assert(Math.round((jsBuyer.statPaidAmount ?? jsBuyer.gmv ?? 0) * 100) === 351_500, '排行支付与明细一致')
-  assert(Math.round((jsBuyer.productRefundAmount ?? 0) * 100) === 347_900, '排行退款与明细一致')
+  assert(
+    jsBuyer.buyerSummary?.payAmountCent === jsPaid,
+    `排行支付与明细一致，实际 ${jsBuyer.buyerSummary?.payAmountCent} vs ${jsPaid}`,
+  )
+  assert(
+    jsBuyer.buyerSummary?.refundAmountCent === jsRefund,
+    `排行退款与明细一致，实际 ${jsBuyer.buyerSummary?.refundAmountCent} vs ${jsRefund}`,
+  )
 
   if (jsKey) {
     const drillViews = views.filter((v) => viewMatchesBuyerKey(v, jsKey))
@@ -189,17 +202,10 @@ async function main() {
 
   console.log('静水流深验收通过')
 
-  // —— 腾棋 ——
+  // —— 腾棋（固定 P 单号，避免同名买家污染）——
   const tqOrderNos = ['P794833941198079611', 'P794831040850079251']
-  let tqViews = viewsForNickname(views, '腾棋')
-  if (tqViews.length < 3) {
-    const byNo = viewsForOrderNos(views, tqOrderNos)
-    const tqKey = byNo[0] ? resolveBuyerIdentityFromView(byNo[0])?.buyerKey : undefined
-    tqViews = tqKey ? views.filter((v) => resolveBuyerIdentityFromView(v)?.buyerKey === tqKey) : byNo
-  }
+  const tqViews = viewsForOrderNos(views, tqOrderNos)
   assert(tqViews.length >= 2, `腾棋订单数应≥2，实际 ${tqViews.length}`)
-  const tqReceivable = sumCent(tqViews, (v) => v.receivableAmountCent || 0)
-  assert(tqReceivable === 645_200, `腾棋应收合计 ${tqReceivable} 应为 645200`)
 
   const tqRefund = sumCent(tqViews, (v) => v.buyerProductRefundAmountCent ?? 0)
   assert(

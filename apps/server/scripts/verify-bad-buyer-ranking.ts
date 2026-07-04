@@ -32,6 +32,12 @@ import {
 import type { BuyerRankingItem } from '../src/services/buyer-ranking.service'
 import { resolveBuyerRankingDateRange } from '../src/utils/buyer-ranking-date-range'
 import { formatDateKeyShanghai } from '../src/utils/business-timezone'
+import { countAftersaleAppliesForViewRow } from '../src/services/buyer-aftersale-event.util'
+import {
+  buildBuyerOrderSummary,
+  mapViewToBuyerOrderStandard,
+} from '../src/services/buyer-order-standard.service'
+import type { AnalyzedOrderView } from '../src/types/analysis'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -644,6 +650,42 @@ async function main() {
     '一致性校验应允许双零',
     issues,
   )
+
+  const multiAfterView = {
+    buyerKey: 'ma-test',
+    buyerId: 'ma-test',
+    orderTimeText: '2026-05-01 10:00:00',
+    orderStatusText: '已完成',
+    isReturnRefund: true,
+    isFreightRefundOnly: false,
+    buyerProductRefundAmountCent: 100000,
+    officialPaidAmountCent: 100000,
+    officialPaidConfirmed: true,
+    raw: {
+      returnsIds: ['AS001', 'AS002', 'AS003'],
+      afterSaleNo: 'AS001,AS002,AS003',
+    },
+  } as AnalyzedOrderView & { raw?: Record<string, unknown> }
+  const multiRow = mapViewToBuyerOrderStandard(multiAfterView)
+  const multiApplyCount = countAftersaleAppliesForViewRow(multiAfterView, multiRow)
+  assert(multiApplyCount === 3, '同一订单 3 个售后单号 aftersaleCount 应为 3', issues)
+  const multiSummary = buildBuyerOrderSummary([multiRow])
+  assert(
+    multiSummary.afterSaleOrderCount === 1,
+    '同一订单 3 个售后单号 afterSaleOrderCount 应为 1',
+    issues,
+  )
+  const freightOnlyView = {
+    ...multiAfterView,
+    isFreightRefundOnly: true,
+    raw: { returnsIds: ['F001'] },
+  } as AnalyzedOrderView & { raw?: Record<string, unknown> }
+  assert(
+    countAftersaleAppliesForViewRow(freightOnlyView, mapViewToBuyerOrderStandard(freightOnlyView)) === 0,
+    '纯运费补偿不应计入售后申请次数',
+    issues,
+  )
+
   assertNoIdentityLeak(wechatText, '微信文案', issues)
 
   const fri = new Date(Date.parse('2026-07-03T12:00:00+08:00'))

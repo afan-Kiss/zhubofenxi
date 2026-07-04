@@ -1,6 +1,6 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import type { BuyerRankingItem } from './buyer-ranking.service'
-import { buildBuyerRankingAllItems } from './buyer-ranking.service'
+import { buildBadBuyerRankingAllItems } from './buyer-ranking.service'
 import {
   resolveBuyerRankingDateRange,
   BUYER_RANKING_PRESET_LABELS,
@@ -23,6 +23,11 @@ import {
   enforceBadBuyerRefundConsistency,
   isBadBuyerRefundStatsConsistent,
 } from './bad-buyer-refund-consistency.service'
+import {
+  countAftersaleAppliesForViewRow,
+  viewAfterSaleEventInBuyerRankingRange,
+  viewPayTimeInBuyerRankingRange,
+} from './buyer-aftersale-event.util'
 
 export type BadBuyerRiskLevel = '低风险' | '关注' | '谨慎发货' | '重点确认' | '建议人工复核'
 
@@ -414,24 +419,7 @@ export function buildBadBuyerProfile(
 }
 
 function countAftersaleAppliesForView(v: AnalyzedOrderView): number {
-  if (v.isFreightRefundOnly) return 0
-  const row = mapViewToBuyerOrderStandard(v)
-  if (row.afterSaleNo) {
-    const ids = row.afterSaleNo.split('、').map((s) => s.trim()).filter(Boolean)
-    if (ids.length > 0) return ids.length
-  }
-  if (
-    row.hasEffectiveAfterSale ||
-    row.refundAmountPending ||
-    row.refundAmountCent > 0 ||
-    v.isReturnRefund ||
-    v.isRefundOnly ||
-    v.afterSaleClosedNoRefund ||
-    v.isQualityReturn
-  ) {
-    return 1
-  }
-  return 0
+  return countAftersaleAppliesForViewRow(v, mapViewToBuyerOrderStandard(v))
 }
 
 function buildAftersaleApplyCountByBuyer(views: AnalyzedOrderView[]): Map<string, number> {
@@ -455,7 +443,10 @@ async function loadBadBuyerContextForRange(
   aftersaleApplyByBuyer: Map<string, number>
 }> {
   const range = resolveBuyerRankingDateRange(preset, startDate, endDate)
-  const bundle = await buildRawAnalyzeBundle(buyerRankingRangeToAnalysisRange(range))
+  const allAnalysisRange = buyerRankingRangeToAnalysisRange(
+    resolveBuyerRankingDateRange('all'),
+  )
+  const bundle = await buildRawAnalyzeBundle(allAnalysisRange)
   if (!bundle) {
     return { shopMap: new Map(), aftersaleApplyByBuyer: new Map() }
   }
@@ -466,7 +457,13 @@ async function loadBadBuyerContextForRange(
   }
   const views = filterViewsForBuyerRanking(
     attachRawByMatchToViews(artifacts?.views ?? [], rawByMatch),
-  )
+  ).filter((v) => {
+    const row = mapViewToBuyerOrderStandard(v)
+    return (
+      viewPayTimeInBuyerRankingRange(v, range) ||
+      viewAfterSaleEventInBuyerRankingRange(v, range, row)
+    )
+  })
   return {
     shopMap: buildBuyerShopMapFromViews(views),
     aftersaleApplyByBuyer: buildAftersaleApplyCountByBuyer(views),
@@ -494,7 +491,7 @@ export async function buildBadBuyerRanking(params: {
   const range = resolveBuyerRankingDateRange(preset, params.startDate, params.endDate)
   const limit = Math.min(10, Math.max(1, Math.floor(params.limit ?? 10)))
 
-  const items = await buildBuyerRankingAllItems({
+  const items = await buildBadBuyerRankingAllItems({
     preset,
     startDate: params.startDate,
     endDate: params.endDate,

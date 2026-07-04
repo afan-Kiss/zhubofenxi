@@ -11,6 +11,7 @@ import { resolveBuyerOrderBusinessMetrics } from './resolve-buyer-order-business
 import { resolveDisplayEarnedAmountCent } from './buyer-earned-amount.service'
 import { isUnverifiedCompletedAfterSaleOrder } from './order-product-refund.service'
 import { isCompletedAfterSaleStatusText } from './completed-after-sale-status.service'
+import { extractAfterSaleNosFromSources } from './buyer-aftersale-event.util'
 
 export type BuyerAfterSaleType =
   | 'none'
@@ -537,6 +538,7 @@ export function mapViewToBuyerOrderStandard(
   const realDealAmountCent = metrics.realDealAmountCent
   const isRealDealOrder = metrics.isRealDealOrder
 
+  const afterSaleNos = extractAfterSaleNosFromSources({ raw })
   const row: BuyerOrderStandardRow = {
     orderNo,
     buyerKey,
@@ -567,7 +569,7 @@ export function mapViewToBuyerOrderStandard(
     hasEffectiveAfterSale: display.hasEffectiveAfterSale,
     afterSaleReason,
     refundSourceText: refundSourceLabel(refundSource, refundPending),
-    afterSaleNo: null,
+    afterSaleNo: afterSaleNos.length > 0 ? afterSaleNos.join('、') : null,
     isPaid,
     isSigned,
     hasRefund,

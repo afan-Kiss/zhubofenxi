@@ -27,6 +27,10 @@ export interface OrderAmountMetrics {
 
 export function isOrderCancelled(order: NormalizedOrder): boolean {
   const raw = order.raw
+  if (!raw || typeof raw !== 'object') {
+    const text = order.orderStatusText ?? ''
+    return CANCEL_KEYWORDS.some((k) => text.includes(k))
+  }
   const statusCode = raw.status ?? raw.orderStatus
   if (statusCode != null && CANCEL_STATUS_CODES.has(statusCode as number | string)) {
     return true
@@ -43,7 +47,12 @@ export function hasOrderPaymentTime(order: NormalizedOrder): boolean {
 }
 
 export function isOrderUnpaid(order: NormalizedOrder): boolean {
-  const text = [order.orderStatusText, String(order.raw.statusDesc ?? '')].filter(Boolean).join(' ')
+  const text = [
+    order.orderStatusText,
+    order.raw && typeof order.raw === 'object' ? String(order.raw.statusDesc ?? '') : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
   if (UNPAID_KEYWORDS.some((k) => text.includes(k))) return true
   const paid =
     order.actualPaidCent > 0 ||

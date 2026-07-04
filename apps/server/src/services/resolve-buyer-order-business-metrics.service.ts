@@ -52,6 +52,13 @@ function pickPaidCent(v: AnalyzedOrderView & { raw?: Record<string, unknown> }):
   source: string
 } {
   const resolved = resolveOfficialPaidAmountCent(v)
+  if (resolved.cent > 0 && resolved.confirmed) {
+    return { cent: resolved.cent, source: resolved.source }
+  }
+  const pipelinePaid = v.officialPaidAmountCent ?? v.statPaidAmountCent ?? 0
+  if (pipelinePaid > 0 && (v.officialPaidConfirmed ?? true)) {
+    return { cent: pipelinePaid, source: 'analysis_pipeline_paid' }
+  }
   return { cent: resolved.cent, source: resolved.source }
 }
 

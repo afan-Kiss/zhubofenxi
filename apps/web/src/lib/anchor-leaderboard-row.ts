@@ -140,8 +140,42 @@ export function anchorRowLivePeriodLines(row: AnchorLeaderboardRow): {
   return { primary: null, secondary: schedule ? `排班 ${schedule}` : null }
 }
 
-export function isSingleDayPreset(preset: string): boolean {
+export function isSingleDayRange(startDate: string, endDate: string): boolean {
+  return startDate.trim() === endDate.trim()
+}
+
+export function isSingleDayPreset(
+  preset: string,
+  startDate?: string,
+  endDate?: string,
+): boolean {
+  if (startDate?.trim() && endDate?.trim()) {
+    return isSingleDayRange(startDate, endDate)
+  }
   return preset === 'today' || preset === 'yesterday'
+}
+
+export function aggregateSummaryFromAnchorRows(
+  rows: AnchorLeaderboardRow[],
+): Record<string, unknown> {
+  if (rows.length === 0) return {}
+  let totalGmv = 0
+  let actualSignedAmount = 0
+  let orderCount = 0
+  let returnAmount = 0
+  for (const row of rows) {
+    totalGmv += anchorRowGmv(row)
+    actualSignedAmount += anchorRowNum(row, 'actualSignedAmount')
+    orderCount += anchorRowPaidCount(row)
+    returnAmount += anchorRowRefundAmount(row)
+  }
+  return {
+    totalGmv,
+    gmv: totalGmv,
+    actualSignedAmount,
+    orderCount,
+    returnRate: totalGmv > 0 ? returnAmount / totalGmv : null,
+  }
 }
 
 export function isHighRefundRate(rate: number | null): boolean {

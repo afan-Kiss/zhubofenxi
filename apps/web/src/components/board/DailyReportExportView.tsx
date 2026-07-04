@@ -11,11 +11,6 @@ import {
   formatPercent,
   formatRatePercent,
 } from './dailyReportFormatters'
-import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
-import {
-  formatLateTimingLine,
-  readLateStatus,
-} from '../../lib/anchor-late-status'
 import type { DailyReportAnchorRow, DailyReportPayload } from './DailyReportImageSheet'
 
 const EXPORT_MAX_PHOTOS = 16
@@ -29,7 +24,6 @@ interface ShipmentPhoto {
 
 interface Props {
   data: DailyReportPayload
-  showAttendanceStatus?: boolean
   shipmentPhotos?: ShipmentPhoto[]
 }
 
@@ -51,14 +45,7 @@ function buildPhotoCaption(total: number, displayed: number, remaining: number):
   return `共 ${total} 张发货前照片`
 }
 
-function ExportAnchorCard({
-  row,
-  showAttendanceStatus,
-}: {
-  row: DailyReportAnchorRow
-  showAttendanceStatus: boolean
-}) {
-  const late = readLateStatus(row)
+function ExportAnchorCard({ row }: { row: DailyReportAnchorRow }) {
   const liveTime =
     row.liveTimeRange &&
     row.liveTimeRange !== '—' &&
@@ -67,16 +54,11 @@ function ExportAnchorCard({
       : row.livePeriodText && row.livePeriodText !== '—'
         ? row.livePeriodText.replace(/~/g, '–')
         : '未读取到直播场次'
-  const scheduleText =
-    showAttendanceStatus && row.scheduleTimeRange ? row.scheduleTimeRange : null
-  const timingDetail = showAttendanceStatus ? formatLateTimingLine(late) : null
-  const alert = showAttendanceStatus && (late.isLate || late.isEarlyLeave)
+  const scheduleText = row.scheduleTimeRange ? row.scheduleTimeRange : null
   const liveTimeMultiline = liveTime.includes('\n')
 
   return (
-    <div
-      className={`daily-report-export-anchor-card${alert ? ' daily-report-export-anchor-card--alert' : ''}`}
-    >
+    <div className="daily-report-export-anchor-card">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-[13px] font-semibold text-slate-900">
@@ -85,7 +67,6 @@ function ExportAnchorCard({
           <p className="mt-0.5 truncate text-[11px] text-slate-500">{row.shopName}</p>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
-          {showAttendanceStatus ? <AnchorLateStatusBadge row={late} /> : null}
           <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700">
             占比 {formatPercent(row.amountRatio)}
           </span>
@@ -93,14 +74,9 @@ function ExportAnchorCard({
       </div>
       <div className="mt-2 space-y-0.5 text-[11px]">
         {scheduleText ? <p className="text-slate-500">排班 {scheduleText}</p> : null}
-        <p className={`${alert ? 'font-medium text-red-600' : 'text-slate-600'}${liveTimeMultiline ? ' whitespace-pre-line' : ''}`}>
+        <p className={`text-slate-600${liveTimeMultiline ? ' whitespace-pre-line' : ''}`}>
           直播 {liveTime}
         </p>
-        {timingDetail ? (
-          <p className={alert ? 'font-medium text-red-600' : 'text-slate-500'}>
-            出勤 {timingDetail}
-          </p>
-        ) : null}
         <p className="text-slate-800">
           <span className="font-semibold text-slate-900">
             真实发货 {formatMoney(row.shippedAmountYuan)}
@@ -158,7 +134,7 @@ function ExportAnchorCard({
 }
 
 export const DailyReportExportView = React.forwardRef<HTMLDivElement, Props>(
-  function DailyReportExportView({ data, showAttendanceStatus = true, shipmentPhotos = [] }, ref) {
+  function DailyReportExportView({ data, shipmentPhotos = [] }, ref) {
     const readyPhotos = shipmentPhotos.filter((photo) => photo.dataUrl)
     const totalPhotoCount = readyPhotos.length
     const displayedPhotos = readyPhotos.slice(0, EXPORT_MAX_PHOTOS)
@@ -247,11 +223,7 @@ export const DailyReportExportView = React.forwardRef<HTMLDivElement, Props>(
           <div className="daily-report-export-anchors">
             <div className={`daily-report-export-grid ${anchorCols}`}>
               {data.anchors.map((row) => (
-                <ExportAnchorCard
-                  key={`${row.anchorName}-${row.sessionLabel}`}
-                  row={row}
-                  showAttendanceStatus={showAttendanceStatus}
-                />
+                <ExportAnchorCard key={`${row.anchorName}-${row.sessionLabel}`} row={row} />
               ))}
             </div>
           </div>

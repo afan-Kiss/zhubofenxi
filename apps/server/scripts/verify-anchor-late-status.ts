@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {
   buildActualLivePeriodText,
-  calculateAnchorAttendanceStatus,
+  calculateAnchorLivePeriodStatus,
   deriveSessionLabelFromSchedule,
   formatDisplaySessionLabel,
   matchManualSchedule,
@@ -9,7 +9,7 @@ import {
   sessionOverlapsEffectiveScheduleRow,
   pickEarliestValidSession,
   pickLatestValidSessionEnd,
-  type AnchorAttendanceStatus,
+  type AnchorLivePeriodStatus,
 } from '../src/utils/anchor-attendance-status.util'
 import {
   DEFAULT_SCHEDULE_TEMPLATE_SEEDS,
@@ -35,7 +35,7 @@ function row(
   }
 }
 
-function runCase(name: string, status: AnchorAttendanceStatus, expect: Partial<AnchorAttendanceStatus>) {
+function runCase(name: string, status: AnchorLivePeriodStatus, expect: Partial<AnchorLivePeriodStatus>) {
   for (const [key, value] of Object.entries(expect)) {
     assert.equal((status as Record<string, unknown>)[key], value, `${name}: ${key}`)
   }
@@ -138,62 +138,83 @@ const feiyun = NEW_SCHEDULES[4]!
 
 runCase(
   'zijie-late-early',
-  calculateAnchorAttendanceStatus(
+  calculateAnchorLivePeriodStatus(
     zijie,
     Date.parse('2026-07-01T09:35:00+08:00'),
     '2026-07-01T09:35:00+08:00',
     Date.parse('2026-07-01T13:50:00+08:00'),
     '2026-07-01T13:50:00+08:00',
   ),
-  { isLate: true, lateMinutes: 5, isEarlyLeave: true, earlyLeaveMinutes: 10 },
+  {
+    hasSchedule: true,
+    actualStartText: '09:35',
+    actualEndText: '13:50',
+    scheduledPeriodText: '09:30~14:00',
+  },
 )
 
 runCase(
   'xiaohong-on-time',
-  calculateAnchorAttendanceStatus(
+  calculateAnchorLivePeriodStatus(
     xiaohong,
     Date.parse('2026-07-01T09:30:00+08:00'),
     '2026-07-01T09:30:00+08:00',
     Date.parse('2026-07-01T14:00:00+08:00'),
     '2026-07-01T14:00:00+08:00',
   ),
-  { isLate: false, isEarlyLeave: false },
+  {
+    hasSchedule: true,
+    actualStartText: '09:30',
+    actualEndText: '14:00',
+  },
 )
 
 runCase(
   'xiaobai-late-early',
-  calculateAnchorAttendanceStatus(
+  calculateAnchorLivePeriodStatus(
     xiaobai,
     Date.parse('2026-07-01T14:10:00+08:00'),
     '2026-07-01T14:10:00+08:00',
     Date.parse('2026-07-01T18:00:00+08:00'),
     '2026-07-01T18:00:00+08:00',
   ),
-  { isLate: true, lateMinutes: 10, isEarlyLeave: true, earlyLeaveMinutes: 30 },
+  {
+    hasSchedule: true,
+    actualStartText: '14:10',
+    actualEndText: '18:00',
+  },
 )
 
 runCase(
   'xiaoyi-early-only',
-  calculateAnchorAttendanceStatus(
+  calculateAnchorLivePeriodStatus(
     xiaoyi,
     Date.parse('2026-07-01T13:58:00+08:00'),
     '2026-07-01T13:58:00+08:00',
     Date.parse('2026-07-01T18:20:00+08:00'),
     '2026-07-01T18:20:00+08:00',
   ),
-  { isLate: false, isEarlyLeave: true, earlyLeaveMinutes: 10 },
+  {
+    hasSchedule: true,
+    actualStartText: '13:58',
+    actualEndText: '18:20',
+  },
 )
 
 runCase(
   'feiyun-late-early',
-  calculateAnchorAttendanceStatus(
+  calculateAnchorLivePeriodStatus(
     feiyun,
     Date.parse('2026-07-01T18:45:00+08:00'),
     '2026-07-01T18:45:00+08:00',
     Date.parse('2026-07-01T22:30:00+08:00'),
     '2026-07-01T22:30:00+08:00',
   ),
-  { isLate: true, lateMinutes: 15, isEarlyLeave: true, earlyLeaveMinutes: 30 },
+  {
+    hasSchedule: true,
+    actualStartText: '18:45',
+    actualEndText: '22:30',
+  },
 )
 
 const multiSegments: AnchorLiveSessionBrief[] = [
@@ -218,14 +239,18 @@ assert.equal(buildActualLivePeriodText(multiSegments), '09:35~13:50', 'multi-seg
 const multiEnd = pickLatestValidSessionEnd(multiSegments)!
 runCase(
   'multi-segment-zijie',
-  calculateAnchorAttendanceStatus(
+  calculateAnchorLivePeriodStatus(
     zijie,
     Date.parse('2026-07-01T09:35:00+08:00'),
     '2026-07-01T09:35:00+08:00',
     multiEnd.endMs,
     multiEnd.endAt,
   ),
-  { isLate: true, lateMinutes: 5, isEarlyLeave: true, earlyLeaveMinutes: 10 },
+  {
+    hasSchedule: true,
+    actualStartText: '09:35',
+    actualEndText: '13:50',
+  },
 )
 
 const durationSession: AnchorLiveSessionBrief = {

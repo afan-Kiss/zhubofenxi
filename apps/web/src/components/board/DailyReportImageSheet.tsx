@@ -11,17 +11,11 @@ import {
   formatRatePercent,
   formatStayDurationSeconds,
 } from './dailyReportFormatters'
-import { AnchorLateStatusBadge } from './AnchorLateStatusBadge'
-import {
-  formatLateTimingLine,
-  lateCardBorderClass,
-  readLateStatus,
-  type AnchorLateStatusView,
-} from '../../lib/anchor-late-status'
+import type { AnchorLivePeriodView } from '../../lib/anchor-live-period'
 import { AnchorTrendChart } from './AnchorTrendChart'
 import type { AnchorTrend } from '../../lib/anchor-leaderboard-row'
 
-export interface DailyReportAnchorRow extends AnchorLateStatusView {
+export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -76,7 +70,6 @@ export interface DailyReportPayload {
 
 interface Props {
   data: DailyReportPayload
-  showAttendanceStatus?: boolean
   shipmentPhotos?: Array<{
     id: string
     publicUrl: string
@@ -96,42 +89,18 @@ function MetricLine({ label, value, strong }: { label: string; value: string; st
   )
 }
 
-function AnchorCard({
-  row,
-  showAttendanceStatus,
-}: {
-  row: DailyReportAnchorRow
-  showAttendanceStatus: boolean
-}) {
-  const late = readLateStatus(row)
+function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
   const liveTime =
     row.liveTimeRange && row.liveTimeRange !== '—' && row.liveTimeRange !== '未读取到直播场次'
       ? row.liveTimeRange
       : row.livePeriodText && row.livePeriodText !== '—'
         ? row.livePeriodText.replace(/~/g, '–')
         : '未读取到直播场次'
-  const scheduleLine =
-    showAttendanceStatus && row.scheduleTimeRange ? `排班 ${row.scheduleTimeRange}` : null
-  const timingDetail = showAttendanceStatus ? formatLateTimingLine(late) : null
-  const attendanceLine =
-    showAttendanceStatus && timingDetail
-      ? timingDetail
-      : showAttendanceStatus && (late.isLate || late.isEarlyLeave)
-        ? late.attendanceLabel || late.label
-        : showAttendanceStatus && late.hasSchedule
-          ? '正常'
-          : null
-  const cardBorderClass = showAttendanceStatus
-    ? lateCardBorderClass(late.isLate, late.isEarlyLeave)
-    : 'border-rose-100 bg-white'
-  const timingTextClass =
-    showAttendanceStatus && (late.isLate || late.isEarlyLeave)
-      ? 'font-medium text-red-600'
-      : 'text-slate-500'
+  const scheduleLine = row.scheduleTimeRange ? `排班 ${row.scheduleTimeRange}` : null
   const liveTimeMultiline = liveTime.includes('\n')
 
   return (
-    <div className={`rounded-2xl border p-4 shadow-sm ${cardBorderClass}`}>
+    <div className="rounded-2xl border border-rose-100 bg-white p-4 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-base font-semibold text-slate-900">
@@ -144,16 +113,12 @@ function AnchorCard({
           {scheduleLine ? (
             <p className="mt-1 text-[13px] text-slate-600">{scheduleLine}</p>
           ) : null}
-          <p className={`mt-1 text-[13px] ${timingTextClass}${liveTimeMultiline ? ' whitespace-pre-line' : ''}`}>
+          <p className={`mt-1 text-[13px] text-slate-600${liveTimeMultiline ? ' whitespace-pre-line' : ''}`}>
             直播 {liveTime}
           </p>
-          {attendanceLine ? (
-            <p className={`mt-1 text-[13px] ${timingTextClass}`}>出勤 {attendanceLine}</p>
-          ) : null}
           <p className="mt-1 text-[12px] text-slate-500">{row.liveDurationText}</p>
         </div>
         <div className="flex flex-col items-end gap-1">
-          {showAttendanceStatus ? <AnchorLateStatusBadge row={late} /> : null}
           <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
             占比 {formatPercent(row.amountRatio)}
           </span>
@@ -202,7 +167,7 @@ function AnchorCard({
 }
 
 export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(function DailyReportImageSheet(
-  { data, showAttendanceStatus = true, shipmentPhotos = [] },
+  { data, shipmentPhotos = [] },
   ref,
 ) {
   const readyPhotos = shipmentPhotos.filter((photo) => photo.dataUrl).slice(0, 12)
@@ -271,11 +236,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
 
       <div className="mt-4 space-y-3">
         {data.anchors.map((row) => (
-          <AnchorCard
-            key={`${row.anchorName}-${row.sessionLabel}`}
-            row={row}
-            showAttendanceStatus={showAttendanceStatus}
-          />
+            <AnchorCard key={`${row.anchorName}-${row.sessionLabel}`} row={row} />
         ))}
       </div>
 

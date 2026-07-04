@@ -522,7 +522,6 @@ export function buildDailyReportLiveScheduleFields(params: {
     primaryScheduleRow,
     scheduleAttendance: {
       ...scheduleAttendance,
-      hasManualSchedule: scheduleAttendance.hasSchedule,
       displaySessionLabel: sessionLabel || scheduleAttendance.displaySessionLabel,
       sessionLabel: sessionLabel || scheduleAttendance.sessionLabel,
       shopName: primaryScheduleRow

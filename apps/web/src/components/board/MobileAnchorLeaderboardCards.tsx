@@ -7,10 +7,8 @@ import {
   anchorRowRate,
   anchorRowRefundAmount,
   anchorRowReturnRefundCount,
-  anchorRowReturnRefundRate,
   anchorRowLivePeriodLines,
   anchorRowLivePeriodText,
-  anchorRowSignedCount,
   anchorRowValidSales,
   isHighRefundRate,
   type AnchorLeaderboardRow,
@@ -106,8 +104,6 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
       {rows.map((a, idx) => {
         const name = String(a.anchorName ?? '—')
         const refundRate = anchorRowRate(a, 'returnRate')
-        const returnRate = anchorRowReturnRefundRate(a)
-        const qualityRate = anchorRowRate(a, 'qualityReturnRate')
         const signRate = anchorRowRate(a, 'signRate')
         const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
         const livePeriodMultiline =
@@ -163,25 +159,11 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               ) : null}
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <MetricCell label="本期销售额" value={formatMoney(anchorRowGmv(a))} />
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <MetricCell label="支付金额" value={formatMoney(anchorRowGmv(a))} />
               <MetricCell label="有效成交额" value={formatMoney(anchorRowValidSales(a))} />
-              {showRates ? (
-                <MetricCell
-                  label="签收金额"
-                  value={formatMoney(anchorRowNum(a, 'actualSignedAmount'))}
-                />
-              ) : null}
+              <MetricCell label="支付单数" value={formatCount(anchorRowPaidCount(a))} />
               <MetricCell label="退款金额" value={formatMoney(anchorRowRefundAmount(a))} danger />
-            </div>
-
-            <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
-              <MetricCell label="订单数" value={formatCount(anchorRowNum(a, 'periodOrderCount'))} />
-              <MetricCell label="支付订单数" value={formatCount(anchorRowPaidCount(a))} />
-              {showRates ? (
-                <MetricCell label="签收单数" value={formatCount(anchorRowSignedCount(a))} />
-              ) : null}
-              <MetricCell label="退款单数" value={formatCount(anchorRowNum(a, 'returnCount'))} />
               <MetricCell
                 label="退货退款单数"
                 value={formatCount(anchorRowReturnRefundCount(a))}
@@ -203,16 +185,6 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               >
                 退款率 {formatRate(refundRate)}
               </span>
-              {showRates && (
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-medium text-slate-600">
-                  退货率 {formatRate(returnRate)}
-                </span>
-              )}
-              {showRates && (
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-medium text-slate-600">
-                  品退率 {formatRate(qualityRate)}
-                </span>
-              )}
               {showRates && (
                 <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[12px] font-medium text-slate-600">
                   签收率 {formatRate(signRate)}

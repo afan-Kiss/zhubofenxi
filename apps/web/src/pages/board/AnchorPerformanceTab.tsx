@@ -18,7 +18,7 @@ import { BusinessSyncProgressCard } from '../../components/board/BusinessSyncPro
 import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
 import { OfficialQualitySyncNote } from '../../components/board/OfficialQualitySyncNote'
-import { anchorRowRate, isSingleDayPreset } from '../../lib/anchor-leaderboard-row'
+import { anchorRowRate, isSingleDayPreset, aggregateSummaryFromAnchorRows } from '../../lib/anchor-leaderboard-row'
 import {
   BoardLiveQueryAutoRefresh,
   useBoardLiveQuery,
@@ -62,7 +62,7 @@ const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
     valueKey: 'actualSignedAmount',
   },
   {
-    label: '支付订单数',
+    label: '支付单数',
     metricExplainKey: 'orderCount',
     type: 'count',
     tone: 'blue',
@@ -148,9 +148,14 @@ export const AnchorPerformanceTab: React.FC = () => {
   }, [allAnchors, anchorFilter])
 
   const performanceSummary = data?.anchorPerformanceSummary
+  const filteredPerformanceSummary = useMemo(() => {
+    if (anchorFilter === '全部') return performanceSummary ?? {}
+    return aggregateSummaryFromAnchorRows(anchors)
+  }, [anchorFilter, performanceSummary, anchors])
   const hasPerformanceData =
-    Boolean(performanceSummary) && Object.keys(performanceSummary ?? {}).length > 0
-  const cards = performanceSummary ?? {}
+    Boolean(filteredPerformanceSummary) && Object.keys(filteredPerformanceSummary ?? {}).length > 0
+  const cards = filteredPerformanceSummary ?? {}
+  const showLivePeriod = isSingleDayPreset(preset, startDate, endDate)
   const showRates = showLongPeriodRates(preset, startDate, endDate)
   const boardDataVisible =
     boardSyncUiMode === 'synced_idle' ||
@@ -164,6 +169,7 @@ export const AnchorPerformanceTab: React.FC = () => {
     'anchor-summary',
     data?.startDate,
     data?.endDate,
+    anchorFilter,
     syncMeta?.businessSync?.lastSuccessAt ?? data?.fetchedAt,
     String(cards.totalGmv ?? cards.gmv ?? ''),
     String(cards.orderCount ?? ''),
@@ -349,18 +355,23 @@ export const AnchorPerformanceTab: React.FC = () => {
       {showMetrics ? (
         <>
           {options.length > 0 ? (
-            <select
-              value={anchorFilter}
-              onChange={(e) => setAnchorFilter(e.target.value)}
-              className="rounded-full border border-rose-100 px-4 py-2 text-sm transition focus:border-rose-300 focus:outline-none"
-            >
-              <option value="全部">全部主播</option>
-              {options.map((o) => (
-                <option key={o.id} value={o.name}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                value={anchorFilter}
+                onChange={(e) => setAnchorFilter(e.target.value)}
+                className="rounded-full border border-rose-100 px-4 py-2 text-sm transition focus:border-rose-300 focus:outline-none"
+              >
+                <option value="全部">全部主播</option>
+                {options.map((o) => (
+                  <option key={o.id} value={o.name}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+              {anchorFilter !== '全部' ? (
+                <span className="text-sm text-slate-600">当前查看：{anchorFilter}</span>
+              ) : null}
+            </div>
           ) : null}
           <MetricGridTransition
             transitionKey={summaryTransitionKey}
@@ -389,8 +400,9 @@ export const AnchorPerformanceTab: React.FC = () => {
             <MetricGridTransition transitionKey={anchorTransitionKey} loading={isLoadingRange}>
               <AnchorLeaderboardPanel
                 rows={anchors}
+                compareRows={allAnchors}
                 showLongPeriodRates={showRates}
-                showLivePeriod={isSingleDayPreset(preset)}
+                showLivePeriod={showLivePeriod}
                 startDate={startDate}
                 endDate={endDate}
                 emptyText="当前范围暂无已同步数据"

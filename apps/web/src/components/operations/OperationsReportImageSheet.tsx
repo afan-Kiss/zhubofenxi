@@ -1,6 +1,4 @@
 import React, { forwardRef } from 'react'
-import { AnchorLateStatusBadge } from '../board/AnchorLateStatusBadge'
-import { formatLateTimingLine, lateCardBorderClass, readLateStatus } from '../../lib/anchor-late-status'
 import type { DailyOperationsReportPayload } from '../../pages/operations/operationsReportTypes'
 import {
   formatDuration,
@@ -8,13 +6,11 @@ import {
   formatIntegerMoney,
   formatOrderCount,
   formatPeopleCount,
-  formatPercent,
   formatRatePercent,
 } from './operationsReportFormatters'
 
 interface Props {
   data: DailyOperationsReportPayload
-  showAttendanceStatus?: boolean
 }
 
 function MetricCard({ label, value }: { label: string; value: string }) {
@@ -26,8 +22,7 @@ function MetricCard({ label, value }: { label: string; value: string }) {
   )
 }
 
-export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(
-  ({ data, showAttendanceStatus = true }, ref) => {
+export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ data }, ref) => {
   return (
     <div ref={ref} className="w-[720px] bg-white p-6 text-slate-900">
       <h1 className="text-xl font-bold">{data.title}</h1>
@@ -67,40 +62,32 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(
       <div className="mt-4">
         <p className="mb-2 text-sm font-semibold">主播表现</p>
         {data.anchors.map((row) => {
-          const late = readLateStatus(row)
-          const timingLine = showAttendanceStatus ? formatLateTimingLine(late) : null
-          const cardBorderClass = showAttendanceStatus
-            ? lateCardBorderClass(late.isLate, late.isEarlyLeave)
-            : 'border-slate-200 bg-white'
-          const timingTextClass =
-            showAttendanceStatus && (late.isLate || late.isEarlyLeave)
-              ? 'mt-1 font-medium text-red-600'
-              : 'mt-1 text-slate-600'
+          const liveTime =
+            row.liveTimeRange && row.liveTimeRange !== '—'
+              ? row.liveTimeRange
+              : row.livePeriodText?.replace(/~/g, '–') ?? '—'
+          const scheduleHint =
+            row.scheduleTimeRange && row.scheduleMatched
+              ? ` · 排班 ${row.scheduleTimeRange}`
+              : ''
           return (
-          <div
-            key={row.anchorName}
-            className={`mb-2 rounded-xl border p-3 text-xs ${cardBorderClass}`}
-          >
-            <p className="text-sm font-semibold">
-              {row.anchorName} · {row.sessionLabel}
-              {showAttendanceStatus ? (
-                <span className="ml-2 inline-flex align-middle">
-                  <AnchorLateStatusBadge row={late} />
-                </span>
-              ) : null}
-            </p>
-            <p className={timingTextClass}>
-              {timingLine ? `${timingLine} · ` : ''}
-              有效成交 {formatIntegerMoney(row.validAmountYuan)} · 订单{' '}
-              {formatOrderCount(row.soldOrderCount)} · 直播 {row.liveDurationText}
-            </p>
-          </div>
+            <div key={row.anchorName} className="mb-2 rounded-xl border border-slate-200 bg-white p-3 text-xs">
+              <p className="text-sm font-semibold">
+                {row.anchorName} · {row.sessionLabel}
+              </p>
+              <p className="mt-1 text-slate-600">
+                直播 {liveTime}
+                {scheduleHint}
+                {' · '}
+                有效成交 {formatIntegerMoney(row.validAmountYuan)} · 订单{' '}
+                {formatOrderCount(row.soldOrderCount)} · 直播 {row.liveDurationText}
+              </p>
+            </div>
           )
         })}
       </div>
     </div>
   )
-},
-)
+})
 
 OperationsReportImageSheet.displayName = 'OperationsReportImageSheet'

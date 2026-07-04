@@ -6,14 +6,10 @@ import { orderLiveRoomMatchesSchedule } from './shop-name-normalize.util'
 import { isPayTimeInSchedule } from './anchor-schedule-time.util'
 import { formatClockShanghai, parseLiveSessionTimeMs } from './business-timezone'
 
-export interface AnchorAttendanceStatus {
+export interface AnchorLivePeriodStatus {
   hasSchedule: boolean
   hasActualStartTime: boolean
   hasActualEndTime: boolean
-  isLate: boolean
-  lateMinutes: number
-  isEarlyLeave: boolean
-  earlyLeaveMinutes: number
   scheduledStartAt: string | null
   scheduledEndAt: string | null
   scheduledPeriodText: string | null
@@ -24,31 +20,26 @@ export interface AnchorAttendanceStatus {
   sessionLabel: string
   shopName: string
   displaySessionLabel: string
-  label: string
-  reason: string
-  attendanceLabel: string
-  attendanceReason: string
 }
 
-/** API / 前端统一字段（含历史兼容名） */
-export type AnchorAttendanceStatusPayload = AnchorAttendanceStatus & {
-  hasManualSchedule: boolean
-}
+export type AnchorLivePeriodPayload = AnchorLivePeriodStatus
 
-/** @deprecated 使用 AnchorAttendanceStatusPayload */
-export type AnchorLateStatusPayload = AnchorAttendanceStatusPayload
+/** @deprecated 使用 AnchorLivePeriodStatus */
+export type AnchorAttendanceStatus = AnchorLivePeriodStatus
 
-/** @deprecated 使用 AnchorAttendanceStatus */
-export type AnchorLateStatus = AnchorAttendanceStatus
+/** @deprecated 使用 AnchorLivePeriodPayload */
+export type AnchorAttendanceStatusPayload = AnchorLivePeriodPayload
 
-const NO_SCHEDULE: AnchorAttendanceStatus = {
+/** @deprecated */
+export type AnchorLateStatusPayload = AnchorLivePeriodPayload
+
+/** @deprecated */
+export type AnchorLateStatus = AnchorLivePeriodStatus
+
+const NO_LIVE_PERIOD: AnchorLivePeriodStatus = {
   hasSchedule: false,
   hasActualStartTime: false,
   hasActualEndTime: false,
-  isLate: false,
-  lateMinutes: 0,
-  isEarlyLeave: false,
-  earlyLeaveMinutes: 0,
   scheduledStartAt: null,
   scheduledEndAt: null,
   scheduledPeriodText: null,
@@ -59,10 +50,6 @@ const NO_SCHEDULE: AnchorAttendanceStatus = {
   sessionLabel: '',
   shopName: '',
   displaySessionLabel: '',
-  label: '',
-  reason: '未排班',
-  attendanceLabel: '',
-  attendanceReason: '未排班',
 }
 
 function formatClockFromIso(iso: string): string {
@@ -325,35 +312,23 @@ export function buildActualLivePeriodText(sessions: AnchorLiveSessionBrief[]): s
   return `${startText}~${endText}`
 }
 
-function buildAttendanceLabel(isLate: boolean, lateMinutes: number, isEarlyLeave: boolean, earlyLeaveMinutes: number): string {
-  const parts: string[] = []
-  if (isLate) parts.push(`迟播 ${lateMinutes} 分钟`)
-  if (isEarlyLeave) parts.push(`早退 ${earlyLeaveMinutes} 分钟`)
-  if (parts.length > 0) return parts.join('，')
-  return '准时开播，正常下播'
-}
-
-export function calculateAnchorAttendanceStatus(
+export function calculateAnchorLivePeriodStatus(
   scheduleRow: EffectiveScheduleRow | undefined,
   actualStartMs: number | null,
   actualStartAt: string | null,
   actualEndMs: number | null,
   actualEndAt: string | null,
-): AnchorAttendanceStatus {
+): AnchorLivePeriodStatus {
   if (!scheduleRow) {
     if (actualStartMs != null && actualStartAt) {
       return {
-        ...NO_SCHEDULE,
+        ...NO_LIVE_PERIOD,
         hasActualStartTime: true,
         actualStartAt,
         actualStartText: formatClockFromIso(actualStartAt),
-        label: '',
-        reason: '未排班',
-        attendanceLabel: '',
-        attendanceReason: '未排班',
       }
     }
-    return { ...NO_SCHEDULE, label: '未排班', attendanceLabel: '未排班', attendanceReason: '未排班' }
+    return { ...NO_LIVE_PERIOD }
   }
 
   const sessionLabel = deriveSessionLabelFromSchedule(
@@ -365,18 +340,12 @@ export function calculateAnchorAttendanceStatus(
   const scheduledStartAt = scheduleRow.startAt
   const scheduledEndAt = scheduleRow.endAt
   const scheduledPeriodText = `${scheduleRow.startTime}~${scheduleRow.endTime}`
-  const scheduledStartMs = new Date(scheduledStartAt).getTime()
-  const scheduledEndMs = new Date(scheduledEndAt).getTime()
 
   if (actualStartMs == null || !actualStartAt || !Number.isFinite(actualStartMs)) {
     return {
       hasSchedule: true,
       hasActualStartTime: false,
       hasActualEndTime: false,
-      isLate: false,
-      lateMinutes: 0,
-      isEarlyLeave: false,
-      earlyLeaveMinutes: 0,
       scheduledStartAt,
       scheduledEndAt,
       scheduledPeriodText,
@@ -387,65 +356,22 @@ export function calculateAnchorAttendanceStatus(
       sessionLabel,
       shopName,
       displaySessionLabel,
-      label: '未读取开播时间',
-      reason: '未读取开播时间',
-      attendanceLabel: '未读取开播时间',
-      attendanceReason: formatScheduleActualTimingLine({
-        scheduledPeriodText,
-        actualStartText: null,
-        actualEndText: null,
-        displaySessionLabel,
-      }),
     }
   }
 
   const actualStartText = formatClockFromIso(actualStartAt)
-  const isLate =
-    Number.isFinite(scheduledStartMs) && actualStartMs > scheduledStartMs
-  const lateMinutes = isLate ? Math.round((actualStartMs - scheduledStartMs) / 60_000) : 0
-
   let hasActualEndTime = false
   let actualEndText: string | null = null
-  let isEarlyLeave = false
-  let earlyLeaveMinutes = 0
 
   if (actualEndMs != null && actualEndAt) {
     hasActualEndTime = true
     actualEndText = formatClockFromIso(actualEndAt)
-    if (Number.isFinite(scheduledEndMs) && actualEndMs < scheduledEndMs) {
-      isEarlyLeave = true
-      earlyLeaveMinutes = Math.round((scheduledEndMs - actualEndMs) / 60_000)
-    }
-  }
-
-  const attendanceLabel = buildAttendanceLabel(isLate, lateMinutes, isEarlyLeave, earlyLeaveMinutes)
-  const attendanceReason = formatScheduleActualTimingLine({
-    scheduledPeriodText,
-    actualStartText,
-    actualEndText,
-    displaySessionLabel,
-  })
-
-  let label = attendanceLabel
-  if (!hasActualEndTime && !isLate) {
-    label = '准时开播'
-  } else if (!hasActualEndTime && isLate) {
-    label = `迟播 ${lateMinutes} 分钟`
-  }
-
-  let reason = attendanceReason
-  if (!hasActualEndTime) {
-    reason = `${attendanceReason}（未读取下播时间）`
   }
 
   return {
     hasSchedule: true,
     hasActualStartTime: true,
     hasActualEndTime,
-    isLate,
-    lateMinutes,
-    isEarlyLeave,
-    earlyLeaveMinutes,
     scheduledStartAt,
     scheduledEndAt,
     scheduledPeriodText,
@@ -456,39 +382,32 @@ export function calculateAnchorAttendanceStatus(
     sessionLabel,
     shopName,
     displaySessionLabel,
-    label,
-    reason,
-    attendanceLabel,
-    attendanceReason,
   }
 }
 
-/** @deprecated 使用 calculateAnchorAttendanceStatus */
-export function calculateAnchorLateStatus(
-  scheduleRow: EffectiveScheduleRow | undefined,
-  actualStartMs: number | null,
-  actualStartAt: string | null,
-): AnchorAttendanceStatus {
-  return calculateAnchorAttendanceStatus(scheduleRow, actualStartMs, actualStartAt, null, null)
+/** @deprecated 使用 calculateAnchorLivePeriodStatus */
+export const calculateAnchorAttendanceStatus = calculateAnchorLivePeriodStatus
+
+/** @deprecated 使用 calculateAnchorLivePeriodStatus */
+export const calculateAnchorLateStatus = calculateAnchorLivePeriodStatus
+
+export function toLivePeriodPayload(status: AnchorLivePeriodStatus): AnchorLivePeriodPayload {
+  return status
 }
 
-export function toAttendanceStatusPayload(status: AnchorAttendanceStatus): AnchorAttendanceStatusPayload {
-  return {
-    ...status,
-    hasManualSchedule: status.hasSchedule,
-  }
-}
+/** @deprecated 使用 toLivePeriodPayload */
+export const toAttendanceStatusPayload = toLivePeriodPayload
 
 /** @deprecated */
-export const toLateStatusPayload = toAttendanceStatusPayload
+export const toLateStatusPayload = toLivePeriodPayload
 
-export function resolveAnchorAttendanceFromSessions(
+export function resolveAnchorLivePeriodFromSessions(
   scheduleRows: EffectiveScheduleRow[],
   anchorName: string,
   shopName: string,
   sessions: AnchorLiveSessionBrief[],
   usedRowIds?: Set<string>,
-): AnchorAttendanceStatusPayload {
+): AnchorLivePeriodPayload {
   const actualStart = earliestSessionStart(sessions)
   const actualEnd = pickLatestValidSessionEnd(sessions)
   const scheduleRow = matchManualSchedule(
@@ -499,19 +418,20 @@ export function resolveAnchorAttendanceFromSessions(
     usedRowIds ?? new Set(),
   )
   if (scheduleRow && usedRowIds) usedRowIds.add(scheduleRow.rowId)
-  return toAttendanceStatusPayload(
-    calculateAnchorAttendanceStatus(
-      scheduleRow,
-      actualStart?.startMs ?? null,
-      actualStart?.startAt ?? null,
-      actualEnd?.endMs ?? null,
-      actualEnd?.endAt ?? null,
-    ),
+  return calculateAnchorLivePeriodStatus(
+    scheduleRow,
+    actualStart?.startMs ?? null,
+    actualStart?.startAt ?? null,
+    actualEnd?.endMs ?? null,
+    actualEnd?.endAt ?? null,
   )
 }
 
+/** @deprecated 使用 resolveAnchorLivePeriodFromSessions */
+export const resolveAnchorAttendanceFromSessions = resolveAnchorLivePeriodFromSessions
+
 /** @deprecated */
-export const resolveAnchorLateStatusFromSessions = resolveAnchorAttendanceFromSessions
+export const resolveAnchorLateStatusFromSessions = resolveAnchorLivePeriodFromSessions
 
 /** @deprecated */
 export function attachAnchorScheduleLateFields(
@@ -520,8 +440,8 @@ export function attachAnchorScheduleLateFields(
   shopName: string,
   sessions: AnchorLiveSessionBrief[],
   usedRowIds?: Set<string>,
-): AnchorAttendanceStatusPayload {
-  return resolveAnchorAttendanceFromSessions(
+): AnchorLivePeriodPayload {
+  return resolveAnchorLivePeriodFromSessions(
     scheduleRows,
     anchorName,
     shopName,

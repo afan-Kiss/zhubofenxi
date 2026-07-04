@@ -1,4 +1,4 @@
-import type { AnchorLateStatusView } from '../../lib/anchor-late-status'
+import type { AnchorLivePeriodView } from '../../lib/anchor-live-period'
 
 export type RankingBasis =
   | 'official_order'
@@ -291,7 +291,7 @@ export interface LiveRoomNewFollowerRow {
 }
 
 
-export interface DailyOperationsAnchorRow extends AnchorLateStatusView {
+export interface DailyOperationsAnchorRow extends AnchorLivePeriodView {
   anchorName: string
   sessionLabel: string
   shopName: string

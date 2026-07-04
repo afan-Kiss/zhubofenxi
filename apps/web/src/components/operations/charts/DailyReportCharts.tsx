@@ -25,7 +25,6 @@ interface Props {
   priceBands: OperationsPriceBandRow[]
   anchors: DailyOperationsAnchorRow[]
   afterSalesReasons: AfterSalesReasonRow[]
-  showAttendanceStatus?: boolean
 }
 
 export const DailyReportCharts: React.FC<Props> = ({
@@ -33,7 +32,6 @@ export const DailyReportCharts: React.FC<Props> = ({
   priceBands,
   anchors,
   afterSalesReasons,
-  showAttendanceStatus = true,
 }) => {
   const { openDrill } = useOperationsBiDrill()
   const topLimit = useChartTopLimit()
@@ -147,7 +145,7 @@ export const DailyReportCharts: React.FC<Props> = ({
             limit={topLimit}
             expanded={anchorExpanded}
             render={(rows) => (
-              <AnchorOperationsTable rows={rows} showAttendanceStatus={showAttendanceStatus} />
+              <AnchorOperationsTable rows={rows} />
             )}
           />
         </section>

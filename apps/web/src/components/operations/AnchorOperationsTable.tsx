@@ -1,10 +1,5 @@
 import React from 'react'
 import type { DailyOperationsAnchorRow } from '../../pages/operations/operationsReportTypes'
-import { AnchorLateStatusBadge } from '../board/AnchorLateStatusBadge'
-import {
-  formatLateTimingLine,
-  readLateStatus,
-} from '../../lib/anchor-late-status'
 import {
   formatDuration,
   formatHourly,
@@ -12,19 +7,13 @@ import {
   formatOrderCount,
   formatPeopleCount,
   formatRatePercent,
-  formatStayDurationSeconds,
 } from './operationsReportFormatters'
 
-function formatAnchorSessionTiming(
-  row: DailyOperationsAnchorRow,
-  showAttendanceStatus: boolean,
-): string {
+function formatAnchorSessionTiming(row: DailyOperationsAnchorRow): string {
   const liveTime =
     row.liveTimeRange && row.liveTimeRange !== '—'
       ? row.liveTimeRange
       : row.livePeriodText?.replace(/~/g, '–') ?? '—'
-  if (!showAttendanceStatus) return liveTime
-  const late = readLateStatus(row)
   const scheduleHint =
     row.scheduleMatched && row.scheduleTimeRange
       ? `（排班 ${row.scheduleTimeRange}）`
@@ -32,18 +21,14 @@ function formatAnchorSessionTiming(
   if (liveTime !== '—') {
     return `${liveTime}${scheduleHint}`
   }
-  return formatLateTimingLine(late) ?? liveTime
+  return liveTime
 }
 
 interface Props {
   rows: DailyOperationsAnchorRow[]
-  showAttendanceStatus?: boolean
 }
 
-export const AnchorOperationsTable: React.FC<Props> = ({
-  rows,
-  showAttendanceStatus = true,
-}) => {
+export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
   if (rows.length === 0) {
     return <p className="text-sm text-slate-500">暂无主播数据</p>
   }
@@ -69,33 +54,11 @@ export const AnchorOperationsTable: React.FC<Props> = ({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
-            const late = readLateStatus(row)
-            const highlightRow =
-              showAttendanceStatus && (late.isLate || late.isEarlyLeave)
-            return (
-            <tr
-              key={row.anchorName}
-              className={
-                highlightRow ? 'border-t border-red-100 bg-red-50/40' : 'border-t border-slate-100'
-              }
-            >
-              <td className="px-3 py-2 font-medium text-slate-900">
-                <div className="flex items-center gap-2">
-                  <span>{row.anchorName}</span>
-                  {showAttendanceStatus ? <AnchorLateStatusBadge row={row} /> : null}
-                </div>
-              </td>
+          {rows.map((row) => (
+            <tr key={row.anchorName} className="border-t border-slate-100">
+              <td className="px-3 py-2 font-medium text-slate-900">{row.anchorName}</td>
               <td className="px-3 py-2 text-slate-600">{row.sessionLabel}</td>
-              <td
-                className={
-                  showAttendanceStatus && late.isLate
-                    ? 'px-3 py-2 font-medium text-red-600'
-                    : 'px-3 py-2 text-slate-600'
-                }
-              >
-                {formatAnchorSessionTiming(row, showAttendanceStatus)}
-              </td>
+              <td className="px-3 py-2 text-slate-600">{formatAnchorSessionTiming(row)}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.returnOrderCount)}</td>
@@ -108,8 +71,7 @@ export const AnchorOperationsTable: React.FC<Props> = ({
               <td className="px-3 py-2">{formatRatePercent(row.dealConversionRate)}</td>
               <td className="px-3 py-2">{formatPeopleCount(row.newFollowerCount)}</td>
             </tr>
-            )
-          })}
+          ))}
         </tbody>
       </table>
     </div>

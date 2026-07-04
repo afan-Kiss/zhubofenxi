@@ -31,8 +31,6 @@ import type { OperationsBiDrillRequest } from './operationsBiDrillTypes'
 import { OperationsCoreMetrics, CollapsibleWarnings } from '../../components/operations/charts/OperationsCoreMetrics'
 import { DailyReportCharts } from '../../components/operations/charts/DailyReportCharts'
 import { useChartTopLimit } from '../../components/operations/charts/useChartTopLimit'
-import { DailyReportAttendanceCheckbox } from '../../components/board/DailyReportAttendanceCheckbox'
-import { useDailyReportShowAttendance } from '../../lib/daily-report-attendance-pref'
 
 interface Props {
   dateKey: string
@@ -53,7 +51,6 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [showFullHot, setShowFullHot] = useState(false)
   const [showFullReturn, setShowFullReturn] = useState(false)
-  const [showAttendanceStatus, setShowAttendanceStatus] = useDailyReportShowAttendance()
 
   const {
     data: loaded,
@@ -158,11 +155,6 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
           <OperationsReportCacheHint cacheMeta={cacheMeta} cacheWarning={cacheWarning} className="mt-1" />
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <DailyReportAttendanceCheckbox
-            checked={showAttendanceStatus}
-            onChange={setShowAttendanceStatus}
-            disabled={exporting}
-          />
           <button
             type="button"
             disabled={exporting}
@@ -232,7 +224,6 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
         priceBands={report.priceBands}
         anchors={report.anchors}
         afterSalesReasons={report.afterSalesReasons}
-        showAttendanceStatus={showAttendanceStatus}
       />
 
       <BusinessInsightCards
@@ -306,11 +297,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
       {report
         ? createPortal(
             <div className="pointer-events-none fixed left-[-9999px] top-0">
-              <OperationsReportImageSheet
-                ref={sheetRef}
-                data={report}
-                showAttendanceStatus={showAttendanceStatus}
-              />
+              <OperationsReportImageSheet ref={sheetRef} data={report} />
             </div>,
             document.body,
           )

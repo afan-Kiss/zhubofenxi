@@ -2,11 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import {
   buildAnchorDrawerSummaryText,
-  formatShippedOrderCountLabel,
 } from '../../lib/anchor-drawer-summary'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { Pagination } from '../ui/Pagination'
-import { showDrawerSignQualityMetrics, showAnchorDrillSignedTab } from '../../lib/board-rate-display'
+import { showAnchorDrillSignedTab } from '../../lib/board-rate-display'
 import { BoardDrawerShell } from './BoardDrawerShell'
 import { BoardDrillOrderTable, type BoardDrillOrderRow } from './BoardDrillOrderTable'
 import { anchorRowLivePeriodText } from '../../lib/anchor-leaderboard-row'
@@ -238,12 +237,10 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
 
   const stats = data?.stats ?? (loading ? rowSnapshot : undefined)
   const showInitialSkeleton = loading && !data && !error
-  const showSignQuality = showDrawerSignQualityMetrics(preset)
   const showSignedTab = showAnchorDrillSignedTab(preset)
 
   const shippedOrderAmount =
     statNum(stats, 'validSalesAmount') || statNum(stats, 'effectiveGmv')
-  const shippedOrderCount = statNum(stats, 'shippedOrderCount')
 
   const summaryText =
     stats && !error
@@ -311,55 +308,25 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
       text: `支付金额 ${formatMoney(statNum(stats, 'gmv') || statNum(stats, 'totalGmv'))}`,
     },
     {
-      key: 'shippedAmt',
-      text: `发货单金额 ${formatMoney(shippedOrderAmount)}`,
+      key: 'validSales',
+      text: `有效成交额 ${formatMoney(shippedOrderAmount)}`,
     },
     {
-      key: 'shippedCnt',
-      text: `发出单数 ${formatShippedOrderCountLabel(shippedOrderCount)}`,
+      key: 'orders',
+      text: `支付单数 ${formatCount(statNum(stats, 'orderCount'))}`,
     },
-    ...(showSignQuality
-      ? [{ key: 'signedAmt', text: `签收 ${formatMoney(statNum(stats, 'actualSignedAmount'))}` }]
-      : []),
-    { key: 'orders', text: `订单 ${formatCount(statNum(stats, 'orderCount'))}` },
-    ...(showSignQuality
-      ? [
-          {
-            key: 'signedCnt',
-            text: `签收单 ${formatCount(
-              statNum(stats, 'actualSignedCount') ||
-                statNum(stats, 'signedOrderCount') ||
-                statNum(stats, 'signedCount'),
-            )}`,
-          },
-        ]
-      : []),
     {
       key: 'refundAmt',
       text: `退款金额 ${formatMoney(statNum(stats, 'returnAmount') || statNum(stats, 'refundAmount'))}`,
     },
-    { key: 'refundCnt', text: `退款订单 ${formatCount(statNum(stats, 'returnCount'))}` },
-    ...(showSignQuality
-      ? [{ key: 'qualityCnt', text: `品退单 ${formatCount(statNum(stats, 'qualityReturnCount'))}` }]
-      : []),
     {
-      key: 'refundRate',
-      text: `退款率 ${formatRate(stats?.returnRate == null ? null : statNum(stats, 'returnRate'))}`,
+      key: 'signRate',
+      text: `签收率 ${formatRate(stats?.signRate == null ? null : statNum(stats, 'signRate'))}`,
     },
-    ...(showSignQuality
-      ? [
-          {
-            key: 'qualityRate',
-            text: `品退率 ${formatRate(
-              stats?.qualityReturnRate == null ? null : statNum(stats, 'qualityReturnRate'),
-            )}`,
-          },
-          {
-            key: 'signRate',
-            text: `签收率 ${formatRate(stats?.signRate == null ? null : statNum(stats, 'signRate'))}`,
-          },
-        ]
-      : []),
+    {
+      key: 'qualityCnt',
+      text: `品退单数 ${formatCount(statNum(stats, 'qualityReturnCount'))}`,
+    },
   ]
 
   return (

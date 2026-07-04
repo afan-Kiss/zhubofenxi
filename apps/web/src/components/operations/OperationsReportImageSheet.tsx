@@ -26,10 +26,10 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
   return (
     <div ref={ref} className="w-[720px] bg-white p-6 text-slate-900">
       <h1 className="text-xl font-bold">{data.title}</h1>
-      <p className="mt-1 text-sm text-slate-500">有效成交与直播经营数据</p>
+      <p className="mt-1 text-sm text-slate-500">全店有效成交与直播经营数据</p>
 
       <div className="mt-4 grid grid-cols-3 gap-2">
-        <MetricCard label="有效成交金额" value={formatIntegerMoney(data.summary.validAmountYuan)} />
+        <MetricCard label="全店有效成交" value={formatIntegerMoney(data.summary.validAmountYuan)} />
         <MetricCard label="有效成交订单" value={formatOrderCount(data.summary.soldOrderCount)} />
         <MetricCard label="退货单率" value={formatRatePercent(data.summary.returnOrderRate)} />
         <MetricCard label="成交人数" value={formatPeopleCount(data.summary.dealUserCount)} />
@@ -79,7 +79,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
                 直播 {liveTime}
                 {scheduleHint}
                 {' · '}
-                有效成交 {formatIntegerMoney(row.validAmountYuan)} · 订单{' '}
+                归属有效成交 {formatIntegerMoney(row.validAmountYuan)} · 订单{' '}
                 {formatOrderCount(row.soldOrderCount)} · 直播 {row.liveDurationText}
               </p>
             </div>

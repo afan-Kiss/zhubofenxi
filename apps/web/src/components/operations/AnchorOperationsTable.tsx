@@ -40,7 +40,7 @@ export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
             <th className="px-3 py-2">主播</th>
             <th className="px-3 py-2">场次</th>
             <th className="px-3 py-2">开播时间</th>
-            <th className="px-3 py-2">有效成交</th>
+            <th className="px-3 py-2">归属有效成交</th>
             <th className="px-3 py-2">订单</th>
             <th className="px-3 py-2">退货单</th>
             <th className="px-3 py-2">退货单率</th>

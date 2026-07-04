@@ -378,6 +378,9 @@ export interface OpsReviewNotePayload {
 
 export interface DailyOperationsSummary {
   validAmountYuan: number
+  anchorAssignedValidAmountYuan?: number
+  unassignedValidAmountYuan?: number
+  unassignedValidOrderCount?: number
   soldOrderCount: number
   invalidOrderCount: number
   returnOrderCount: number
@@ -390,6 +393,9 @@ export interface DailyOperationsSummary {
   avgViewDurationSeconds: number | null
   avgOrderAmountYuan: number | null
   totalLiveDurationMinutes: number
+  assignedLiveDurationMinutes?: number
+  unassignedLiveDurationMinutes?: number
+  unassignedLiveSessionCount?: number
   hourlyAmountYuan: number | null
   liveRoomNewFollowers: LiveRoomNewFollowerRow[]
   totalNewFollowerCount: number

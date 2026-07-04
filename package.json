@@ -60,6 +60,7 @@
     "verify:quality-return-display": "tsx apps/server/scripts/verify-quality-return-display.ts",
     "verify:data-display-consistency": "tsx apps/server/scripts/verify-data-display-consistency.ts",
     "verify:overview-stability": "tsx apps/server/scripts/verify-overview-stability.ts",
+    "verify:statistics-integrity": "tsx apps/server/scripts/verify-statistics-integrity.ts",
     "update:overview-stable-snapshot": "tsx apps/server/scripts/update-overview-stable-snapshot.ts",
     "verify:buyer-ranking-week-range": "tsx apps/server/scripts/verify-buyer-ranking-week-range.ts",
     "verify:bad-buyer-ranking": "tsx apps/server/scripts/verify-bad-buyer-ranking.ts",

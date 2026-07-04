@@ -170,7 +170,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
         core={
           <>
             <OperationsMetricDrillCard
-              label="有效成交金额"
+              label="全店有效成交"
               value={formatIntegerMoney(s.validAmountYuan)}
               drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
             />
@@ -205,7 +205,10 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
               value={formatHourly(s.hourlyAmountYuan)}
               footer={
                 <p className="mt-1 text-[11px] leading-snug text-slate-500">
-                  每小时成交 = 有效成交金额 ÷ 直播时长
+                  每小时成交 = 全店有效成交 ÷ 全部直播时长
+                  {(s.unassignedLiveSessionCount ?? 0) > 0
+                    ? '（含未匹配排班的场次）'
+                    : ''}
                 </p>
               }
             />

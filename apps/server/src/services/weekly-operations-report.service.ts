@@ -130,6 +130,12 @@ function aggregateWeeklySummary(
   let returnOrderCount = 0
   let paidOrderCount = 0
   let totalLiveDurationMinutes = 0
+  let assignedLiveDurationMinutes = 0
+  let unassignedLiveDurationMinutes = 0
+  let unassignedLiveSessionCount = 0
+  let anchorAssignedValidCent = 0
+  let unassignedValidCent = 0
+  let unassignedValidOrderCount = 0
   let totalNewFollowerCount = 0
   let dealUserCount: number | null = null
   let joinUserCount: number | null = null
@@ -147,6 +153,12 @@ function aggregateWeeklySummary(
     returnOrderCount += snap.summary.returnOrderCount
     paidOrderCount += snap.summary.paidOrderCount ?? 0
     totalLiveDurationMinutes += snap.summary.totalLiveDurationMinutes
+    assignedLiveDurationMinutes += snap.summary.assignedLiveDurationMinutes ?? 0
+    unassignedLiveDurationMinutes += snap.summary.unassignedLiveDurationMinutes ?? 0
+    unassignedLiveSessionCount += snap.summary.unassignedLiveSessionCount ?? 0
+    anchorAssignedValidCent += Math.round((snap.summary.anchorAssignedValidAmountYuan ?? 0) * 100)
+    unassignedValidCent += Math.round((snap.summary.unassignedValidAmountYuan ?? 0) * 100)
+    unassignedValidOrderCount += snap.summary.unassignedValidOrderCount ?? 0
     totalNewFollowerCount += snap.summary.totalNewFollowerCount
     if (snap.summary.dealUserCount != null) {
       dealUserCount = (dealUserCount ?? 0) + snap.summary.dealUserCount
@@ -177,6 +189,9 @@ function aggregateWeeklySummary(
   return {
     validAmountCent,
     validAmountYuan,
+    anchorAssignedValidAmountYuan: anchorAssignedValidCent / 100,
+    unassignedValidAmountYuan: unassignedValidCent / 100,
+    unassignedValidOrderCount,
     soldOrderCount,
     invalidOrderCount,
     returnOrderCount,
@@ -194,6 +209,9 @@ function aggregateWeeklySummary(
     avgOrderAmountYuan:
       soldOrderCount > 0 ? Math.round(validAmountYuan / soldOrderCount) : null,
     totalLiveDurationMinutes,
+    assignedLiveDurationMinutes,
+    unassignedLiveDurationMinutes,
+    unassignedLiveSessionCount,
     hourlyAmountYuan:
       totalLiveHours > 0 ? Math.round(validAmountYuan / totalLiveHours) : null,
     liveRoomNewFollowers: [...liveRoomMap.entries()].map(([liveAccountName, count]) => ({

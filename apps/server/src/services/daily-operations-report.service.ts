@@ -105,6 +105,9 @@ export interface DailyOperationsAnchorRow extends AnchorAttendanceStatusPayload 
 export interface DailyOperationsSummary {
   validAmountCent: number
   validAmountYuan: number
+  anchorAssignedValidAmountYuan: number
+  unassignedValidAmountYuan: number
+  unassignedValidOrderCount: number
   soldOrderCount: number
   invalidOrderCount: number
   returnOrderCount: number
@@ -118,6 +121,9 @@ export interface DailyOperationsSummary {
   avgViewDurationSeconds: number | null
   avgOrderAmountYuan: number | null
   totalLiveDurationMinutes: number
+  assignedLiveDurationMinutes: number
+  unassignedLiveDurationMinutes: number
+  unassignedLiveSessionCount: number
   hourlyAmountYuan: number | null
   liveRoomNewFollowers: LiveRoomNewFollowerRow[]
   totalNewFollowerCount: number
@@ -437,11 +443,21 @@ export async function buildDailyOperationsReport(params: {
 
   const anchorRows = await buildDailyOperationsAnchorRowsForDay(params)
 
-  const soldOrderCount = anchorRows.reduce((sum, row) => sum + row.soldOrderCount, 0)
+  const storeWideValid = sumValidRevenueFromViews(performanceViewsAll)
+  const anchorAssignedValidCent = anchorRows.reduce((sum, row) => sum + row.validAmountCent, 0)
+  const unassignedViews = dedupeViewsByMetricOrderNo(performanceViewsAll).filter(
+    (v) => v.attributionType === 'unassigned',
+  )
+  const unassignedValid = sumValidRevenueFromViews(unassignedViews)
+
+  const validAmountCent = storeWideValid.validAmountCent
+  const validAmountYuan = storeWideValid.validAmountYuan
+  const soldOrderCount = storeWideValid.soldOrderCount
+  for (const row of anchorRows) {
+    row.amountRatio = safeRatioPercent(row.validAmountYuan, validAmountYuan)
+  }
+
   const invalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)
-  const summaryValidAmountCent = anchorRows.reduce((sum, row) => sum + row.validAmountCent, 0)
-  const validAmountCent = summaryValidAmountCent
-  const validAmountYuan = centToYuan(validAmountCent)
   const summaryRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViewsAll)
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
@@ -483,17 +499,33 @@ export async function buildDailyOperationsReport(params: {
     products,
     limit: 10,
   })
+
+  const statisticsIntegrityWarnings: string[] = []
+  if (unassignedValid.soldOrderCount > 0) {
+    statisticsIntegrityWarnings.push(
+      `有 ${unassignedValid.soldOrderCount} 单有效成交未归属主播（${unassignedValid.validAmountYuan.toFixed(2)} 元），全店汇总已计入、主播表为已归属口径。`,
+    )
+  }
+  if (liveAssignment.unassignedLiveSessionCount > 0) {
+    statisticsIntegrityWarnings.push(
+      `有 ${liveAssignment.unassignedLiveSessionCount} 场真实直播未匹配到排班，已计入总时长但不计入主播个人时长。`,
+    )
+  }
+
   const reportDataQuality = {
     reliable: rankings.products.hot.items.length > 0 || anchorRows.some((a) => a.validAmountYuan > 0),
-    warnings: buildDailyReportDataQualityWarnings({
-      summary: {
-        dealUserCount: summaryTraffic.dealUserCount,
-        joinUserCount: summaryTraffic.joinUserCount,
-        viewSessionCount: summaryTraffic.viewSessionCount,
-      },
-      rankings,
-      reviewNote,
-    }),
+    warnings: [
+      ...buildDailyReportDataQualityWarnings({
+        summary: {
+          dealUserCount: summaryTraffic.dealUserCount,
+          joinUserCount: summaryTraffic.joinUserCount,
+          viewSessionCount: summaryTraffic.viewSessionCount,
+        },
+        rankings,
+        reviewNote,
+      }),
+      ...statisticsIntegrityWarnings,
+    ],
   }
 
   let businessInsights: BusinessInsightsPayload
@@ -545,6 +577,9 @@ export async function buildDailyOperationsReport(params: {
     summary: {
       validAmountCent,
       validAmountYuan,
+      anchorAssignedValidAmountYuan: centToYuan(anchorAssignedValidCent),
+      unassignedValidAmountYuan: unassignedValid.validAmountYuan,
+      unassignedValidOrderCount: unassignedValid.soldOrderCount,
       soldOrderCount,
       invalidOrderCount,
       returnOrderCount: summaryRefundMetrics.refundOrderCount,
@@ -558,6 +593,9 @@ export async function buildDailyOperationsReport(params: {
       avgViewDurationSeconds: summaryTraffic.avgViewDurationSeconds,
       avgOrderAmountYuan: roundYuan(safeDivide(validAmountYuan, soldOrderCount)),
       totalLiveDurationMinutes,
+      assignedLiveDurationMinutes: liveAssignment.assignedLiveDurationMinutes,
+      unassignedLiveDurationMinutes: liveAssignment.unassignedLiveDurationMinutes,
+      unassignedLiveSessionCount: liveAssignment.unassignedLiveSessionCount,
       hourlyAmountYuan: roundYuan(
         totalLiveHours != null ? safeDivide(validAmountYuan, totalLiveHours) : null,
       ),

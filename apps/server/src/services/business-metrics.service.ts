@@ -10,7 +10,7 @@ import { viewCountsAsQualityRefund } from './quality-refund-resolution.service'
 import { getOfficialQualityPackageIdSet, getQualityBadCasesSync } from './quality-badcase-store.service'
 import { aggregateRefundAmountCentByOrderNo } from './order-refund-metrics.service'
 import { dedupeOrderCountByOrderNo } from './order-master-match.service'
-import { resolveMetricOrderNo } from './calc-refund-rate.service'
+import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { sumValidRevenueFromViews } from './valid-revenue-order.service'
 /** 全站经营指标统一计算（看板 / 排行 / 钻取 / 导出共用） */
 
@@ -146,13 +146,15 @@ export function calculateBusinessMetrics(
   warnCtx?: import('./calc-refund-rate.service').RefundRateWarnContext,
 ): BusinessMetrics {
 
+  const dedupedViews = dedupeViewsByMetricOrderNo(views)
+
   let totalGmvCent = 0
 
   let actualSignedCent = 0
 
   let freightRefundCent = 0
 
-  for (const v of views) {
+  for (const v of dedupedViews) {
 
     if (v.includedInGmv) {
       totalGmvCent += v.paymentBaseCent

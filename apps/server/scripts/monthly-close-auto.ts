@@ -1,4 +1,12 @@
 #!/usr/bin/env tsx
+import fs from 'node:fs'
+import path from 'node:path'
+import { config as loadDotenv } from 'dotenv'
+
+const serverEnv = path.resolve(process.cwd(), 'apps/server/.env')
+if (fs.existsSync(serverEnv)) loadDotenv({ path: serverEnv })
+if (!process.env.DATABASE_URL) process.env.DATABASE_URL = 'file:../data/app.db'
+
 import { runMonthlyCloseAuto } from '../src/services/monthly-close-auto.service'
 
 async function main() {

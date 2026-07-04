@@ -24,6 +24,7 @@ export function buildConclusionReasonSummaryFromChecks(params: {
   checks: DataAccuracyCheck[]
   syncRiskStatus: DataAccuracyStatus
   overallStatus: DataAccuracyStatus
+  reconciliationBlockers?: string[]
 }): string {
   const parts: string[] = []
 
@@ -48,7 +49,12 @@ export function buildConclusionReasonSummaryFromChecks(params: {
   }
 
   if (parts.length === 0) {
-    return params.overallStatus === 'pass' ? '数据核对通过' : '存在需关注的提示项'
+    if (params.overallStatus === 'pass') return '数据核对通过'
+    const blockers = params.reconciliationBlockers?.filter(Boolean) ?? []
+    if (blockers.length > 0) {
+      return blockers.slice(0, 2).join('；')
+    }
+    return '存在需关注的提示项'
   }
   return [...new Set(parts)].join('、')
 }

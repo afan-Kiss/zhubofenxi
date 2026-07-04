@@ -50,6 +50,18 @@ function main(): void {
   })
   assert(summary2.includes('品退诊断异常'), 'quality warning 应显示品退诊断异常', issues)
 
+  const summary3 = buildConclusionReasonSummaryFromChecks({
+    checks: [],
+    syncRiskStatus: 'pass',
+    overallStatus: 'danger',
+    reconciliationBlockers: ['结算/到账数据不足，不能判断实际到账利润'],
+  })
+  assert(
+    summary3.includes('结算/到账数据不足'),
+    'reconciliation blockers 应写入结论摘要',
+    issues,
+  )
+
   assert(
     isMonthlyCloseReportBuildStale(
       { schemaVersion: 2, gitCommit: 'abc123', fullScan: true },

@@ -155,6 +155,7 @@ export async function runMonthlyCloseAuto(params?: {
         checks: report.checks,
         syncRiskStatus: report.syncRisk.status,
         overallStatus: report.status,
+        reconciliationBlockers: reconciliation.dataQuality.blockers,
       }),
     }
 

@@ -4,7 +4,7 @@ import {
   getAssignedSessionsForAnchor,
   resolveAnchorLiveMatchHint,
   resolveDailyReportLiveSessionAssignments,
-  resolveOriginalSessionsForAssignedAnchor,
+  mapOriginalSessionsWithAssignedRange,
   shouldUsePerShopRealLiveSessions,
   type DailyReportLiveSessionAssignments,
 } from './daily-report-live-sessions.service'
@@ -97,11 +97,6 @@ async function resolveLiveSessionsForAnchorRow(params: {
   liveAssignment?: DailyReportLiveSessionAssignments
 }): Promise<AnchorLiveSessionBrief[]> {
   if (shouldUsePerShopRealLiveSessions(params.startDate, params.endDate) && params.liveAssignment) {
-    const originals = resolveOriginalSessionsForAssignedAnchor(
-      params.liveAssignment,
-      params.anchorName,
-    )
-    if (originals.length > 0) return originals
     return getAssignedSessionsForAnchor(params.liveAssignment, params.anchorName)
   }
   return resolveAnchorLiveSessionsForRange({
@@ -111,6 +106,14 @@ async function resolveLiveSessionsForAnchorRow(params: {
     anchorId: params.anchorId,
     anchorName: params.anchorName,
   })
+}
+
+function resolveOriginalLiveSessionsForAnchorRow(params: {
+  liveAssignment?: DailyReportLiveSessionAssignments
+  anchorName: string
+}): AnchorLiveSessionBrief[] {
+  if (!params.liveAssignment) return []
+  return mapOriginalSessionsWithAssignedRange(params.liveAssignment, params.anchorName)
 }
 
 export async function enrichAnchorLeaderboardWithLateStatus(
@@ -130,6 +133,7 @@ export async function enrichAnchorLeaderboardWithLateStatus(
     anchorName: string
     shopName: string
     sessions: AnchorLiveSessionBrief[]
+    attendanceSessions: AnchorLiveSessionBrief[]
     actualStartMs: number | null
     sessionName: string
   }
@@ -139,7 +143,16 @@ export async function enrichAnchorLeaderboardWithLateStatus(
       const anchorName = String(row.anchorName ?? '').trim()
       const anchorId = String(row.anchorId ?? '').trim()
       if (!anchorName || anchorName === '未归属') {
-        return { index, row, anchorName, shopName: '', sessions: [], actualStartMs: null, sessionName: '' }
+        return {
+          index,
+          row,
+          anchorName,
+          shopName: '',
+          sessions: [],
+          attendanceSessions: [],
+          actualStartMs: null,
+          sessionName: '',
+        }
       }
 
       const sessions = await resolveLiveSessionsForAnchorRow({
@@ -150,7 +163,13 @@ export async function enrichAnchorLeaderboardWithLateStatus(
         anchorName,
         liveAssignment,
       })
-      const actual = earliestSessionStart(sessions)
+      const originalSessions = resolveOriginalLiveSessionsForAnchorRow({
+        liveAssignment,
+        anchorName,
+      })
+      const attendanceSessions =
+        originalSessions.length > 0 ? originalSessions : sessions
+      const actual = earliestSessionStart(attendanceSessions)
       const shopName =
         String(row.shopName ?? '').trim() || resolveShopHintFromSessions(anchorName, sessions)
 
@@ -160,6 +179,7 @@ export async function enrichAnchorLeaderboardWithLateStatus(
         anchorName,
         shopName,
         sessions,
+        attendanceSessions,
         actualStartMs: actual?.startMs ?? null,
         sessionName: '',
       }
@@ -194,7 +214,7 @@ export async function enrichAnchorLeaderboardWithLateStatus(
         scheduleTable.rows,
         item.anchorName,
         item.shopName,
-        item.sessions,
+        item.attendanceSessions,
         usedRowIds,
       ),
     )
@@ -204,8 +224,9 @@ export async function enrichAnchorLeaderboardWithLateStatus(
     const attendance = attendanceByIndex.get(index)
     const item = prefetched[index]
     const sessions = item?.sessions ?? []
+    const attendanceSessions = item?.attendanceSessions ?? sessions
     const livePeriodText = buildPerSessionLivePeriodText(sessions)
-    const liveTimeRange = buildActualLivePeriodText(sessions)
+    const liveTimeRange = buildActualLivePeriodText(attendanceSessions)
     const livePeriodHint = resolveAnchorLiveMatchHint({
       anchorName: String(row.anchorName ?? ''),
       scheduleRows: scheduleTable.rows,
@@ -256,6 +277,7 @@ export async function enrichPocketRowsWithLateStatus(
     anchorName: string
     shopName: string
     sessions: AnchorLiveSessionBrief[]
+    attendanceSessions: AnchorLiveSessionBrief[]
     actualStartMs: number | null
     sessionName: string
   }
@@ -270,7 +292,13 @@ export async function enrichPocketRowsWithLateStatus(
         anchorName: row.anchorName,
         liveAssignment,
       })
-      const actual = earliestSessionStart(sessions)
+      const originalSessions = resolveOriginalLiveSessionsForAnchorRow({
+        liveAssignment,
+        anchorName: row.anchorName,
+      })
+      const attendanceSessions =
+        originalSessions.length > 0 ? originalSessions : sessions
+      const actual = earliestSessionStart(attendanceSessions)
       const shopName =
         row.shopName?.trim() || resolveShopHintFromSessions(row.anchorName, sessions)
 
@@ -280,6 +308,7 @@ export async function enrichPocketRowsWithLateStatus(
         anchorName: row.anchorName,
         shopName,
         sessions,
+        attendanceSessions,
         actualStartMs: actual?.startMs ?? null,
         sessionName: row.sessionName ?? '',
       }
@@ -312,7 +341,7 @@ export async function enrichPocketRowsWithLateStatus(
         scheduleTable.rows,
         item.anchorName,
         item.shopName,
-        item.sessions,
+        item.attendanceSessions,
         usedRowIds,
       ),
     )

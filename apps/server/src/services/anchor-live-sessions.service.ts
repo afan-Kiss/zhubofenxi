@@ -58,6 +58,8 @@ function formatLiveClock(time: Date | null, fallbackText?: string): string {
     return formatClockShanghai(time)
   }
   const text = (fallbackText ?? '').trim()
+  const hitSec = /\d{2}:\d{2}:\d{2}/.exec(text)
+  if (hitSec) return hitSec[0]
   const hit = /\d{2}:\d{2}/.exec(text)
   return hit ? hit[0] : '—'
 }

@@ -42,6 +42,10 @@ import {
   resolveAnchorLiveSessionsForRange,
 } from './anchor-live-sessions.service'
 import {
+  resolveOriginalSessionsForAssignedAnchorRange,
+  shouldUsePerShopRealLiveSessions,
+} from './daily-report-live-sessions.service'
+import {
   attachRawByMatchToViews,
   filterViewsForAnchorPerformance,
   filterViewsForBuyerRanking,
@@ -188,14 +192,25 @@ export async function buildAnchorDrill(params: {
   const total = allRows.length
   const rows = allRows.slice((page - 1) * pageSize, page * pageSize)
 
-  const liveSessions = await resolveAnchorLiveSessionsForRange({
-    preset: params.preset,
-    startDate: params.startDate,
-    endDate: params.endDate,
-    anchorId: anchorQuery.anchorId,
-    anchorName: anchorQuery.anchorName,
-    anchorOrders: anchorViews,
-  })
+  const isSingleDay =
+    params.startDate.trim() === params.endDate.trim() && Boolean(params.startDate.trim())
+  const useOriginalLiveSessions =
+    isSingleDay && shouldUsePerShopRealLiveSessions(params.startDate, params.endDate)
+
+  const liveSessions = useOriginalLiveSessions
+    ? await resolveOriginalSessionsForAssignedAnchorRange({
+        startDate: params.startDate,
+        endDate: params.endDate,
+        anchorName: anchorQuery.anchorName ?? '',
+      })
+    : await resolveAnchorLiveSessionsForRange({
+        preset: params.preset,
+        startDate: params.startDate,
+        endDate: params.endDate,
+        anchorId: anchorQuery.anchorId,
+        anchorName: anchorQuery.anchorName,
+        anchorOrders: anchorViews,
+      })
 
   return {
     anchorId: stats?.anchorId ?? anchorQuery.anchorId ?? '',

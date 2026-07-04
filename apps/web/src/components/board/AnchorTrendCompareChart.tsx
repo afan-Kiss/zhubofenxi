@@ -17,6 +17,8 @@ import {
 
 const ANCHOR_COLORS = ['#f43f5e', '#3b82f6', '#22c55e', '#f59e0b'] as const
 const MAX_ANCHORS = 4
+const INTRADAY_BUCKET_MINUTES = 30
+const BUCKET_MS = INTRADAY_BUCKET_MINUTES * 60_000
 
 export interface AnchorTrendCompareSeries {
   anchorName: string
@@ -27,7 +29,8 @@ export interface AnchorTrendCompareSeries {
 interface CompareChartRow {
   label: string
   key: string
-  [dataKey: string]: string | number
+  bucketIndex: number
+  [dataKey: string]: string | number | null
 }
 
 function isValidAnchorRow(row: AnchorLeaderboardRow): boolean {
@@ -37,12 +40,127 @@ function isValidAnchorRow(row: AnchorLeaderboardRow): boolean {
   return Boolean(trend?.points?.length)
 }
 
+function relativeBucketLabel(bucketIndex: number): string {
+  const start = bucketIndex * INTRADAY_BUCKET_MINUTES
+  const end = (bucketIndex + 1) * INTRADAY_BUCKET_MINUTES
+  return `${start}-${end}分钟`
+}
+
+function relativeBucketTooltipLabel(bucketIndex: number): string {
+  return `开播后 ${relativeBucketLabel(bucketIndex)}`
+}
+
+function buildDailyComparePayload(
+  matched: Array<{ anchorName: string; trend: NonNullable<ReturnType<typeof anchorRowTrend>> }>,
+): { series: AnchorTrendCompareSeries[]; chartData: CompareChartRow[] } {
+  const keyOrder: string[] = []
+  const keyLabels = new Map<string, string>()
+  for (const item of matched) {
+    for (const point of item.trend.points) {
+      const k = point.key || point.label
+      if (!keyLabels.has(k)) {
+        keyOrder.push(k)
+        keyLabels.set(k, point.label)
+      }
+    }
+  }
+
+  const series: AnchorTrendCompareSeries[] = matched.map((item, index) => ({
+    anchorName: item.anchorName,
+    color: ANCHOR_COLORS[index] ?? ANCHOR_COLORS[ANCHOR_COLORS.length - 1]!,
+    dataKey: `anchor_${index}`,
+  }))
+
+  const chartData: CompareChartRow[] = keyOrder.map((key, bucketIndex) => {
+    const row: CompareChartRow = {
+      key,
+      label: keyLabels.get(key) ?? key,
+      bucketIndex,
+    }
+    for (let i = 0; i < matched.length; i++) {
+      const item = matched[i]!
+      const point = item.trend.points.find((p) => (p.key || p.label) === key)
+      row[`anchor_${i}`] = point?.value ?? 0
+    }
+    return row
+  })
+
+  return { series, chartData }
+}
+
+function buildIntradayRelativeComparePayload(
+  matched: Array<{ anchorName: string; trend: NonNullable<ReturnType<typeof anchorRowTrend>> }>,
+): { series: AnchorTrendCompareSeries[]; chartData: CompareChartRow[] } {
+  type AnchorBuckets = {
+    anchorName: string
+    bucketValues: Map<number, number>
+    maxBucket: number
+  }
+
+  const perAnchor: AnchorBuckets[] = []
+
+  for (const item of matched) {
+    const points = item.trend.points
+    if (points.length === 0) continue
+
+    const firstKey = points[0]!.key
+    const firstMs = Number(firstKey)
+    const useTimestamp = Number.isFinite(firstMs)
+
+    const bucketValues = new Map<number, number>()
+    let maxBucket = 0
+
+    points.forEach((point, index) => {
+      const bucketIndex = useTimestamp
+        ? Math.max(0, Math.round((Number(point.key) - firstMs) / BUCKET_MS))
+        : index
+      maxBucket = Math.max(maxBucket, bucketIndex)
+      bucketValues.set(bucketIndex, (bucketValues.get(bucketIndex) ?? 0) + point.value)
+    })
+
+    perAnchor.push({
+      anchorName: item.anchorName,
+      bucketValues,
+      maxBucket,
+    })
+  }
+
+  const globalMaxBucket = perAnchor.reduce((max, item) => Math.max(max, item.maxBucket), 0)
+
+  const series: AnchorTrendCompareSeries[] = perAnchor.map((item, index) => ({
+    anchorName: item.anchorName,
+    color: ANCHOR_COLORS[index] ?? ANCHOR_COLORS[ANCHOR_COLORS.length - 1]!,
+    dataKey: `anchor_${index}`,
+  }))
+
+  const chartData: CompareChartRow[] = []
+  for (let bucketIndex = 0; bucketIndex <= globalMaxBucket; bucketIndex++) {
+    const row: CompareChartRow = {
+      key: String(bucketIndex),
+      label: relativeBucketLabel(bucketIndex),
+      bucketIndex,
+    }
+    for (let i = 0; i < perAnchor.length; i++) {
+      const item = perAnchor[i]!
+      if (bucketIndex > item.maxBucket) {
+        row[`anchor_${i}`] = null
+      } else {
+        row[`anchor_${i}`] = item.bucketValues.get(bucketIndex) ?? 0
+      }
+    }
+    chartData.push(row)
+  }
+
+  return { series, chartData }
+}
+
 function buildComparePayload(rows: AnchorLeaderboardRow[]): {
   mode: AnchorTrendMode | null
   series: AnchorTrendCompareSeries[]
   chartData: CompareChartRow[]
   skippedModeMismatch: boolean
   hasComparableData: boolean
+  isRelativeIntraday: boolean
 } {
   const candidates = rows.filter(isValidAnchorRow)
   if (candidates.length === 0) {
@@ -52,6 +170,7 @@ function buildComparePayload(rows: AnchorLeaderboardRow[]): {
       chartData: [],
       skippedModeMismatch: false,
       hasComparableData: false,
+      isRelativeIntraday: false,
     }
   }
 
@@ -78,42 +197,20 @@ function buildComparePayload(rows: AnchorLeaderboardRow[]): {
       chartData: [],
       skippedModeMismatch,
       hasComparableData: false,
+      isRelativeIntraday: false,
     }
   }
 
-  const keyOrder: string[] = []
-  const keyLabels = new Map<string, string>()
-  for (const item of matched) {
-    for (const point of item.trend.points) {
-      const k = point.key || point.label
-      if (!keyLabels.has(k)) {
-        keyOrder.push(k)
-        keyLabels.set(k, point.label)
-      }
-    }
-  }
-
-  const series: AnchorTrendCompareSeries[] = matched.map((item, index) => ({
-    anchorName: item.anchorName,
-    color: ANCHOR_COLORS[index] ?? ANCHOR_COLORS[ANCHOR_COLORS.length - 1]!,
-    dataKey: `anchor_${index}`,
-  }))
-
-  const chartData: CompareChartRow[] = keyOrder.map((key) => {
-    const row: CompareChartRow = {
-      key,
-      label: keyLabels.get(key) ?? key,
-    }
-    for (let i = 0; i < matched.length; i++) {
-      const item = matched[i]!
-      const point = item.trend.points.find((p) => (p.key || p.label) === key)
-      row[`anchor_${i}`] = point?.value ?? 0
-    }
-    return row
-  })
+  const isRelativeIntraday = referenceMode === 'intraday'
+  const { series, chartData } = isRelativeIntraday
+    ? buildIntradayRelativeComparePayload(matched)
+    : buildDailyComparePayload(matched)
 
   const hasComparableData = chartData.some((row) =>
-    series.some((s) => Number(row[s.dataKey] ?? 0) > 0),
+    series.some((s) => {
+      const v = row[s.dataKey]
+      return v != null && Number(v) > 0
+    }),
   )
 
   return {
@@ -122,6 +219,7 @@ function buildComparePayload(rows: AnchorLeaderboardRow[]): {
     chartData,
     skippedModeMismatch,
     hasComparableData,
+    isRelativeIntraday,
   }
 }
 
@@ -131,29 +229,39 @@ function CompareTooltip({
   label,
   series,
   formatMoney,
+  isRelativeIntraday,
+  bucketIndex,
 }: {
   active?: boolean
   payload?: ReadonlyArray<{ dataKey?: string | number; value?: unknown; color?: string }> | undefined
   label?: string | number
   series: AnchorTrendCompareSeries[]
   formatMoney: (n: number) => string
+  isRelativeIntraday: boolean
+  bucketIndex?: number
 }) {
   if (!active || !payload?.length) return null
 
-  const entries = series
-    .map((s) => {
-      const hit = payload.find((p) => String(p.dataKey ?? '') === s.dataKey)
-      return {
-        anchorName: s.anchorName,
-        color: s.color,
-        value: Number(hit?.value ?? 0),
-      }
-    })
-    .sort((a, b) => b.value - a.value)
+  const title =
+    isRelativeIntraday && bucketIndex != null
+      ? relativeBucketTooltipLabel(bucketIndex)
+      : String(label ?? '')
+
+  const entries = series.map((s) => {
+    const hit = payload.find((p) => String(p.dataKey ?? '') === s.dataKey)
+    const raw = hit?.value
+    const isNull = raw == null || raw === ''
+    return {
+      anchorName: s.anchorName,
+      color: s.color,
+      isNull,
+      value: isNull ? null : Number(raw),
+    }
+  })
 
   return (
     <div className="rounded-lg border border-rose-100 bg-white px-3 py-2 text-xs shadow-md">
-      <p className="font-medium text-slate-800">{String(label ?? '')}</p>
+      <p className="font-medium text-slate-800">{title}</p>
       <ul className="mt-1.5 space-y-1">
         {entries.map((entry) => (
           <li key={entry.anchorName} className="flex items-center justify-between gap-4">
@@ -165,7 +273,7 @@ function CompareTooltip({
               {entry.anchorName}
             </span>
             <span className="font-medium tabular-nums text-slate-800">
-              {formatMoney(entry.value)}
+              {entry.isNull ? '未到该时长' : formatMoney(entry.value ?? 0)}
             </span>
           </li>
         ))}
@@ -185,10 +293,8 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
   formatMoney,
   className = '',
 }) => {
-  const { mode, series, chartData, skippedModeMismatch, hasComparableData } = useMemo(
-    () => buildComparePayload(rows),
-    [rows],
-  )
+  const { series, chartData, skippedModeMismatch, hasComparableData, isRelativeIntraday } =
+    useMemo(() => buildComparePayload(rows), [rows])
 
   const xInterval = useMemo(() => {
     const len = chartData.length
@@ -209,10 +315,10 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     )
   }
 
-  const subtitle =
-    mode === 'intraday'
-      ? '按当前查询范围内的直播时间/排班时间统计'
-      : '按当前查询范围内每日销售额统计'
+  const title = isRelativeIntraday ? '主播开播后成交节奏对比' : '主播每日销售走势对比'
+  const subtitle = isRelativeIntraday
+    ? '按「开播后第几分钟」对齐，不按自然时间'
+    : '按日期对比每日销售额'
 
   return (
     <div
@@ -221,7 +327,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     >
       <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
         <div>
-          <p className="text-[13px] font-medium text-slate-700 md:text-[14px]">主播销售走势对比</p>
+          <p className="text-[13px] font-medium text-slate-700 md:text-[14px]">{title}</p>
           <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p>
         </div>
         {skippedModeMismatch ? (
@@ -248,15 +354,23 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
             />
             <YAxis hide domain={[0, (max: number) => Math.max(max, 1)]} />
             <Tooltip
-              content={({ active, payload, label }) => (
-                <CompareTooltip
-                  active={active}
-                  payload={payload}
-                  label={label}
-                  series={series}
-                  formatMoney={formatMoney}
-                />
-              )}
+              content={({ active, payload, label }) => {
+                const bucketIndex =
+                  typeof payload?.[0]?.payload?.bucketIndex === 'number'
+                    ? payload[0]!.payload.bucketIndex
+                    : chartData.find((r) => r.label === label)?.bucketIndex
+                return (
+                  <CompareTooltip
+                    active={active}
+                    payload={payload}
+                    label={label}
+                    series={series}
+                    formatMoney={formatMoney}
+                    isRelativeIntraday={isRelativeIntraday}
+                    bucketIndex={bucketIndex}
+                  />
+                )
+              }}
             />
             <Legend
               verticalAlign="bottom"
@@ -279,6 +393,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
                 stroke={s.color}
                 strokeWidth={2}
                 dot={false}
+                connectNulls={false}
                 activeDot={{ r: 3.5, fill: s.color, stroke: '#fff', strokeWidth: 1 }}
                 isAnimationActive
               />

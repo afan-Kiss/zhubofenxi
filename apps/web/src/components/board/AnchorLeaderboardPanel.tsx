@@ -92,7 +92,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                 : 'text-slate-600 hover:bg-rose-50'
             }`}
           >
-            四主播对比
+            开播节奏对比
           </button>
         </div>
         <ListViewToggle mode={viewMode} onChange={setViewMode} />

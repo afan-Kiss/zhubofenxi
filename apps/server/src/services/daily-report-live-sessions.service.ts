@@ -531,11 +531,17 @@ function baseLiveIdFromClippedSession(liveId: string): string {
   return idx >= 0 ? liveId.slice(0, idx) : liveId
 }
 
-/** 归属段对应的平台原始场次（展示用真实开播/下播时间） */
-export function resolveOriginalSessionsForAssignedAnchor(
+/** 抽屉展示：平台原始场次 + 该主播归属时段 */
+export interface AnchorDrillLiveSession extends DailyReportLiveSession {
+  assignedStartTime?: string
+  assignedEndTime?: string
+}
+
+/** 从归属结果映射平台原始场次（含 assigned 时段） */
+export function mapOriginalSessionsWithAssignedRange(
   assignment: Pick<DailyReportLiveSessionAssignments, 'allSessions' | 'byAnchor'>,
   anchorName: string,
-): DailyReportLiveSession[] {
+): AnchorDrillLiveSession[] {
   const clipped = getAssignedSessionsForAnchor(assignment, anchorName)
   if (clipped.length === 0) return []
 
@@ -545,16 +551,55 @@ export function resolveOriginalSessionsForAssignedAnchor(
   }
 
   const seen = new Set<string>()
-  const result: DailyReportLiveSession[] = []
+  const result: AnchorDrillLiveSession[] = []
   for (const clippedSession of clipped) {
     const baseId = baseLiveIdFromClippedSession(clippedSession.liveId)
     const original = originalsByLiveId.get(baseId)
     if (!original) continue
-    if (seen.has(baseId)) continue
-    seen.add(baseId)
-    result.push(original)
+    const dedupeKey = `${original.sourceShopCode}::${baseId}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+    result.push({
+      ...original,
+      assignedStartTime: clippedSession.startTime,
+      assignedEndTime: clippedSession.endTime,
+    })
   }
   return result.sort((a, b) => a.startTime.localeCompare(b.startTime))
+}
+
+/** @deprecated 使用 mapOriginalSessionsWithAssignedRange */
+export function resolveOriginalSessionsForAssignedAnchor(
+  assignment: Pick<DailyReportLiveSessionAssignments, 'allSessions' | 'byAnchor'>,
+  anchorName: string,
+): DailyReportLiveSession[] {
+  return mapOriginalSessionsWithAssignedRange(assignment, anchorName)
+}
+
+/** 主播订单抽屉：返回平台原始直播场次（订单归属仍用 clipped 段） */
+export async function resolveOriginalSessionsForAssignedAnchorRange(params: {
+  startDate: string
+  endDate: string
+  anchorName: string
+}): Promise<AnchorDrillLiveSession[]> {
+  const anchorName = params.anchorName.trim()
+  if (!anchorName || anchorName === '未归属') return []
+  if (!shouldUsePerShopRealLiveSessions(params.startDate, params.endDate)) return []
+
+  const start = params.startDate.trim()
+  const end = params.endDate.trim()
+  const byKey = new Map<string, AnchorDrillLiveSession>()
+  let dateKey = start
+  while (dateKey <= end) {
+    const assignment = await resolveDailyReportLiveSessionAssignments(dateKey)
+    for (const session of mapOriginalSessionsWithAssignedRange(assignment, anchorName)) {
+      const key = `${session.sourceShopCode}::${session.liveId}`
+      if (!byKey.has(key)) byKey.set(key, session)
+    }
+    if (dateKey === end) break
+    dateKey = addDaysShanghai(dateKey, 1)
+  }
+  return [...byKey.values()].sort((a, b) => a.startTime.localeCompare(b.startTime))
 }
 
 export function resolveAnchorLiveMatchHint(params: {

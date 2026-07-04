@@ -8,6 +8,7 @@ import type { DailyReportLiveSession } from '../src/services/daily-report-live-s
 import {
   assignDailyReportLiveSessionsToAnchors,
   buildDailyReportLiveSessionDedupeKey,
+  mapOriginalSessionsWithAssignedRange,
 } from '../src/services/daily-report-live-sessions.service'
 import {
   buildPerSessionLivePeriodText,
@@ -198,6 +199,43 @@ async function main(): Promise<void> {
   assert.equal(resolveAnchorFromClippedAssignment(mockAssignment, pay1350), 'A', '13:50 应归 A')
   assert.equal(resolveAnchorFromClippedAssignment(mockAssignment, pay1430), 'B', '14:30 应归 B')
   console.log('PASS 场景4: 13:50→A, 14:30→B')
+
+  // 场景 5：抽屉显示原始场次，归属时段单独标注
+  const zijieSchedules = [
+    scheduleRow({
+      rowId: 'zijie-am',
+      anchorName: '子杰',
+      shopName: '拾玉居和田玉',
+      startTime: '09:30',
+      endTime: '14:00',
+      startAt: `${DATE}T09:30:00+08:00`,
+      endAt: `${DATE}T14:00:00+08:00`,
+    }),
+  ]
+  const originalLive: DailyReportLiveSession = {
+    ...liveSession('live-zijie-real', '09:24', '14:02'),
+    liveName: '拾玉居和田玉',
+    liveAccountName: '拾玉居和田玉',
+    sourceShopName: '拾玉居和田玉',
+    startTime: `${DATE} 09:24:31`,
+    endTime: `${DATE} 14:02:19`,
+  }
+  const assignDrawer = assignDailyReportLiveSessionsToAnchors(
+    [originalLive],
+    zijieSchedules,
+    DATE,
+  )
+  const drawerSessions = mapOriginalSessionsWithAssignedRange(assignDrawer, '子杰')
+  const clippedSessions = assignDrawer.byAnchor.get('子杰') ?? []
+  assert.equal(drawerSessions.length, 1, '场景5 抽屉应有 1 场原始直播')
+  assert.ok(drawerSessions[0]!.startTime.includes('09:24:31'), '场景5 原始开播含秒')
+  assert.ok(drawerSessions[0]!.endTime.includes('14:02:19'), '场景5 原始下播含秒')
+  assert.ok(drawerSessions[0]!.assignedStartTime, '场景5 应有归属开始')
+  assert.ok(drawerSessions[0]!.assignedEndTime, '场景5 应有归属结束')
+  const cardPeriod = buildPerSessionLivePeriodText(clippedSessions)
+  assert.ok(cardPeriod.includes('09:24'), `场景5 业绩卡片归属段: ${cardPeriod}`)
+  assert.ok(drawerSessions[0]!.startTime.includes('09:24:31'), '场景5 抽屉保留秒级原始开播')
+  console.log('PASS 场景5: 抽屉原始场次 vs 归属时段')
 
   // 切段 liveId 不应互相去重
   const keyA = buildDailyReportLiveSessionDedupeKey(aSession)

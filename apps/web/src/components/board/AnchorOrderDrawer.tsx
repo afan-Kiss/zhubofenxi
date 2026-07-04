@@ -14,8 +14,16 @@ import { anchorRowLivePeriodText } from '../../lib/anchor-leaderboard-row'
 function formatSessionClock(time: string): string {
   const t = time.trim()
   if (!t || t === '—') return '—'
-  if (t.length >= 16 && (t[10] === ' ' || t[10] === 'T')) {
-    return t.slice(11, 16)
+  if (t.length >= 19 && (t[10] === ' ' || t[10] === 'T')) {
+    const clock = t.slice(11, 19)
+    if (clock.endsWith(':00')) return clock.slice(0, 5)
+    return clock
+  }
+  const hitSec = /\d{2}:\d{2}:\d{2}/.exec(t)
+  if (hitSec) {
+    const clock = hitSec[0]
+    if (clock.endsWith(':00')) return clock.slice(0, 5)
+    return clock
   }
   const hit = /\d{2}:\d{2}/.exec(t)
   return hit ? hit[0] : '—'
@@ -26,10 +34,24 @@ function formatSessionLine(session: {
   startTime: string
   endTime: string
   durationText: string
+  assignedStartTime?: string
+  assignedEndTime?: string
 }): string {
   const start = formatSessionClock(session.startTime)
   const end = formatSessionClock(session.endTime)
-  return `${start}~${end}（${session.durationText}）`
+  const main = `${start}~${end}（${session.durationText}）`
+  const assignedStart = session.assignedStartTime
+    ? formatSessionClock(session.assignedStartTime)
+    : null
+  const assignedEnd = session.assignedEndTime ? formatSessionClock(session.assignedEndTime) : null
+  if (
+    assignedStart &&
+    assignedEnd &&
+    (assignedStart !== start || assignedEnd !== end)
+  ) {
+    return `${main} · 归属时段 ${assignedStart}~${assignedEnd}`
+  }
+  return main
 }
 
 const DRAWER_STAT_FONT =
@@ -47,6 +69,8 @@ interface AnchorDrillData {
     endTime: string
     durationMinutes: number
     durationText: string
+    assignedStartTime?: string
+    assignedEndTime?: string
   }>
   liveSummaryText?: string
   blacklistedBuyerIds?: string[]

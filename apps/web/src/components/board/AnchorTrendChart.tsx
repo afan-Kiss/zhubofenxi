@@ -55,7 +55,7 @@ function TrendTooltip({
     return (
       <div className="rounded-lg border border-rose-100 bg-white px-3 py-2 text-xs shadow-md">
         <p className="font-medium text-slate-800">{point.timeRange ?? point.label}</p>
-        <p className="mt-1 text-slate-600">销售额 {formatMoney(point.value)}</p>
+        <p className="mt-1 text-slate-600">支付金额 {formatMoney(point.value)}</p>
         <p className="text-slate-500">订单数 {formatCount(point.orderCount)}</p>
         {point.scheduleRange ? (
           <p className="mt-1 text-slate-500">排班 {point.scheduleRange}</p>
@@ -68,7 +68,7 @@ function TrendTooltip({
   return (
     <div className="rounded-lg border border-rose-100 bg-white px-3 py-2 text-xs shadow-md">
       <p className="font-medium text-slate-800">{point.date ?? point.label}</p>
-      <p className="mt-1 text-slate-600">销售额 {formatMoney(point.value)}</p>
+      <p className="mt-1 text-slate-600">支付金额 {formatMoney(point.value)}</p>
       <p className="text-slate-500">订单数 {formatCount(point.orderCount)}</p>
       <p className="mt-1 text-slate-500">排班 {point.scheduleRange ?? '—'}</p>
       <p className="text-slate-500">实际 {point.actualRange ?? '—'}</p>
@@ -128,7 +128,8 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   }
 
   const mode = resolved!.mode
-  const title = resolved!.title || (mode === 'intraday' ? '当日时段走势' : '每日销售走势')
+  const title = resolved!.title || (mode === 'intraday' ? '支付金额走势' : '支付金额走势')
+  const subtitle = resolved!.subtitle
   const chartHeight = isReport ? 'h-[132px]' : 'h-[120px] md:h-[150px]'
   const titleClass = isReport ? 'text-[11px]' : 'text-[12px]'
   const tagClass = isReport ? 'text-[9px] px-1.5 py-0' : 'text-[10px] px-2 py-0.5'
@@ -141,8 +142,13 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
       className={`rounded-2xl border border-rose-100 bg-white/80 p-3 shadow-sm shadow-rose-50/40 ${className}`}
     >
       <div className="mb-2 flex items-center justify-between gap-2">
-        <p className={`${titleClass} font-medium text-slate-700`}>{title}</p>
-        <div className="flex items-center gap-1.5">
+        <div className="min-w-0">
+          <p className={`${titleClass} font-medium text-slate-700`}>{title}</p>
+          {subtitle ? (
+            <p className="mt-0.5 text-[10px] leading-snug text-slate-400">{subtitle}</p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
           {isReport && !hasPositiveSales ? (
             <span
               className={`rounded-full bg-slate-100 font-medium text-slate-500 ${tagClass}`}
@@ -153,7 +159,7 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
           <span
             className={`rounded-full bg-rose-50 font-medium text-rose-600 ${tagClass}`}
           >
-            销售额
+            支付金额
           </span>
         </div>
       </div>

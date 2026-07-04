@@ -17,6 +17,7 @@ export interface AnchorTrend {
   mode: AnchorTrendMode
   metric: 'gmv'
   title: string
+  subtitle?: string
   points: AnchorTrendPoint[]
 }
 
@@ -49,27 +50,28 @@ export function anchorRowRate(row: AnchorLeaderboardRow, key: string): number | 
 }
 
 export function anchorRowGmv(row: AnchorLeaderboardRow): number {
-  return anchorRowNum(row, 'gmv') || anchorRowNum(row, 'totalGmv')
+  const v = row.gmv ?? row.totalGmv
+  return Number(v ?? 0)
 }
 
 export function anchorRowValidSales(row: AnchorLeaderboardRow): number {
-  return anchorRowNum(row, 'validSalesAmount') || anchorRowNum(row, 'effectiveGmv')
+  const v = row.validSalesAmount ?? row.effectiveGmv
+  return Number(v ?? 0)
 }
 
 export function anchorRowSignedCount(row: AnchorLeaderboardRow): number {
-  return (
-    anchorRowNum(row, 'actualSignedCount') ||
-    anchorRowNum(row, 'signedOrderCount') ||
-    anchorRowNum(row, 'signedCount')
-  )
+  const v = row.actualSignedCount ?? row.signedOrderCount ?? row.signedCount
+  return Number(v ?? 0)
 }
 
 export function anchorRowPaidCount(row: AnchorLeaderboardRow): number {
-  return anchorRowNum(row, 'paidOrderCount') || anchorRowNum(row, 'orderCount')
+  const v = row.paidOrderCount ?? row.orderCount
+  return Number(v ?? 0)
 }
 
 export function anchorRowRefundAmount(row: AnchorLeaderboardRow): number {
-  return anchorRowNum(row, 'returnAmount') || anchorRowNum(row, 'refundAmount')
+  const v = row.returnAmount ?? row.refundAmount
+  return Number(v ?? 0)
 }
 
 export function anchorRowReturnRefundCount(row: AnchorLeaderboardRow): number {
@@ -81,7 +83,8 @@ export function anchorRowReturnRefundRate(row: AnchorLeaderboardRow): number | n
 }
 
 export function anchorRowReturnCount(row: AnchorLeaderboardRow): number {
-  return anchorRowNum(row, 'returnCount') || anchorRowNum(row, 'refundOrderCount')
+  const v = row.returnCount ?? row.refundOrderCount
+  return Number(v ?? 0)
 }
 
 export function anchorRowLivePeriodText(row: AnchorLeaderboardRow): string | null {

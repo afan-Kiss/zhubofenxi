@@ -35,6 +35,7 @@ export interface AnchorTrend {
   mode: AnchorTrendMode
   metric: 'gmv'
   title: string
+  subtitle?: string
   points: AnchorTrendPoint[]
 }
 
@@ -46,8 +47,9 @@ export type AnchorCardTrendPoint = AnchorTrendPoint
 export type AnchorCardTrend = AnchorTrend
 
 const INTRADAY_BUCKET_MINUTES = 30
-const INTRADAY_TITLE = '直播时段走势'
-const DAILY_TITLE = '每日销售走势'
+const INTRADAY_TITLE = '支付金额走势'
+const DAILY_TITLE = '支付金额走势'
+const INTRADAY_SUBTITLE = '按订单支付时间统计，不是有效成交走势'
 
 export function resolveAnchorTrendMode(params: {
   preset?: string
@@ -276,7 +278,7 @@ function buildIntradayTrend(
       actualRange,
     }))
 
-  return { mode: 'intraday', metric: 'gmv', title: INTRADAY_TITLE, points }
+  return { mode: 'intraday', metric: 'gmv', title: INTRADAY_TITLE, subtitle: INTRADAY_SUBTITLE, points }
 }
 
 async function buildDailySessionInfoByDate(params: {
@@ -365,7 +367,7 @@ function buildDailyTrendFromViews(
     }
   })
 
-  return { mode: 'daily', metric: 'gmv', title: DAILY_TITLE, points }
+  return { mode: 'daily', metric: 'gmv', title: DAILY_TITLE, subtitle: INTRADAY_SUBTITLE, points }
 }
 
 export async function enrichAnchorLeaderboardWithTrend(

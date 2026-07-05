@@ -233,7 +233,7 @@ async function main(): Promise<void> {
     console.log('\nFAIL: 未解析为经营视图')
     process.exit(1)
   }
-  const view = attachRawByMatchToViews([viewRaw], artifacts.rawByMatch)[0] as AnalyzedOrderView & {
+  const view = attachRawByMatchToViews([viewRaw], rawByMatch)[0] as AnalyzedOrderView & {
     raw?: Record<string, unknown>
   }
 

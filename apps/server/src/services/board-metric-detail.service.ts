@@ -30,6 +30,8 @@ import {
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { resolveOverviewStableDrawerContext } from './overview-metric-snapshot.service'
 import { isValidRevenueOrder } from './valid-revenue-order.service'
+import { attachRawByMatchToViews } from './low-price-brush-order.service'
+import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 
 export type BoardDataSource = 'local_db' | 'live_api'
 
@@ -253,21 +255,29 @@ export async function buildBoardMetricDetail(params: {
     username: params.username,
   })
 
-  let views = filterViewsForCoreMetrics(scoped.views)
+  const coreViews = filterViewsForCoreMetrics(scoped.views)
+  let viewsForTotals = coreViews
   if (anchorId || anchorName) {
-    views = filterViewsByAnchorSpec(views, anchorId, anchorName)
+    viewsForTotals = filterViewsByAnchorSpec(coreViews, anchorId, anchorName)
   }
   const rawByMatch = scoped.rawByMatch
   const range = scoped.range
-  const totals = calculateBusinessMetrics(views)
+  const totals = calculateBusinessMetrics(viewsForTotals)
   const valueRaw = pickMetricValue(totals, def.valueKey)
+
+  const viewsWithRaw = attachRawByMatchToViews(coreViews, rawByMatch)
+  let displayViews = await remapViewsWithScheduleOverlay(viewsWithRaw)
+  if (anchorId || anchorName) {
+    displayViews = filterViewsByAnchorSpec(displayViews, anchorId, anchorName)
+  }
+
   const isQualityMetric =
     params.metric === 'qualityReturnCount' || params.metric === 'qualityReturnRate'
-  let sourceViews = matchMetricViews(views, params.metric, params.tab)
+  let sourceViews = matchMetricViews(displayViews, params.metric, params.tab)
   if (isQualityMetric || params.metric === 'effectiveGmv') {
     sourceViews = dedupeViewsByMetricOrderNo(sourceViews)
   }
-  const blacklist = buildBlacklistedBuyerIds(views)
+  const blacklist = buildBlacklistedBuyerIds(viewsForTotals)
 
   const allRows = sortRows(
     sourceViews.map((v) => {
@@ -290,11 +300,11 @@ export async function buildBoardMetricDetail(params: {
   const tabs =
     params.metric === 'signRate' || params.metric === 'signedCount'
       ? [
-          { key: 'signed', label: '已签收', count: views.filter((v) => isEffectiveSignedView(v)).length },
+          { key: 'signed', label: '已签收', count: viewsForTotals.filter((v) => isEffectiveSignedView(v)).length },
           {
             key: 'unsigned',
             label: '未签收/售后',
-            count: views.filter((v) => !isEffectiveSignedView(v)).length,
+            count: viewsForTotals.filter((v) => !isEffectiveSignedView(v)).length,
           },
         ]
       : []
@@ -354,7 +364,7 @@ export async function buildBoardMetricDetail(params: {
       totalPages: Math.max(1, Math.ceil(total / pageSize)),
     },
     rows,
-    pageSummary: buildPageSummary(views),
+    pageSummary: buildPageSummary(viewsForTotals),
     blacklistedBuyerIds: [...blacklist],
     source: 'local_db' as BoardDataSource,
     ...(stableDrawer

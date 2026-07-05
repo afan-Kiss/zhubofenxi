@@ -20,6 +20,7 @@ import {
   computeExpectedAnchorFromEffectiveSchedule,
   loadDailyScheduleMeta,
 } from './lib/anchor-attribution-verify.util'
+import { verifyMetricDrawerAttribution } from './lib/metric-detail-attribution-verify.util'
 
 config({ path: path.resolve(__dirname, '../.env') })
 
@@ -164,12 +165,32 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n=== 验收 ===')
+  console.log('\n=== 验收（主播业绩 remap 链路）===')
   if (mismatches.length > 0) {
     console.log(`✗ FAIL: ${mismatches.length} 笔订单与当天生效排班不一致`)
     process.exit(1)
   }
   console.log('✓ PASS: 范围内可推导订单均与当天生效排班一致')
+
+  console.log('\n=== 6. 经营总览 metric drawer 归属验收 ===')
+  const drawerCheck = await verifyMetricDrawerAttribution({
+    startDate,
+    endDate,
+    metrics: ['effectiveGmv', 'gmv', 'orderCount'],
+  })
+  if (drawerCheck.mismatches.length > 0) {
+    console.log(`错归行数: ${drawerCheck.mismatches.length}`)
+    for (const row of drawerCheck.mismatches.slice(0, 20)) {
+      console.log(JSON.stringify(row))
+    }
+    if (drawerCheck.mismatches.length > 20) {
+      console.log(`... 另有 ${drawerCheck.mismatches.length - 20} 行`)
+    }
+    console.log('\n=== 验收（metric drawer）===')
+    console.log(`✗ FAIL: metric drawer ${drawerCheck.mismatches.length} 行 anchorName 与 remap 不一致`)
+    process.exit(1)
+  }
+  console.log('✓ PASS: effectiveGmv / gmv / orderCount drawer 归属与 remap 一致')
 }
 
 main()

@@ -1,14 +1,14 @@
 /**
  * 只读：按订单支付日期的生效排班推导期望主播（不写库）
  */
-import { prisma } from '../src/lib/prisma'
+import { prisma } from '../../src/lib/prisma'
 import {
   getEffectiveScheduleTableForDate,
   type EffectiveScheduleRow,
   type EffectiveScheduleTable,
-} from '../src/services/anchor-daily-schedule.service'
-import { isPayTimeInSchedule } from '../src/utils/anchor-schedule-time.util'
-import { orderLiveRoomMatchesSchedule } from '../src/utils/shop-name-normalize.util'
+} from '../../src/services/anchor-daily-schedule.service'
+import { isPayTimeInSchedule } from '../../src/utils/anchor-schedule-time.util'
+import { orderLiveRoomMatchesSchedule } from '../../src/utils/shop-name-normalize.util'
 
 export interface ExpectedAnchorHit {
   anchorName: string

@@ -27,6 +27,8 @@ interface Props {
   /** 是否在卡片内展示单主播走势图；默认展开 */
   showIndividualTrend?: boolean
   showLivePeriod?: boolean
+  /** 单日：无成交也展示平线走势 */
+  includeZeroPerformance?: boolean
 }
 
 function MetricCell({
@@ -85,6 +87,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   className = 'block md:hidden',
   showIndividualTrend = true,
   showLivePeriod = false,
+  includeZeroPerformance = false,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [expandedTrendKeys, setExpandedTrendKeys] = useState<Record<string, boolean>>({})
@@ -192,9 +195,15 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 <AnchorTrendChart
                   variant="page"
                   trend={trend}
+                  includeZeroPerformance={includeZeroPerformance}
                   formatMoney={formatMoney}
                   formatCount={(n) => `${formatCount(n)} 单`}
                 />
+              </div>
+            ) : showTrend && includeZeroPerformance ? (
+              <div className="mt-3 rounded-xl border border-dashed border-rose-100 bg-rose-50/20 px-3 py-4 text-center">
+                <p className="text-[12px] text-slate-500">暂无走势数据</p>
+                <p className="mt-1 text-[11px] text-slate-400">请先设置排班或同步直播场次</p>
               </div>
             ) : null}
 

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CalendarDays, ChevronDown, Package, Percent, TrendingUp, Wallet, type LucideIcon } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
@@ -26,7 +26,11 @@ import {
 } from '../../providers/BoardLiveQueryProvider'
 import { showLongPeriodRates } from '../../lib/board-rate-display'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
-import { DailyReportPreviewButton } from '../../components/board/DailyReportPreviewButton'
+import { DailyReportPreviewButton, prefetchShipmentPhotoDataUrls } from '../../components/board/DailyReportPreviewButton'
+import {
+  DailyReportShipmentPhotos,
+  type DailyReportImageItem,
+} from '../../components/board/DailyReportShipmentPhotos'
 import { AnchorEffectiveSchedulePanel } from '../../components/board/AnchorEffectiveSchedulePanel'
 import { useDataFreshness } from '../../hooks/useDataFreshness'
 import { formatDataFreshnessTime, type DataFreshnessInfo } from '../../lib/data-freshness'
@@ -151,6 +155,15 @@ export const AnchorPerformanceTab: React.FC = () => {
     anchorName: string
     anchorId?: string
   } | null>(null)
+  const [shipmentPhotos, setShipmentPhotos] = useState<DailyReportImageItem[]>([])
+  const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
+  const [reportPhotosStale, setReportPhotosStale] = useState(false)
+
+  const handleShipmentImagesChange = useCallback((images: DailyReportImageItem[]) => {
+    setShipmentPhotos(images)
+    setReportPhotosStale(true)
+    void prefetchShipmentPhotoDataUrls(images).then(setShipmentPhotoDataUrls)
+  }, [])
 
   const allAnchors = (data?.anchorLeaderboard as Array<Record<string, unknown>>) ?? []
 
@@ -183,8 +196,14 @@ export const AnchorPerformanceTab: React.FC = () => {
   const showDailyReportEntry =
     isSingleDayPreset(preset, startDate, endDate) &&
     Boolean(startDate && endDate) &&
+    (preset !== 'custom' || customQueried) &&
     boardDataVisible &&
     status !== 'failed'
+  const dailyReportDateLabel = useMemo(() => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startDate.trim())
+    if (!m) return startDate
+    return `${Number(m[2])}月${Number(m[3])}日`
+  }, [startDate])
   const isLoadingRange = isDisplayStale && isLoading
   const showInitialSkeleton = isLoading && !hasPerformanceData && !data
   const showMetrics = hasPerformanceData && boardDataVisible
@@ -326,15 +345,32 @@ export const AnchorPerformanceTab: React.FC = () => {
       )}
 
       {showDailyReportEntry ? (
-        <div className="rounded-2xl border border-rose-100/60 bg-white p-4 shadow-sm">
-          <p className="mb-3 text-sm font-medium text-slate-800">主播日报</p>
-          <DailyReportPreviewButton
-            preset={preset}
-            startDate={startDate}
-            endDate={endDate}
-            disabled={isLoading && !data}
+        <>
+          <div className="rounded-2xl border border-rose-100/60 bg-white p-4 shadow-sm">
+            <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium text-slate-800">主播日报</p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  将生成 {dailyReportDateLabel}（{startDate}）经营日报长图
+                </p>
+              </div>
+            </div>
+            <DailyReportPreviewButton
+              preset={preset}
+              startDate={startDate}
+              endDate={endDate}
+              disabled={isLoading && !data}
+              shipmentPhotos={shipmentPhotos}
+              shipmentPhotoDataUrls={shipmentPhotoDataUrls}
+              photosStale={reportPhotosStale}
+              onGenerated={() => setReportPhotosStale(false)}
+            />
+          </div>
+          <DailyReportShipmentPhotos
+            reportDate={startDate}
+            onImagesChange={handleShipmentImagesChange}
           />
-        </div>
+        </>
       ) : null}
 
       {showProgressCard ? (
@@ -427,6 +463,7 @@ export const AnchorPerformanceTab: React.FC = () => {
                 compareRows={allAnchors}
                 showLongPeriodRates={showRates}
                 showLivePeriod={showLivePeriod}
+                includeZeroPerformance={showLivePeriod}
                 startDate={startDate}
                 endDate={endDate}
                 emptyText="当前范围暂无已同步数据"

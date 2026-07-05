@@ -20,7 +20,17 @@ export function formatDuration(minutes: number | null | undefined): string {
 
 export function formatPercent(ratio: number | null | undefined): string {
   if (ratio == null || !Number.isFinite(ratio)) return '--'
-  return `${Math.round(ratio)}%`
+  const rounded = Math.round(ratio * 10) / 10
+  return Number.isInteger(rounded) ? `${rounded}%` : `${rounded.toFixed(1)}%`
+}
+
+/** 日报卡片：无真实发货时不展示 0% 占比 */
+export function formatShippedSharePercent(
+  ratio: number | null | undefined,
+  shippedAmountYuan: number | null | undefined,
+): string {
+  if (shippedAmountYuan == null || shippedAmountYuan <= 0) return '--'
+  return formatPercent(ratio)
 }
 
 export function formatDensity(minutes: number | null | undefined): string {

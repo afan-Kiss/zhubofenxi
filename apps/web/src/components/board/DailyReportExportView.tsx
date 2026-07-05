@@ -1,3 +1,4 @@
+/** @deprecated 未被引用；日报截图请使用 DailyReportImageSheet */
 import React from 'react'
 import './daily-report-export.css'
 import {
@@ -8,7 +9,7 @@ import {
   formatMoney,
   formatOrderCount,
   formatPeopleCount,
-  formatPercent,
+  formatShippedSharePercent,
   formatRatePercent,
 } from './dailyReportFormatters'
 import type { DailyReportAnchorRow, DailyReportPayload } from './DailyReportImageSheet'
@@ -68,7 +69,7 @@ function ExportAnchorCard({ row }: { row: DailyReportAnchorRow }) {
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700">
-            占比 {formatPercent(row.amountRatio)}
+            发货占比 {formatShippedSharePercent(row.amountRatio, row.shippedAmountYuan)}
           </span>
         </div>
       </div>

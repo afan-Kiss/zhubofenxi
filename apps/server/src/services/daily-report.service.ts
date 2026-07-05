@@ -41,7 +41,7 @@ import {
 } from '../utils/anchor-attendance-status.util'
 import { aggregateAnchorLeaderboard } from './board-metrics.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
-import { enrichAnchorLeaderboardWithTrend, type AnchorTrend } from './anchor-card-trend.service'
+import { enrichAnchorLeaderboardWithTrend, buildLeaderboardRowIntradayTrend, resolveAnchorTrendMode, type AnchorTrend } from './anchor-card-trend.service'
 import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
 
 const NO_LIVE_SESSION_TEXT = '未读取到直播场次'
@@ -377,11 +377,47 @@ export async function buildDailyReport(params: {
     endDate: params.endDate,
   })
   const trendByAnchor = new Map(leaderboardRows.map((r) => [String(r.anchorName ?? ''), r]))
+  const trendMode = resolveAnchorTrendMode({
+    preset:
+      params.preset === 'today' || params.preset === 'yesterday'
+        ? params.preset
+        : 'custom',
+    startDate: params.startDate,
+    endDate: params.endDate,
+  })
   for (const row of anchorRows) {
     const lb = trendByAnchor.get(row.anchorName)
-    if (!lb) continue
-    row.gmvYuan = Number(lb.gmv ?? lb.totalGmv ?? 0)
-    row.trend = lb.trend as AnchorTrend | undefined
+    row.gmvYuan = Number(lb?.gmv ?? lb?.totalGmv ?? 0)
+
+    const mergedTrendRow: Record<string, unknown> = {
+      ...(lb ?? {}),
+      anchorName: row.anchorName,
+      scheduledPeriodText:
+        (lb?.scheduledPeriodText as string | undefined) ??
+        (row.scheduleTimeRange ? row.scheduleTimeRange.replace(/-/g, '~') : null),
+      liveTimeRange:
+        row.liveTimeRange && row.liveTimeRange !== NO_LIVE_SESSION_TEXT
+          ? row.liveTimeRange
+          : (lb?.liveTimeRange as string | undefined),
+      livePeriodText: row.livePeriodText ?? lb?.livePeriodText,
+      actualStartAt: row.liveStartTime ?? lb?.actualStartAt,
+      actualEndAt: row.liveEndTime ?? lb?.actualEndAt,
+      scheduledStartAt: lb?.scheduledStartAt,
+      scheduledEndAt: lb?.scheduledEndAt,
+    }
+
+    if (trendMode === 'intraday') {
+      const anchorViews = allPerformanceViews.filter(
+        (view) => String(view.anchorName ?? '').trim() === row.anchorName,
+      )
+      row.trend = buildLeaderboardRowIntradayTrend(
+        anchorViews,
+        params.startDate,
+        mergedTrendRow,
+      )
+    } else {
+      row.trend = (lb?.trend as AnchorTrend | undefined) ?? row.trend
+    }
   }
 
   const totalSoldOrderCount = anchorRows.reduce((sum, row) => sum + row.soldOrderCount, 0)

@@ -281,6 +281,15 @@ function buildIntradayTrend(
   return { mode: 'intraday', metric: 'gmv', title: INTRADAY_TITLE, subtitle: INTRADAY_SUBTITLE, points }
 }
 
+/** 供日报等场景：按排班/直播时段生成走势（无订单时也保留空桶） */
+export function buildLeaderboardRowIntradayTrend(
+  anchorViews: AnalyzedOrderView[],
+  dateKey: string,
+  row: Record<string, unknown>,
+): AnchorTrend {
+  return buildIntradayTrend(anchorViews, dateKey, row)
+}
+
 async function buildDailySessionInfoByDate(params: {
   anchorName: string
   anchorId: string

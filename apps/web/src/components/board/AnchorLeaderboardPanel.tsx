@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import {
   anchorRowGmv,
@@ -26,6 +26,8 @@ interface Props {
   onQualityCountClick?: (row: AnchorLeaderboardRow) => void
   showLongPeriodRates?: boolean
   showLivePeriod?: boolean
+  /** 单日：无成交主播也展示走势与对比 */
+  includeZeroPerformance?: boolean
   startDate?: string
   endDate?: string
 }
@@ -38,6 +40,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   onQualityCountClick,
   showLongPeriodRates: showRates = true,
   showLivePeriod = false,
+  includeZeroPerformance = false,
   startDate: _startDate = '',
   endDate: _endDate = '',
 }) => {
@@ -45,6 +48,10 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
   const [showCompareTrend, setShowCompareTrend] = useState(true)
   const [showExtraColumns, setShowExtraColumns] = useState(false)
+
+  useEffect(() => {
+    if (showLivePeriod) setViewMode('cards')
+  }, [showLivePeriod])
 
   const trendCompareRows = compareRows ?? rows
   const canCompareTrend = trendCompareRows.length >= 2
@@ -85,9 +92,15 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
       {showCompareTrend && canCompareTrend ? (
         <div className="mb-4">
           <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
-            默认展示全部有走势的主播，可手动隐藏不想看的主播；下面列表可单独筛选。
+            {includeZeroPerformance
+              ? '单日展示全部固定主播，无成交显示平线；可手动隐藏不想看的主播。'
+              : '默认展示有成交的主播，可手动隐藏不想看的主播；下面列表可单独筛选。'}
           </p>
-          <AnchorTrendCompareChart rows={trendCompareRows} formatMoney={formatMoney} />
+          <AnchorTrendCompareChart
+            rows={trendCompareRows}
+            formatMoney={formatMoney}
+            includeZeroPerformance={includeZeroPerformance}
+          />
         </div>
       ) : null}
 
@@ -99,6 +112,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         showLongPeriodRates={showRates}
         showIndividualTrend
         showLivePeriod={showLivePeriod}
+        includeZeroPerformance={includeZeroPerformance}
         className={cardClass}
       />
 

@@ -7,8 +7,8 @@ import {
   formatMoney,
   formatOrderCount,
   formatPeopleCount,
-  formatPercent,
   formatRatePercent,
+  formatShippedSharePercent,
   formatStayDurationSeconds,
 } from './dailyReportFormatters'
 import type { AnchorLivePeriodView } from '../../lib/anchor-live-period'
@@ -132,7 +132,7 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         </div>
         <div className="flex flex-col items-end gap-1">
           <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
-            占比 {formatPercent(row.amountRatio)}
+            发货占比 {formatShippedSharePercent(row.amountRatio, row.shippedAmountYuan)}
           </span>
         </div>
       </div>
@@ -145,8 +145,15 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         />
       </div>
       <div className="mt-3 space-y-1">
-        <MetricLine label="支付金额" value={formatMoney(row.gmvYuan)} strong />
-        <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} />
+        <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} strong />
+        <MetricLine
+          label="归属支付金额"
+          value={formatMoney(row.gmvYuan)}
+          strong={false}
+        />
+        <p className="text-[10px] leading-snug text-slate-400">
+          归属支付按主播时段统计；真实发货已剔除售后与关闭单
+        </p>
         <MetricLine label="真实卖出" value={formatOrderCount(row.soldOrderCount)} />
         <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />
         <MetricLine label="场观人数" value={formatPeopleCount(row.viewSessionCount)} />
@@ -200,7 +207,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
       </div>
 
       <div className="mt-5 rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50/80 to-white p-5">
-        <p className="text-[13px] text-slate-500">昨日总览</p>
+        <p className="text-[13px] text-slate-500">{data.dateLabel} 总览</p>
         <p className="mt-2 text-[28px] font-bold leading-none text-slate-900">
           真实发货 {formatMoney(data.summary.totalShippedAmountYuan)}
         </p>

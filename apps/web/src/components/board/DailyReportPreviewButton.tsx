@@ -3,14 +3,9 @@ import { createPortal } from 'react-dom'
 import { toPng } from 'html-to-image'
 import { apiRequest } from '../../lib/api'
 import { type DailyReportPayload, DailyReportImageSheet } from './DailyReportImageSheet'
-import {
-  DailyReportShipmentPhotos,
-  type DailyReportImageItem,
-} from './DailyReportShipmentPhotos'
+import type { DailyReportImageItem } from './DailyReportShipmentPhotos'
 import { DailyReportZoomPanImage } from './DailyReportZoomPanImage'
-import {
-  resolveDailyReportImageFetchUrl,
-} from '../../lib/daily-report-image-url'
+import { resolveDailyReportImageFetchUrl } from '../../lib/daily-report-image-url'
 import { ViewportModal } from '../ui/ViewportModal'
 
 async function waitForNextPaint(): Promise<void> {
@@ -19,20 +14,23 @@ async function waitForNextPaint(): Promise<void> {
   })
 }
 
-async function waitForTrendChartsReady(root: HTMLElement): Promise<void> {
+function isTrendChartElementReady(el: Element): boolean {
+  const trendState = el.getAttribute('data-anchor-trend-chart')
+  const compareState = el.getAttribute('data-anchor-trend-compare')
+  const state = trendState ?? compareState
+  if (state !== 'ready') return false
+  const svg = el.querySelector('svg')
+  return Boolean(svg && svg.getBoundingClientRect().height > 0)
+}
+
+async function waitForTrendChartsReady(root: HTMLElement, timeoutMs = 5000): Promise<void> {
   const charts = Array.from(
     root.querySelectorAll('[data-anchor-trend-chart], [data-anchor-trend-compare]'),
   )
   if (charts.length === 0) return
   const started = Date.now()
-  while (Date.now() - started < 3000) {
-    const allReady = charts.every((el) => {
-      const state = el.getAttribute('data-anchor-trend-chart') ?? el.getAttribute('data-anchor-trend-compare')
-      if (state === 'empty') return true
-      const svg = el.querySelector('svg')
-      return Boolean(svg && svg.getBoundingClientRect().height > 0)
-    })
-    if (allReady) break
+  while (Date.now() - started < timeoutMs) {
+    if (charts.every(isTrendChartElementReady)) break
     await waitForNextPaint()
     await new Promise((resolve) => window.setTimeout(resolve, 40))
   }
@@ -72,7 +70,7 @@ async function waitForSheetRef(
   return ref.current
 }
 
-async function prefetchShipmentPhotoDataUrls(
+export async function prefetchShipmentPhotoDataUrls(
   photos: DailyReportImageItem[],
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = {}
@@ -185,11 +183,34 @@ async function renderSheetToPng(node: HTMLElement): Promise<string> {
   throw new Error('日报图片生成失败')
 }
 
+function downloadDataUrl(dataUrl: string, filename: string): void {
+  const link = document.createElement('a')
+  link.href = dataUrl
+  link.download = filename
+  link.click()
+}
+
+function buildReportDownloadName(startDate: string, title?: string | null): string {
+  const safeTitle = (title ?? '主播日报').replace(/[\\/:*?"<>|]/g, '-')
+  return `${startDate || 'daily'}-${safeTitle}.png`
+}
+
+interface ShipmentPhotoForSheet {
+  id: string
+  publicUrl: string
+  caption: string | null
+  dataUrl?: string | null
+}
+
 interface Props {
   preset?: string
   startDate: string
   endDate: string
   disabled?: boolean
+  shipmentPhotos?: DailyReportImageItem[]
+  shipmentPhotoDataUrls?: Record<string, string>
+  photosStale?: boolean
+  onGenerated?: () => void
 }
 
 export const DailyReportPreviewButton: React.FC<Props> = ({
@@ -197,6 +218,10 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   startDate,
   endDate,
   disabled = false,
+  shipmentPhotos = [],
+  shipmentPhotoDataUrls = {},
+  photosStale = false,
+  onGenerated,
 }) => {
   const sheetRef = useRef<HTMLDivElement>(null)
   const captureTokenRef = useRef(0)
@@ -207,15 +232,15 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [pendingCapture, setPendingCapture] = useState(false)
-  const [shipmentPhotos, setShipmentPhotos] = useState<DailyReportImageItem[]>([])
-  const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
 
   const isSingleDay = startDate.trim() === endDate.trim() && Boolean(startDate.trim())
 
-  const handleShipmentImagesChange = useCallback((images: DailyReportImageItem[]) => {
-    setShipmentPhotos(images)
-    void prefetchShipmentPhotoDataUrls(images).then(setShipmentPhotoDataUrls)
-  }, [])
+  const sheetPhotos: ShipmentPhotoForSheet[] = shipmentPhotos.map((p) => ({
+    id: p.id,
+    publicUrl: p.publicUrl,
+    caption: p.caption,
+    dataUrl: shipmentPhotoDataUrls[p.id] ?? null,
+  }))
 
   const closePreview = useCallback(() => {
     setPreviewOpen(false)
@@ -232,11 +257,12 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
       await new Promise((resolve) => window.setTimeout(resolve, 120))
       const dataUrl = await renderSheetToPng(node)
       setImageDataUrl(dataUrl)
+      onGenerated?.()
     } finally {
       restorePhotos()
       restoreImages()
     }
-  }, [])
+  }, [onGenerated])
 
   useEffect(() => {
     if (!pendingCapture || !report) return
@@ -268,7 +294,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     }
   }, [pendingCapture, report, captureImage])
 
-  const handleViewReport = async () => {
+  const loadAndCapture = async () => {
     if (loading || disabled || capturing) return
     setLoading(true)
     setError(null)
@@ -279,22 +305,14 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
       } else {
         qs.set('preset', 'custom')
       }
-      const [data, photoPayload] = await Promise.all([
-        apiRequest<DailyReportPayload>(`/board/daily-report?${qs}`, { retryOnGateway: 2 }),
-        apiRequest<{ images: DailyReportImageItem[] }>(
-          `/daily-report-images?date=${encodeURIComponent(startDate)}`,
-          { retryOnGateway: 2 },
-        ).catch(() => ({ images: [] as DailyReportImageItem[] })),
-      ])
+      const data = await apiRequest<DailyReportPayload>(`/board/daily-report?${qs}`, {
+        retryOnGateway: 2,
+      })
       if (!data?.summary || !Array.isArray(data?.anchors)) {
         setError('日报数据不完整，请刷新后重试')
         setLoading(false)
         return
       }
-      const photos = photoPayload.images ?? []
-      const dataUrlMap = await prefetchShipmentPhotoDataUrls(photos)
-      setShipmentPhotos(photos)
-      setShipmentPhotoDataUrls(dataUrlMap)
       setReport(data)
       setImageDataUrl(null)
       setPreviewOpen(false)
@@ -311,40 +329,41 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     report
       ? createPortal(
           <div aria-hidden className="pointer-events-none fixed left-[-9999px] top-0">
-            <DailyReportImageSheet
-              ref={sheetRef}
-              data={report}
-              shipmentPhotos={shipmentPhotos.map((p) => ({
-                id: p.id,
-                publicUrl: p.publicUrl,
-                caption: p.caption,
-                dataUrl: shipmentPhotoDataUrls[p.id] ?? null,
-              }))}
-            />
+            <DailyReportImageSheet ref={sheetRef} data={report} shipmentPhotos={sheetPhotos} />
           </div>,
           document.body,
         )
       : null
 
+  const busy = loading || capturing
+
   return (
     <>
-      <div className="flex w-full flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          disabled={disabled || busy}
+          onClick={() => void loadAndCapture()}
+          className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {busy ? '生成中...' : imageDataUrl ? '重新生成日报' : '查看日报'}
+        </button>
+        {imageDataUrl && !busy ? (
           <button
             type="button"
-            disabled={disabled || loading || capturing}
-            onClick={() => void handleViewReport()}
-            className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+            onClick={() => setPreviewOpen(true)}
+            className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
           >
-            {loading || capturing ? '生成中...' : '查看日报'}
+            再次预览
           </button>
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
-        </div>
-        <DailyReportShipmentPhotos
-          reportDate={startDate}
-          onImagesChange={handleShipmentImagesChange}
-        />
+        ) : null}
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
       </div>
+      {photosStale ? (
+        <p className="mt-2 text-xs text-amber-700">
+          发货照片已更新，请重新生成日报后再预览或保存。
+        </p>
+      ) : null}
 
       {sheetPortal}
 
@@ -359,14 +378,29 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
           <div className="mb-3 flex shrink-0 flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-base font-semibold text-slate-900">日报预览</p>
+              <p className="mt-0.5 text-xs text-slate-500">{report?.title ?? startDate}</p>
             </div>
-            <button
-              type="button"
-              onClick={closePreview}
-              className="rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
-            >
-              关闭
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  downloadDataUrl(
+                    imageDataUrl,
+                    buildReportDownloadName(startDate, report?.title),
+                  )
+                }
+                className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700 hover:bg-rose-100"
+              >
+                保存图片
+              </button>
+              <button
+                type="button"
+                onClick={closePreview}
+                className="rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600 hover:bg-slate-50"
+              >
+                关闭
+              </button>
+            </div>
           </div>
 
           <DailyReportZoomPanImage

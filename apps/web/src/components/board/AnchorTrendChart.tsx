@@ -18,6 +18,8 @@ export interface AnchorTrendChartProps {
   formatCount?: (value: number) => string
   /** page=交互页；report=日报截图（固定高度、无 tooltip） */
   variant?: 'page' | 'report'
+  /** 单日业绩/日报：无成交也按排班展示平线 */
+  includeZeroPerformance?: boolean
   className?: string
 }
 
@@ -87,8 +89,10 @@ function resolveTrendSubtitle(trend: AnchorTrend): string | undefined {
 function hasTrendData(
   trend: AnchorTrend | null | undefined,
   variant: 'page' | 'report',
+  includeZeroPerformance: boolean,
 ): boolean {
   if (!trend?.points?.length) return false
+  if (variant === 'report' || includeZeroPerformance) return true
   return trend.points.some((p) => p.value > 0 || p.orderCount > 0)
 }
 
@@ -139,11 +143,13 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   formatMoney,
   formatCount = defaultFormatCount,
   variant = 'page',
+  includeZeroPerformance = false,
   className = '',
 }) => {
   const gradientId = useId().replace(/:/g, '')
   const resolved = trend ?? null
   const isReport = variant === 'report'
+  const showZeroPerformanceTrend = isReport || includeZeroPerformance
 
   const chartData = useMemo(
     () =>
@@ -180,14 +186,18 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
 
   const emptyMinH = isReport ? 'min-h-[100px]' : 'min-h-[120px] md:min-h-[150px]'
 
-  if (!hasTrendData(resolved, variant)) {
+  if (!hasTrendData(resolved, variant, includeZeroPerformance)) {
     return (
       <div
         data-anchor-trend-chart="empty"
         className={`flex ${emptyMinH} flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-4 ${className}`}
       >
         <p className={`${isReport ? 'text-[12px]' : 'text-[13px]'} text-slate-500`}>暂无走势数据</p>
-        <p className="mt-1 text-[11px] text-slate-400">有订单后会按开播时间生成走势</p>
+        <p className="mt-1 text-[11px] text-slate-400">
+          {showZeroPerformanceTrend
+            ? '请先设置排班或同步直播场次'
+            : '有订单后会按开播时间生成走势'}
+        </p>
       </div>
     )
   }
@@ -218,7 +228,7 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
           ) : null}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          {isReport && !hasPositiveSales ? (
+          {showZeroPerformanceTrend && !hasPositiveSales ? (
             <span
               className={`rounded-full bg-slate-100 font-medium text-slate-500 ${tagClass}`}
             >

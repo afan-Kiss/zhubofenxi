@@ -81,20 +81,32 @@ function hasPositiveTrendPoint(row: AnchorLeaderboardRow): boolean {
   return trend.points.some((p) => p.value > 0 || p.orderCount > 0)
 }
 
-function isValidAnchorRow(row: AnchorLeaderboardRow): boolean {
-  const name = String(row.anchorName ?? '').trim()
-  if (!name || name === '未归属') return false
-  return hasPositiveTrendPoint(row)
+function hasTrendPoints(row: AnchorLeaderboardRow): boolean {
+  const trend = anchorRowTrend(row)
+  return Boolean(trend?.points?.length)
 }
 
-export function sortCompareCandidates(rows: AnchorLeaderboardRow[]): AnchorLeaderboardRow[] {
+function isValidCompareRow(row: AnchorLeaderboardRow, includeZeroPerformance: boolean): boolean {
+  const name = String(row.anchorName ?? '').trim()
+  if (!name || name === '未归属') return false
+  return includeZeroPerformance ? hasTrendPoints(row) : hasPositiveTrendPoint(row)
+}
+
+export function sortCompareCandidates(
+  rows: AnchorLeaderboardRow[],
+  options?: { includeZeroPerformance?: boolean },
+): AnchorLeaderboardRow[] {
+  const includeZeroPerformance = options?.includeZeroPerformance ?? false
   return rows
-    .filter(isValidAnchorRow)
+    .filter((row) => isValidCompareRow(row, includeZeroPerformance))
     .sort((a, b) => anchorRowGmv(b) - anchorRowGmv(a))
 }
 
-export function defaultCompareAnchorNames(rows: AnchorLeaderboardRow[]): string[] {
-  return sortCompareCandidates(rows).map((row) => String(row.anchorName).trim())
+export function defaultCompareAnchorNames(
+  rows: AnchorLeaderboardRow[],
+  options?: { includeZeroPerformance?: boolean },
+): string[] {
+  return sortCompareCandidates(rows, options).map((row) => String(row.anchorName).trim())
 }
 
 function relativeBucketLabel(bucketIndex: number): string {
@@ -175,6 +187,7 @@ export function buildIntradayRelativeComparePayload(
 
     const bucketValues = new Map<number, number>()
     let maxActiveBucket = -1
+    let maxBucketFromRange = -1
 
     points.forEach((point, index) => {
       const bucketIndex = useTimestamp
@@ -183,17 +196,19 @@ export function buildIntradayRelativeComparePayload(
       if (bucketIndex > INTRADAY_COMPARE_MAX_BUCKET_INDEX) return
 
       bucketValues.set(bucketIndex, (bucketValues.get(bucketIndex) ?? 0) + point.value)
+      maxBucketFromRange = Math.max(maxBucketFromRange, bucketIndex)
       if (point.value > 0 || point.orderCount > 0) {
         maxActiveBucket = Math.max(maxActiveBucket, bucketIndex)
       }
     })
 
-    if (maxActiveBucket < 0) continue
+    const effectiveMaxBucket = maxActiveBucket >= 0 ? maxActiveBucket : maxBucketFromRange
+    if (effectiveMaxBucket < 0) continue
 
     perAnchor.push({
       anchorName: item.anchorName,
       bucketValues,
-      maxBucket: maxActiveBucket,
+      maxBucket: effectiveMaxBucket,
     })
   }
 
@@ -233,6 +248,7 @@ export function buildIntradayRelativeComparePayload(
 function buildComparePayload(
   rows: AnchorLeaderboardRow[],
   selectedNames: string[],
+  includeZeroPerformance = false,
 ): {
   mode: AnchorTrendMode | null
   series: AnchorTrendCompareSeries[]
@@ -241,7 +257,7 @@ function buildComparePayload(
   hasComparableData: boolean
   isRelativeIntraday: boolean
 } {
-  const sortedCandidates = sortCompareCandidates(rows)
+  const sortedCandidates = sortCompareCandidates(rows, { includeZeroPerformance })
   if (sortedCandidates.length === 0) {
     return {
       mode: null,
@@ -378,6 +394,8 @@ export interface AnchorTrendCompareChartProps {
   className?: string
   /** page=交互页；report=日报长图（无筛选、无动画） */
   variant?: 'page' | 'report'
+  /** 单日业绩：无成交主播也参与对比 */
+  includeZeroPerformance?: boolean
 }
 
 export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = ({
@@ -386,24 +404,32 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
   formatCount = (value) => `${value} 单`,
   className = '',
   variant = 'page',
+  includeZeroPerformance: includeZeroPerformanceProp,
 }) => {
   const isReport = variant === 'report'
+  const includeZeroPerformance = includeZeroPerformanceProp ?? isReport
   const compact = useCompactChart() || isReport
-  const sortedCandidates = useMemo(() => sortCompareCandidates(rows), [rows])
+  const sortedCandidates = useMemo(
+    () => sortCompareCandidates(rows, { includeZeroPerformance }),
+    [rows, includeZeroPerformance],
+  )
   const defaultSelectedKey = useMemo(
-    () => defaultCompareAnchorNames(rows).join('|'),
-    [rows],
+    () => defaultCompareAnchorNames(rows, { includeZeroPerformance }).join('|'),
+    [rows, includeZeroPerformance],
   )
   const [selectedNames, setSelectedNames] = useState<string[]>(() =>
-    defaultCompareAnchorNames(rows),
+    defaultCompareAnchorNames(rows, { includeZeroPerformance }),
   )
 
   useEffect(() => {
-    setSelectedNames(defaultCompareAnchorNames(rows))
-  }, [defaultSelectedKey, rows])
+    setSelectedNames(defaultCompareAnchorNames(rows, { includeZeroPerformance }))
+  }, [defaultSelectedKey, rows, includeZeroPerformance])
 
   const { series, chartData, skippedModeMismatch, hasComparableData, isRelativeIntraday } =
-    useMemo(() => buildComparePayload(rows, selectedNames), [rows, selectedNames])
+    useMemo(
+      () => buildComparePayload(rows, selectedNames, includeZeroPerformance),
+      [rows, selectedNames, includeZeroPerformance],
+    )
 
   const chartDataWithTicks = useMemo(
     () =>
@@ -439,7 +465,11 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
       >
         <p className="text-[13px] text-slate-500">暂无可对比走势</p>
         {!isReport ? (
-          <p className="mt-1 text-[11px] text-slate-400">有主播成交后会自动生成对比曲线</p>
+          <p className="mt-1 text-[11px] text-slate-400">
+            {includeZeroPerformance
+              ? '请先设置排班或同步直播场次后再查看对比'
+              : '有主播成交后会自动生成对比曲线'}
+          </p>
         ) : null}
       </div>
     )
@@ -470,7 +500,9 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
           <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p>
           {!isReport ? (
             <p className="mt-0.5 text-[10px] text-slate-400">
-              默认展示全部有走势的主播，可手动隐藏不想看的主播
+              {includeZeroPerformance
+                ? '单日展示全部固定主播，无成交显示平线；可手动隐藏不想看的主播'
+                : '默认展示有成交的主播，可手动隐藏不想看的主播'}
             </p>
           ) : null}
         </div>

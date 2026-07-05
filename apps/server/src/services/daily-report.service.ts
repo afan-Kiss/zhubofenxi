@@ -27,11 +27,13 @@ import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { ensureManualAnchorOverrideCache } from './order-anchor-manual-override.service'
 import {
   countDailyReportOrders,
+  listDailyReportShippedOrders,
   roundMinutes,
   roundYuan,
   safeDivide,
   safeRatioPercent,
   sumDailyReportShippedFromViews,
+  type DailyReportShippedOrderLine,
 } from './daily-report-order.util'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import { buildDailyReportLiveScheduleFields, buildLiveSessionCountSummary, buildPerSessionLivePeriodText } from './daily-report-live-schedule-match.service'
@@ -62,6 +64,8 @@ export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   shippedAmountYuan: number
   soldOrderCount: number
   invalidOrderCount: number
+  /** 真实发货订单明细（已剔除售后/关闭/取消） */
+  shippedOrders: DailyReportShippedOrderLine[]
   avgOrderAmountYuan: number | null
   hourlyAmountYuan: number | null
   dealDensityMinutes: number | null
@@ -89,6 +93,8 @@ export interface DailyReportPayload {
     totalShippedAmountYuan: number
     totalSoldOrderCount: number
     totalInvalidOrderCount: number
+    /** 全店真实发货订单明细 */
+    shippedOrders: DailyReportShippedOrderLine[]
     totalLiveDurationMinutes: number
     assignedLiveDurationMinutes: number
     unassignedLiveDurationMinutes: number
@@ -172,6 +178,7 @@ function buildAnchorRow(params: {
   shippedAmountYuan: number
   soldOrderCount: number
   invalidOrderCount: number
+  shippedOrders: DailyReportShippedOrderLine[]
   sessions: AnchorLiveSessionBrief[]
   totalShippedAmountYuan: number
   scheduleAttendance: AnchorAttendanceStatusPayload
@@ -229,6 +236,7 @@ function buildAnchorRow(params: {
     shippedAmountYuan: params.shippedAmountYuan,
     soldOrderCount: params.soldOrderCount,
     invalidOrderCount: params.invalidOrderCount,
+    shippedOrders: params.shippedOrders,
     avgOrderAmountYuan: roundYuan(
       safeDivide(params.shippedAmountYuan, params.soldOrderCount),
     ),
@@ -285,6 +293,7 @@ export async function buildDailyReport(params: {
     )
     const shipped = sumDailyReportShippedFromViews(performanceViews)
     const shippedAmountYuan = shipped.shippedAmountYuan
+    const shippedOrders = listDailyReportShippedOrders(performanceViews)
 
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
     const { soldOrderCount } = shipped
@@ -333,6 +342,7 @@ export async function buildDailyReport(params: {
         shippedAmountYuan,
         soldOrderCount,
         invalidOrderCount: invalidFromAll,
+        shippedOrders,
         sessions,
         totalShippedAmountYuan: 0,
         scheduleAttendance,
@@ -439,6 +449,16 @@ export async function buildDailyReport(params: {
     0,
   )
   const totalLiveHours = safeDivide(totalLiveDurationMinutes, 60)
+  const summaryShippedOrders = anchorRows.flatMap((row) => row.shippedOrders ?? [])
+  const shippedOrderByNo = new Map<string, DailyReportShippedOrderLine>()
+  for (const line of summaryShippedOrders) {
+    if (!shippedOrderByNo.has(line.orderNo)) {
+      shippedOrderByNo.set(line.orderNo, line)
+    }
+  }
+  const dedupedSummaryShippedOrders = [...shippedOrderByNo.values()].sort((a, b) =>
+    a.orderNo.localeCompare(b.orderNo, 'zh-CN'),
+  )
 
   const dateLabel = formatDailyReportDateLabel(params.startDate)
 
@@ -451,6 +471,7 @@ export async function buildDailyReport(params: {
       totalShippedAmountYuan,
       totalSoldOrderCount,
       totalInvalidOrderCount,
+      shippedOrders: dedupedSummaryShippedOrders,
       totalLiveDurationMinutes,
       assignedLiveDurationMinutes: liveAssignment.assignedLiveDurationMinutes,
       unassignedLiveDurationMinutes: liveAssignment.unassignedLiveDurationMinutes,

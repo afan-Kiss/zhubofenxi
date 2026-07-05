@@ -16,6 +16,11 @@ import { AnchorTrendChart } from './AnchorTrendChart'
 import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
 import type { AnchorLeaderboardRow, AnchorTrend } from '../../lib/anchor-leaderboard-row'
 
+export interface DailyReportShippedOrderLine {
+  orderNo: string
+  amountYuan: number
+}
+
 export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   anchorName: string
   sessionLabel: string
@@ -32,6 +37,7 @@ export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   shippedAmountYuan: number
   soldOrderCount: number
   invalidOrderCount: number
+  shippedOrders?: DailyReportShippedOrderLine[]
   avgOrderAmountYuan: number | null
   hourlyAmountYuan: number | null
   dealDensityMinutes: number | null
@@ -57,6 +63,7 @@ export interface DailyReportPayload {
     totalShippedAmountYuan: number
     totalSoldOrderCount: number
     totalInvalidOrderCount: number
+    shippedOrders?: DailyReportShippedOrderLine[]
     totalLiveDurationMinutes: number
     assignedLiveDurationMinutes?: number
     unassignedLiveDurationMinutes?: number
@@ -97,6 +104,38 @@ function MetricLine({ label, value, strong }: { label: string; value: string; st
       <span className={strong ? 'text-[15px] font-semibold text-slate-900' : 'text-slate-800'}>
         {value}
       </span>
+    </div>
+  )
+}
+
+function ShippedOrdersBlock({
+  orders,
+  compact = false,
+}: {
+  orders: DailyReportShippedOrderLine[] | undefined
+  compact?: boolean
+}) {
+  const list = orders ?? []
+  if (list.length === 0) {
+    return (
+      <p className={`${compact ? 'text-[10px]' : 'text-[11px]'} text-slate-400`}>
+        真实发货订单：暂无（已剔除售后、关闭与取消单）
+      </p>
+    )
+  }
+  return (
+    <div className="mt-1 space-y-0.5">
+      <p className={`${compact ? 'text-[10px]' : 'text-[11px]'} text-slate-500`}>
+        真实发货订单（{list.length} 单，已剔除售后/关闭/取消）
+      </p>
+      {list.map((order) => (
+        <p
+          key={order.orderNo}
+          className={`${compact ? 'text-[10px]' : 'text-[11px]'} font-mono text-slate-700`}
+        >
+          {order.orderNo} · {formatMoney(order.amountYuan)}
+        </p>
+      ))}
     </div>
   )
 }
@@ -146,13 +185,14 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
       </div>
       <div className="mt-3 space-y-1">
         <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} strong />
+        <ShippedOrdersBlock orders={row.shippedOrders} />
         <MetricLine
           label="归属支付金额"
           value={formatMoney(row.gmvYuan)}
           strong={false}
         />
         <p className="text-[10px] leading-snug text-slate-400">
-          归属支付按主播时段统计；真实发货已剔除售后与关闭单
+          归属支付按主播时段统计；真实发货已剔除售后、关闭与取消单
         </p>
         <MetricLine label="真实卖出" value={formatOrderCount(row.soldOrderCount)} />
         <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />
@@ -227,6 +267,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
             strong={data.summary.totalInvalidOrderCount > 0}
           />
         </div>
+        <ShippedOrdersBlock orders={data.summary.shippedOrders} compact />
         {data.summary.liveSessionAttributionNote ? (
           <p className="mt-3 border-t border-rose-100 pt-3 text-[12px] leading-relaxed text-amber-800">
             {data.summary.liveSessionAttributionNote}

@@ -4,27 +4,31 @@ import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-
 import { isLowPriceBrushOrderView } from './low-price-brush-order.service'
 import { isActualAfterSaleOrder } from './operations-after-sale-order.util'
 
-const CLOSED_KEYWORDS = ['已关闭', '交易关闭']
+const CLOSED_OR_CANCELLED_KEYWORDS = ['已关闭', '交易关闭', '已取消', '交易取消']
 
 function normalizeOrderStatus(view: AnalyzedOrderView): string {
   return (view.orderStatusText ?? '').trim()
 }
 
-/** 关闭/退货单：已关闭，或存在售后/退款（与真实发货剔除口径一致） */
-export function isDailyReportInvalidOrder(v: AnalyzedOrderView): boolean {
+function isDailyReportClosedOrCancelledOrder(v: AnalyzedOrderView): boolean {
   const orderStatus = normalizeOrderStatus(v)
-  if (CLOSED_KEYWORDS.some((k) => orderStatus.includes(k))) return true
+  return CLOSED_OR_CANCELLED_KEYWORDS.some((k) => orderStatus.includes(k))
+}
+
+/** 关闭/退货单：已关闭/已取消，或存在售后/退款（与真实发货剔除口径一致） */
+export function isDailyReportInvalidOrder(v: AnalyzedOrderView): boolean {
+  if (isDailyReportClosedOrCancelledOrder(v)) return true
   return isActualAfterSaleOrder(v)
 }
 
 /**
- * 真实发货计入订单：主播业绩内订单，剔除低价刷单与售后订单。
+ * 真实发货计入订单：主播业绩内订单，剔除低价刷单、售后与关闭/取消单。
  * 金额取支付基数 paymentBaseCent（与主播业绩支付金额一致）。
  */
 export function isDailyReportShippedOrder(v: AnalyzedOrderView): boolean {
   if (!v.includedInGmv) return false
   if (isLowPriceBrushOrderView(v)) return false
-  if (isActualAfterSaleOrder(v)) return false
+  if (isDailyReportInvalidOrder(v)) return false
   return (v.paymentBaseCent ?? 0) > 0
 }
 
@@ -53,6 +57,29 @@ export function sumDailyReportShippedFromViews(views: AnalyzedOrderView[]): {
     shippedAmountYuan: Math.round(centToYuan(shippedAmountCent)),
     soldOrderCount,
   }
+}
+
+export interface DailyReportShippedOrderLine {
+  orderNo: string
+  amountYuan: number
+}
+
+/** 真实发货订单明细（与 sumDailyReportShippedFromViews 同一订单池） */
+export function listDailyReportShippedOrders(views: AnalyzedOrderView[]): DailyReportShippedOrderLine[] {
+  const deduped = dedupeViewsByMetricOrderNo(views)
+  const lines: DailyReportShippedOrderLine[] = []
+  for (const v of deduped) {
+    if (!resolveMetricOrderNo(v) && v.paymentBaseCent <= 0) continue
+    if (!isDailyReportShippedOrder(v)) continue
+    const orderNo = resolveMetricOrderNo(v) || String(v.orderId ?? '').trim()
+    if (!orderNo) continue
+    lines.push({
+      orderNo,
+      amountYuan: Math.round(centToYuan(v.paymentBaseCent) * 100) / 100,
+    })
+  }
+  lines.sort((a, b) => a.orderNo.localeCompare(b.orderNo, 'zh-CN'))
+  return lines
 }
 
 export function countDailyReportOrders(views: AnalyzedOrderView[]): {

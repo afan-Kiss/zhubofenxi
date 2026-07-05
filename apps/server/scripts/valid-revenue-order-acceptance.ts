@@ -257,6 +257,12 @@ function testDailyReportShippedCaliber(issues: string[]) {
 
   const refunded = mockView({ orderStatusText: '已完成', afterSaleStatusText: '退款成功' })
   assert(!isDailyReportSoldOrder(refunded), '售后订单不应计入真实发货', issues)
+
+  const closed = mockView({ orderStatusText: '交易关闭', afterSaleStatusText: '无售后' })
+  assert(!isDailyReportSoldOrder(closed), '已关闭订单不应计入真实发货', issues)
+
+  const cancelled = mockView({ orderStatusText: '已取消', afterSaleStatusText: '' })
+  assert(!isDailyReportSoldOrder(cancelled), '已取消订单不应计入真实发货', issues)
 }
 
 function testAmountCent(issues: string[]) {

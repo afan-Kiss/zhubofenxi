@@ -180,6 +180,11 @@ export const AnchorPerformanceTab: React.FC = () => {
     boardSyncUiMode === 'synced_idle' ||
     boardSyncUiMode === 'syncing_with_data' ||
     boardSyncUiMode === 'loading_range'
+  const showDailyReportEntry =
+    isSingleDayPreset(preset, startDate, endDate) &&
+    Boolean(startDate && endDate) &&
+    boardDataVisible &&
+    status !== 'failed'
   const isLoadingRange = isDisplayStale && isLoading
   const showInitialSkeleton = isLoading && !hasPerformanceData && !data
   const showMetrics = hasPerformanceData && boardDataVisible
@@ -320,6 +325,18 @@ export const AnchorPerformanceTab: React.FC = () => {
         <BoardStatRangeNote startDate={resolvedRange.startDate} endDate={resolvedRange.endDate} />
       )}
 
+      {showDailyReportEntry ? (
+        <div className="rounded-2xl border border-rose-100/60 bg-white p-4 shadow-sm">
+          <p className="mb-3 text-sm font-medium text-slate-800">主播日报</p>
+          <DailyReportPreviewButton
+            preset={preset}
+            startDate={startDate}
+            endDate={endDate}
+            disabled={isLoading && !data}
+          />
+        </div>
+      ) : null}
+
       {showProgressCard ? (
         <BusinessSyncProgressCard
           variant={progressVariant}
@@ -450,14 +467,6 @@ export const AnchorPerformanceTab: React.FC = () => {
               </button>
               {toolsOpen ? (
                 <div className="space-y-4 border-t border-slate-100 px-4 pb-4 pt-3">
-                  <div className="flex flex-wrap items-center gap-3">
-                    <DailyReportPreviewButton
-                      preset={preset}
-                      startDate={startDate}
-                      endDate={endDate}
-                      disabled={!boardDataVisible || isLoading}
-                    />
-                  </div>
                   <AnchorEffectiveSchedulePanel startDate={startDate} endDate={endDate} />
                   <AnchorPocketSummaryPanel preset={preset} startDate={startDate} endDate={endDate} />
                   <AnchorAuditExportPanel startDate={startDate} endDate={endDate} />

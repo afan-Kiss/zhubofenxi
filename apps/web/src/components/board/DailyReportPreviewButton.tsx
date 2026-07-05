@@ -20,12 +20,15 @@ async function waitForNextPaint(): Promise<void> {
 }
 
 async function waitForTrendChartsReady(root: HTMLElement): Promise<void> {
-  const charts = Array.from(root.querySelectorAll('[data-anchor-trend-chart]'))
+  const charts = Array.from(
+    root.querySelectorAll('[data-anchor-trend-chart], [data-anchor-trend-compare]'),
+  )
   if (charts.length === 0) return
   const started = Date.now()
   while (Date.now() - started < 3000) {
     const allReady = charts.every((el) => {
-      if (el.getAttribute('data-anchor-trend-chart') === 'empty') return true
+      const state = el.getAttribute('data-anchor-trend-chart') ?? el.getAttribute('data-anchor-trend-compare')
+      if (state === 'empty') return true
       const svg = el.querySelector('svg')
       return Boolean(svg && svg.getBoundingClientRect().height > 0)
     })
@@ -270,7 +273,12 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     setLoading(true)
     setError(null)
     try {
-      const qs = new URLSearchParams({ startDate, endDate, preset: 'custom' })
+      const qs = new URLSearchParams({ startDate, endDate })
+      if (preset === 'today' || preset === 'yesterday') {
+        qs.set('preset', preset)
+      } else {
+        qs.set('preset', 'custom')
+      }
       const [data, photoPayload] = await Promise.all([
         apiRequest<DailyReportPayload>(`/board/daily-report?${qs}`, { retryOnGateway: 2 }),
         apiRequest<{ images: DailyReportImageItem[] }>(

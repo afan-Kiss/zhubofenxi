@@ -369,7 +369,10 @@ export async function buildDailyReport(params: {
     preset: 'custom',
   })
   leaderboardRows = await enrichAnchorLeaderboardWithTrend(leaderboardRows, allPerformanceViews, {
-    preset: 'custom',
+    preset:
+      params.preset === 'today' || params.preset === 'yesterday'
+        ? params.preset
+        : 'custom',
     startDate: params.startDate,
     endDate: params.endDate,
   })

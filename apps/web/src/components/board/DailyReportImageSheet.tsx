@@ -13,7 +13,8 @@ import {
 } from './dailyReportFormatters'
 import type { AnchorLivePeriodView } from '../../lib/anchor-live-period'
 import { AnchorTrendChart } from './AnchorTrendChart'
-import type { AnchorTrend } from '../../lib/anchor-leaderboard-row'
+import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
+import type { AnchorLeaderboardRow, AnchorTrend } from '../../lib/anchor-leaderboard-row'
 
 export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   anchorName: string
@@ -76,6 +77,17 @@ interface Props {
     caption: string | null
     dataUrl?: string | null
   }>
+}
+
+function toCompareLeaderboardRows(anchors: DailyReportAnchorRow[]): AnchorLeaderboardRow[] {
+  return anchors.map((row) => ({
+    anchorName: row.anchorName,
+    trend: row.trend,
+    gmv: row.gmvYuan ?? 0,
+    totalGmv: row.gmvYuan ?? 0,
+    orderCount: row.soldOrderCount,
+    paidOrderCount: row.soldOrderCount,
+  }))
 }
 
 function MetricLine({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
@@ -232,6 +244,15 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
             )}
           </div>
         )}
+      </div>
+
+      <div className="mt-4">
+        <AnchorTrendCompareChart
+          variant="report"
+          rows={toCompareLeaderboardRows(data.anchors)}
+          formatMoney={(v) => formatMoney(v)}
+          formatCount={(n) => formatOrderCount(n)}
+        />
       </div>
 
       <div className="mt-4 space-y-3">

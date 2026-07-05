@@ -376,6 +376,8 @@ export interface AnchorTrendCompareChartProps {
   formatMoney: (value: number) => string
   formatCount?: (value: number) => string
   className?: string
+  /** page=交互页；report=日报长图（无筛选、无动画） */
+  variant?: 'page' | 'report'
 }
 
 export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = ({
@@ -383,8 +385,10 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
   formatMoney,
   formatCount = (value) => `${value} 单`,
   className = '',
+  variant = 'page',
 }) => {
-  const compact = useCompactChart()
+  const isReport = variant === 'report'
+  const compact = useCompactChart() || isReport
   const sortedCandidates = useMemo(() => sortCompareCandidates(rows), [rows])
   const defaultSelectedKey = useMemo(
     () => defaultCompareAnchorNames(rows).join('|'),
@@ -431,44 +435,53 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     return (
       <div
         data-anchor-trend-compare="empty"
-        className={`flex min-h-[180px] flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-6 md:min-h-[220px] ${className}`}
+        className={`flex ${isReport ? 'min-h-[120px]' : 'min-h-[180px] md:min-h-[220px]'} flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-6 ${className}`}
       >
         <p className="text-[13px] text-slate-500">暂无可对比走势</p>
-        <p className="mt-1 text-[11px] text-slate-400">有主播成交后会自动生成对比曲线</p>
+        {!isReport ? (
+          <p className="mt-1 text-[11px] text-slate-400">有主播成交后会自动生成对比曲线</p>
+        ) : null}
       </div>
     )
   }
 
   const title = isRelativeIntraday ? '主播开播后支付金额节奏对比' : '主播每日支付金额走势对比'
   const subtitle = isRelativeIntraday
-    ? compact
-      ? '按开播后分钟对齐，单场最多 240 分钟'
-      : '按「开播后第几分钟」对齐（单场约 4 小时），不按自然时间'
+    ? isReport
+      ? '按开播后分钟对齐（单场约 4 小时）'
+      : compact
+        ? '按开播后分钟对齐，单场最多 240 分钟'
+        : '按「开播后第几分钟」对齐（单场约 4 小时），不按自然时间'
     : '按日期对比每日支付金额，不是有效成交额'
 
   const xAxisKey = compact ? 'tickLabel' : 'label'
+  const chartHeightClass = isReport ? 'h-[180px]' : compact ? 'h-[248px]' : 'h-[220px] md:h-[260px]'
 
   return (
     <div
       data-anchor-trend-compare="ready"
-      className={`rounded-2xl border border-rose-100 bg-white/80 p-3 shadow-sm shadow-rose-50/40 md:p-4 ${className}`}
+      className={`rounded-2xl border border-rose-100 bg-white/80 ${isReport ? 'p-3' : 'p-3 shadow-sm shadow-rose-50/40 md:p-4'} ${className}`}
     >
-      <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+      <div className={`mb-2 flex flex-wrap items-start justify-between gap-2 ${isReport ? '' : ''}`}>
         <div>
-          <p className="text-[13px] font-medium text-slate-700 md:text-[14px]">{title}</p>
-          <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p>
-          <p className="mt-0.5 text-[10px] text-slate-400">
-            默认展示全部有走势的主播，可手动隐藏不想看的主播
+          <p className={`${isReport ? 'text-[13px]' : 'text-[13px] md:text-[14px]'} font-medium text-slate-700`}>
+            {title}
           </p>
+          <p className="mt-0.5 text-[11px] text-slate-500">{subtitle}</p>
+          {!isReport ? (
+            <p className="mt-0.5 text-[10px] text-slate-400">
+              默认展示全部有走势的主播，可手动隐藏不想看的主播
+            </p>
+          ) : null}
         </div>
-        {skippedModeMismatch ? (
+        {!isReport && skippedModeMismatch ? (
           <p className="max-w-[200px] text-right text-[10px] leading-snug text-amber-600">
             部分主播走势口径不同，已自动跳过
           </p>
         ) : null}
       </div>
 
-      {sortedCandidates.length > 0 ? (
+      {!isReport && sortedCandidates.length > 0 ? (
         <div className="mb-3 flex flex-wrap gap-2">
           {sortedCandidates.map((row) => {
             const name = String(row.anchorName).trim()
@@ -504,7 +517,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
         </div>
       ) : null}
 
-      <div className={`w-full ${compact ? 'h-[248px]' : 'h-[220px] md:h-[260px]'}`}>
+      <div className={`w-full ${chartHeightClass}`}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
             data={chartDataWithTicks}
@@ -571,8 +584,8 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
                 strokeWidth={2}
                 dot={false}
                 connectNulls={false}
-                activeDot={{ r: 3.5, fill: s.color, stroke: '#fff', strokeWidth: 1 }}
-                isAnimationActive
+                activeDot={isReport ? false : { r: 3.5, fill: s.color, stroke: '#fff', strokeWidth: 1 }}
+                isAnimationActive={!isReport}
               />
             ))}
           </LineChart>

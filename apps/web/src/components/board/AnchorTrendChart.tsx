@@ -89,7 +89,6 @@ function hasTrendData(
   variant: 'page' | 'report',
 ): boolean {
   if (!trend?.points?.length) return false
-  if (variant === 'report') return true
   return trend.points.some((p) => p.value > 0 || p.orderCount > 0)
 }
 

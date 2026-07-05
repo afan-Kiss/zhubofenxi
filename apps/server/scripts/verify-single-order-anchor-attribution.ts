@@ -225,6 +225,9 @@ async function main(): Promise<void> {
     process.exit(1)
   }
   const artifacts = prepareAnalysisArtifactsFromRaw(bundle)
+  const rawByMatch = new Map(
+    (artifacts.dedupe.uniqueOrders ?? []).map((o) => [o.matchOrderId, o.raw]),
+  )
   const viewRaw = findViewByOrderNo(artifacts.views, ORDER_NO)
   if (!viewRaw) {
     console.log('\nFAIL: 未解析为经营视图')

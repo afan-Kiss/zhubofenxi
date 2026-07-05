@@ -28,6 +28,8 @@ export interface BoardSyncMeta {
     nextRunAt: string | null
     status: 'success' | 'failed' | 'running' | 'idle' | 'queued'
     intervalMinutes: number
+    /** 与系统设置 apiSyncEnabled 一致 */
+    enabled: boolean
     message: string
     lastError: string | null
     currentTask?: { reason: string; startedAt: string } | null

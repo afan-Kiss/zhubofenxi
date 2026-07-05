@@ -1,14 +1,9 @@
 import React from 'react'
 import type { BoardSyncMeta } from '../../lib/board-live-query'
-
-function fmt(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  try {
-    return new Date(iso).toLocaleString('zh-CN', { hour12: false })
-  } catch {
-    return iso
-  }
-}
+import {
+  formatBusinessSyncTime,
+  resolveBusinessSyncScheduleLines,
+} from '../../lib/business-sync-ui'
 
 const BUSINESS_SYNC_FAILED_HINT =
   '最近一次自动同步失败，系统会自动重试。'
@@ -21,13 +16,16 @@ export const BoardAutoSyncStatusNote: React.FC<Props> = ({ syncMeta }) => {
   if (!syncMeta) return null
 
   const biz = syncMeta.businessSync
-  const intervalMinutes = biz.intervalMinutes ?? 180
+  const schedule = resolveBusinessSyncScheduleLines(biz)
 
   let lastSyncLine: React.ReactNode
   if (biz.lastSuccessAt) {
     lastSyncLine = (
       <p>
-        数据最后同步：<span className="font-medium text-slate-700">{fmt(biz.lastSuccessAt)}</span>
+        数据最后同步：
+        <span className="font-medium text-slate-700">
+          {formatBusinessSyncTime(biz.lastSuccessAt)}
+        </span>
       </p>
     )
   } else if (biz.status === 'running') {
@@ -45,11 +43,18 @@ export const BoardAutoSyncStatusNote: React.FC<Props> = ({ syncMeta }) => {
   return (
     <div className="mt-1 space-y-1 text-xs text-slate-500">
       {lastSyncLine}
-      <p>
-        下次自动同步：<span className="font-medium text-slate-700">{fmt(biz.nextRunAt)}</span>
+      <p className={schedule.autoSyncEnabled ? 'text-slate-600' : 'text-amber-800'}>
+        {schedule.headline}
       </p>
+      {schedule.autoSyncEnabled && schedule.nextRunText ? (
+        <p>{schedule.nextRunText}</p>
+      ) : null}
+      {!schedule.autoSyncEnabled ? (
+        <p className="text-amber-800">
+          自动同步已关闭，页面不会自动更新；请到系统设置开启或手动同步。
+        </p>
+      ) : null}
       <p>当前展示：最近一次成功同步后的本地数据</p>
-      <p>同步频率：经营数据每 {intervalMinutes} 分钟自动同步</p>
       <p className="text-slate-400">
         数据来源：订单、直播场次、售后、商品问题售后接口的本地同步结果
       </p>

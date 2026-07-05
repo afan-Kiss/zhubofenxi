@@ -43,8 +43,6 @@ import type { DateRangePreset } from '../utils/date-range'
 import { sendFail, sendOk } from '../utils/response'
 import { formatSettingsCookieUpdatedBy } from '../utils/cookie-upload-source.util'
 import { clearBusinessDataForSettings } from '../services/clear-business-data.service'
-import { triggerBusinessSyncIfStale } from '../services/business-sync-scheduler.service'
-
 export const settingsRouter = Router()
 
 settingsRouter.use(attachRequestUser, requireAuth)
@@ -375,18 +373,24 @@ settingsRouter.post(
 
 settingsRouter.post(
   '/data-maintenance/trigger-business-sync',
-  async (_req, res) => {
+  async (req, res) => {
     try {
-      const result = await triggerBusinessSyncIfStale('catchup')
+      const { runDailyStrategySyncJob } = await import('../services/daily-sync-strategy.service')
+      const { jobId, alreadyRunning } = await runDailyStrategySyncJob({
+        triggeredBy: req.user?.id ? `manual:${req.user.id}` : 'manual:settings',
+        audit: {
+          requestId: req.requestId,
+          ip: getClientIp(req),
+          userAgent: req.headers['user-agent'] ?? undefined,
+        },
+      })
       sendOk(res, {
         ok: true,
-        result,
-        message:
-          result === 'started'
-            ? '经营同步已启动'
-            : result === 'queued'
-              ? '经营同步已排队'
-              : '经营同步未启动，请稍后在经营总览查看状态',
+        syncJobId: jobId,
+        alreadyRunning,
+        message: alreadyRunning
+          ? '经营同步已在进行中'
+          : '经营同步已启动（手动触发，不受自动同步开关影响）',
       })
     } catch (err) {
       sendFail(res, err instanceof Error ? err.message : '触发同步失败', 500)

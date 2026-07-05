@@ -282,3 +282,44 @@ export function resolveSyncingHeaderMessage(job: SyncJobLike): string {
   }
   return '经营数据正在后台更新，当前展示最近一次成功结果。'
 }
+
+export function formatBusinessSyncTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  try {
+    return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+  } catch {
+    return iso
+  }
+}
+
+export function resolveBusinessSyncScheduleLines(biz: {
+  enabled?: boolean
+  intervalMinutes?: number
+  nextRunAt?: string | null
+  lastSuccessAt?: string | null
+}): {
+  autoSyncEnabled: boolean
+  headline: string
+  detail: string
+  nextRunText: string | null
+} {
+  const autoSyncEnabled = biz.enabled !== false
+  const intervalMinutes = biz.intervalMinutes ?? 180
+  if (!autoSyncEnabled) {
+    return {
+      autoSyncEnabled: false,
+      headline: '经营数据自动同步：已关闭',
+      detail:
+        '系统不会按固定间隔从千帆拉取订单、直播场次与官方品退；页面仅展示本地已有数据。开启后将按间隔自动补数据，也可在下方手动触发同步。',
+      nextRunText: null,
+    }
+  }
+  return {
+    autoSyncEnabled: true,
+    headline: '经营数据自动同步：已开启',
+    detail: `每 ${intervalMinutes} 分钟自动同步最近 180 天订单、直播场次与官方品退（上一轮结束后开始计时）。买家排行仍于每天凌晨 3 点重建本地画像。`,
+    nextRunText: biz.nextRunAt
+      ? `预计下次自动同步：${formatBusinessSyncTime(biz.nextRunAt)}`
+      : null,
+  }
+}

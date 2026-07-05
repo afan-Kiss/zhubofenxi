@@ -155,6 +155,7 @@ export function deriveDashboardStatus(input: {
   syncJob: SyncJobView | null
   dataSource: string
   intervalMinutes?: number
+  autoSyncEnabled?: boolean
 }): {
   dataStatus: DataStatusKind
   dataSourceLabel: string
@@ -162,6 +163,7 @@ export function deriveDashboardStatus(input: {
 } {
   const presetText = PRESET_DISPLAY[input.preset] ?? input.rangeLabel
   const intervalMinutes = input.intervalMinutes ?? 180
+  const autoSyncEnabled = input.autoSyncEnabled !== false
 
   if (input.syncRunning) {
     return {
@@ -209,7 +211,9 @@ export function deriveDashboardStatus(input: {
   return {
     dataStatus: 'empty',
     dataSourceLabel: '暂无数据',
-    hint: `当前范围暂无已同步数据，请等待系统自动同步（经营数据约每 ${intervalMinutes} 分钟）后再查看。`,
+    hint: autoSyncEnabled
+      ? `当前范围暂无已同步数据，请等待系统自动同步（经营数据约每 ${intervalMinutes} 分钟）后再查看。`
+      : '当前范围暂无已同步数据；经营数据自动同步已关闭，请到系统设置开启或手动同步。',
   }
 }
 

@@ -369,6 +369,9 @@ export async function getBusinessSyncStatus(): Promise<{
 
     intervalMinutes: number
 
+    /** 系统设置 apiSyncEnabled；关闭时不触发 interval/补跑同步 */
+    enabled: boolean
+
     message: string
 
     lastError: string | null
@@ -550,6 +553,8 @@ export async function getBusinessSyncStatus(): Promise<{
 
   const { getLastCookieBootstrapSummary } = await import('./qianfan-cookie-resolver.service')
   const cookieSummary = getLastCookieBootstrapSummary()
+  const settings = await getApiSyncSettings()
+  const apiSyncEnabled = settings.apiSyncEnabled
 
   return {
 
@@ -561,13 +566,17 @@ export async function getBusinessSyncStatus(): Promise<{
 
       failedAt,
 
-      nextRunAt: nextBusiness.toISOString(),
+      nextRunAt: apiSyncEnabled ? nextBusiness.toISOString() : null,
 
       status: businessStatus,
 
       intervalMinutes: BUSINESS_SYNC_INTERVAL_MINUTES,
 
-      message: `经营数据每 ${BUSINESS_SYNC_INTERVAL_MINUTES} 分钟自动同步`,
+      enabled: apiSyncEnabled,
+
+      message: apiSyncEnabled
+        ? `经营数据每 ${BUSINESS_SYNC_INTERVAL_MINUTES} 分钟自动同步`
+        : '经营数据自动同步已关闭',
 
       lastError: lastError ?? null,
 

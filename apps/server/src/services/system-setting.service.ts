@@ -168,7 +168,7 @@ export interface NotificationSettings {
 }
 
 const API_SYNC_DEFAULTS: ApiSyncSettings = {
-  apiSyncEnabled: false,
+  apiSyncEnabled: true,
   apiSyncTime: '02:00',
   apiSyncPreset: 'today',
   refreshTimezone: 'Asia/Shanghai',
@@ -239,6 +239,7 @@ export async function getApiSyncSettings(): Promise<ApiSyncSettings> {
 export async function updateApiSyncSettings(
   input: Partial<ApiSyncSettings>,
 ): Promise<ApiSyncSettings> {
+  const before = await getApiSyncSettings()
   if (input.apiSyncEnabled !== undefined) {
     await setSetting('apiSyncEnabled', String(input.apiSyncEnabled))
   }
@@ -270,7 +271,13 @@ export async function updateApiSyncSettings(
   if (input.syncSettledSettlementEnabled !== undefined) {
     await setSetting('syncSettledSettlementEnabled', String(input.syncSettledSettlementEnabled))
   }
-  return getApiSyncSettings()
+  const saved = await getApiSyncSettings()
+  if (input.apiSyncEnabled === true && !before.apiSyncEnabled && saved.apiSyncEnabled) {
+    await rescheduleApiSyncFromSettings()
+    const { triggerBusinessSyncIfStale } = await import('./business-sync-scheduler.service')
+    void triggerBusinessSyncIfStale('startup')
+  }
+  return saved
 }
 
 export async function getNotificationSettings(): Promise<NotificationSettings> {

@@ -225,6 +225,7 @@ export const AnchorPerformanceTab: React.FC = () => {
       nextRunAt: null,
       status: 'idle',
       intervalMinutes: 180,
+      enabled: false,
       message: '',
       lastError: null,
     },

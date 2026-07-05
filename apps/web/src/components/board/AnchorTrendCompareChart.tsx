@@ -29,6 +29,10 @@ const ANCHOR_COLORS = [
 ] as const
 const INTRADAY_BUCKET_MINUTES = 30
 const BUCKET_MS = INTRADAY_BUCKET_MINUTES * 60_000
+/** 今日/昨日对比图：单场直播约 4 小时，横轴最多对齐到 240 分钟 */
+const INTRADAY_COMPARE_MAX_LIVE_MINUTES = 240
+export const INTRADAY_COMPARE_MAX_BUCKET_INDEX =
+  Math.ceil(INTRADAY_COMPARE_MAX_LIVE_MINUTES / INTRADAY_BUCKET_MINUTES) - 1
 
 function seriesColor(index: number): string {
   return ANCHOR_COLORS[index % ANCHOR_COLORS.length] ?? ANCHOR_COLORS[0]!
@@ -71,11 +75,16 @@ function computeXTickInterval(len: number, compact: boolean, isIntraday: boolean
   return Math.max(1, Math.ceil(len / targetTicks) - 1)
 }
 
+function hasPositiveTrendPoint(row: AnchorLeaderboardRow): boolean {
+  const trend = anchorRowTrend(row)
+  if (!trend?.points?.length) return false
+  return trend.points.some((p) => p.value > 0 || p.orderCount > 0)
+}
+
 function isValidAnchorRow(row: AnchorLeaderboardRow): boolean {
   const name = String(row.anchorName ?? '').trim()
   if (!name || name === '未归属') return false
-  const trend = anchorRowTrend(row)
-  return Boolean(trend?.points?.length)
+  return hasPositiveTrendPoint(row)
 }
 
 export function sortCompareCandidates(rows: AnchorLeaderboardRow[]): AnchorLeaderboardRow[] {
@@ -145,7 +154,7 @@ function buildDailyComparePayload(
   return { series, chartData }
 }
 
-function buildIntradayRelativeComparePayload(
+export function buildIntradayRelativeComparePayload(
   matched: Array<{ anchorName: string; trend: NonNullable<ReturnType<typeof anchorRowTrend>> }>,
 ): { series: AnchorTrendCompareSeries[]; chartData: CompareChartRow[] } {
   type AnchorBuckets = {
@@ -165,24 +174,33 @@ function buildIntradayRelativeComparePayload(
     const useTimestamp = Number.isFinite(firstMs)
 
     const bucketValues = new Map<number, number>()
-    let maxBucket = 0
+    let maxActiveBucket = -1
 
     points.forEach((point, index) => {
       const bucketIndex = useTimestamp
         ? Math.max(0, Math.round((Number(point.key) - firstMs) / BUCKET_MS))
         : index
-      maxBucket = Math.max(maxBucket, bucketIndex)
+      if (bucketIndex > INTRADAY_COMPARE_MAX_BUCKET_INDEX) return
+
       bucketValues.set(bucketIndex, (bucketValues.get(bucketIndex) ?? 0) + point.value)
+      if (point.value > 0 || point.orderCount > 0) {
+        maxActiveBucket = Math.max(maxActiveBucket, bucketIndex)
+      }
     })
+
+    if (maxActiveBucket < 0) continue
 
     perAnchor.push({
       anchorName: item.anchorName,
       bucketValues,
-      maxBucket,
+      maxBucket: maxActiveBucket,
     })
   }
 
-  const globalMaxBucket = perAnchor.reduce((max, item) => Math.max(max, item.maxBucket), 0)
+  const globalMaxBucket = Math.min(
+    INTRADAY_COMPARE_MAX_BUCKET_INDEX,
+    perAnchor.reduce((max, item) => Math.max(max, item.maxBucket), 0),
+  )
 
   const series: AnchorTrendCompareSeries[] = perAnchor.map((item, index) => ({
     anchorName: item.anchorName,
@@ -424,8 +442,8 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
   const title = isRelativeIntraday ? '主播开播后支付金额节奏对比' : '主播每日支付金额走势对比'
   const subtitle = isRelativeIntraday
     ? compact
-      ? '按开播后分钟对齐（横轴为起始分钟）'
-      : '按「开播后第几分钟」对齐，不按自然时间'
+      ? '按开播后分钟对齐，单场最多 240 分钟'
+      : '按「开播后第几分钟」对齐（单场约 4 小时），不按自然时间'
     : '按日期对比每日支付金额，不是有效成交额'
 
   const xAxisKey = compact ? 'tickLabel' : 'label'

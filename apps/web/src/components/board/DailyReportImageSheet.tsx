@@ -19,6 +19,7 @@ import type { AnchorLeaderboardRow, AnchorTrend } from '../../lib/anchor-leaderb
 export interface DailyReportShippedOrderLine {
   orderNo: string
   amountYuan: number
+  anchorName?: string
 }
 
 export interface DailyReportAnchorRow extends AnchorLivePeriodView {
@@ -70,7 +71,11 @@ export interface DailyReportPayload {
     unassignedLiveSessionCount?: number
     liveSessionAttributionNote?: string | null
     overallHourlyAmountYuan: number | null
-    liveRoomNewFollowers: Array<{ liveAccountName: string; newFollowerCount: number }>
+    liveRoomNewFollowers: Array<{
+      liveAccountName: string
+      newFollowerCount: number
+      anchorNames?: string[]
+    }>
     totalNewFollowerCount: number
   }
   anchors: DailyReportAnchorRow[]
@@ -108,12 +113,54 @@ function MetricLine({ label, value, strong }: { label: string; value: string; st
   )
 }
 
+function AnchorNameBadge({
+  name,
+  compact = false,
+}: {
+  name: string
+  compact?: boolean
+}) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center rounded-md border border-rose-200/90 bg-gradient-to-b from-rose-50 to-white px-1.5 font-sans font-medium leading-none text-rose-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] ${
+        compact ? 'py-0.5 text-[9px]' : 'py-[3px] text-[10px]'
+      }`}
+    >
+      {name}
+    </span>
+  )
+}
+
+function LiveRoomFollowerLine({
+  liveAccountName,
+  anchorNames,
+  newFollowerCount,
+}: {
+  liveAccountName: string
+  anchorNames?: string[]
+  newFollowerCount: number
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 text-[13px] leading-6">
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-slate-500">
+        <span className="text-slate-600">{liveAccountName}</span>
+        {(anchorNames ?? []).map((name) => (
+          <AnchorNameBadge key={`${liveAccountName}-${name}`} name={name} />
+        ))}
+      </span>
+      <span className="shrink-0 text-slate-800">{formatPeopleCount(newFollowerCount)}</span>
+    </div>
+  )
+}
+
 function ShippedOrdersBlock({
   orders,
   compact = false,
+  showAnchorName = true,
 }: {
   orders: DailyReportShippedOrderLine[] | undefined
   compact?: boolean
+  showAnchorName?: boolean
 }) {
   const list = orders ?? []
   if (list.length === 0) {
@@ -129,12 +176,17 @@ function ShippedOrdersBlock({
         真实发货订单（{list.length} 单，已剔除售后/关闭/取消）
       </p>
       {list.map((order) => (
-        <p
+        <div
           key={order.orderNo}
-          className={`${compact ? 'text-[10px]' : 'text-[11px]'} font-mono text-slate-700`}
+          className={`flex flex-wrap items-center gap-1.5 ${compact ? 'text-[10px]' : 'text-[11px]'} leading-5`}
         >
-          {order.orderNo} · {formatMoney(order.amountYuan)}
-        </p>
+          <span className="font-mono text-slate-700">{order.orderNo}</span>
+          {showAnchorName && order.anchorName ? (
+            <AnchorNameBadge name={order.anchorName} compact={compact} />
+          ) : null}
+          <span className="text-slate-400">·</span>
+          <span className="tabular-nums text-slate-700">{formatMoney(order.amountYuan)}</span>
+        </div>
       ))}
     </div>
   )
@@ -185,7 +237,7 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
       </div>
       <div className="mt-3 space-y-1">
         <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} strong />
-        <ShippedOrdersBlock orders={row.shippedOrders} />
+        <ShippedOrdersBlock orders={row.shippedOrders} showAnchorName={false} />
         <MetricLine
           label="归属支付金额"
           value={formatMoney(row.gmvYuan)}
@@ -216,10 +268,13 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         <MetricLine label="时均产出" value={formatHourly(row.hourlyAmountYuan)} />
         <MetricLine label="成交密度" value={formatDensity(row.dealDensityMinutes)} />
         <MetricLine
-          label="关闭/退货单"
+          label="本场关闭/退货单"
           value={formatOrderCount(row.invalidOrderCount)}
           strong={row.invalidOrderCount > 0}
         />
+        <p className="text-[10px] leading-snug text-slate-400">
+          含本场关闭、取消、售后订单，不计入真实发货
+        </p>
       </div>
     </div>
   )
@@ -262,11 +317,14 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
             value={formatHourly(data.summary.overallHourlyAmountYuan)}
           />
           <MetricLine
-            label="关闭/退货单"
+            label="本场关闭/退货单"
             value={formatOrderCount(data.summary.totalInvalidOrderCount)}
             strong={data.summary.totalInvalidOrderCount > 0}
           />
         </div>
+        <p className="mt-1 text-[10px] leading-snug text-slate-400">
+          关闭/退货单与真实发货同基础池，已剔除低价刷单；含关闭、取消、售后，不计入真实发货
+        </p>
         <ShippedOrdersBlock orders={data.summary.shippedOrders} compact />
         {data.summary.liveSessionAttributionNote ? (
           <p className="mt-3 border-t border-rose-100 pt-3 text-[12px] leading-relaxed text-amber-800">
@@ -277,10 +335,11 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
           <div className="mt-4 border-t border-rose-100 pt-3 space-y-1">
             <p className="text-[12px] text-slate-500">各直播号新增粉丝</p>
             {data.summary.liveRoomNewFollowers.map((row) => (
-              <MetricLine
+              <LiveRoomFollowerLine
                 key={row.liveAccountName}
-                label={row.liveAccountName}
-                value={formatPeopleCount(row.newFollowerCount)}
+                liveAccountName={row.liveAccountName}
+                anchorNames={row.anchorNames}
+                newFollowerCount={row.newFollowerCount}
               />
             ))}
             {data.summary.liveRoomNewFollowers.length > 1 && (

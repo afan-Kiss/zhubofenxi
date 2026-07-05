@@ -16,6 +16,14 @@ import {
   type AnchorLeaderboardRow,
   type AnchorTrendMode,
 } from '../../lib/anchor-leaderboard-row'
+import {
+  buildRelativeIntradayCompareSeries,
+  INTRADAY_COMPARE_MAX_BUCKET_INDEX,
+  relativeBucketTickLabel,
+  relativeBucketTooltipLabel,
+} from '../../lib/anchor-intraday-trend.util'
+
+export { INTRADAY_COMPARE_MAX_BUCKET_INDEX }
 
 const ANCHOR_COLORS = [
   '#f43f5e',
@@ -27,12 +35,6 @@ const ANCHOR_COLORS = [
   '#64748b',
   '#ec4899',
 ] as const
-const INTRADAY_BUCKET_MINUTES = 30
-const BUCKET_MS = INTRADAY_BUCKET_MINUTES * 60_000
-/** 今日/昨日对比图：单场直播约 4 小时，横轴最多对齐到 240 分钟 */
-const INTRADAY_COMPARE_MAX_LIVE_MINUTES = 240
-export const INTRADAY_COMPARE_MAX_BUCKET_INDEX =
-  Math.ceil(INTRADAY_COMPARE_MAX_LIVE_MINUTES / INTRADAY_BUCKET_MINUTES) - 1
 
 function seriesColor(index: number): string {
   return ANCHOR_COLORS[index % ANCHOR_COLORS.length] ?? ANCHOR_COLORS[0]!
@@ -109,23 +111,6 @@ export function defaultCompareAnchorNames(
   return sortCompareCandidates(rows, options).map((row) => String(row.anchorName).trim())
 }
 
-function relativeBucketLabel(bucketIndex: number): string {
-  const start = bucketIndex * INTRADAY_BUCKET_MINUTES
-  const end = (bucketIndex + 1) * INTRADAY_BUCKET_MINUTES
-  return `${start}-${end}分钟`
-}
-
-function relativeBucketTickLabel(bucketIndex: number, compact: boolean): string {
-  const start = bucketIndex * INTRADAY_BUCKET_MINUTES
-  if (compact) return String(start)
-  const end = (bucketIndex + 1) * INTRADAY_BUCKET_MINUTES
-  return `${start}~${end}`
-}
-
-function relativeBucketTooltipLabel(bucketIndex: number): string {
-  return `开播后 ${relativeBucketLabel(bucketIndex)}`
-}
-
 function buildDailyComparePayload(
   matched: Array<{ anchorName: string; trend: NonNullable<ReturnType<typeof anchorRowTrend>> }>,
 ): { series: AnchorTrendCompareSeries[]; chartData: CompareChartRow[] } {
@@ -169,78 +154,18 @@ function buildDailyComparePayload(
 export function buildIntradayRelativeComparePayload(
   matched: Array<{ anchorName: string; trend: NonNullable<ReturnType<typeof anchorRowTrend>> }>,
 ): { series: AnchorTrendCompareSeries[]; chartData: CompareChartRow[] } {
-  type AnchorBuckets = {
-    anchorName: string
-    bucketValues: Map<number, number>
-    maxBucket: number
-  }
+  const { series: rawSeries, chartData: rawChartData } = buildRelativeIntradayCompareSeries(matched)
 
-  const perAnchor: AnchorBuckets[] = []
-
-  for (const item of matched) {
-    const points = item.trend.points
-    if (points.length === 0) continue
-
-    const firstKey = points[0]!.key
-    const firstMs = Number(firstKey)
-    const useTimestamp = Number.isFinite(firstMs)
-
-    const bucketValues = new Map<number, number>()
-    let maxActiveBucket = -1
-    let maxBucketFromRange = -1
-
-    points.forEach((point, index) => {
-      const bucketIndex = useTimestamp
-        ? Math.max(0, Math.round((Number(point.key) - firstMs) / BUCKET_MS))
-        : index
-      if (bucketIndex > INTRADAY_COMPARE_MAX_BUCKET_INDEX) return
-
-      bucketValues.set(bucketIndex, (bucketValues.get(bucketIndex) ?? 0) + point.value)
-      maxBucketFromRange = Math.max(maxBucketFromRange, bucketIndex)
-      if (point.value > 0 || point.orderCount > 0) {
-        maxActiveBucket = Math.max(maxActiveBucket, bucketIndex)
-      }
-    })
-
-    const effectiveMaxBucket = maxActiveBucket >= 0 ? maxActiveBucket : maxBucketFromRange
-    if (effectiveMaxBucket < 0) continue
-
-    perAnchor.push({
-      anchorName: item.anchorName,
-      bucketValues,
-      maxBucket: effectiveMaxBucket,
-    })
-  }
-
-  const globalMaxBucket = Math.min(
-    INTRADAY_COMPARE_MAX_BUCKET_INDEX,
-    perAnchor.reduce((max, item) => Math.max(max, item.maxBucket), 0),
-  )
-
-  const series: AnchorTrendCompareSeries[] = perAnchor.map((item, index) => ({
+  const series: AnchorTrendCompareSeries[] = rawSeries.map((item, index) => ({
     anchorName: item.anchorName,
     color: seriesColor(index),
-    dataKey: `anchor_${index}`,
+    dataKey: item.dataKey,
   }))
 
-  const chartData: CompareChartRow[] = []
-  for (let bucketIndex = 0; bucketIndex <= globalMaxBucket; bucketIndex++) {
-    const row: CompareChartRow = {
-      key: String(bucketIndex),
-      label: relativeBucketLabel(bucketIndex),
-      tickLabel: relativeBucketTickLabel(bucketIndex, false),
-      bucketIndex,
-    }
-    for (let i = 0; i < perAnchor.length; i++) {
-      const item = perAnchor[i]!
-      if (bucketIndex > item.maxBucket) {
-        row[`anchor_${i}`] = null
-      } else {
-        row[`anchor_${i}`] = item.bucketValues.get(bucketIndex) ?? 0
-      }
-    }
-    chartData.push(row)
-  }
+  const chartData: CompareChartRow[] = rawChartData.map((row) => ({
+    ...row,
+    key: String(row.bucketIndex),
+  }))
 
   return { series, chartData }
 }
@@ -485,7 +410,18 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     : '按日期对比每日支付金额，不是有效成交额'
 
   const xAxisKey = compact ? 'tickLabel' : 'label'
-  const chartHeightClass = isReport ? 'h-[180px]' : compact ? 'h-[248px]' : 'h-[220px] md:h-[260px]'
+  const chartHeightClass = isReport ? 'h-[188px]' : compact ? 'h-[248px]' : 'h-[220px] md:h-[260px]'
+  const chartMargin = isReport
+    ? { top: 4, right: 20, left: -10, bottom: 6 }
+    : {
+        top: 4,
+        right: compact ? 4 : 8,
+        left: compact ? -18 : -12,
+        bottom: compact ? 2 : 0,
+      }
+  const xAxisAngle = isReport ? 0 : compact ? -35 : 0
+  const xAxisTextAnchor = isReport ? 'middle' : compact ? 'end' : 'middle'
+  const xAxisHeight = isReport ? 24 : compact ? 48 : 30
 
   return (
     <div
@@ -549,16 +485,11 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
         </div>
       ) : null}
 
-      <div className={`w-full ${chartHeightClass}`}>
+      <div className={`w-full ${chartHeightClass}${isReport ? ' overflow-visible' : ''}`}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart
             data={chartDataWithTicks}
-            margin={{
-              top: 4,
-              right: compact ? 4 : 8,
-              left: compact ? -18 : -12,
-              bottom: compact ? 2 : 0,
-            }}
+            margin={chartMargin}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#f8fafc" vertical={false} />
             <XAxis
@@ -567,10 +498,11 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
               axisLine={false}
               tickLine={false}
               interval={xInterval}
-              minTickGap={compact ? 8 : 20}
-              angle={compact ? -35 : 0}
-              textAnchor={compact ? 'end' : 'middle'}
-              height={compact ? 48 : 30}
+              minTickGap={isReport ? 10 : compact ? 8 : 20}
+              angle={xAxisAngle}
+              textAnchor={xAxisTextAnchor}
+              height={xAxisHeight}
+              padding={isReport ? { left: 10, right: 18 } : undefined}
             />
             <YAxis hide domain={[0, (max: number) => Math.max(max, 1)]} />
             <Tooltip

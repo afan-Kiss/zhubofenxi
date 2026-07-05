@@ -407,6 +407,8 @@ export function aggregateAnchorLiveSessionTraffic(
 export interface LiveRoomNewFollowerRow {
   liveAccountName: string
   newFollowerCount: number
+  /** 当日该直播号排班/归属主播（日报展示用） */
+  anchorNames?: string[]
 }
 
 const LIVE_ACCOUNT_DISPLAY_ORDER = ['祥钰', '和田雅玉', '拾玉居']

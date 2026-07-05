@@ -9,6 +9,7 @@ import {
   YAxis,
 } from 'recharts'
 import type { AnchorTrend, AnchorTrendPoint } from '../../lib/anchor-leaderboard-row'
+import { buildRelativeIntradayTrendPoints } from '../../lib/anchor-intraday-trend.util'
 
 export type { AnchorTrend, AnchorTrendPoint }
 
@@ -150,15 +151,20 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   const resolved = trend ?? null
   const isReport = variant === 'report'
   const showZeroPerformanceTrend = isReport || includeZeroPerformance
+  const useRelativeIntraday =
+    resolved?.mode === 'intraday' && showZeroPerformanceTrend
 
-  const chartData = useMemo(
-    () =>
-      (resolved?.points ?? []).map((p) => ({
-        ...p,
-        chartValue: p.value,
-      })),
-    [resolved?.points],
-  )
+  const chartData = useMemo(() => {
+    const points = resolved?.points ?? []
+    if (points.length === 0) return []
+    if (useRelativeIntraday) {
+      return buildRelativeIntradayTrendPoints(points, { compactTicks: isReport }).points
+    }
+    return points.map((p) => ({
+      ...p,
+      chartValue: p.value,
+    }))
+  }, [resolved?.points, useRelativeIntraday, isReport])
 
   const hasPositiveSales = useMemo(
     () => chartData.some((p) => p.value > 0 || p.orderCount > 0),
@@ -181,8 +187,11 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
     if (!resolved?.points?.length) {
       return { headline: '暂无成交' as const, peak: undefined }
     }
-    return buildTrendSummary(resolved, formatMoney, formatCount)
-  }, [resolved, formatMoney, formatCount])
+    const trendForSummary = useRelativeIntraday
+      ? { ...resolved, points: buildRelativeIntradayTrendPoints(resolved.points).points }
+      : resolved
+    return buildTrendSummary(trendForSummary, formatMoney, formatCount)
+  }, [resolved, formatMoney, formatCount, useRelativeIntraday])
 
   const emptyMinH = isReport ? 'min-h-[100px]' : 'min-h-[120px] md:min-h-[150px]'
 
@@ -204,12 +213,17 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
 
   const mode = resolved!.mode
   const title = resolved!.title || '支付金额走势'
-  const subtitle = resolveTrendSubtitle(resolved!)
-  const chartHeight = isReport ? 'h-[132px]' : 'h-[120px] md:h-[150px]'
+  const subtitle = useRelativeIntraday
+    ? '按开播后分钟统计，不是有效成交走势'
+    : resolveTrendSubtitle(resolved!)
+  const chartHeight = isReport ? 'h-[140px]' : 'h-[120px] md:h-[150px]'
   const titleClass = isReport ? 'text-[11px]' : 'text-[12px]'
   const tagClass = isReport ? 'text-[9px] px-1.5 py-0' : 'text-[10px] px-2 py-0.5'
   const tickSize = isReport ? 9 : 10
   const gridStroke = isReport ? '#f1f5f9' : '#f8fafc'
+  const chartMargin = isReport
+    ? { top: 4, right: 18, left: -10, bottom: 6 }
+    : { top: 4, right: 4, left: -18, bottom: 0 }
 
   return (
     <div
@@ -242,11 +256,11 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
           </span>
         </div>
       </div>
-      <div className={`${chartHeight} w-full`}>
+      <div className={`${chartHeight} w-full${isReport ? ' overflow-visible' : ''}`}>
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart
             data={chartData}
-            margin={isReport ? { top: 2, right: 2, left: -16, bottom: 0 } : { top: 4, right: 4, left: -18, bottom: 0 }}
+            margin={chartMargin}
           >
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -261,7 +275,9 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
               axisLine={false}
               tickLine={false}
               interval={xInterval}
-              minTickGap={isReport ? 14 : 20}
+              minTickGap={isReport ? 10 : 20}
+              padding={isReport ? { left: 10, right: 16 } : undefined}
+              height={isReport ? 22 : 30}
             />
             <YAxis hide domain={[0, (max: number) => Math.max(max, 1)]} />
             {!isReport ? (

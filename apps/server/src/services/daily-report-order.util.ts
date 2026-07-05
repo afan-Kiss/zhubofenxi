@@ -54,7 +54,7 @@ export function sumDailyReportShippedFromViews(views: AnalyzedOrderView[]): {
   }
   return {
     shippedAmountCent,
-    shippedAmountYuan: Math.round(centToYuan(shippedAmountCent)),
+    shippedAmountYuan: roundMoneyYuan(centToYuan(shippedAmountCent)),
     soldOrderCount,
   }
 }
@@ -62,10 +62,14 @@ export function sumDailyReportShippedFromViews(views: AnalyzedOrderView[]): {
 export interface DailyReportShippedOrderLine {
   orderNo: string
   amountYuan: number
+  anchorName?: string
 }
 
 /** 真实发货订单明细（与 sumDailyReportShippedFromViews 同一订单池） */
-export function listDailyReportShippedOrders(views: AnalyzedOrderView[]): DailyReportShippedOrderLine[] {
+export function listDailyReportShippedOrders(
+  views: AnalyzedOrderView[],
+  anchorName?: string,
+): DailyReportShippedOrderLine[] {
   const deduped = dedupeViewsByMetricOrderNo(views)
   const lines: DailyReportShippedOrderLine[] = []
   for (const v of deduped) {
@@ -73,9 +77,11 @@ export function listDailyReportShippedOrders(views: AnalyzedOrderView[]): DailyR
     if (!isDailyReportShippedOrder(v)) continue
     const orderNo = resolveMetricOrderNo(v) || String(v.orderId ?? '').trim()
     if (!orderNo) continue
+    const resolvedAnchorName = (anchorName ?? v.anchorName ?? '').trim()
     lines.push({
       orderNo,
       amountYuan: Math.round(centToYuan(v.paymentBaseCent) * 100) / 100,
+      ...(resolvedAnchorName ? { anchorName: resolvedAnchorName } : {}),
     })
   }
   lines.sort((a, b) => a.orderNo.localeCompare(b.orderNo, 'zh-CN'))
@@ -118,6 +124,11 @@ export function safeDivide(numerator: number, denominator: number): number | nul
 export function roundYuan(value: number | null): number | null {
   if (value == null || !Number.isFinite(value)) return null
   return Math.round(value)
+}
+
+/** 金额保留两位小数（元），与 formatMoney 展示一致 */
+export function roundMoneyYuan(value: number): number {
+  return Math.round(value * 100) / 100
 }
 
 export function roundMinutes(value: number | null): number | null {

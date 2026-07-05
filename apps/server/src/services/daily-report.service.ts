@@ -16,6 +16,7 @@ import {
   getAssignedSessionsForAnchor,
   resolveDailyReportLiveSessionAssignments,
   sumUniqueDailyReportLiveDurationMinutes,
+  type DailyReportLiveSessionAssignment,
 } from './daily-report-live-sessions.service'
 import {
   ANCHOR_SESSION_DISPLAY_FROM_0613,
@@ -29,6 +30,7 @@ import {
   countDailyReportOrders,
   listDailyReportShippedOrders,
   roundMinutes,
+  roundMoneyYuan,
   roundYuan,
   safeDivide,
   safeRatioPercent,
@@ -168,6 +170,67 @@ function formatSessionLabelWithShop(sessionLabel: string, shopName: string): str
   return `${sessionLabel}·${shopName}`
 }
 
+function buildLiveAccountAnchorNamesMap(
+  anchorRows: DailyReportAnchorRow[],
+  liveAssignment: DailyReportLiveSessionAssignment,
+): Map<string, string[]> {
+  const map = new Map<string, Set<string>>()
+
+  const add = (liveAccount: string, anchorName: string) => {
+    const account = liveAccount.trim()
+    const name = anchorName.trim()
+    if (!account || !name) return
+    if (!map.has(account)) map.set(account, new Set())
+    map.get(account)!.add(name)
+  }
+
+  for (const row of anchorRows) {
+    if (row.shopName) add(row.shopName, row.anchorName)
+  }
+
+  for (const [anchorName, sessions] of liveAssignment.byAnchor.entries()) {
+    for (const session of sessions) {
+      add(session.sourceShopName || session.liveName || '', anchorName)
+    }
+  }
+
+  return new Map(
+    [...map.entries()].map(([account, names]) => [
+      account,
+      [...names].sort((a, b) => a.localeCompare(b, 'zh-CN')),
+    ]),
+  )
+}
+
+function resolveAnchorNamesForLiveAccount(
+  liveAccountName: string,
+  accountMap: Map<string, string[]>,
+): string[] {
+  const trimmed = liveAccountName.trim()
+  const exact = accountMap.get(trimmed)
+  if (exact?.length) return exact
+
+  const found = new Set<string>()
+  for (const [key, names] of accountMap.entries()) {
+    if (key.includes(trimmed) || trimmed.includes(key)) {
+      for (const name of names) found.add(name)
+    }
+  }
+  return [...found].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+}
+
+function enrichLiveRoomNewFollowersWithAnchorNames(
+  rows: LiveRoomNewFollowerRow[],
+  anchorRows: DailyReportAnchorRow[],
+  liveAssignment: DailyReportLiveSessionAssignment,
+): LiveRoomNewFollowerRow[] {
+  const accountMap = buildLiveAccountAnchorNamesMap(anchorRows, liveAssignment)
+  return rows.map((row) => ({
+    ...row,
+    anchorNames: resolveAnchorNamesForLiveAccount(row.liveAccountName, accountMap),
+  }))
+}
+
 function buildAnchorRow(params: {
   config: AnchorConfig
   anchorId: string
@@ -237,8 +300,8 @@ function buildAnchorRow(params: {
     soldOrderCount: params.soldOrderCount,
     invalidOrderCount: params.invalidOrderCount,
     shippedOrders: params.shippedOrders,
-    avgOrderAmountYuan: roundYuan(
-      safeDivide(params.shippedAmountYuan, params.soldOrderCount),
+    avgOrderAmountYuan: roundMoneyYuan(
+      safeDivide(params.shippedAmountYuan, params.soldOrderCount) ?? 0,
     ),
     hourlyAmountYuan: roundYuan(
       liveHours != null ? safeDivide(params.shippedAmountYuan, liveHours) : null,
@@ -293,11 +356,11 @@ export async function buildDailyReport(params: {
     )
     const shipped = sumDailyReportShippedFromViews(performanceViews)
     const shippedAmountYuan = shipped.shippedAmountYuan
-    const shippedOrders = listDailyReportShippedOrders(performanceViews)
+    const shippedOrders = listDailyReportShippedOrders(performanceViews, anchor.anchorName)
 
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
     const { soldOrderCount } = shipped
-    const { invalidOrderCount: invalidFromAll } = countDailyReportOrders(anchorAllViews)
+    const { invalidOrderCount: invalidFromPerformance } = countDailyReportOrders(performanceViews)
     const fixedDisplay = useShopSessionRules
       ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]
       : undefined
@@ -314,7 +377,7 @@ export async function buildDailyReport(params: {
     const hasData =
       shippedAmountYuan > 0 ||
       soldOrderCount > 0 ||
-      invalidFromAll > 0 ||
+      invalidFromPerformance > 0 ||
       sessions.length > 0 ||
       performanceViews.length > 0
 
@@ -341,7 +404,7 @@ export async function buildDailyReport(params: {
           : fixedDisplay?.sessionLabel,
         shippedAmountYuan,
         soldOrderCount,
-        invalidOrderCount: invalidFromAll,
+        invalidOrderCount: invalidFromPerformance,
         shippedOrders,
         sessions,
         totalShippedAmountYuan: 0,
@@ -356,7 +419,9 @@ export async function buildDailyReport(params: {
     )
   }
 
-  const totalShippedAmountYuan = anchorRows.reduce((sum, row) => sum + row.shippedAmountYuan, 0)
+  const totalShippedAmountYuan = roundMoneyYuan(
+    anchorRows.reduce((sum, row) => sum + row.shippedAmountYuan, 0),
+  )
   for (const row of anchorRows) {
     row.amountRatio = safeRatioPercent(row.shippedAmountYuan, totalShippedAmountYuan)
   }
@@ -439,11 +504,15 @@ export async function buildDailyReport(params: {
     liveAssignment.unassignedLiveSessionCount > 0
       ? `有 ${liveAssignment.unassignedLiveSessionCount} 场真实直播未匹配到排班，已计入总时长但不计入主播个人时长。`
       : null
-  const liveRoomNewFollowers = await sumNewFollowersByLiveAccountForRange({
-    preset: 'custom',
-    startDate: params.startDate,
-    endDate: params.endDate,
-  })
+  const liveRoomNewFollowers = enrichLiveRoomNewFollowersWithAnchorNames(
+    await sumNewFollowersByLiveAccountForRange({
+      preset: 'custom',
+      startDate: params.startDate,
+      endDate: params.endDate,
+    }),
+    anchorRows,
+    liveAssignment,
+  )
   const totalNewFollowerCount = liveRoomNewFollowers.reduce(
     (sum, row) => sum + row.newFollowerCount,
     0,

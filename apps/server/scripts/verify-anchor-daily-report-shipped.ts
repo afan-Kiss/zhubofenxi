@@ -89,7 +89,7 @@ async function main(): Promise<void> {
     (sum, line) => sum + line.amountYuan,
     0,
   )
-  if (Math.abs(summaryOrderSum - report.summary.totalShippedAmountYuan) <= 1) {
+  if (Math.abs(summaryOrderSum - report.summary.totalShippedAmountYuan) <= 0.01) {
     ok(`汇总订单金额合计 ≈ 真实发货总额 (¥${summaryOrderSum.toFixed(2)})`)
   } else {
     fail(

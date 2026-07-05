@@ -190,19 +190,43 @@ export function aggregateSummaryFromAnchorRows(
   let validSalesAmount = 0
   let paidOrderCount = 0
   let returnCount = 0
+  let returnAmount = 0
+  let returnRefundCount = 0
+  let qualityReturnCount = 0
+  let signedCount = 0
+  let actualSignedCount = 0
   for (const row of rows) {
     totalGmv += anchorRowGmv(row)
     validSalesAmount += anchorRowValidSales(row)
     paidOrderCount += anchorRowPaidCount(row)
     returnCount += anchorRowReturnCount(row)
+    returnAmount += anchorRowRefundAmount(row)
+    returnRefundCount += anchorRowReturnRefundCount(row)
+    qualityReturnCount += anchorRowNum(row, 'qualityReturnCount')
+    signedCount += anchorRowNum(row, 'signedCount')
+    actualSignedCount += anchorRowSignedCount(row)
   }
+  const refundRate = paidOrderCount > 0 ? returnCount / paidOrderCount : null
+  const signRate = paidOrderCount > 0 ? actualSignedCount / paidOrderCount : null
   return {
     totalGmv,
     gmv: totalGmv,
     validSalesAmount,
     effectiveGmv: validSalesAmount,
     orderCount: paidOrderCount,
-    returnRate: paidOrderCount > 0 ? returnCount / paidOrderCount : null,
+    paidOrderCount,
+    returnRate: refundRate,
+    refundRate,
+    returnCount,
+    refundOrderCount: returnCount,
+    returnAmount,
+    refundAmount: returnAmount,
+    returnRefundCount,
+    qualityReturnCount,
+    signedCount,
+    signedOrderCount: signedCount,
+    actualSignedCount,
+    signRate,
   }
 }
 

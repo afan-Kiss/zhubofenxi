@@ -36,6 +36,7 @@ import {
   loadAfterSalesBundleForOrderNos,
   loadWorkbenchRefundMapFromDb,
   mergeWorkbenchIntoMemory,
+  type AfterSalesWorkbenchRefund,
 } from './xhs-after-sales-workbench.service'
 import { warmWorkbenchCacheForOrders } from './workbench-cache-warm.service'
 import {
@@ -78,6 +79,184 @@ import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
 function shouldExposeSignedDrillTab(preset?: string): boolean {
   if (!preset || preset === 'yesterday' || preset === 'today') return false
   return preset === 'thisWeek' || preset === 'thisMonth' || preset === 'lastMonth' || preset === 'custom'
+}
+
+function pickAfterSaleString(rec: Record<string, unknown>, keys: string[]): string {
+  for (const k of keys) {
+    const v = rec[k]
+    if (v != null && String(v).trim()) return String(v).trim()
+  }
+  return ''
+}
+
+function pickAfterSaleReturnsId(rec: Record<string, unknown>): string {
+  return pickAfterSaleString(rec, [
+    'returns_id',
+    'returnsId',
+    'return_id',
+    'returnId',
+    'after_sale_id',
+    'afterSaleId',
+  ])
+}
+
+function pickAfterSaleReason(rec: Record<string, unknown>): string {
+  return pickAfterSaleString(rec, [
+    'reason_name_zh',
+    'reasonNameZh',
+    'reason_name',
+    'reasonName',
+    'reason',
+    'refund_reason',
+    'refundReason',
+  ])
+}
+
+function pickAfterSaleStatus(rec: Record<string, unknown>): string {
+  return pickAfterSaleString(rec, [
+    'refund_status_name',
+    'refundStatusName',
+    'status_name',
+    'statusName',
+  ])
+}
+
+function pickAfterSaleRefundFeeYuan(rec: Record<string, unknown>): number {
+  const fee = rec.refund_fee ?? rec.refundFee
+  if (typeof fee === 'number' && fee > 0) return fee
+  if (typeof fee === 'string' && fee.trim()) {
+    const n = Number(fee)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return 0
+}
+
+function pickAfterSaleRefundOkTime(rec: Record<string, unknown>): string {
+  return pickAfterSaleString(rec, [
+    'refund_ok_time',
+    'refundOkTime',
+    'refund_time',
+    'refundTime',
+    'update_at',
+    'updateAt',
+  ])
+}
+
+function afterSaleRecordCompleteness(rec: Record<string, unknown>): number {
+  let score = 0
+  if (pickAfterSaleReturnsId(rec)) score += 8
+  if (pickAfterSaleReason(rec)) score += 4
+  if (pickAfterSaleStatus(rec)) score += 2
+  if (pickAfterSaleRefundFeeYuan(rec) > 0) score += 2
+  if (pickAfterSaleRefundOkTime(rec)) score += 1
+  return score
+}
+
+/** 合并两条售后 raw，保留字段更完整的一侧 */
+function mergeAfterSaleRecordFields(
+  base: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base, ...incoming }
+  const returnsId = pickAfterSaleReturnsId(base) || pickAfterSaleReturnsId(incoming)
+  if (returnsId) {
+    out.returns_id = returnsId
+    out.returnsId = returnsId
+  }
+  const reason = pickAfterSaleReason(incoming) || pickAfterSaleReason(base)
+  if (reason) {
+    out.reason_name_zh = reason
+    out.reason_name = reason
+  }
+  const status = pickAfterSaleStatus(incoming) || pickAfterSaleStatus(base)
+  if (status) out.refund_status_name = status
+  const fee = pickAfterSaleRefundFeeYuan(incoming) || pickAfterSaleRefundFeeYuan(base)
+  if (fee > 0) out.refund_fee = fee
+  const okTime = pickAfterSaleRefundOkTime(incoming) || pickAfterSaleRefundOkTime(base)
+  if (okTime) out.refund_ok_time = okTime
+  return out
+}
+
+function workbenchToAfterSaleRecords(
+  workbench: AfterSalesWorkbenchRefund | undefined,
+): Record<string, unknown>[] {
+  if (!workbench) return []
+  const fromRaw: Record<string, unknown>[] = []
+  const raw = workbench.rawDetail
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (item && typeof item === 'object') fromRaw.push(item as Record<string, unknown>)
+    }
+  } else if (raw && typeof raw === 'object') {
+    fromRaw.push(raw as Record<string, unknown>)
+  }
+  if (fromRaw.length > 0) return fromRaw
+  if (!workbench.returnsIds?.length) return []
+  const feeYuan = workbench.officialRefundAmountCent / 100
+  return workbench.returnsIds.map((rid) => ({
+    returns_id: rid,
+    refund_status_name: workbench.afterSaleStatus ?? '',
+    reason_name_zh: workbench.afterSaleReason ?? '',
+    reason_name: workbench.afterSaleReason ?? '',
+    refund_fee: feeYuan > 0 ? feeYuan : undefined,
+  }))
+}
+
+/** 品退 drill：合并工作台 / 时间查询 / 官方品退 / 内存工作台售后 raw，按售后单号去重 */
+export function mergeQualityAfterSaleRecords(
+  sources: Record<string, unknown>[][],
+): Record<string, unknown>[] {
+  const byReturnsId = new Map<string, Record<string, unknown>>()
+  const noIdRecords: Record<string, unknown>[] = []
+
+  for (const list of sources) {
+    for (const rec of list) {
+      if (!rec || typeof rec !== 'object') continue
+      const rid = pickAfterSaleReturnsId(rec)
+      if (rid) {
+        const existing = byReturnsId.get(rid)
+        if (!existing) {
+          byReturnsId.set(rid, { ...rec })
+          continue
+        }
+        const mergedA = mergeAfterSaleRecordFields(existing, rec)
+        const mergedB = mergeAfterSaleRecordFields(rec, existing)
+        byReturnsId.set(
+          rid,
+          afterSaleRecordCompleteness(mergedB) >= afterSaleRecordCompleteness(mergedA)
+            ? mergedB
+            : mergedA,
+        )
+      } else {
+        noIdRecords.push({ ...rec })
+      }
+    }
+  }
+
+  if (byReturnsId.size > 0 && noIdRecords.length > 0) {
+    for (const rec of noIdRecords) {
+      let bestRid: string | null = null
+      let bestGain = 0
+      for (const [rid, existing] of byReturnsId) {
+        const gain =
+          afterSaleRecordCompleteness(mergeAfterSaleRecordFields(existing, rec)) -
+          afterSaleRecordCompleteness(existing)
+        if (gain > bestGain) {
+          bestGain = gain
+          bestRid = rid
+        }
+      }
+      if (bestRid && bestGain > 0) {
+        byReturnsId.set(
+          bestRid,
+          mergeAfterSaleRecordFields(byReturnsId.get(bestRid)!, rec),
+        )
+      }
+    }
+  }
+
+  if (byReturnsId.size > 0) return [...byReturnsId.values()]
+  return noIdRecords
 }
 
 function filterDrillViewsByStatus(
@@ -360,27 +539,14 @@ export async function buildAnchorQualityRefundDrill(params: {
       const officialCase = officialByOrderKey.get(
         liveAccountPackageKey(attr.view.liveAccountId, attr.orderNo),
       )
-      const afterSaleRecords = [
-        ...(rawAfterSalesByOrderNo.get(cacheKey) ?? []),
-        ...(timeSearchMap.get(cacheKey) ?? []),
-      ]
       const workbench = getWorkbenchRefundFromMemory(attr.view.liveAccountId, attr.orderNo)
       const fromOfficialCase = buildAfterSaleRecordsFromOfficialCase(officialCase, attr.view)
-      const mergedAfterSaleRecords =
-        afterSaleRecords.length > 0
-          ? afterSaleRecords
-          : fromOfficialCase.length > 0
-            ? fromOfficialCase
-            : workbench?.returnsIds?.length
-              ? [
-                  {
-                    returns_id: workbench.returnsIds[0],
-                    refund_status_name: workbench.afterSaleStatus,
-                    reason_name: workbench.afterSaleReason,
-                    refund_fee: workbench.officialRefundAmountCent / 100,
-                  },
-                ]
-              : []
+      const mergedAfterSaleRecords = mergeQualityAfterSaleRecords([
+        rawAfterSalesByOrderNo.get(cacheKey) ?? [],
+        timeSearchMap.get(cacheKey) ?? [],
+        fromOfficialCase,
+        workbenchToAfterSaleRecords(workbench),
+      ])
       const qualityInfo = resolveQualityRefundInfo({
         view: attr.view,
         afterSaleRecords: mergedAfterSaleRecords,

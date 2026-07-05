@@ -105,16 +105,18 @@ async function main(): Promise<void> {
   console.log(`[verify:quality-refund-cross-match] 只读体检 DATE=${dateKey}`)
 
   section('基础数据')
-  const [orders, liveSessions, qualityCases, creds, users] = await Promise.all([
+  const [orders, liveSessions, qualityCases, workbenchCache, creds, users] = await Promise.all([
     prisma.xhsRawOrder.count(),
     prisma.xhsRawLiveSession.count(),
     prisma.qualityBadCase.count(),
+    prisma.xhsAfterSalesWorkbenchCache.count(),
     prisma.platformCredential.count(),
     prisma.user.count(),
   ])
   console.log(`XhsRawOrder: ${orders}`)
   console.log(`XhsRawLiveSession: ${liveSessions}`)
   console.log(`QualityBadCase: ${qualityCases}`)
+  console.log(`XhsAfterSalesWorkbenchCache: ${workbenchCache}`)
   console.log(`PlatformCredential: ${creds}`)
   console.log(`User: ${users}`)
 
@@ -257,7 +259,7 @@ async function main(): Promise<void> {
         )
       } else if (hasLinkedAfterSale) {
         warn(
-          `DB 未入库最终售后理由（期望 ${TARGET_AFTER_REASON}），售后工作台缓存缺失，属数据同步缺口；UI 仍展示已关联售后单与提示文案。`,
+          '售后单已匹配，但最终售后理由未入库，这是同步缺口',
         )
       } else {
         fail(`最终售后理由应为 ${TARGET_AFTER_REASON}，实际 ${finalReason || '—'}`)
@@ -322,13 +324,71 @@ async function main(): Promise<void> {
     } else {
       ok(`归属主播 ${TARGET_ANCHOR}`)
     }
-    if (!row.qianfanDetailAvailable) fail('未返回 qianfanDetailAvailable')
+    if (row.afterSaleOrderNo !== TARGET_AFTER_SALE) {
+      fail(`drill 售后单号应为 ${TARGET_AFTER_SALE}，实际 ${row.afterSaleOrderNo || '—'}`)
+    } else {
+      ok(`drill 售后单号 ${TARGET_AFTER_SALE}`)
+    }
+    const drillRefund = row.afterSaleRefundAmountYuan ?? 0
+    if (!approxEqual(drillRefund, TARGET_REFUND_YUAN)) {
+      fail(`drill 退款金额应为 ${TARGET_REFUND_YUAN}，实际 ${drillRefund}`)
+    } else {
+      ok(`drill 退款金额 ${drillRefund}`)
+    }
+    if ((row.qualitySourceLabel ?? '').includes('暂未匹配')) {
+      fail(`drill 匹配说明不应含「暂未匹配」，实际 ${row.qualitySourceLabel}`)
+    } else {
+      ok(`drill 匹配说明 ${row.qualitySourceLabel}`)
+    }
+    if (!(row.extraHint ?? '').includes('买家后续可能改过售后理由')) {
+      fail(`drill 缺少 extraHint，实际 ${row.extraHint || '—'}`)
+    } else {
+      ok('drill 含 extraHint')
+    }
+    if (!row.qianfanDetailAvailable) fail('drill 未返回 qianfanDetailAvailable')
     else ok('qianfanDetailAvailable=true')
+    const drillFinalReason =
+      row.afterSaleFinalReasonText?.trim() || row.afterSaleReasonText?.trim() || ''
+    const drillReasonOk =
+      drillFinalReason.includes('多拍') ||
+      drillFinalReason.includes('不想要') ||
+      drillFinalReason.includes('拍错')
+    if (!drillReasonOk && row.afterSaleOrderNo) {
+      warn('售后单已匹配，但最终售后理由未入库，这是同步缺口')
+    } else if (drillReasonOk) {
+      ok(`drill 最终售后理由 ${drillFinalReason}`)
+    }
     if (row.buyerNickname && !row.buyerNickname.includes('果果')) {
       warn(`买家昵称 ${row.buyerNickname}（期望含 ${TARGET_BUYER}）`)
     } else {
       ok(`买家 ${row.buyerNickname || TARGET_BUYER}`)
     }
+  }
+
+  section('board-drill 静态检查')
+  const drillServicePath = path.resolve(
+    __dirname,
+    '../src/services/board-drill.service.ts',
+  )
+  const drillServiceSrc = fs.readFileSync(drillServicePath, 'utf-8')
+  if (/afterSaleRecords\.length\s*>\s*0\s*\?\s*afterSaleRecords/.test(drillServiceSrc)) {
+    fail('board-drill.service.ts 仍存在售后记录三选一逻辑')
+  } else {
+    ok('未使用 afterSaleRecords 三选一')
+  }
+  if (!drillServiceSrc.includes('mergeQualityAfterSaleRecords')) {
+    fail('board-drill.service.ts 缺少 mergeQualityAfterSaleRecords')
+  } else {
+    ok('存在 mergeQualityAfterSaleRecords')
+  }
+  if (
+    !drillServiceSrc.includes('returns_id') ||
+    !drillServiceSrc.includes('returnsId') ||
+    !drillServiceSrc.includes('afterSaleId')
+  ) {
+    fail('board-drill.service.ts 缺少 returns_id / returnsId / afterSaleId 去重字段')
+  } else {
+    ok('含售后单号去重字段')
   }
 
   section('前端静态检查')
@@ -343,6 +403,11 @@ async function main(): Promise<void> {
   else ok('抽屉展示 extraHint')
   if (!drawer.includes('afterSaleOrderNo')) fail('抽屉未展示售后单号')
   else ok('抽屉展示售后单号')
+  if (!drawer.includes('系统暂未同步到最终售后理由')) {
+    fail('抽屉未展示「系统暂未同步到最终售后理由」')
+  } else {
+    ok('抽屉含同步缺口文案')
+  }
 
   tryParseHarAfterSale()
 

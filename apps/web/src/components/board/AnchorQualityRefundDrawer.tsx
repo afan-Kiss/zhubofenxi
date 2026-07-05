@@ -147,6 +147,9 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
                 const officialReason =
                   row.officialQualityReasonText || row.qualityReasonText || '—'
                 const afterSaleNo = row.afterSaleOrderNo?.trim() || ''
+                const finalReason =
+                  row.afterSaleFinalReasonText?.trim() || row.afterSaleReasonText?.trim() || ''
+                const missingFinalReason = Boolean(afterSaleNo && !finalReason)
                 const refundYuan = row.afterSaleRefundAmountYuan ?? 0
                 return (
                   <li
@@ -193,7 +196,9 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
                         <p className="mt-1">售后状态：{row.afterSaleStatus || '—'}</p>
                         <p className="mt-1">
                           最终售后理由：
-                          {row.afterSaleFinalReasonText || row.afterSaleReasonText || '—'}
+                          {missingFinalReason
+                            ? '系统暂未同步到最终售后理由'
+                            : finalReason || '—'}
                         </p>
                         <p className="mt-1">
                           退款金额：

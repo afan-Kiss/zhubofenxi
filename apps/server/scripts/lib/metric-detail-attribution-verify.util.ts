@@ -10,6 +10,68 @@ import { filterViewsForCoreMetrics } from '../../src/services/metrics-exclusion.
 import { resolveMetricOrderNo } from '../../src/services/calc-refund-rate.service'
 import type { BoardDrillOrderRow } from '../../src/services/order-row-mapper.service'
 
+/** 经营总览 metric drawer 全量验收指标 */
+export const DRAWER_VERIFY_METRICS: BoardMetricKey[] = [
+  'effectiveGmv',
+  'gmv',
+  'orderCount',
+  'returnAmount',
+  'returnCount',
+  'returnRate',
+  'qualityReturnCount',
+  'signedCount',
+  'signRate',
+  'freightRefundAmount',
+]
+
+export const ANCHOR_DRAWER_NAMES = ['子杰', '小白', '小艺'] as const
+
+const ANCHOR_MUST_INCLUDE: Partial<Record<(typeof ANCHOR_DRAWER_NAMES)[number], string[]>> = {
+  小白: ['P798535644148309221'],
+  小艺: ['P798440490066093751'],
+}
+
+const ANCHOR_MUST_EXCLUDE: Partial<Record<(typeof ANCHOR_DRAWER_NAMES)[number], string[]>> = {
+  子杰: ['P798535644148309221', 'P798440490066093751'],
+}
+
+type MetricValueMode = 'amount' | 'count' | 'rate'
+
+function metricValueMode(metric: BoardMetricKey): MetricValueMode {
+  if (metric === 'returnRate' || metric === 'signRate' || metric === 'qualityReturnRate') {
+    return 'rate'
+  }
+  if (
+    metric === 'orderCount' ||
+    metric === 'returnCount' ||
+    metric === 'qualityReturnCount' ||
+    metric === 'signedCount'
+  ) {
+    return 'count'
+  }
+  return 'amount'
+}
+
+export function sumDrawerRowMetricValue(rows: BoardDrillOrderRow[], metric: BoardMetricKey): number {
+  switch (metric) {
+    case 'effectiveGmv':
+      return rows.reduce((s, r) => s + (r.actualDealAmount ?? 0), 0)
+    case 'gmv':
+      return rows.reduce((s, r) => s + (r.payAmount ?? 0), 0)
+    case 'returnAmount':
+      return rows.reduce((s, r) => s + (r.productRefundAmount ?? 0), 0)
+    case 'freightRefundAmount':
+      return rows.reduce((s, r) => s + (r.freightRefundAmount ?? 0), 0)
+    case 'orderCount':
+    case 'returnCount':
+    case 'qualityReturnCount':
+    case 'signedCount':
+      return rows.length
+    default:
+      return 0
+  }
+}
+
 function registerOrderKey(
   map: Map<string, string>,
   orderNo: string | undefined,
@@ -93,7 +155,6 @@ export async function fetchMetricDetailBundle(params: {
   return { rows: allRows, summary: summary!, paginationTotal }
 }
 
-/** @deprecated use fetchMetricDetailBundle */
 export async function fetchMetricDetailRows(params: {
   metric: BoardMetricKey
   startDate: string
@@ -107,6 +168,7 @@ export async function fetchMetricDetailRows(params: {
 export function compareDrawerRowsToRemap(
   rows: BoardDrillOrderRow[],
   expectedMap: Map<string, string>,
+  metric = '',
 ): Array<{
   metric: string
   orderNo: string
@@ -131,7 +193,7 @@ export function compareDrawerRowsToRemap(
     const rowAnchor = row.anchorName?.trim() || '未归属'
     if (rowAnchor !== expected) {
       mismatches.push({
-        metric: '',
+        metric,
         orderNo,
         rowAnchor,
         expectedAnchor: expected,
@@ -163,37 +225,39 @@ export async function verifyAnchorMetricDrawer(params: {
     anchorName: params.anchorName,
   })
   const { rows, summary, paginationTotal } = bundle
+  const label = `${params.anchorName}/${params.metric}`
 
   for (const row of rows) {
     const rowAnchor = row.anchorName?.trim() || '未归属'
     if (rowAnchor !== params.anchorName) {
-      fails.push(
-        `${params.anchorName} drawer: ${row.orderNo || row.packageId} anchor=${rowAnchor}`,
-      )
+      fails.push(`${label}: ${row.orderNo || row.packageId} anchor=${rowAnchor}`)
     }
   }
 
   if (paginationTotal !== rows.length) {
-    fails.push(
-      `${params.anchorName} drawer: pagination.total=${paginationTotal} rows=${rows.length}`,
-    )
+    fails.push(`${label}: pagination.total=${paginationTotal} rows=${rows.length}`)
   }
 
-  const rowAmountSum = rows.reduce((sum, r) => sum + (r.actualDealAmount ?? 0), 0)
-  if (Math.abs(summary.valueRaw - rowAmountSum) > 0.02) {
-    fails.push(
-      `${params.anchorName} drawer: valueRaw=${summary.valueRaw} rowSum=${rowAmountSum.toFixed(2)}`,
-    )
+  const mode = metricValueMode(params.metric)
+  if (mode === 'amount') {
+    const rowSum = sumDrawerRowMetricValue(rows, params.metric)
+    if (Math.abs(summary.valueRaw - rowSum) > 0.02) {
+      fails.push(`${label}: valueRaw=${summary.valueRaw} rowSum=${rowSum.toFixed(2)}`)
+    }
+  } else if (mode === 'count') {
+    if (Math.abs(summary.valueRaw - rows.length) > 0.01) {
+      fails.push(`${label}: valueRaw=${summary.valueRaw} rowCount=${rows.length}`)
+    }
   }
 
   for (const orderNo of params.mustInclude ?? []) {
     if (!orderInRows(rows, orderNo)) {
-      fails.push(`${params.anchorName} drawer 缺少 ${orderNo}`)
+      fails.push(`${label} 缺少 ${orderNo}`)
     }
   }
   for (const orderNo of params.mustExclude ?? []) {
     if (orderInRows(rows, orderNo)) {
-      fails.push(`${params.anchorName} drawer 不应包含 ${orderNo}`)
+      fails.push(`${label} 不应包含 ${orderNo}`)
     }
   }
 
@@ -203,7 +267,7 @@ export async function verifyAnchorMetricDrawer(params: {
 export async function verifyMetricDrawerAttribution(params: {
   startDate: string
   endDate: string
-  metrics: BoardMetricKey[]
+  metrics?: BoardMetricKey[]
   anchorNames?: string[]
 }): Promise<{
   mismatches: Array<{
@@ -214,7 +278,9 @@ export async function verifyMetricDrawerAttribution(params: {
     liveAccountName: string
   }>
   anchorFails: string[]
+  storeSummary: Array<{ metric: string; valueRaw: number; rows: number }>
 }> {
+  const metrics = params.metrics ?? DRAWER_VERIFY_METRICS
   const expectedMap = await buildRemappedAnchorMap(params)
   const allMismatches: Array<{
     metric: string
@@ -224,35 +290,34 @@ export async function verifyMetricDrawerAttribution(params: {
     liveAccountName: string
   }> = []
   const anchorFails: string[] = []
+  const storeSummary: Array<{ metric: string; valueRaw: number; rows: number }> = []
 
-  for (const metric of params.metrics) {
-    const rows = await fetchMetricDetailRows({
+  for (const metric of metrics) {
+    const bundle = await fetchMetricDetailBundle({
       metric,
       startDate: params.startDate,
       endDate: params.endDate,
     })
-    const mismatches = compareDrawerRowsToRemap(rows, expectedMap)
-    for (const m of mismatches) {
-      allMismatches.push({ ...m, metric })
-    }
+    storeSummary.push({
+      metric,
+      valueRaw: bundle.summary.valueRaw,
+      rows: bundle.rows.length,
+    })
+    const mismatches = compareDrawerRowsToRemap(bundle.rows, expectedMap, metric)
+    allMismatches.push(...mismatches)
   }
 
-  if (params.anchorNames?.length) {
-    for (const anchorName of params.anchorNames) {
+  const anchorNames = params.anchorNames ?? [...ANCHOR_DRAWER_NAMES]
+  for (const anchorName of anchorNames) {
+    for (const metric of metrics) {
       const mustInclude =
-        anchorName === '小白'
-          ? ['P798535644148309221']
-          : anchorName === '小艺'
-            ? ['P798440490066093751']
-            : undefined
+        metric === 'effectiveGmv' ? ANCHOR_MUST_INCLUDE[anchorName as keyof typeof ANCHOR_MUST_INCLUDE] : undefined
       const mustExclude =
-        anchorName === '子杰'
-          ? ['P798535644148309221', 'P798440490066093751']
-          : undefined
+        metric === 'effectiveGmv' ? ANCHOR_MUST_EXCLUDE[anchorName as keyof typeof ANCHOR_MUST_EXCLUDE] : undefined
       const fails = await verifyAnchorMetricDrawer({
         startDate: params.startDate,
         endDate: params.endDate,
-        metric: 'effectiveGmv',
+        metric,
         anchorName,
         mustInclude,
         mustExclude,
@@ -261,5 +326,5 @@ export async function verifyMetricDrawerAttribution(params: {
     }
   }
 
-  return { mismatches: allMismatches, anchorFails }
+  return { mismatches: allMismatches, anchorFails, storeSummary }
 }

@@ -111,3 +111,19 @@ export function pickSkuId(raw: Record<string, unknown> | undefined): string {
   }
   return '—'
 }
+
+/** 真实直播空档：系统 live_session/unmatched 归未归属，但纯排班兜底会命中其他主播 */
+export function isLiveSessionGapAttributionMismatch(params: {
+  currentAnchor: string
+  expectedAnchor: string
+  attributionSource: string
+  attributionExplain: string
+}): boolean {
+  if (params.currentAnchor !== '未归属') return false
+  if (!params.expectedAnchor || params.expectedAnchor === '未归属') return false
+  if (params.attributionSource === 'unmatched') return true
+  return (
+    params.attributionSource === 'live_session' &&
+    params.attributionExplain.includes('未落在该直播号当日真实直播时段')
+  )
+}

@@ -18,7 +18,6 @@ import { resolveMetricOrderNo } from '../src/services/calc-refund-rate.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 import {
   computeExpectedAnchorFromEffectiveSchedule,
-  isLiveSessionGapAttributionMismatch,
   loadDailyScheduleMeta,
 } from './lib/anchor-attribution-verify.util'
 import {
@@ -88,7 +87,6 @@ async function main(): Promise<void> {
   }
   const templateFallbackDates = new Set<string>()
   const mismatches: MismatchRow[] = []
-  const pendingBusinessRule: MismatchRow[] = []
   let derivable = 0
 
   const scheduleCache = new Map<string, Awaited<ReturnType<typeof loadDailyScheduleMeta>>>()
@@ -134,7 +132,7 @@ async function main(): Promise<void> {
 
     const resolved = await resolveAnchorWithScheduleOverlay(view)
     if (resolved.anchorName !== hit.anchorName) {
-      const row: MismatchRow = {
+      mismatches.push({
         orderNo,
         payTime: view.orderTimeText ?? new Date(payMs).toISOString(),
         liveAccountName,
@@ -144,19 +142,7 @@ async function main(): Promise<void> {
         expectedAnchor: hit.anchorName,
         expectedRowId: hit.row.rowId,
         expectedScheduleSource: hit.row.source,
-      }
-      if (
-        isLiveSessionGapAttributionMismatch({
-          currentAnchor: resolved.anchorName,
-          expectedAnchor: hit.anchorName,
-          attributionSource: resolved.attributionSource,
-          attributionExplain: resolved.attributionExplain,
-        })
-      ) {
-        pendingBusinessRule.push(row)
-      } else {
-        mismatches.push(row)
-      }
+      })
     }
   }
 
@@ -182,33 +168,12 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n=== 5b. 业务规则待确认（真实直播空档，不计入 FAIL） ===')
-  if (pendingBusinessRule.length === 0) {
-    console.log('（无）')
-  } else {
-    for (const row of pendingBusinessRule) {
-      console.log(
-        JSON.stringify({
-          ...row,
-          pendingReason:
-            '支付时间落在直播切换空档：系统 live_session/unmatched 归未归属，纯排班兜底会命中其他主播；需业务确认是否空档应用排班兜底',
-        }),
-      )
-    }
-  }
-
   console.log('\n=== 验收（主播业绩 remap 链路） ===')
   if (mismatches.length > 0) {
-    console.log(`✗ FAIL: ${mismatches.length} 笔订单与当天生效排班不一致（不含空档待确认 ${pendingBusinessRule.length} 笔）`)
+    console.log(`✗ FAIL: ${mismatches.length} 笔订单与当天生效排班不一致`)
     process.exit(1)
   }
-  if (pendingBusinessRule.length > 0) {
-    console.log(
-      `✓ PASS（含 ${pendingBusinessRule.length} 笔直播空档待业务确认，已单列不计 FAIL）`,
-    )
-  } else {
-    console.log('✓ PASS: 范围内可推导订单均与当天生效排班一致')
-  }
+  console.log('✓ PASS: 范围内可推导订单均与当天生效排班一致（含直播空档按排班兜底）')
 
   console.log('\n=== 6. 经营总览 metric drawer 归属验收（全店） ===')
   const drawerCheck = await verifyMetricDrawerAttribution({

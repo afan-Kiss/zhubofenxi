@@ -108,8 +108,60 @@ function formatHmRange(startAt: Date, endAt: Date): string {
 function buildEffectiveExplain(
   dateKey: string,
   hit: { liveRoomName: string; startAt: Date; endAt: Date; anchorName: string },
+  fromLiveSessionGap = false,
 ): string {
-  return `命中 ${dateKey} 生效排班表：${hit.liveRoomName} ${formatHmRange(hit.startAt, hit.endAt)} → ${hit.anchorName}`
+  const base = `命中 ${dateKey} 生效排班表：${hit.liveRoomName} ${formatHmRange(hit.startAt, hit.endAt)} → ${hit.anchorName}`
+  if (fromLiveSessionGap) {
+    return `支付时间未命中真实直播时段，按当天生效排班兜底：${hit.liveRoomName} ${formatHmRange(hit.startAt, hit.endAt)} → ${hit.anchorName}`
+  }
+  return base
+}
+
+function resolveScheduleAttribution(
+  dateKey: string,
+  view: AnalyzedOrderView & { raw?: Record<string, unknown> },
+  payMs: number,
+  buckets: Awaited<ReturnType<typeof loadSchedules>>,
+  dateConfirmed: boolean,
+  fromLiveSessionGap: boolean,
+): ScheduleAttributionResult | null {
+  const manualHit = matchScheduleRow(view, payMs, buckets.manual)
+  if (manualHit) {
+    return {
+      anchorId: resolveAnchorId(manualHit.anchorName),
+      anchorName: manualHit.anchorName,
+      attributionSource: 'manual_schedule',
+      attributionExplain: buildEffectiveExplain(dateKey, manualHit, fromLiveSessionGap),
+      scheduleConfirmed: dateConfirmed,
+      matchedScheduleRowId: manualHit.id,
+    }
+  }
+
+  const generatedHit = matchScheduleRow(view, payMs, buckets.generated)
+  if (generatedHit) {
+    return {
+      anchorId: resolveAnchorId(generatedHit.anchorName),
+      anchorName: generatedHit.anchorName,
+      attributionSource: 'default_schedule',
+      attributionExplain: buildEffectiveExplain(dateKey, generatedHit, fromLiveSessionGap),
+      scheduleConfirmed: dateConfirmed,
+      matchedScheduleRowId: generatedHit.id,
+    }
+  }
+
+  const virtualHit = matchScheduleRow(view, payMs, buckets.virtual)
+  if (virtualHit) {
+    return {
+      anchorId: resolveAnchorId(virtualHit.anchorName),
+      anchorName: virtualHit.anchorName,
+      attributionSource: 'template_virtual',
+      attributionExplain: buildEffectiveExplain(dateKey, virtualHit, fromLiveSessionGap),
+      scheduleConfirmed: dateConfirmed,
+      matchedScheduleRowId: virtualHit.id,
+    }
+  }
+
+  return null
 }
 
 export async function resolveAnchorWithScheduleOverlay(
@@ -158,49 +210,25 @@ export async function resolveAnchorWithScheduleOverlay(
     }
 
     const hasLiveForShop = await shopHasLiveSessionDataForPayTime(view, payMs)
+    const scheduleHit = resolveScheduleAttribution(
+      dateKey,
+      view,
+      payMs,
+      buckets,
+      dateConfirmed,
+      hasLiveForShop,
+    )
+    if (scheduleHit) {
+      return scheduleHit
+    }
+
     if (hasLiveForShop) {
       return {
         anchorId: '',
         anchorName: '未归属',
         attributionSource: 'unmatched',
-        attributionExplain: `${dateKey} 支付时间未落在该直播号当日真实直播时段内`,
+        attributionExplain: `${dateKey} 支付时间未落在该直播号当日真实直播时段内，且未命中生效排班表`,
         scheduleConfirmed: dateConfirmed,
-      }
-    }
-
-    const manualHit = matchScheduleRow(view, payMs, buckets.manual)
-    if (manualHit) {
-      return {
-        anchorId: resolveAnchorId(manualHit.anchorName),
-        anchorName: manualHit.anchorName,
-        attributionSource: 'manual_schedule',
-        attributionExplain: buildEffectiveExplain(dateKey, manualHit),
-        scheduleConfirmed: dateConfirmed,
-        matchedScheduleRowId: manualHit.id,
-      }
-    }
-
-    const generatedHit = matchScheduleRow(view, payMs, buckets.generated)
-    if (generatedHit) {
-      return {
-        anchorId: resolveAnchorId(generatedHit.anchorName),
-        anchorName: generatedHit.anchorName,
-        attributionSource: 'default_schedule',
-        attributionExplain: buildEffectiveExplain(dateKey, generatedHit),
-        scheduleConfirmed: dateConfirmed,
-        matchedScheduleRowId: generatedHit.id,
-      }
-    }
-
-    const virtualHit = matchScheduleRow(view, payMs, buckets.virtual)
-    if (virtualHit) {
-      return {
-        anchorId: resolveAnchorId(virtualHit.anchorName),
-        anchorName: virtualHit.anchorName,
-        attributionSource: 'template_virtual',
-        attributionExplain: buildEffectiveExplain(dateKey, virtualHit),
-        scheduleConfirmed: dateConfirmed,
-        matchedScheduleRowId: virtualHit.id,
       }
     }
 

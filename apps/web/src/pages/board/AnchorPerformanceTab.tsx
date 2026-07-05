@@ -32,6 +32,10 @@ import {
   type DailyReportImageItem,
 } from '../../components/board/DailyReportShipmentPhotos'
 import { AnchorEffectiveSchedulePanel } from '../../components/board/AnchorEffectiveSchedulePanel'
+import {
+  BoardMetricDrawer,
+  type BoardMetricKey,
+} from '../../components/board/BoardMetricDrawer'
 import { useDataFreshness } from '../../hooks/useDataFreshness'
 import { formatDataFreshnessTime, type DataFreshnessInfo } from '../../lib/data-freshness'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
@@ -41,9 +45,11 @@ type AnchorSummaryCardType = 'money' | 'count' | 'rate'
 interface AnchorSummaryCardDef {
   label: string
   metricExplainKey: BoardMetricExplainKey
+  drawerKey: BoardMetricKey
   type: AnchorSummaryCardType
   tone: BoardSummaryMetricTone
   helper: string
+  hint: string
   icon: LucideIcon
   valueKey: 'totalGmv' | 'validSalesAmount' | 'orderCount' | 'returnRate'
 }
@@ -52,40 +58,66 @@ const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
   {
     label: '支付金额',
     metricExplainKey: 'totalGmv',
+    drawerKey: 'gmv',
     type: 'money',
     tone: 'violet',
     helper: '主播归属订单支付金额',
+    hint: '查看相关订单',
     icon: TrendingUp,
     valueKey: 'totalGmv',
   },
   {
     label: '有效成交额',
     metricExplainKey: 'validSalesAmount',
+    drawerKey: 'effectiveGmv',
     type: 'money',
     tone: 'green',
     helper: '已完成/已签收，且无在途售后、未成功退款的成交金额',
+    hint: '点击查看明细',
     icon: Wallet,
     valueKey: 'validSalesAmount',
   },
   {
     label: '支付单数',
     metricExplainKey: 'orderCount',
+    drawerKey: 'orderCount',
     type: 'count',
     tone: 'blue',
     helper: '已支付订单笔数',
+    hint: '查看相关订单',
     icon: Package,
     valueKey: 'orderCount',
   },
   {
     label: '退款率',
     metricExplainKey: 'returnRate',
+    drawerKey: 'returnRate',
     type: 'rate',
     tone: 'orange',
     helper: '退款订单占支付订单比例',
+    hint: '点击查看明细',
     icon: Percent,
     valueKey: 'returnRate',
   },
 ]
+
+function anchorSummaryMetricValue(
+  cards: Record<string, unknown>,
+  metric: BoardMetricKey,
+): number {
+  switch (metric) {
+    case 'gmv':
+      return Number(cards.totalGmv ?? cards.gmv ?? 0)
+    case 'effectiveGmv':
+      return Number(cards.validSalesAmount ?? cards.effectiveGmv ?? 0)
+    case 'orderCount':
+      return Number(cards.orderCount ?? cards.paidOrderCount ?? 0)
+    case 'returnRate':
+      return Number(cards.returnRate ?? cards.refundRate ?? 0)
+    default:
+      return 0
+  }
+}
 
 function anchorCardRawValue(cards: Record<string, unknown>, key: AnchorSummaryCardDef['valueKey']): number {
   if (key === 'totalGmv') return Number(cards.totalGmv ?? cards.gmv ?? 0)
@@ -155,6 +187,7 @@ export const AnchorPerformanceTab: React.FC = () => {
     anchorName: string
     anchorId?: string
   } | null>(null)
+  const [metricDrawer, setMetricDrawer] = useState<BoardMetricKey | null>(null)
   const [shipmentPhotos, setShipmentPhotos] = useState<DailyReportImageItem[]>([])
   const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
   const [reportPhotosStale, setReportPhotosStale] = useState(false)
@@ -184,6 +217,16 @@ export const AnchorPerformanceTab: React.FC = () => {
     if (anchorFilter === '全部') return performanceSummary ?? {}
     return aggregateSummaryFromAnchorRows(anchors)
   }, [anchorFilter, performanceSummary, anchors])
+  const selectedAnchorMeta = useMemo(() => {
+    if (anchorFilter === '全部') return null
+    const row = allAnchors.find((a) => String(a.anchorName) === anchorFilter)
+    return {
+      anchorName: anchorFilter,
+      anchorId:
+        anchorFilter === '未归属' ? undefined : String(row?.anchorId ?? '').trim() || undefined,
+    }
+  }, [anchorFilter, allAnchors])
+  const blacklistedBuyerIds = data?.blacklistedBuyerIds ?? []
   const hasPerformanceData =
     Boolean(filteredPerformanceSummary) && Object.keys(filteredPerformanceSummary ?? {}).length > 0
   const cards = filteredPerformanceSummary ?? {}
@@ -448,8 +491,10 @@ export const AnchorPerformanceTab: React.FC = () => {
                       }
                       value={renderAnchorCardValue(card)}
                       helper={card.helper}
+                      hint={card.hint}
                       tone={card.tone}
                       icon={Icon}
+                      onClick={() => setMetricDrawer(card.drawerKey)}
                     />
                   </StaggerCard>
                 )
@@ -534,6 +579,21 @@ export const AnchorPerformanceTab: React.FC = () => {
         startDate={startDate}
         endDate={endDate}
       />
+
+      {metricDrawer && showMetrics ? (
+        <BoardMetricDrawer
+          open={Boolean(metricDrawer)}
+          onClose={() => setMetricDrawer(null)}
+          metric={metricDrawer}
+          startDate={startDate}
+          endDate={endDate}
+          preset={preset}
+          anchorId={selectedAnchorMeta?.anchorId}
+          anchorName={selectedAnchorMeta?.anchorName}
+          cardValueRaw={anchorSummaryMetricValue(filteredPerformanceSummary, metricDrawer)}
+          blacklistedBuyerIds={blacklistedBuyerIds}
+        />
+      ) : null}
     </div>
   )
 }

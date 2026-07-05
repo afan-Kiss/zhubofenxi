@@ -76,6 +76,7 @@
     "verify:daily-report-images": "tsx apps/server/scripts/verify-daily-report-images.ts",
     "verify:anchor-daily-report-shipped": "tsx apps/server/scripts/verify-anchor-daily-report-shipped.ts",
     "verify:anchor-performance-daily-report-integrity": "tsx apps/server/scripts/verify-anchor-performance-daily-report-integrity.ts",
+    "verify:single-order-anchor-attribution": "tsx apps/server/scripts/verify-single-order-anchor-attribution.ts",
     "verify:daily-report-live-sessions": "tsx apps/server/scripts/verify-daily-report-live-sessions-shiyuju.ts",
     "repair:good-review-images": "tsx apps/server/scripts/repair-good-review-images.ts",
     "repair:good-review-prices": "tsx apps/server/scripts/repair-good-review-prices.ts",

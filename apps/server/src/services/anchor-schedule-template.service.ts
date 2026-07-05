@@ -350,6 +350,11 @@ export async function repairScheduleTemplatesFrom20260701(options?: {
       await generateDefaultSchedulesForDate({ date: dateKey, overwrite: true })
       regeneratedDates.push(dateKey)
     }
+
+    const { invalidateBusinessBoardCacheForDate } = await import('./anchor-schedule-cache.service')
+    for (const dateKey of regeneratedDates) {
+      invalidateBusinessBoardCacheForDate(dateKey)
+    }
   }
 
   return {

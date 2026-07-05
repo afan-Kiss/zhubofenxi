@@ -172,25 +172,35 @@ async function main(): Promise<void> {
   }
   console.log('✓ PASS: 范围内可推导订单均与当天生效排班一致')
 
-  console.log('\n=== 6. 经营总览 metric drawer 归属验收 ===')
+  console.log('\n=== 6. 经营总览 metric drawer 归属验收（全店） ===')
   const drawerCheck = await verifyMetricDrawerAttribution({
     startDate,
     endDate,
     metrics: ['effectiveGmv', 'gmv', 'orderCount'],
+    anchorNames: ['子杰', '小白', '小艺'],
   })
   if (drawerCheck.mismatches.length > 0) {
-    console.log(`错归行数: ${drawerCheck.mismatches.length}`)
+    console.log(`全店错归行数: ${drawerCheck.mismatches.length}`)
     for (const row of drawerCheck.mismatches.slice(0, 20)) {
       console.log(JSON.stringify(row))
     }
     if (drawerCheck.mismatches.length > 20) {
       console.log(`... 另有 ${drawerCheck.mismatches.length - 20} 行`)
     }
-    console.log('\n=== 验收（metric drawer）===')
+    console.log('\n=== 验收（metric drawer 全店）===')
     console.log(`✗ FAIL: metric drawer ${drawerCheck.mismatches.length} 行 anchorName 与 remap 不一致`)
     process.exit(1)
   }
-  console.log('✓ PASS: effectiveGmv / gmv / orderCount drawer 归属与 remap 一致')
+  console.log('✓ PASS: effectiveGmv / gmv / orderCount 全店 drawer 归属与 remap 一致')
+
+  if (drawerCheck.anchorFails.length > 0) {
+    console.log('\n=== 7. 主播维度 metric drawer 失败项 ===')
+    for (const f of drawerCheck.anchorFails) console.log(`  - ${f}`)
+    console.log('\n=== 验收（metric drawer 主播维度）===')
+    console.log(`✗ FAIL: 主播维度 ${drawerCheck.anchorFails.length} 项未通过`)
+    process.exit(1)
+  }
+  console.log('✓ PASS: 子杰/小白/小艺 effectiveGmv drawer 主播池与 summary 一致')
 }
 
 main()

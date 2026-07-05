@@ -256,20 +256,22 @@ export async function buildBoardMetricDetail(params: {
   })
 
   const coreViews = filterViewsForCoreMetrics(scoped.views)
-  let viewsForTotals = coreViews
-  if (anchorId || anchorName) {
-    viewsForTotals = filterViewsByAnchorSpec(coreViews, anchorId, anchorName)
-  }
   const rawByMatch = scoped.rawByMatch
   const range = scoped.range
-  const totals = calculateBusinessMetrics(viewsForTotals)
-  const valueRaw = pickMetricValue(totals, def.valueKey)
 
   const viewsWithRaw = attachRawByMatchToViews(coreViews, rawByMatch)
-  let displayViews = await remapViewsWithScheduleOverlay(viewsWithRaw)
+  const remappedViews = await remapViewsWithScheduleOverlay(viewsWithRaw)
+
+  let viewsForTotals = coreViews
+  let displayViews = remappedViews
   if (anchorId || anchorName) {
-    displayViews = filterViewsByAnchorSpec(displayViews, anchorId, anchorName)
+    const filteredRemapped = filterViewsByAnchorSpec(remappedViews, anchorId, anchorName)
+    viewsForTotals = filteredRemapped
+    displayViews = filteredRemapped
   }
+
+  const totals = calculateBusinessMetrics(viewsForTotals)
+  const valueRaw = pickMetricValue(totals, def.valueKey)
 
   const isQualityMetric =
     params.metric === 'qualityReturnCount' || params.metric === 'qualityReturnRate'

@@ -3,9 +3,7 @@
  */
 import { buildBoardMetricDetail } from '../../src/services/board-metric-detail.service'
 import type { BoardMetricKey } from '../../src/services/board-metric-detail.service'
-import {
-  getBoardScopedViewsForRange,
-} from '../../src/services/board-scoped-views.service'
+import { getBoardScopedViewsForRange } from '../../src/services/board-scoped-views.service'
 import { attachRawByMatchToViews } from '../../src/services/low-price-brush-order.service'
 import { remapViewsWithScheduleOverlay } from '../../src/services/anchor-schedule-attribution.service'
 import { filterViewsForCoreMetrics } from '../../src/services/metrics-exclusion.service'
@@ -49,12 +47,23 @@ export async function buildRemappedAnchorMap(params: {
   return map
 }
 
-export async function fetchMetricDetailRows(params: {
+export async function fetchMetricDetailBundle(params: {
   metric: BoardMetricKey
   startDate: string
   endDate: string
-}): Promise<BoardDrillOrderRow[]> {
+  anchorName?: string
+  anchorId?: string
+}): Promise<{
+  rows: BoardDrillOrderRow[]
+  summary: {
+    valueRaw: number
+    matchedOrders: number
+  }
+  paginationTotal: number
+}> {
   const allRows: BoardDrillOrderRow[] = []
+  let summary: { valueRaw: number; matchedOrders: number } | null = null
+  let paginationTotal = 0
   let page = 1
   const pageSize = 100
   while (true) {
@@ -63,16 +72,36 @@ export async function fetchMetricDetailRows(params: {
       preset: 'custom',
       startDate: params.startDate,
       endDate: params.endDate,
+      anchorName: params.anchorName,
+      anchorId: params.anchorId,
       page,
       pageSize,
       role: 'super_admin',
       username: 'verify-script',
     })
+    if (!summary) {
+      summary = {
+        valueRaw: detail.summary.valueRaw,
+        matchedOrders: detail.summary.matchedOrders,
+      }
+      paginationTotal = detail.pagination.total
+    }
     allRows.push(...detail.rows)
     if (page >= detail.pagination.totalPages) break
     page++
   }
-  return allRows
+  return { rows: allRows, summary: summary!, paginationTotal }
+}
+
+/** @deprecated use fetchMetricDetailBundle */
+export async function fetchMetricDetailRows(params: {
+  metric: BoardMetricKey
+  startDate: string
+  endDate: string
+  anchorName?: string
+}): Promise<BoardDrillOrderRow[]> {
+  const bundle = await fetchMetricDetailBundle(params)
+  return bundle.rows
 }
 
 export function compareDrawerRowsToRemap(
@@ -113,10 +142,69 @@ export function compareDrawerRowsToRemap(
   return mismatches
 }
 
+function orderInRows(rows: BoardDrillOrderRow[], orderNo: string): boolean {
+  const keys = [orderNo, orderNo.replace(/^P/, '')]
+  return rows.some((r) => keys.includes(r.orderNo || r.packageId || ''))
+}
+
+export async function verifyAnchorMetricDrawer(params: {
+  startDate: string
+  endDate: string
+  metric: BoardMetricKey
+  anchorName: string
+  mustInclude?: string[]
+  mustExclude?: string[]
+}): Promise<string[]> {
+  const fails: string[] = []
+  const bundle = await fetchMetricDetailBundle({
+    metric: params.metric,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    anchorName: params.anchorName,
+  })
+  const { rows, summary, paginationTotal } = bundle
+
+  for (const row of rows) {
+    const rowAnchor = row.anchorName?.trim() || '未归属'
+    if (rowAnchor !== params.anchorName) {
+      fails.push(
+        `${params.anchorName} drawer: ${row.orderNo || row.packageId} anchor=${rowAnchor}`,
+      )
+    }
+  }
+
+  if (paginationTotal !== rows.length) {
+    fails.push(
+      `${params.anchorName} drawer: pagination.total=${paginationTotal} rows=${rows.length}`,
+    )
+  }
+
+  const rowAmountSum = rows.reduce((sum, r) => sum + (r.actualDealAmount ?? 0), 0)
+  if (Math.abs(summary.valueRaw - rowAmountSum) > 0.02) {
+    fails.push(
+      `${params.anchorName} drawer: valueRaw=${summary.valueRaw} rowSum=${rowAmountSum.toFixed(2)}`,
+    )
+  }
+
+  for (const orderNo of params.mustInclude ?? []) {
+    if (!orderInRows(rows, orderNo)) {
+      fails.push(`${params.anchorName} drawer 缺少 ${orderNo}`)
+    }
+  }
+  for (const orderNo of params.mustExclude ?? []) {
+    if (orderInRows(rows, orderNo)) {
+      fails.push(`${params.anchorName} drawer 不应包含 ${orderNo}`)
+    }
+  }
+
+  return fails
+}
+
 export async function verifyMetricDrawerAttribution(params: {
   startDate: string
   endDate: string
   metrics: BoardMetricKey[]
+  anchorNames?: string[]
 }): Promise<{
   mismatches: Array<{
     metric: string
@@ -125,6 +213,7 @@ export async function verifyMetricDrawerAttribution(params: {
     expectedAnchor: string
     liveAccountName: string
   }>
+  anchorFails: string[]
 }> {
   const expectedMap = await buildRemappedAnchorMap(params)
   const allMismatches: Array<{
@@ -134,6 +223,7 @@ export async function verifyMetricDrawerAttribution(params: {
     expectedAnchor: string
     liveAccountName: string
   }> = []
+  const anchorFails: string[] = []
 
   for (const metric of params.metrics) {
     const rows = await fetchMetricDetailRows({
@@ -147,5 +237,29 @@ export async function verifyMetricDrawerAttribution(params: {
     }
   }
 
-  return { mismatches: allMismatches }
+  if (params.anchorNames?.length) {
+    for (const anchorName of params.anchorNames) {
+      const mustInclude =
+        anchorName === '小白'
+          ? ['P798535644148309221']
+          : anchorName === '小艺'
+            ? ['P798440490066093751']
+            : undefined
+      const mustExclude =
+        anchorName === '子杰'
+          ? ['P798535644148309221', 'P798440490066093751']
+          : undefined
+      const fails = await verifyAnchorMetricDrawer({
+        startDate: params.startDate,
+        endDate: params.endDate,
+        metric: 'effectiveGmv',
+        anchorName,
+        mustInclude,
+        mustExclude,
+      })
+      anchorFails.push(...fails)
+    }
+  }
+
+  return { mismatches: allMismatches, anchorFails }
 }

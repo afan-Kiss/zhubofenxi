@@ -7,11 +7,11 @@ import path from 'node:path'
 import { config } from 'dotenv'
 import { prisma } from '../src/lib/prisma'
 import { bootstrapQualityBadCaseCache } from '../src/services/quality-badcase-store.service'
-import { buildBoardMetricDetail } from '../src/services/board-metric-detail.service'
 import {
   buildRemappedAnchorMap,
   compareDrawerRowsToRemap,
-  fetchMetricDetailRows,
+  fetchMetricDetailBundle,
+  verifyAnchorMetricDrawer,
 } from './lib/metric-detail-attribution-verify.util'
 
 config({ path: path.resolve(__dirname, '../.env') })
@@ -28,6 +28,24 @@ const FOCUS_ORDERS = [
   'P798515495684105931',
 ]
 
+const ANCHOR_CHECKS = [
+  {
+    anchorName: '子杰',
+    mustInclude: [] as string[],
+    mustExclude: ['P798535644148309221', 'P798440490066093751'],
+  },
+  {
+    anchorName: '小白',
+    mustInclude: ['P798535644148309221'],
+    mustExclude: [] as string[],
+  },
+  {
+    anchorName: '小艺',
+    mustInclude: ['P798440490066093751'],
+    mustExclude: [] as string[],
+  },
+]
+
 function orderKeys(orderNo: string): string[] {
   const bare = orderNo.replace(/^P/, '')
   return [orderNo, bare]
@@ -36,35 +54,24 @@ function orderKeys(orderNo: string): string[] {
 async function main(): Promise<void> {
   await bootstrapQualityBadCaseCache()
 
-  console.log('\n=== 1. 检查范围 ===')
+  console.log('\n=== 1. 全店检查范围 ===')
   console.log(`metric=${METRIC} ${START_DATE} ~ ${END_DATE}`)
 
   const expectedMap = await buildRemappedAnchorMap({ startDate: START_DATE, endDate: END_DATE })
-  const rows = await fetchMetricDetailRows({
+  const storeBundle = await fetchMetricDetailBundle({
     metric: METRIC,
     startDate: START_DATE,
     endDate: END_DATE,
   })
 
-  const detail = await buildBoardMetricDetail({
-    metric: METRIC,
-    preset: 'custom',
-    startDate: START_DATE,
-    endDate: END_DATE,
-    page: 1,
-    pageSize: 100,
-    role: 'super_admin',
-    username: 'verify-script',
-  })
+  console.log('\n=== 2. 全店 effectiveGmv 汇总 ===')
+  console.log(`valueRaw: ${storeBundle.summary.valueRaw}`)
+  console.log(`matchedOrders: ${storeBundle.summary.matchedOrders}`)
+  console.log(`drawerRows: ${storeBundle.rows.length}`)
 
-  console.log('\n=== 2. effectiveGmv 汇总 ===')
-  console.log(`valueRaw: ${detail.summary.valueRaw}`)
-  console.log(`matchedOrders: ${detail.summary.matchedOrders}`)
-  console.log(`drawerRows: ${rows.length}`)
+  const mismatches = compareDrawerRowsToRemap(storeBundle.rows, expectedMap)
 
-  const mismatches = compareDrawerRowsToRemap(rows, expectedMap)
-
-  console.log('\n=== 3. row.anchorName 与 remap 后归属不一致 ===')
+  console.log('\n=== 3. 全店 row.anchorName 与 remap 后归属不一致 ===')
   if (mismatches.length === 0) {
     console.log('（无）')
   } else {
@@ -76,10 +83,12 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n=== 4. 重点订单验收 ===')
+  console.log('\n=== 4. 全店重点订单验收 ===')
   const focusFails: string[] = []
   for (const orderNo of FOCUS_ORDERS) {
-    const row = rows.find((r) => orderKeys(orderNo).includes(r.orderNo || r.packageId || ''))
+    const row = storeBundle.rows.find((r) =>
+      orderKeys(orderNo).includes(r.orderNo || r.packageId || ''),
+    )
     const expected = expectedMap.get(orderNo) ?? expectedMap.get(orderNo.replace(/^P/, '')) ?? '—'
     const rowAnchor = row?.anchorName?.trim() || '（未出现在 drawer）'
     const wrongZiJie = rowAnchor === '子杰' && expected !== '子杰'
@@ -95,34 +104,48 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n=== 5. 子杰错显抽检（非拾玉居早场店铺） ===')
-  const ziJieWrong = rows.filter((row) => {
-    if ((row.anchorName?.trim() || '') !== '子杰') return false
-    const shop = (row.liveAccountName ?? '').trim()
-    if (!shop || shop.includes('拾玉居')) return false
-    const orderNo = row.orderNo || row.packageId || ''
-    const expected = expectedMap.get(orderNo) ?? expectedMap.get(orderNo.replace(/^P/, ''))
-    return expected != null && expected !== '子杰'
-  })
-  console.log(`可疑子杰错显: ${ziJieWrong.length}`)
-  for (const row of ziJieWrong.slice(0, 10)) {
-    const orderNo = row.orderNo || row.packageId || ''
-    const expected = expectedMap.get(orderNo) ?? expectedMap.get(orderNo.replace(/^P/, ''))
-    console.log(`  ${orderNo} shop=${row.liveAccountName} drawer=子杰 expected=${expected}`)
+  console.log('\n=== 5. 主播维度 effectiveGmv drawer ===')
+  const anchorFails: string[] = []
+  for (const check of ANCHOR_CHECKS) {
+    const fails = await verifyAnchorMetricDrawer({
+      startDate: START_DATE,
+      endDate: END_DATE,
+      metric: METRIC,
+      anchorName: check.anchorName,
+      mustInclude: check.mustInclude,
+      mustExclude: check.mustExclude,
+    })
+    const bundle = await fetchMetricDetailBundle({
+      metric: METRIC,
+      startDate: START_DATE,
+      endDate: END_DATE,
+      anchorName: check.anchorName,
+    })
+    const rowSum = bundle.rows.reduce((s, r) => s + (r.actualDealAmount ?? 0), 0)
+    const status = fails.length === 0 ? '✓' : '✗'
+    console.log(
+      `${status} ${check.anchorName}: rows=${bundle.rows.length} valueRaw=${bundle.summary.valueRaw} rowSum=${rowSum.toFixed(2)}`,
+    )
+    if (fails.length > 0) {
+      for (const f of fails) console.log(`  - ${f}`)
+      anchorFails.push(...fails)
+    }
   }
 
   console.log('\n=== 验收 ===')
-  if (mismatches.length > 0 || focusFails.length > 0) {
+  if (mismatches.length > 0 || focusFails.length > 0 || anchorFails.length > 0) {
     if (mismatches.length > 0) {
-      console.log(`✗ FAIL: ${mismatches.length} 行 anchorName 与 remap 不一致`)
+      console.log(`✗ FAIL: 全店 ${mismatches.length} 行 anchorName 与 remap 不一致`)
     }
     if (focusFails.length > 0) {
-      console.log(`✗ FAIL: 重点订单 ${focusFails.length} 笔未通过`)
-      for (const f of focusFails) console.log(`  - ${f}`)
+      console.log(`✗ FAIL: 全店重点订单 ${focusFails.length} 笔未通过`)
+    }
+    if (anchorFails.length > 0) {
+      console.log(`✗ FAIL: 主播维度 ${anchorFails.length} 项未通过`)
     }
     process.exit(1)
   }
-  console.log('✓ PASS: metric drawer 主播归属与 remapViewsWithScheduleOverlay 一致')
+  console.log('✓ PASS: 全店 + 主播维度 metric drawer 归属一致')
 }
 
 main()

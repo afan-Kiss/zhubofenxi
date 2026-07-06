@@ -433,6 +433,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
             listKey={`anchor-${anchorId ?? anchorName}-${orderTab}-${page}-${data?.rows.length ?? 0}`}
             blacklistedBuyerIds={data?.blacklistedBuyerIds}
             loading={loading && !!data}
+            amountMode={orderTab === 'signed' ? 'signed' : 'default'}
             emptyText={
               orderTab === 'signed' ? '当前范围暂无实际签收订单' : '当前范围暂无该主播订单'
             }

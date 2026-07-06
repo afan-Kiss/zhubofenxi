@@ -111,7 +111,7 @@ function logAnchorLeaderboardReconcile(
   if (topGmvCent !== cardsGmvCent || topCount !== cardsCount) {
     const unassignedCount = unassigned ? Number(unassigned.orderCount ?? unassigned.paidOrderCount ?? 0) : 0
     const unassignedGmv = unassigned
-      ? (Number(unassigned.totalGmv ?? unassigned.gmv ?? 0) / 100).toFixed(2)
+      ? Number(unassigned.totalGmv ?? unassigned.gmv ?? 0).toFixed(2)
       : '0.00'
     logWarn(
       '经营看板',

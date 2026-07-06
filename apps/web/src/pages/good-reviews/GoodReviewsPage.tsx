@@ -451,30 +451,42 @@ export const GoodReviewsPage: React.FC = () => {
     const startedAt = new Date().toISOString()
     const shopResults: GoodReviewSyncResult['shops'] = []
     const total = SHOP_TAB_ORDER.length
-    try {
-      for (let i = 0; i < total; i++) {
-        const shopKey = SHOP_TAB_ORDER[i]!
-        const shopName = shopNameByKey.get(shopKey) ?? shopKey
-        const basePct = Math.round((i / total) * 100)
-        setSyncAllProgress(basePct)
-        setSyncAllLabel(`正在同步 ${shopName}（${i + 1}/${total}）...`)
+    for (let i = 0; i < total; i++) {
+      const shopKey = SHOP_TAB_ORDER[i]!
+      const shopName = shopNameByKey.get(shopKey) ?? shopKey
+      const basePct = Math.round((i / total) * 100)
+      setSyncAllProgress(basePct)
+      setSyncAllLabel(`正在同步 ${shopName}（${i + 1}/${total}）...`)
+      try {
         const result = await apiRequest<GoodReviewSyncResult>('/api/good-reviews/sync', {
           method: 'POST',
           body: JSON.stringify({ shop: shopKey, days: GOOD_REVIEWS_DEFAULT_DAYS }),
         })
         shopResults.push(...result.shops)
-        setSyncAllProgress(Math.round(((i + 1) / total) * 100))
+      } catch (err) {
+        shopResults.push({
+          shopKey,
+          shopName,
+          success: false,
+          error: err instanceof Error ? err.message : '同步失败',
+        })
       }
-      const merged = mergeGoodReviewSyncResults(shopResults, startedAt)
-      setSyncAllLabel('全部店铺同步完成')
-      setBanner(formatGoodReviewSyncMessage(merged))
+      setSyncAllProgress(Math.round(((i + 1) / total) * 100))
+    }
+    const merged = mergeGoodReviewSyncResults(shopResults, startedAt)
+    setSyncAllProgress(100)
+    setSyncAllLabel(
+      merged.successShopCount === merged.totalShopCount
+        ? '全部店铺同步完成'
+        : merged.successShopCount > 0
+          ? `同步完成：成功 ${merged.successShopCount} 个，失败 ${merged.failedShopCount} 个`
+          : '全部店铺同步失败',
+    )
+    setBanner(formatGoodReviewSyncMessage(merged))
+    try {
       await loadFirstPage(activeShop, { silent: true })
     } catch (err) {
-      setError(err instanceof Error ? err.message : '同步失败')
-      setBanner({
-        tone: 'error',
-        text: '同步失败：店铺都没有同步成功，请检查 Cookie 或接口状态',
-      })
+      setError(err instanceof Error ? err.message : '刷新列表失败')
     } finally {
       setSyncing(false)
       window.setTimeout(() => {

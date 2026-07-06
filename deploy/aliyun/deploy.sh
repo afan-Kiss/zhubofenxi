@@ -87,8 +87,12 @@ install_deps_build() {
   npm run db:generate -w @live/server
   log "prisma migrate deploy"
   npm run db:migrate:deploy -w @live/server
-  log "repair schedule templates from 20260701"
-  npx tsx apps/server/scripts/repair-schedule-templates-20260701.ts
+  if [[ "${RUN_SCHEDULE_REPAIR_20260701:-0}" == "1" ]]; then
+    log "repair schedule templates from 20260701"
+    npx tsx apps/server/scripts/repair-schedule-templates-20260701.ts
+  else
+    log "skip schedule repair templates from 20260701 (set RUN_SCHEDULE_REPAIR_20260701=1 to run manually)"
+  fi
   log "npm run build"
   WEB_BASE_PATH_VALUE="$(grep -E '^WEB_BASE_PATH=' apps/server/.env 2>/dev/null | head -1 | cut -d= -f2- | tr -d ' "' || true)"
   if [[ -n "$WEB_BASE_PATH_VALUE" && "$WEB_BASE_PATH_VALUE" != "/" ]]; then

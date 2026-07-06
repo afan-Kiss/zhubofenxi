@@ -20,9 +20,9 @@ import {
 import {
   ANCHOR_SESSION_DISPLAY_FROM_0613,
   isReportDateOnOrAfterShopSessionCutoff,
-  remapViewsForAnchorPerformance,
   resolveDailyReportAnchorsForDate,
 } from './anchor-performance-attribution.service'
+import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import {
   countDailyReportOrders,
@@ -340,7 +340,7 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
   const dayParams = { ...params, preset: 'custom' as const }
   const scoped = await getBoardScopedViewsForRange(dayParams)
   const config = getAnchorConfigSync()
-  const remappedAll = remapViewsForAnchorPerformance(
+  const remappedAll = await remapViewsWithScheduleOverlay(
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)
@@ -472,7 +472,7 @@ export async function buildDailyOperationsReport(params: {
     row.amountRatio = safeRatioPercent(row.validAmountYuan, validAmountYuan)
   }
 
-  const remappedAll = remapViewsForAnchorPerformance(
+  const remappedAll = await remapViewsWithScheduleOverlay(
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
   const storeWideInvalid = countDailyReportOrders(remappedAll)

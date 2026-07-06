@@ -227,6 +227,24 @@ async function checkDailyReport(): Promise<void> {
   }
 }
 
+function checkOperationsReportRemap(): void {
+  console.log('\n=== 3b. 运营日报 remap 入口 ===')
+  const svc = fs.readFileSync(
+    path.resolve(ROOT, 'server/src/services/daily-operations-report.service.ts'),
+    'utf-8',
+  )
+  if (svc.includes('remapViewsForAnchorPerformance')) {
+    fail('daily-operations-report 仍使用 remapViewsForAnchorPerformance')
+  } else {
+    ok('daily-operations-report 已移除 remapViewsForAnchorPerformance')
+  }
+  if (svc.includes('remapViewsWithScheduleOverlay')) {
+    ok('daily-operations-report 使用 remapViewsWithScheduleOverlay')
+  } else {
+    fail('daily-operations-report 缺少 remapViewsWithScheduleOverlay')
+  }
+}
+
 function checkOperationsReportStatic(): void {
   console.log('\n=== 3. 运营报表文案 ===')
   const sheet = fs.readFileSync(
@@ -269,6 +287,10 @@ async function checkHistoricalScheduleProtection(): Promise<void> {
     path.resolve(ROOT, 'server/src/services/anchor-daily-schedule.service.ts'),
     'utf-8',
   )
+  const routes = fs.readFileSync(
+    path.resolve(ROOT, 'server/src/routes/anchor-schedules.routes.ts'),
+    'utf-8',
+  )
   if (
     svc.includes('forceHistoricalScheduleChange') &&
     svc.includes('历史已确认排班不能直接覆盖')
@@ -276,6 +298,48 @@ async function checkHistoricalScheduleProtection(): Promise<void> {
     ok('save/copy 含 forceHistoricalScheduleChange 与错误文案')
   } else {
     fail('历史排班保护逻辑缺失')
+  }
+
+  if (svc.includes('generateDefaultSchedulesForDate') && svc.match(/generateDefaultSchedulesForDate[\s\S]*?forceHistoricalScheduleChange/)) {
+    ok('generateDefaultSchedulesForDate 参数含 forceHistoricalScheduleChange')
+  } else {
+    fail('generateDefaultSchedulesForDate 缺少 forceHistoricalScheduleChange 参数')
+  }
+
+  const genDefaultBlock = svc.match(
+    /export async function generateDefaultSchedulesForDate[\s\S]*?^export async function saveDailySchedules/m,
+  )?.[0]
+  if (
+    genDefaultBlock &&
+    genDefaultBlock.includes('assertHistoricalScheduleChangeAllowed') &&
+    genDefaultBlock.indexOf('assertHistoricalScheduleChangeAllowed') <
+      genDefaultBlock.indexOf('deleteMany')
+  ) {
+    ok('generateDefault overwrite 在 deleteMany 之前有历史保护')
+  } else {
+    fail('generateDefault 未在 deleteMany 之前做历史保护')
+  }
+
+  if (
+    genDefaultBlock &&
+    genDefaultBlock.includes('templatesToCreate.length > 0') &&
+    genDefaultBlock.includes('assertHistoricalScheduleChangeAllowed')
+  ) {
+    ok('generateDefault 非 overwrite 新增 rows 也有历史保护')
+  } else {
+    fail('generateDefault 非 overwrite 新增缺少历史保护')
+  }
+
+  const genDefaultRoute = routes.match(
+    /anchorSchedulesRouter\.post\('\/generate-default'[\s\S]*?\}\)/,
+  )?.[0]
+  if (
+    genDefaultRoute?.includes('forceHistoricalScheduleChange') &&
+    genDefaultRoute?.includes('changeReason')
+  ) {
+    ok('/generate-default 透传 forceHistoricalScheduleChange / changeReason')
+  } else {
+    fail('/generate-default 未透传 forceHistoricalScheduleChange / changeReason')
   }
 
   const today = formatDateKeyShanghai(new Date())
@@ -346,6 +410,7 @@ async function main(): Promise<void> {
   await bootstrapQualityBadCaseCache()
   await checkOverviewSignedDrawers()
   await checkDailyReport()
+  checkOperationsReportRemap()
   checkOperationsReportStatic()
   checkBoardMetricDrawerReset()
   await checkHistoricalScheduleProtection()

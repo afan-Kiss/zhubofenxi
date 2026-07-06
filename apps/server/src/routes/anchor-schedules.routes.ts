@@ -46,6 +46,8 @@ anchorSchedulesRouter.post('/generate-default', async (req, res, next) => {
       date,
       overwrite: Boolean(body.overwrite),
       createdBy: req.user?.username,
+      forceHistoricalScheduleChange: Boolean(body.forceHistoricalScheduleChange),
+      changeReason: body.changeReason ? String(body.changeReason) : undefined,
     })
     sendOk(res, { ok: true, ...data, ...buildScheduleMutationResult(date) })
   } catch (err) {

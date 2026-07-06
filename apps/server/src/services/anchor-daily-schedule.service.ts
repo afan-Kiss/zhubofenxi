@@ -360,6 +360,8 @@ export async function generateDefaultSchedulesForDate(params: {
   date: string
   overwrite: boolean
   createdBy?: string
+  forceHistoricalScheduleChange?: boolean
+  changeReason?: string
 }): Promise<{ date: string; schedules: DailyScheduleDto[]; warnings: string[] }> {
   const { date, overwrite } = params
   const templates = await listActiveTemplatesForDate(date)
@@ -369,6 +371,17 @@ export async function generateDefaultSchedulesForDate(params: {
 
   const existing = await prisma.anchorDailySchedule.findMany({ where: { scheduleDate: date } })
   const hasManualOrLocked = existing.some((r) => r.source === 'manual' || r.locked)
+  const isHistoricalConfirmed =
+    date < shanghaiTodayDateKey() && (await isDateScheduleConfirmed(date))
+
+  if (overwrite && isHistoricalConfirmed) {
+    await assertHistoricalScheduleChangeAllowed({
+      date,
+      forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
+      changeReason: params.changeReason,
+      createdBy: params.createdBy,
+    })
+  }
 
   if (overwrite) {
     await prisma.anchorDailySchedule.deleteMany({
@@ -405,6 +418,15 @@ export async function generateDefaultSchedulesForDate(params: {
     }
     return !coveredKeys.has(templateKey(t.anchorName, t.shopName, t.startTime))
   })
+
+  if (!overwrite && templatesToCreate.length > 0 && isHistoricalConfirmed) {
+    await assertHistoricalScheduleChangeAllowed({
+      date,
+      forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
+      changeReason: params.changeReason,
+      createdBy: params.createdBy,
+    })
+  }
 
   if (templatesToCreate.length === 0 && refreshedExisting.length > 0) {
     return listDailySchedulesForDate(date)

@@ -118,6 +118,8 @@ const AFTER_SALE_POSITIVE_KEYWORDS = [
   '售后中',
   '售后完成',
   '售后关闭',
+  '售后申请',
+  '售后处理中',
   '退款成功',
   '退款中',
   '退货退款',
@@ -126,32 +128,31 @@ const AFTER_SALE_POSITIVE_KEYWORDS = [
   '申请退款',
 ] as const
 
+const NO_AFTER_SALE_PHRASES = [
+  '无',
+  '无售后',
+  '暂无售后',
+  '未申请售后',
+  '未发起售后',
+  '未产生售后',
+  '没有售后',
+  '售后无',
+  '售后状态无',
+  '售后状态：无',
+  '售后状态:无',
+  '无退款',
+  '无退货',
+] as const
+
 /** 售后状态文案表示「无售后/未申请」时返回 true（不算售后信号） */
 export function isNoAfterSaleText(text: string): boolean {
   const raw = text.trim()
   if (!raw || raw === '—' || raw === '-') return true
   const normalized = raw.replace(/\s+/g, '')
-  const exactNoAfterSale = [
-    '无',
-    '无售后',
-    '暂无售后',
-    '未申请售后',
-    '没有售后',
-    '无退款',
-    '无退货',
-    '售后无',
-    '售后状态无',
-    '售后状态：无',
-    '售后状态:无',
-  ]
-  if (exactNoAfterSale.some((p) => normalized === p.replace(/\s+/g, '') || raw === p)) {
-    return true
-  }
-  const negWords = ['无', '未', '暂无', '没有']
-  if (negWords.some((w) => raw.includes(w)) && raw.includes('售后')) {
-    return true
-  }
-  return false
+  return NO_AFTER_SALE_PHRASES.some((phrase) => {
+    const phraseNorm = phrase.replace(/\s+/g, '')
+    return normalized === phraseNorm || raw === phrase
+  })
 }
 
 export function viewHasRefundAfterSaleSignal(v: AnalyzedOrderView): boolean {

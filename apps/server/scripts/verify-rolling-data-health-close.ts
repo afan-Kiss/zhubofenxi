@@ -253,8 +253,27 @@ async function main(): Promise<void> {
     fail('monthly-close-scheduler 逻辑缺失')
   }
 
+  if (
+    !businessMetrics.includes("negWords.some((w) => raw.includes(w)) && raw.includes('售后')") &&
+    businessMetrics.includes('NO_AFTER_SALE_PHRASES')
+  ) {
+    ok('isNoAfterSaleText 使用明确负例短语，无宽泛 未+售后 规则')
+  } else {
+    fail('isNoAfterSaleText 仍含宽泛 未+售后 误判规则')
+  }
+
   console.log('\n=== 售后信号运行时断言 ===')
-  const negativeTexts = ['无售后', '暂无售后', '未申请售后', '没有售后', '售后：无', '售后状态：无']
+  const negativeTexts = [
+    '无售后',
+    '暂无售后',
+    '未申请售后',
+    '未发起售后',
+    '未产生售后',
+    '没有售后',
+    '售后状态：无',
+    '无退款',
+    '无退货',
+  ]
   for (const text of negativeTexts) {
     if (isNoAfterSaleText(text)) {
       ok(`isNoAfterSaleText「${text}」`)
@@ -269,7 +288,17 @@ async function main(): Promise<void> {
     }
   }
 
-  const positiveTexts = ['退款成功', '退货退款', '仅退款', '售后完成']
+  const positiveTexts = [
+    '售后完成未退款',
+    '售后关闭未退款',
+    '售后中未退款',
+    '售后申请未处理',
+    '售后处理中未退款',
+    '退款成功',
+    '退货退款',
+    '仅退款',
+    '售后完成',
+  ]
   for (const text of positiveTexts) {
     if (!isNoAfterSaleText(text)) {
       ok(`isNoAfterSaleText 未误伤「${text}」`)

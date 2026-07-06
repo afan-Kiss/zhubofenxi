@@ -20,6 +20,11 @@ import { saveDailySchedules } from '../src/services/anchor-daily-schedule.servic
 import { isDateScheduleConfirmed } from '../src/services/anchor-schedule-confirm.service'
 import { addDaysShanghai, formatDateKeyShanghai } from '../src/utils/business-timezone'
 import type { BoardDrillOrderRow } from '../src/services/order-row-mapper.service'
+import {
+  isNoAfterSaleText,
+  viewHasRefundAfterSaleSignal,
+} from '../src/services/business-metrics.service'
+import type { AnalyzedOrderView } from '../src/types/analysis'
 
 config({ path: path.resolve(__dirname, '../.env') })
 
@@ -673,10 +678,57 @@ function checkAfterSaleAndHealthTailStatic(): void {
     fail('monthly-close 缺少 isUnassignedMonthlyCloseView')
   }
 
+  if (
+    !businessMetrics.includes("negWords.some((w) => raw.includes(w)) && raw.includes('售后')") &&
+    businessMetrics.includes('NO_AFTER_SALE_PHRASES')
+  ) {
+    ok('isNoAfterSaleText 使用明确负例短语')
+  } else {
+    fail('isNoAfterSaleText 仍含宽泛 未+售后 规则')
+  }
+
   if (panel.includes('全库累计') && panel.includes('售后信号记录')) {
     ok('DataHealthPanel 含全库累计与售后信号记录')
   } else {
     fail('DataHealthPanel 缺少全库累计或售后信号记录')
+  }
+}
+
+function checkNoAfterSaleTextRuntime(): void {
+  console.log('\n=== 0b. isNoAfterSaleText 运行时断言 ===')
+  const negatives = [
+    '无售后',
+    '暂无售后',
+    '未申请售后',
+    '未发起售后',
+    '未产生售后',
+    '没有售后',
+    '售后状态：无',
+    '无退款',
+    '无退货',
+  ]
+  for (const text of negatives) {
+    if (isNoAfterSaleText(text)) ok(`负例「${text}」`)
+    else fail(`负例「${text}」未被识别`)
+  }
+
+  const positives = [
+    '售后完成未退款',
+    '售后关闭未退款',
+    '售后中未退款',
+    '售后申请未处理',
+    '售后处理中未退款',
+    '退款成功',
+    '退货退款',
+    '仅退款',
+    '售后完成',
+  ]
+  for (const text of positives) {
+    if (isNoAfterSaleText(text)) fail(`正例「${text}」被误判为无售后`)
+    else ok(`正例「${text}」未被误判为无售后`)
+    const view = { afterSaleStatusText: text } as AnalyzedOrderView
+    if (viewHasRefundAfterSaleSignal(view)) ok(`正例「${text}」算售后信号`)
+    else fail(`正例「${text}」未识别为售后信号`)
   }
 }
 
@@ -685,6 +737,7 @@ async function main(): Promise<void> {
   console.log(`范围: ${START_DATE} ~ ${END_DATE}`)
 
   checkAfterSaleAndHealthTailStatic()
+  checkNoAfterSaleTextRuntime()
 
   await bootstrapQualityBadCaseCache()
   await checkOverviewSignedDrawers()

@@ -95,6 +95,44 @@ function formatCountLine(label: string, count: number, unit: string, lowHint = f
   )
 }
 
+const ROLLING_CLOSE_STALE_MS = 30 * 60 * 60 * 1000
+
+function formatRollingCloseGeneratedAt(iso: string): string {
+  try {
+    const d = new Date(iso)
+    const now = new Date()
+    const fmt = (date: Date) =>
+      date.toLocaleString('zh-CN', {
+        hour12: false,
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    const sameDay =
+      d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' }) ===
+      now.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' })
+    if (sameDay) {
+      const time = d.toLocaleString('zh-CN', {
+        hour12: false,
+        timeZone: 'Asia/Shanghai',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+      return `今天 ${time}`
+    }
+    return fmt(d)
+  } catch {
+    return iso
+  }
+}
+
+function isRollingCloseStale(generatedAt: string): boolean {
+  const ms = Date.parse(generatedAt)
+  if (!Number.isFinite(ms)) return false
+  return Date.now() - ms > ROLLING_CLOSE_STALE_MS
+}
+
 function RollingCloseSection({ report }: { report: RollingDataHealthCloseSummary | null }) {
   if (!report) {
     return (
@@ -110,12 +148,21 @@ function RollingCloseSection({ report }: { report: RollingDataHealthCloseSummary
   const rangeText =
     report.rangeLabel?.trim() ||
     `${report.startDate} ~ ${report.endDate}（滚动30天，延迟15天）`
+  const staleRollingClose = isRollingCloseStale(report.generatedAt)
 
   return (
     <div className="mt-3 rounded-lg border border-slate-200/80 bg-white/60 px-2.5 py-2">
       <div className="text-xs font-semibold text-slate-800">滚动30天结账</div>
+      {staleRollingClose ? (
+        <p className="mt-1 text-[11px] leading-relaxed text-amber-800">
+          滚动30天结账超过一天没更新，请检查凌晨任务。
+        </p>
+      ) : null}
       <div className="mt-1 grid gap-0.5 sm:grid-cols-2">
         <div className="text-[11px] text-slate-600 sm:col-span-2">统计范围：{rangeText}</div>
+        <div className="text-[11px] text-slate-600 sm:col-span-2">
+          生成时间：{formatRollingCloseGeneratedAt(report.generatedAt)}
+        </div>
         <div className="text-[11px] text-slate-600">
           已签收金额：{formatMoneyDisplay(report.actualSignedAmountYuan)}
         </div>
@@ -133,6 +180,15 @@ function RollingCloseSection({ report }: { report: RollingDataHealthCloseSummary
         </div>
         <div className="text-[11px] text-slate-600">
           品退单数：{report.qualityRefundOrderCount.toLocaleString('zh-CN')} 单
+        </div>
+        <div className="text-[11px] text-slate-600">
+          售后相关订单：{report.afterSaleRecordCount.toLocaleString('zh-CN')} 单
+        </div>
+        <div className="text-[11px] text-slate-600">
+          售后缓存记录：{report.afterSaleCacheRecordCount.toLocaleString('zh-CN')} 条
+        </div>
+        <div className="text-[11px] text-slate-600">
+          未归属订单：{report.unassignedOrderCount.toLocaleString('zh-CN')} 单
         </div>
       </div>
       {report.warnings.length > 0 ? (

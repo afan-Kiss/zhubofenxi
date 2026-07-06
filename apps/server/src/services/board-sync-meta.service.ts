@@ -139,6 +139,12 @@ export interface RollingDataHealthCloseSummary {
   signRate: number | null
   refundRate: number | null
   qualityRefundOrderCount: number
+  qualityRefundRate: number | null
+  afterSaleRecordCount: number
+  afterSaleCacheRecordCount: number
+  afterSaleCacheRecordScope: 'all_db' | 'range'
+  unassignedOrderCount: number
+  duplicateOrderCount: number
   warnings: string[]
 }
 
@@ -160,6 +166,12 @@ function toRollingDataHealthCloseSummary(
     signRate: report.signRate,
     refundRate: report.refundRate,
     qualityRefundOrderCount: report.qualityRefundOrderCount,
+    qualityRefundRate: report.qualityRefundRate,
+    afterSaleRecordCount: report.afterSaleRecordCount,
+    afterSaleCacheRecordCount: report.afterSaleCacheRecordCount,
+    afterSaleCacheRecordScope: report.afterSaleCacheRecordScope,
+    unassignedOrderCount: report.unassignedOrderCount,
+    duplicateOrderCount: report.duplicateOrderCount,
     warnings: report.warnings,
   }
 }

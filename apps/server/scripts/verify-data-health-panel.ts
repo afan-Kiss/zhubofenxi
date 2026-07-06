@@ -190,6 +190,33 @@ function main(): void {
     fail('Provider 未使用缓存失败大白话')
   }
 
+  const rollingLabels = [
+    '生成时间',
+    '售后相关订单',
+    '售后缓存记录',
+    '未归属订单',
+    '超过一天没更新',
+  ]
+  for (const label of rollingLabels) {
+    if (panel.includes(label)) {
+      ok(`DataHealthPanel 包含「${label}」`)
+    } else {
+      fail(`DataHealthPanel 缺少「${label}」`)
+    }
+  }
+
+  const bannedExtra = ['schema', 'buildMeta', 'monthly close']
+  function assertNoExtraBanned(src: string, label: string): void {
+    const literals = src.match(/'[^']*'|"[^"]*"|`[^`]*`/g) ?? []
+    for (const word of bannedExtra) {
+      if (literals.some((lit) => lit.toLowerCase().includes(word))) {
+        fail(`${label} 用户可见文案出现 ${word}`)
+        return
+      }
+    }
+  }
+  assertNoExtraBanned(panel, 'DataHealthPanel')
+
   console.log('\n=== API 字段冒烟 ===')
   void buildBoardSyncMetaForApi()
     .then((meta) => {

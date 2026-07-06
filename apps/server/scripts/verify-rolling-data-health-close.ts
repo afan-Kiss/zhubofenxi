@@ -74,6 +74,51 @@ async function main(): Promise<void> {
     fail('未使用 calculateBusinessMetrics')
   }
 
+  if (
+    routes.includes('sendOk(res, { ok: true, report })') &&
+    !routes.includes('refundOrderCount: report.refundOrderCount')
+  ) {
+    ok('POST /run 返回完整 report 对象')
+  } else {
+    fail('POST /run 未返回完整 report')
+  }
+
+  if (store.includes('acquireRollingDataHealthCloseLock')) {
+    ok('存在 acquireRollingDataHealthCloseLock')
+  } else {
+    fail('缺少 acquireRollingDataHealthCloseLock')
+  }
+
+  if (store.includes('rolling-data-health-close.lock') && !store.includes('monthly-close-auto.lock')) {
+    ok('lock 文件为 rolling-data-health-close.lock')
+  } else {
+    fail('lock 文件名不正确')
+  }
+
+  if (service.includes('acquireRollingDataHealthCloseLock')) {
+    ok('runRollingDataHealthClose 使用 acquireRollingDataHealthCloseLock')
+  } else {
+    fail('runRollingDataHealthClose 未使用锁')
+  }
+
+  if (service.includes('finally') && service.includes('releaseLock')) {
+    ok('runRollingDataHealthClose finally 释放锁')
+  } else {
+    fail('runRollingDataHealthClose 未在 finally 释放锁')
+  }
+
+  if (store.includes('afterSaleCacheRecordCount') && store.includes('afterSaleCacheRecordScope')) {
+    ok('report 类型包含 afterSaleCacheRecordCount / afterSaleCacheRecordScope')
+  } else {
+    fail('report 缺少售后缓存字段')
+  }
+
+  if (service.includes('售后相关订单可能偏低') && service.includes('售后缓存记录可能未同步')) {
+    ok('warning 区分售后相关订单和售后缓存记录')
+  } else {
+    fail('warning 未区分售后相关订单和售后缓存记录')
+  }
+
   for (const field of [
     'gmvAmountYuan',
     'actualSignedAmountYuan',

@@ -21,6 +21,8 @@ export interface RollingDataHealthCloseReport {
   qualityRefundOrderCount: number
   qualityRefundRate: number | null
   afterSaleRecordCount: number
+  afterSaleCacheRecordCount: number
+  afterSaleCacheRecordScope: 'all_db' | 'range'
   unassignedOrderCount: number
   duplicateOrderCount: number
   warnings: string[]
@@ -97,4 +99,49 @@ export async function appendRollingDataHealthCloseRunLog(
 ): Promise<void> {
   await fs.mkdir(getDataDir(), { recursive: true })
   await fs.appendFile(runsLogPath(), `${JSON.stringify(entry)}\n`, 'utf8')
+}
+
+function lockPath(): string {
+  return path.join(getDataDir(), 'rolling-data-health-close.lock')
+}
+
+export async function acquireRollingDataHealthCloseLock(
+  rangeKey: string,
+  triggeredBy: string,
+): Promise<() => Promise<void>> {
+  const lockFile = lockPath()
+  try {
+    await fs.mkdir(getDataDir(), { recursive: true })
+    await fs.writeFile(
+      lockFile,
+      JSON.stringify({
+        rangeKey,
+        pid: process.pid,
+        at: new Date().toISOString(),
+        triggeredBy,
+      }),
+      { flag: 'wx' },
+    )
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error('滚动30天数据健康结账正在执行中，请稍后再试')
+    }
+    throw err
+  }
+  return async () => {
+    try {
+      await fs.unlink(lockFile)
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export async function isRollingDataHealthCloseLocked(): Promise<boolean> {
+  try {
+    await fs.access(lockPath())
+    return true
+  } catch {
+    return false
+  }
 }

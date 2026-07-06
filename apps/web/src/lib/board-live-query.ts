@@ -67,6 +67,12 @@ export interface RollingDataHealthCloseSummary {
   signRate: number | null
   refundRate: number | null
   qualityRefundOrderCount: number
+  qualityRefundRate: number | null
+  afterSaleRecordCount: number
+  afterSaleCacheRecordCount: number
+  afterSaleCacheRecordScope: 'all_db' | 'range'
+  unassignedOrderCount: number
+  duplicateOrderCount: number
   warnings: string[]
 }
 

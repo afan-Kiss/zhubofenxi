@@ -1,5 +1,6 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { LOCAL_VIEWER_USER } from '../constants/local-viewer'
+import { prisma } from '../lib/prisma'
 import {
   addDaysShanghai,
   formatDateKeyShanghai,
@@ -14,7 +15,9 @@ import {
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import {
+  acquireRollingDataHealthCloseLock,
   appendRollingDataHealthCloseRunLog,
+  rollingDataHealthCloseReportFileKey,
   writeRollingDataHealthCloseReport,
   type RollingDataHealthCloseReport,
 } from './rolling-data-health-close-store.service'
@@ -59,13 +62,17 @@ function countUnassignedOrders(views: AnalyzedOrderView[]): number {
 
 function buildWarnings(input: {
   afterSaleRecordCount: number
+  afterSaleCacheRecordCount: number
   qualityRefundOrderCount: number
   unassignedOrderCount: number
   duplicateOrderCount: number
 }): string[] {
   const warnings: string[] = []
   if (input.afterSaleRecordCount === 0) {
-    warnings.push('售后数据可能未同步')
+    warnings.push('售后相关订单可能偏低')
+  }
+  if (input.afterSaleCacheRecordCount === 0) {
+    warnings.push('售后缓存记录可能未同步')
   }
   if (input.qualityRefundOrderCount === 0) {
     warnings.push('官方品退可能未同步')
@@ -77,6 +84,15 @@ function buildWarnings(input: {
     warnings.push(`发现 ${input.duplicateOrderCount} 条重复订单风险`)
   }
   return warnings
+}
+
+async function countAfterSaleCacheRecords(): Promise<{
+  count: number
+  scope: 'all_db' | 'range'
+}> {
+  // 售后工作台缓存表无可靠订单支付时间字段，按全库统计
+  const count = await prisma.xhsAfterSalesWorkbenchCache.count()
+  return { count, scope: 'all_db' }
 }
 
 export async function buildRollingDataHealthCloseReport(input: {
@@ -96,6 +112,7 @@ export async function buildRollingDataHealthCloseReport(input: {
   const performanceViews = await getAnchorPerformanceViews(coreViews, scoped.rawByMatch)
   const unassignedOrderCount = countUnassignedOrders(performanceViews)
   const duplicateOrderCount = countDuplicateOrderRisk(coreViews)
+  const afterSaleCache = await countAfterSaleCacheRecords()
 
   return {
     generatedAt: new Date().toISOString(),
@@ -114,10 +131,13 @@ export async function buildRollingDataHealthCloseReport(input: {
     qualityRefundOrderCount: metrics.qualityRefundOrderCount,
     qualityRefundRate: metrics.qualityRefundRate,
     afterSaleRecordCount: metrics.afterSaleRecordCount,
+    afterSaleCacheRecordCount: afterSaleCache.count,
+    afterSaleCacheRecordScope: afterSaleCache.scope,
     unassignedOrderCount,
     duplicateOrderCount,
     warnings: buildWarnings({
       afterSaleRecordCount: metrics.afterSaleRecordCount,
+      afterSaleCacheRecordCount: afterSaleCache.count,
       qualityRefundOrderCount: metrics.qualityRefundOrderCount,
       unassignedOrderCount,
       duplicateOrderCount,
@@ -133,9 +153,13 @@ export async function runRollingDataHealthClose(input: {
   triggeredBy: string
   asOfDateKey?: string
 }): Promise<RollingDataHealthCloseReport> {
+  const range = resolveRollingDataHealthCloseRange(input.asOfDateKey)
+  const rangeKey = rollingDataHealthCloseReportFileKey(range.startDate, range.endDate)
   const startedAt = new Date().toISOString()
+  let releaseLock: (() => Promise<void>) | null = null
   logInfo('滚动30天数据健康结账', '滚动30天数据健康结账开始')
   try {
+    releaseLock = await acquireRollingDataHealthCloseLock(rangeKey, input.triggeredBy)
     const report = await buildRollingDataHealthCloseReport(input)
     const reportPath = await writeRollingDataHealthCloseReport(report)
     await appendRollingDataHealthCloseRunLog({
@@ -154,7 +178,6 @@ export async function runRollingDataHealthClose(input: {
     return report
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
-    const range = resolveRollingDataHealthCloseRange(input.asOfDateKey)
     await appendRollingDataHealthCloseRunLog({
       task: 'rolling-data-health-close',
       startDate: range.startDate,
@@ -166,6 +189,10 @@ export async function runRollingDataHealthClose(input: {
     })
     logError('滚动30天数据健康结账', `滚动30天数据健康结账失败：${message}`, err)
     throw err
+  } finally {
+    if (releaseLock) {
+      await releaseLock()
+    }
   }
 }
 

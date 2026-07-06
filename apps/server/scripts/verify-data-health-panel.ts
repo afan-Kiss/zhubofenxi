@@ -193,9 +193,11 @@ function main(): void {
   const rollingLabels = [
     '生成时间',
     '售后相关订单',
+    '售后信号记录',
     '售后缓存记录',
     '未归属订单',
     '超过一天没更新',
+    '全库累计',
   ]
   for (const label of rollingLabels) {
     if (panel.includes(label)) {

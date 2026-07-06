@@ -42,6 +42,11 @@ import {
   type PayTimePrefilterDiagnosticResult,
 } from './order-pay-time-prefilter-diagnostic.service'
 
+function isUnassignedMonthlyCloseView(v: AnalyzedOrderView): boolean {
+  const name = String(v.anchorName ?? '').trim()
+  return name === '未归属' || v.attributionType === 'unassigned'
+}
+
 export type MonthlyCloseProfitConclusion =
   | 'can_judge_profit_loss'
   | 'sales_only_no_profit'
@@ -238,7 +243,7 @@ export async function buildMonthlyCloseReconciliation(params: {
   const paidViews = deduped.filter((v) => viewCountsAsPaidOrder(v))
   const invalidViews = deduped.filter((v) => isDailyReportInvalidOrder(v))
   const afterSaleViews = deduped.filter((v) => isActualAfterSaleOrder(v))
-  const unassignedViews = deduped.filter((v) => v.attributionType === 'unassigned')
+  const unassignedViews = deduped.filter(isUnassignedMonthlyCloseView)
 
   const rawPaidInRange = rawOrdersInRange.filter(
     (o) => o.errors.length === 0 && orderPayTimeInRange(o, range),
@@ -579,9 +584,8 @@ export async function buildMonthlyCloseDataSafetyBaseline(params?: {
     const valid = sumValidRevenueFromViews(scoped.views)
     const refund = computeOperationsRefundMetricsFromViews(scoped.views)
     const dup = countDuplicateKeys(scoped.views)
-    const unassigned = dedupeViewsByMetricOrderNo(scoped.views).filter(
-      (v) => v.attributionType === 'unassigned',
-    ).length
+    const unassigned = dedupeViewsByMetricOrderNo(scoped.views).filter(isUnassignedMonthlyCloseView)
+      .length
     const missingPay = paid.filter((o) => !o.paymentTime).length
 
     monthStats = {

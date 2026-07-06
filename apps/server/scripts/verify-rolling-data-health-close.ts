@@ -11,6 +11,11 @@ import {
   buildRollingDataHealthCloseReport,
 } from '../src/services/rolling-data-health-close.service'
 import { addDaysShanghai } from '../src/utils/business-timezone'
+import {
+  isNoAfterSaleText,
+  viewHasRefundAfterSaleSignal,
+} from '../src/services/business-metrics.service'
+import type { AnalyzedOrderView } from '../src/types/analysis'
 
 config({ path: path.resolve(__dirname, '../.env') })
 
@@ -119,6 +124,80 @@ async function main(): Promise<void> {
     fail('warning 未区分售后相关订单和售后缓存记录')
   }
 
+  const businessMetrics = read('server/src/services/business-metrics.service.ts')
+  const orderMetricSets = read('server/src/services/order-metric-sets.service.ts')
+  const monthlyClose = read('server/src/services/monthly-close-reconciliation.service.ts')
+
+  if (businessMetrics.includes('function isNoAfterSaleText')) {
+    ok('business-metrics 存在 isNoAfterSaleText')
+  } else {
+    fail('business-metrics 缺少 isNoAfterSaleText')
+  }
+
+  if (
+    !businessMetrics.includes("afterSale.includes('售后')") &&
+    businessMetrics.includes('AFTER_SALE_POSITIVE_KEYWORDS')
+  ) {
+    ok('售后正向判断不再仅靠 afterSale.includes(售后)')
+  } else {
+    fail('售后正向判断仍仅用「售后」二字')
+  }
+
+  if (orderMetricSets.includes('afterSaleRelatedOrderCount') && orderMetricSets.includes('dedupeOrderCountByOrderNo')) {
+    ok('order-metric-sets 存在 afterSaleRelatedOrderCount 且按 P 单号去重')
+  } else {
+    fail('order-metric-sets 缺少 afterSaleRelatedOrderCount 去重')
+  }
+
+  if (
+    store.includes('afterSaleRelatedOrderCount') &&
+    store.includes('afterSaleSignalRecordCount') &&
+    service.includes('afterSaleSignalRecordCount')
+  ) {
+    ok('rolling report 包含 afterSaleRelatedOrderCount / afterSaleSignalRecordCount')
+  } else {
+    fail('rolling report 缺少售后相关订单/信号记录字段')
+  }
+
+  if (store.includes('ROLLING_DATA_HEALTH_CLOSE_LOCK_STALE_MS') && store.includes('clearExpiredRollingCloseLockIfNeeded')) {
+    ok('lock 存在 ROLLING_DATA_HEALTH_CLOSE_LOCK_STALE_MS 且过期会清理')
+  } else {
+    fail('lock 缺少过期自动清理')
+  }
+
+  if (store.includes('发现过期滚动结账锁，已自动清理')) {
+    ok('过期锁清理会 logWarn')
+  } else {
+    fail('过期锁清理缺少 logWarn')
+  }
+
+  if (monthlyClose.includes('isUnassignedMonthlyCloseView') && monthlyClose.includes("name === '未归属'")) {
+    ok('monthly-close 使用 isUnassignedMonthlyCloseView（含 anchorName=未归属）')
+  } else {
+    fail('monthly-close 未统一未归属判断')
+  }
+
+  if (
+    !monthlyClose.match(/filter\(\(v\) => v\.attributionType === 'unassigned'\)/) &&
+    !monthlyClose.match(/filter\(\s*\(v\)\s*=>\s*v\.attributionType === 'unassigned'\s*,\s*\)/)
+  ) {
+    ok('monthly-close 不再仅用 attributionType=unassigned 过滤')
+  } else {
+    fail('monthly-close 仍仅用 attributionType=unassigned')
+  }
+
+  if (panel.includes('售后信号记录') && panel.includes('全库累计')) {
+    ok('DataHealthPanel 显示售后信号记录与全库累计')
+  } else {
+    fail('DataHealthPanel 缺少售后信号记录或全库累计')
+  }
+
+  if (service.includes('售后信号记录可能偏低')) {
+    ok('warning 区分售后信号记录')
+  } else {
+    fail('warning 未区分售后信号记录')
+  }
+
   for (const field of [
     'gmvAmountYuan',
     'actualSignedAmountYuan',
@@ -172,6 +251,37 @@ async function main(): Promise<void> {
     ok('保留老 monthly-close-scheduler 每月逻辑')
   } else {
     fail('monthly-close-scheduler 逻辑缺失')
+  }
+
+  console.log('\n=== 售后信号运行时断言 ===')
+  const negativeTexts = ['无售后', '暂无售后', '未申请售后', '没有售后', '售后：无', '售后状态：无']
+  for (const text of negativeTexts) {
+    if (isNoAfterSaleText(text)) {
+      ok(`isNoAfterSaleText「${text}」`)
+    } else {
+      fail(`isNoAfterSaleText 未识别「${text}」`)
+    }
+    const view = { afterSaleStatusText: text } as AnalyzedOrderView
+    if (!viewHasRefundAfterSaleSignal(view)) {
+      ok(`「${text}」不算售后信号`)
+    } else {
+      fail(`「${text}」被误判为售后信号`)
+    }
+  }
+
+  const positiveTexts = ['退款成功', '退货退款', '仅退款', '售后完成']
+  for (const text of positiveTexts) {
+    if (!isNoAfterSaleText(text)) {
+      ok(`isNoAfterSaleText 未误伤「${text}」`)
+    } else {
+      fail(`isNoAfterSaleText 误伤「${text}」`)
+    }
+    const view = { afterSaleStatusText: text } as AnalyzedOrderView
+    if (viewHasRefundAfterSaleSignal(view)) {
+      ok(`「${text}」算售后信号`)
+    } else {
+      fail(`「${text}」未识别为售后信号`)
+    }
   }
 
   console.log('\n=== 运行时冒烟 ===')

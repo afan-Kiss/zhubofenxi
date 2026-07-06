@@ -61,15 +61,19 @@ function countUnassignedOrders(views: AnalyzedOrderView[]): number {
 }
 
 function buildWarnings(input: {
-  afterSaleRecordCount: number
+  afterSaleRelatedOrderCount: number
+  afterSaleSignalRecordCount: number
   afterSaleCacheRecordCount: number
   qualityRefundOrderCount: number
   unassignedOrderCount: number
   duplicateOrderCount: number
 }): string[] {
   const warnings: string[] = []
-  if (input.afterSaleRecordCount === 0) {
+  if (input.afterSaleRelatedOrderCount === 0) {
     warnings.push('售后相关订单可能偏低')
+  }
+  if (input.afterSaleSignalRecordCount === 0) {
+    warnings.push('售后信号记录可能偏低')
   }
   if (input.afterSaleCacheRecordCount === 0) {
     warnings.push('售后缓存记录可能未同步')
@@ -131,12 +135,15 @@ export async function buildRollingDataHealthCloseReport(input: {
     qualityRefundOrderCount: metrics.qualityRefundOrderCount,
     qualityRefundRate: metrics.qualityRefundRate,
     afterSaleRecordCount: metrics.afterSaleRecordCount,
+    afterSaleRelatedOrderCount: metrics.afterSaleRelatedOrderCount,
+    afterSaleSignalRecordCount: metrics.afterSaleRecordCount,
     afterSaleCacheRecordCount: afterSaleCache.count,
     afterSaleCacheRecordScope: afterSaleCache.scope,
     unassignedOrderCount,
     duplicateOrderCount,
     warnings: buildWarnings({
-      afterSaleRecordCount: metrics.afterSaleRecordCount,
+      afterSaleRelatedOrderCount: metrics.afterSaleRelatedOrderCount,
+      afterSaleSignalRecordCount: metrics.afterSaleRecordCount,
       afterSaleCacheRecordCount: afterSaleCache.count,
       qualityRefundOrderCount: metrics.qualityRefundOrderCount,
       unassignedOrderCount,

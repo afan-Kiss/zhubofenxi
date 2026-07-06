@@ -182,10 +182,15 @@ function RollingCloseSection({ report }: { report: RollingDataHealthCloseSummary
           品退单数：{report.qualityRefundOrderCount.toLocaleString('zh-CN')} 单
         </div>
         <div className="text-[11px] text-slate-600">
-          售后相关订单：{report.afterSaleRecordCount.toLocaleString('zh-CN')} 单
+          售后相关订单：{report.afterSaleRelatedOrderCount.toLocaleString('zh-CN')} 单
         </div>
         <div className="text-[11px] text-slate-600">
-          售后缓存记录：{report.afterSaleCacheRecordCount.toLocaleString('zh-CN')} 条
+          售后信号记录：{report.afterSaleSignalRecordCount.toLocaleString('zh-CN')} 条
+        </div>
+        <div className="text-[11px] text-slate-600">
+          售后缓存记录：
+          {report.afterSaleCacheRecordCount.toLocaleString('zh-CN')} 条
+          {report.afterSaleCacheRecordScope === 'all_db' ? '（全库累计）' : ''}
         </div>
         <div className="text-[11px] text-slate-600">
           未归属订单：{report.unassignedOrderCount.toLocaleString('zh-CN')} 单

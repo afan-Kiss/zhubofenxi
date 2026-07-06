@@ -11,6 +11,7 @@ import {
   resolveViewRefundAmountCent,
   viewCountsAsRefundOrder,
 } from './order-refund-metrics.service'
+import { dedupeOrderCountByOrderNo } from './order-master-match.service'
 import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
 import { viewCountsAsQualityRefund } from './quality-refund-resolution.service'
 import type { NormalizedQualityBadCase } from './quality-badcase.types'
@@ -23,6 +24,8 @@ export interface OrderMetricSets {
   qualityRefundOrderNos: string[]
   signedOrderNos: string[]
   afterSaleRecordCount: number
+  afterSaleRelatedOrderNos: string[]
+  afterSaleRelatedOrderCount: number
   paidOrderCount: number
   refundOrderCount: number
   returnOrderCount: number
@@ -48,6 +51,7 @@ export function buildOrderMetricSets(
   const qualityRefundOrderNos: string[] = []
   const signedOrderNos: string[] = []
   let afterSaleRecordCount = 0
+  const afterSaleRelatedOrderNos: string[] = []
 
   for (const v of views) {
     const no = resolveMetricOrderNo(v)
@@ -57,6 +61,7 @@ export function buildOrderMetricSets(
 
     if (viewInvolvesRefundAfterSale(v)) {
       afterSaleRecordCount += 1
+      if (no) afterSaleRelatedOrderNos.push(no)
     }
 
     if (viewCountsAsRefundOrder(v) && no) {
@@ -121,6 +126,8 @@ export function buildOrderMetricSets(
     qualityRefundOrderNos,
     signedOrderNos,
     afterSaleRecordCount,
+    afterSaleRelatedOrderNos,
+    afterSaleRelatedOrderCount: dedupeOrderCountByOrderNo(afterSaleRelatedOrderNos),
     paidOrderCount: refundResult.paidOrderCount,
     refundOrderCount: refundResult.refundOrderCount,
     returnOrderCount: returnResult.numeratorOrderCount,

@@ -140,7 +140,10 @@ export interface RollingDataHealthCloseSummary {
   refundRate: number | null
   qualityRefundOrderCount: number
   qualityRefundRate: number | null
+  /** @deprecated 兼容旧字段，等同 afterSaleSignalRecordCount */
   afterSaleRecordCount: number
+  afterSaleRelatedOrderCount: number
+  afterSaleSignalRecordCount: number
   afterSaleCacheRecordCount: number
   afterSaleCacheRecordScope: 'all_db' | 'range'
   unassignedOrderCount: number
@@ -168,6 +171,8 @@ function toRollingDataHealthCloseSummary(
     qualityRefundOrderCount: report.qualityRefundOrderCount,
     qualityRefundRate: report.qualityRefundRate,
     afterSaleRecordCount: report.afterSaleRecordCount,
+    afterSaleRelatedOrderCount: report.afterSaleRelatedOrderCount ?? 0,
+    afterSaleSignalRecordCount: report.afterSaleSignalRecordCount ?? report.afterSaleRecordCount,
     afterSaleCacheRecordCount: report.afterSaleCacheRecordCount,
     afterSaleCacheRecordScope: report.afterSaleCacheRecordScope,
     unassignedOrderCount: report.unassignedOrderCount,

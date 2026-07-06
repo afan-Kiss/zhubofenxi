@@ -48,6 +48,9 @@ export interface BusinessMetrics {
   /** 售后记录条数（视图行级，可含同一订单多条售后信号） */
   afterSaleRecordCount: number
 
+  /** 售后相关订单数（viewInvolvesRefundAfterSale，按 P 订单号去重） */
+  afterSaleRelatedOrderCount: number
+
   /** 实际产生商品退款金额的订单数 */
   refundWithAmountOrderCount: number
 
@@ -108,15 +111,59 @@ function viewIsCancelled(v: AnalyzedOrderView): boolean {
   return ['已取消', '取消', '交易关闭', '已关闭'].some((k) => text.includes(k))
 }
 
-function viewHasRefundAfterSaleSignal(v: AnalyzedOrderView): boolean {
+const AFTER_SALE_POSITIVE_KEYWORDS = [
+  '退款',
+  '退货',
+  '仅退',
+  '售后中',
+  '售后完成',
+  '售后关闭',
+  '退款成功',
+  '退款中',
+  '退货退款',
+  '仅退款',
+  '已退款',
+  '申请退款',
+] as const
+
+/** 售后状态文案表示「无售后/未申请」时返回 true（不算售后信号） */
+export function isNoAfterSaleText(text: string): boolean {
+  const raw = text.trim()
+  if (!raw || raw === '—' || raw === '-') return true
+  const normalized = raw.replace(/\s+/g, '')
+  const exactNoAfterSale = [
+    '无',
+    '无售后',
+    '暂无售后',
+    '未申请售后',
+    '没有售后',
+    '无退款',
+    '无退货',
+    '售后无',
+    '售后状态无',
+    '售后状态：无',
+    '售后状态:无',
+  ]
+  if (exactNoAfterSale.some((p) => normalized === p.replace(/\s+/g, '') || raw === p)) {
+    return true
+  }
+  const negWords = ['无', '未', '暂无', '没有']
+  if (negWords.some((w) => raw.includes(w)) && raw.includes('售后')) {
+    return true
+  }
+  return false
+}
+
+export function viewHasRefundAfterSaleSignal(v: AnalyzedOrderView): boolean {
   if (v.isReturnRefund || v.isRefundOnly || v.isRealProductRefund) return true
   if (v.afterSaleClosedNoRefund) return true
   if (v.isQualityReturn) return true
   const afterSale = [v.afterSaleStatusText, v.afterSaleStatusLabel, v.afterSaleDisplayType]
     .filter(Boolean)
     .join(' ')
-  if (!afterSale || afterSale === '—') return false
-  return ['退款', '退货', '售后', '仅退'].some((k) => afterSale.includes(k))
+  if (isNoAfterSaleText(afterSale)) return false
+  if (!afterSale) return false
+  return AFTER_SALE_POSITIVE_KEYWORDS.some((k) => afterSale.includes(k))
 }
 
 /** Drawer / 退款单数卡片：涉及退款、退货退款、售后关闭、已支付后取消等 */
@@ -203,6 +250,7 @@ export function calculateBusinessMetrics(
 
     refundOrderCount: metricSets.refundOrderCount,
     afterSaleRecordCount: metricSets.afterSaleRecordCount,
+    afterSaleRelatedOrderCount: metricSets.afterSaleRelatedOrderCount,
     refundWithAmountOrderCount,
 
     qualityRefundOrderCount: metricSets.qualityRefundOrderCount,

@@ -618,9 +618,73 @@ async function checkFocusOrderAttribution(): Promise<void> {
   }
 }
 
+function readRepo(rel: string): string {
+  return fs.readFileSync(path.resolve(ROOT, rel), 'utf-8')
+}
+
+function checkAfterSaleAndHealthTailStatic(): void {
+  console.log('\n=== 0. 售后信号与数据健康尾巴（静态） ===')
+  const businessMetrics = readRepo('server/src/services/business-metrics.service.ts')
+  const orderMetricSets = readRepo('server/src/services/order-metric-sets.service.ts')
+  const rollingStore = readRepo('server/src/services/rolling-data-health-close-store.service.ts')
+  const rollingService = readRepo('server/src/services/rolling-data-health-close.service.ts')
+  const monthlyClose = readRepo('server/src/services/monthly-close-reconciliation.service.ts')
+  const panel = readRepo('web/src/components/board/DataHealthPanel.tsx')
+
+  if (businessMetrics.includes('isNoAfterSaleText')) {
+    ok('business-metrics 含 isNoAfterSaleText')
+  } else {
+    fail('business-metrics 缺少 isNoAfterSaleText')
+  }
+
+  if (
+    !businessMetrics.includes("afterSale.includes('售后')") &&
+    businessMetrics.includes('AFTER_SALE_POSITIVE_KEYWORDS')
+  ) {
+    ok('售后正向判断不依赖裸「售后」二字')
+  } else {
+    fail('售后仍可能仅靠「售后」二字误判')
+  }
+
+  if (orderMetricSets.includes('afterSaleRelatedOrderCount')) {
+    ok('order-metric-sets 含 afterSaleRelatedOrderCount')
+  } else {
+    fail('order-metric-sets 缺少 afterSaleRelatedOrderCount')
+  }
+
+  if (
+    rollingStore.includes('afterSaleSignalRecordCount') &&
+    rollingService.includes('afterSaleRelatedOrderCount')
+  ) {
+    ok('rolling report 区分售后相关订单与信号记录')
+  } else {
+    fail('rolling report 未区分售后相关订单与信号记录')
+  }
+
+  if (rollingStore.includes('ROLLING_DATA_HEALTH_CLOSE_LOCK_STALE_MS')) {
+    ok('rolling lock 含过期常量')
+  } else {
+    fail('rolling lock 缺少过期常量')
+  }
+
+  if (monthlyClose.includes('isUnassignedMonthlyCloseView')) {
+    ok('monthly-close 含 isUnassignedMonthlyCloseView')
+  } else {
+    fail('monthly-close 缺少 isUnassignedMonthlyCloseView')
+  }
+
+  if (panel.includes('全库累计') && panel.includes('售后信号记录')) {
+    ok('DataHealthPanel 含全库累计与售后信号记录')
+  } else {
+    fail('DataHealthPanel 缺少全库累计或售后信号记录')
+  }
+}
+
 async function main(): Promise<void> {
   console.log('verify-data-truth-sweep')
   console.log(`范围: ${START_DATE} ~ ${END_DATE}`)
+
+  checkAfterSaleAndHealthTailStatic()
 
   await bootstrapQualityBadCaseCache()
   await checkOverviewSignedDrawers()

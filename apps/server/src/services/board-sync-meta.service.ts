@@ -11,6 +11,8 @@ import {
   type XhsSyncJobView,
 } from './xhs-api-sync/xhs-sync-job.service'
 import { isBusinessSyncJobStale } from './business-sync-stale-cleanup.service'
+import { readLatestRollingDataHealthCloseReport } from './rolling-data-health-close-store.service'
+import type { RollingDataHealthCloseReport } from './rolling-data-health-close-store.service'
 
 export type { BuyerProfileStatusView }
 
@@ -123,6 +125,45 @@ function buildDegradedCookieHealth(errorMessage: string): {
   }
 }
 
+export interface RollingDataHealthCloseSummary {
+  generatedAt: string
+  startDate: string
+  endDate: string
+  rangeLabel: string
+  gmvAmountYuan: number
+  actualSignedAmountYuan: number
+  refundAmountYuan: number
+  paidOrderCount: number
+  signedOrderCount: number
+  refundOrderCount: number
+  signRate: number | null
+  refundRate: number | null
+  qualityRefundOrderCount: number
+  warnings: string[]
+}
+
+function toRollingDataHealthCloseSummary(
+  report: RollingDataHealthCloseReport | null,
+): RollingDataHealthCloseSummary | null {
+  if (!report) return null
+  return {
+    generatedAt: report.generatedAt,
+    startDate: report.startDate,
+    endDate: report.endDate,
+    rangeLabel: report.dataRangeLabel,
+    gmvAmountYuan: report.gmvAmountYuan,
+    actualSignedAmountYuan: report.actualSignedAmountYuan,
+    refundAmountYuan: report.refundAmountYuan,
+    paidOrderCount: report.paidOrderCount,
+    signedOrderCount: report.signedOrderCount,
+    refundOrderCount: report.refundOrderCount,
+    signRate: report.signRate,
+    refundRate: report.refundRate,
+    qualityRefundOrderCount: report.qualityRefundOrderCount,
+    warnings: report.warnings,
+  }
+}
+
 /** 经营看板用：业务同步状态 + 进行中任务进度（复用 sync/status 字段） */
 export async function buildBoardSyncMetaForApi(): Promise<{
   businessSync: Awaited<ReturnType<typeof getBusinessSyncStatus>>['businessSync']
@@ -135,8 +176,9 @@ export async function buildBoardSyncMetaForApi(): Promise<{
   totalAfterSaleRecords: number
   totalQualityCases: number
   buyerProfileStatus: BuyerProfileStatusView
+  rollingDataHealthClose: RollingDataHealthCloseSummary | null
 }> {
-  const [base, syncPayload, totalRawOrders, totalRawLiveSessions, afterSaleCount, qualityCaseCount, buyerCacheRow] =
+  const [base, syncPayload, totalRawOrders, totalRawLiveSessions, afterSaleCount, qualityCaseCount, buyerCacheRow, rollingReport] =
     await Promise.all([
       getBusinessSyncStatus(),
       getSyncStatusPayload(),
@@ -145,6 +187,7 @@ export async function buildBoardSyncMetaForApi(): Promise<{
       prisma.xhsAfterSalesWorkbenchCache.count(),
       prisma.qualityBadCase.count(),
       prisma.buyerRankingCache.findUnique({ where: { id: 'default' } }),
+      readLatestRollingDataHealthCloseReport(),
     ])
 
   let cookieHealth: Awaited<ReturnType<typeof getCookieHealthPayload>> | ReturnType<typeof buildDegradedCookieHealth>
@@ -193,5 +236,6 @@ export async function buildBoardSyncMetaForApi(): Promise<{
     totalAfterSaleRecords: afterSaleCount,
     totalQualityCases: qualityCaseCount,
     buyerProfileStatus,
+    rollingDataHealthClose: toRollingDataHealthCloseSummary(rollingReport),
   }
 }

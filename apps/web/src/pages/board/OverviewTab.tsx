@@ -238,9 +238,10 @@ export const OverviewTab: React.FC = () => {
     totalRawLiveSessions,
     totalAfterSaleRecords,
     totalQualityCases,
+    rollingDataHealthClose,
+    pageFetchedAt,
     cookieHealth,
     staleMessage,
-    lastSyncedAt,
     dataDisplayStatus,
     startDate,
     endDate,
@@ -369,12 +370,13 @@ export const OverviewTab: React.FC = () => {
         boardSyncUiMode={boardSyncUiMode}
         staleMessage={staleMessage}
         activeSyncJob={activeSyncJob}
-        lastSyncedAt={lastSyncedAt}
         lastSuccessAt={syncMeta?.businessSync.lastSuccessAt ?? null}
+        pageFetchedAt={pageFetchedAt}
         totalRawOrders={totalRawOrders}
         totalRawLiveSessions={totalRawLiveSessions}
         totalAfterSaleRecords={totalAfterSaleRecords}
         totalQualityCases={totalQualityCases}
+        rollingDataHealthClose={rollingDataHealthClose}
         cookieHealth={cookieHealth}
       />
 

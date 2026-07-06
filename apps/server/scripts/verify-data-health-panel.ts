@@ -125,13 +125,63 @@ function main(): void {
   assertNoBannedUserStrings(read('web/src/components/board/CookieHealthBanner.tsx'), 'CookieHealthBanner')
   assertNoBannedUserStrings(overview, 'OverviewTab')
 
-  const requiredLabels = ['数据健康', '最近同步', '订单数据', '直播场次', '售后数据', '官方品退', 'Cookie']
+  const requiredLabels = [
+    '数据健康',
+    '最近同步成功',
+    '页面读取时间',
+    '本地累计订单',
+    '本地累计直播场次',
+    '本地累计售后',
+    '本地累计官方品退',
+    'Cookie',
+    '滚动30天结账',
+  ]
   for (const label of requiredLabels) {
     if (panel.includes(label)) {
       ok(`数据健康区包含「${label}」`)
     } else {
       fail(`数据健康区缺少「${label}」`)
     }
+  }
+
+  if (panel.includes('最近同步成功') && !panel.match(/最近同步成功[\s\S]*fetchedAt/)) {
+    ok('最近同步成功未使用 fetchedAt 作为展示字段名')
+  } else {
+    fail('最近同步成功可能仍绑定 fetchedAt')
+  }
+
+  if (panel.includes('页面读取时间') && panel.includes('pageFetchedAt')) {
+    ok('页面读取时间使用 pageFetchedAt')
+  } else {
+    fail('页面读取时间未使用 pageFetchedAt')
+  }
+
+  if (
+    panel.includes('showCookieDetail') &&
+    panel.includes('cannotSyncCount') &&
+    !panel.includes("tone !== 'warning'")
+  ) {
+    ok('Cookie 异常店名不会被 staleMessage 隐藏')
+  } else {
+    fail('Cookie 异常店名仍可能被 staleMessage 隐藏')
+  }
+
+  if (provider.includes('pageFetchedAt') && provider.includes('data?.fetchedAt')) {
+    ok('Provider 暴露 pageFetchedAt 来自 fetchedAt')
+  } else {
+    fail('Provider 未正确暴露 pageFetchedAt')
+  }
+
+  if (provider.includes('rollingDataHealthClose')) {
+    ok('Provider 暴露 rollingDataHealthClose')
+  } else {
+    fail('Provider 未暴露 rollingDataHealthClose')
+  }
+
+  if (syncMetaService.includes('rollingDataHealthClose')) {
+    ok('board-sync-meta 返回 rollingDataHealthClose')
+  } else {
+    fail('board-sync-meta 缺少 rollingDataHealthClose')
   }
 
   if (provider.includes('缓存重建失败，当前展示上一次成功数据。')) {

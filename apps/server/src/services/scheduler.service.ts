@@ -199,6 +199,17 @@ function scheduleBuyerRankingCache(): void {
             `定时重建失败：${err instanceof Error ? err.message : String(err)}`,
             err,
           )
+        } finally {
+          try {
+            const { runRollingDataHealthClose } = await import('./rolling-data-health-close.service')
+            await runRollingDataHealthClose({ triggeredBy: 'buyer-ranking-scheduler' })
+          } catch (err) {
+            logError(
+              '滚动30天数据健康结账',
+              `滚动30天数据健康结账失败：${err instanceof Error ? err.message : String(err)}`,
+              err,
+            )
+          }
         }
       })()
     },

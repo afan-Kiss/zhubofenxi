@@ -85,6 +85,41 @@ boardRouter.get('/sync-meta', async (_req, res) => {
   }
 })
 
+boardRouter.post('/data-health/rolling-close/run', async (_req, res) => {
+  try {
+    const { runRollingDataHealthClose } = await import('../services/rolling-data-health-close.service')
+    const report = await runRollingDataHealthClose({ triggeredBy: 'manual-api' })
+    sendOk(res, {
+      ok: true,
+      report: {
+        startDate: report.startDate,
+        endDate: report.endDate,
+        generatedAt: report.generatedAt,
+        gmvAmountYuan: report.gmvAmountYuan,
+        actualSignedAmountYuan: report.actualSignedAmountYuan,
+        refundAmountYuan: report.refundAmountYuan,
+        paidOrderCount: report.paidOrderCount,
+        signedOrderCount: report.signedOrderCount,
+        refundOrderCount: report.refundOrderCount,
+        warnings: report.warnings,
+      },
+    })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '滚动30天数据健康结账失败', 500)
+  }
+})
+
+boardRouter.get('/data-health/rolling-close/latest', async (_req, res) => {
+  try {
+    const { readLatestRollingDataHealthCloseReport } = await import(
+      '../services/rolling-data-health-close-store.service'
+    )
+    sendOk(res, await readLatestRollingDataHealthCloseReport())
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '读取滚动30天结账报告失败', 500)
+  }
+})
+
 boardRouter.get('/sync-debug', async (_req, res) => {
   try {
     const { buildBoardSyncDebugForApi } = await import('../services/board-sync-debug.service')

@@ -45,6 +45,7 @@
     "verify:system-logic-sweep": "tsx apps/server/scripts/verify-system-logic-sweep.ts",
     "verify:data-truth-sweep": "tsx apps/server/scripts/verify-data-truth-sweep.ts",
     "verify:data-health-panel": "tsx apps/server/scripts/verify-data-health-panel.ts",
+    "verify:rolling-data-health-close": "tsx apps/server/scripts/verify-rolling-data-health-close.ts",
     "verify:anchor-realtime-sync-static": "tsx apps/server/scripts/verify-anchor-realtime-sync-static.ts",
     "verify:good-review-material-center": "tsx apps/server/scripts/verify-good-review-material-center.ts",
     "verify:order-pay-time-prefilter": "tsx apps/server/scripts/verify-order-pay-time-prefilter.ts",

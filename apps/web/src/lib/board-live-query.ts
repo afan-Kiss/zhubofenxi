@@ -50,6 +50,24 @@ export interface BoardSyncMeta {
   totalAfterSaleRecords?: number
   totalQualityCases?: number
   buyerProfileStatus?: BuyerProfileStatus
+  rollingDataHealthClose?: RollingDataHealthCloseSummary | null
+}
+
+export interface RollingDataHealthCloseSummary {
+  generatedAt: string
+  startDate: string
+  endDate: string
+  rangeLabel: string
+  gmvAmountYuan: number
+  actualSignedAmountYuan: number
+  refundAmountYuan: number
+  paidOrderCount: number
+  signedOrderCount: number
+  refundOrderCount: number
+  signRate: number | null
+  refundRate: number | null
+  qualityRefundOrderCount: number
+  warnings: string[]
 }
 
 export interface BuyerProfileStatus {

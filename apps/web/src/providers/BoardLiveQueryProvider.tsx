@@ -18,6 +18,7 @@ import {
   type BoardLiveQueryData,
   type BoardSyncMeta,
   type BoardDataDisplayStatus,
+  type RollingDataHealthCloseSummary,
 } from '../lib/board-live-query'
 import { apiRequest } from '../lib/api'
 import { deriveBoardSyncUiMode, isBusinessSyncActive } from '../lib/business-sync-ui'
@@ -54,6 +55,8 @@ interface BoardLiveQueryContextValue {
   totalRawLiveSessions: number
   totalAfterSaleRecords: number
   totalQualityCases: number
+  rollingDataHealthClose: RollingDataHealthCloseSummary | null
+  pageFetchedAt: string | null
   cookieHealth: CookieHealthPayload | null
   staleMessage: string | null
   startDate: string
@@ -108,6 +111,8 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   const totalRawLiveSessions = syncMeta?.totalRawLiveSessions ?? 0
   const totalAfterSaleRecords = syncMeta?.totalAfterSaleRecords ?? 0
   const totalQualityCases = syncMeta?.totalQualityCases ?? 0
+  const rollingDataHealthClose = syncMeta?.rollingDataHealthClose ?? null
+  const pageFetchedAt = rangeMatched ? data?.fetchedAt ?? null : null
 
   /** 仅当 loadedRangeKey 与当前 rangeKey 一致时，才向 UI 暴露 summary / data */
   const showSummaryForUi = rangeMatched ? displaySummary : null
@@ -349,6 +354,8 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       totalRawLiveSessions,
       totalAfterSaleRecords,
       totalQualityCases,
+      rollingDataHealthClose,
+      pageFetchedAt,
       cookieHealth: syncMeta?.cookieHealth ?? null,
       staleMessage,
       startDate,
@@ -380,6 +387,8 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       totalRawLiveSessions,
       totalAfterSaleRecords,
       totalQualityCases,
+      rollingDataHealthClose,
+      pageFetchedAt,
       staleMessage,
       startDate,
       endDate,

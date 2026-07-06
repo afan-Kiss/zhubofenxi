@@ -1,13 +1,14 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import { Activity } from 'lucide-react'
-import type { BoardActiveSyncJob } from '../../lib/board-live-query'
+import type { BoardActiveSyncJob, RollingDataHealthCloseSummary } from '../../lib/board-live-query'
 import {
   buildCookieBannerMessage,
   buildCookieHealthSummaryLine,
   type CookieHealthPayload,
 } from '../../lib/live-account'
 import { formatDataFreshnessTime } from '../../lib/data-freshness'
+import { formatMoneyDisplay, formatRateDisplay } from '../../lib/format-money'
 import {
   formatPageProgress,
   formatReadingPrefix,
@@ -19,12 +20,13 @@ interface Props {
   boardSyncUiMode: BoardSyncUiMode
   staleMessage: string | null
   activeSyncJob: BoardActiveSyncJob | null
-  lastSyncedAt: string | null
   lastSuccessAt: string | null
+  pageFetchedAt: string | null
   totalRawOrders: number
   totalRawLiveSessions: number
   totalAfterSaleRecords: number
   totalQualityCases: number
+  rollingDataHealthClose: RollingDataHealthCloseSummary | null
   cookieHealth: CookieHealthPayload | null
   className?: string
 }
@@ -93,16 +95,70 @@ function formatCountLine(label: string, count: number, unit: string, lowHint = f
   )
 }
 
+function RollingCloseSection({ report }: { report: RollingDataHealthCloseSummary | null }) {
+  if (!report) {
+    return (
+      <div className="mt-3 rounded-lg border border-slate-200/80 bg-white/60 px-2.5 py-2">
+        <div className="text-xs font-semibold text-slate-800">滚动30天结账</div>
+        <p className="mt-1 text-[11px] leading-relaxed text-slate-600">
+          滚动30天结账还没生成，今晚 3 点后会自动生成。
+        </p>
+      </div>
+    )
+  }
+
+  const rangeText =
+    report.rangeLabel?.trim() ||
+    `${report.startDate} ~ ${report.endDate}（滚动30天，延迟15天）`
+
+  return (
+    <div className="mt-3 rounded-lg border border-slate-200/80 bg-white/60 px-2.5 py-2">
+      <div className="text-xs font-semibold text-slate-800">滚动30天结账</div>
+      <div className="mt-1 grid gap-0.5 sm:grid-cols-2">
+        <div className="text-[11px] text-slate-600 sm:col-span-2">统计范围：{rangeText}</div>
+        <div className="text-[11px] text-slate-600">
+          已签收金额：{formatMoneyDisplay(report.actualSignedAmountYuan)}
+        </div>
+        <div className="text-[11px] text-slate-600">
+          支付金额：{formatMoneyDisplay(report.gmvAmountYuan)}
+        </div>
+        <div className="text-[11px] text-slate-600">
+          退款金额：{formatMoneyDisplay(report.refundAmountYuan)}
+        </div>
+        <div className="text-[11px] text-slate-600">
+          签收率：{formatRateDisplay(report.signRate)}
+        </div>
+        <div className="text-[11px] text-slate-600">
+          退款率：{formatRateDisplay(report.refundRate)}
+        </div>
+        <div className="text-[11px] text-slate-600">
+          品退单数：{report.qualityRefundOrderCount.toLocaleString('zh-CN')} 单
+        </div>
+      </div>
+      {report.warnings.length > 0 ? (
+        <div className="mt-1.5 space-y-0.5">
+          {report.warnings.slice(0, 2).map((warning) => (
+            <p key={warning} className="text-[11px] leading-relaxed text-amber-800">
+              {warning}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export const DataHealthPanel: React.FC<Props> = ({
   boardSyncUiMode,
   staleMessage,
   activeSyncJob,
-  lastSyncedAt,
   lastSuccessAt,
+  pageFetchedAt,
   totalRawOrders,
   totalRawLiveSessions,
   totalAfterSaleRecords,
   totalQualityCases,
+  rollingDataHealthClose,
   cookieHealth,
   className = '',
 }) => {
@@ -111,13 +167,9 @@ export const DataHealthPanel: React.FC<Props> = ({
     staleMessage,
     cookieHealth,
   })
-  const syncTime = lastSuccessAt ?? lastSyncedAt
   const cookieSummary = buildCookieHealthSummaryLine(cookieHealth)
   const cookieDetail = buildCookieBannerMessage(cookieHealth)
-  const showCookieDetail =
-    Boolean(cookieDetail) &&
-    tone !== 'warning' &&
-    !(tone === 'syncing' && staleMessage)
+  const showCookieDetail = (cookieHealth?.summary.cannotSyncCount ?? 0) > 0 && Boolean(cookieDetail)
 
   return (
     <div
@@ -144,6 +196,10 @@ export const DataHealthPanel: React.FC<Props> = ({
         ) : null}
       </div>
 
+      {showCookieDetail ? (
+        <p className="mt-2 text-[11px] leading-relaxed text-rose-800">{cookieDetail}</p>
+      ) : null}
+
       {boardSyncUiMode === 'syncing_with_data' && activeSyncJob ? (
         <div className="mt-2 space-y-1 rounded-lg border border-sky-100/80 bg-white/60 px-2.5 py-2 text-[11px] leading-relaxed text-slate-700">
           <p>
@@ -164,12 +220,15 @@ export const DataHealthPanel: React.FC<Props> = ({
 
       <div className="mt-2 grid gap-0.5 sm:grid-cols-2">
         <div className="text-[11px] text-slate-600">
-          最近同步：{syncTime ? formatDataFreshnessTime(syncTime) : '暂无'}
+          最近同步成功：{lastSuccessAt ? formatDataFreshnessTime(lastSuccessAt) : '暂无'}
         </div>
-        {formatCountLine('订单数据', totalRawOrders, '笔')}
-        {formatCountLine('直播场次', totalRawLiveSessions, '场')}
-        {formatCountLine('售后数据', totalAfterSaleRecords, '条', true)}
-        {formatCountLine('官方品退', totalQualityCases, '条', true)}
+        <div className="text-[11px] text-slate-600">
+          页面读取时间：{pageFetchedAt ? formatDataFreshnessTime(pageFetchedAt) : '暂无'}
+        </div>
+        {formatCountLine('本地累计订单', totalRawOrders, '笔')}
+        {formatCountLine('本地累计直播场次', totalRawLiveSessions, '场')}
+        {formatCountLine('本地累计售后', totalAfterSaleRecords, '条', true)}
+        {formatCountLine('本地累计官方品退', totalQualityCases, '条', true)}
         {cookieSummary ? (
           <div className="text-[11px] leading-relaxed text-slate-600 sm:col-span-2">
             Cookie：{cookieSummary}
@@ -177,9 +236,7 @@ export const DataHealthPanel: React.FC<Props> = ({
         ) : null}
       </div>
 
-      {showCookieDetail ? (
-        <p className="mt-2 text-[11px] leading-relaxed text-rose-800">{cookieDetail}</p>
-      ) : null}
+      <RollingCloseSection report={rollingDataHealthClose} />
     </div>
   )
 }

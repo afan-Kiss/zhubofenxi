@@ -41,6 +41,8 @@ interface Props {
   /** 买家 Drawer 明细表：拆分金额列 */
   variant?: 'board' | 'buyer'
   headerRefundOrderCount?: number
+  /** 已签收金额抽屉：主金额列展示 signedAmount */
+  amountMode?: 'default' | 'signed'
   manualAnchorAssign?: {
     anchorOptions: Array<{ id: string; name: string }>
     assigningOrderNo?: string | null
@@ -76,6 +78,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
   listKey,
   variant = 'board',
   headerRefundOrderCount,
+  amountMode = 'default',
   manualAnchorAssign,
 }) => {
   const { formatMoney } = useAmountDisplay()
@@ -152,6 +155,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
         emptyText={emptyText}
         blacklistedBuyerIds={blacklistedBuyerIds}
         className={cardClass}
+        amountMode={amountMode}
         manualAnchorAssign={manualAnchorAssign}
       />
       <div className={tableWrapClass}>{renderBoardTable()}</div>
@@ -198,7 +202,9 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
               <th className="whitespace-nowrap px-2 py-2">主播</th>
               <th className="whitespace-nowrap px-2 py-2">买家昵称</th>
               <th className="whitespace-nowrap px-2 py-2">商品名称</th>
-              <th className="whitespace-nowrap px-2 py-2">商家应收/支付金额</th>
+              <th className="whitespace-nowrap px-2 py-2">
+                {amountMode === 'signed' ? '已签收金额' : '商家应收/支付金额'}
+              </th>
               <th className="whitespace-nowrap px-2 py-2">退款金额</th>
               <th className="whitespace-nowrap px-2 py-2">订单状态</th>
               <th className="whitespace-nowrap px-2 py-2">售后状态</th>
@@ -250,7 +256,16 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                       {displayCell(r.productName)}
                     </td>
                     <td className="px-2 py-1.5 font-medium">
-                      {formatMoney(Number(r.merchantReceivableAmount ?? 0))}
+                      {amountMode === 'signed' ? (
+                        <div>
+                          <div>{formatMoney(Number(r.signedAmount ?? 0))}</div>
+                          <div className="text-[10px] font-normal text-slate-400">
+                            支付金额 {formatMoney(Number(r.merchantReceivableAmount ?? 0))}
+                          </div>
+                        </div>
+                      ) : (
+                        formatMoney(Number(r.merchantReceivableAmount ?? 0))
+                      )}
                     </td>
                     <td className="px-2 py-1.5 text-rose-600">
                       {formatMoney(Number(r.refundAmount ?? r.productRefundAmount ?? 0))}

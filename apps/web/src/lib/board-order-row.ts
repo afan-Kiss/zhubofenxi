@@ -64,6 +64,9 @@ export interface BoardDrillOrderRow {
   netDealAmount?: number
   /** 买家展示：单订单赚到金额（元） */
   earnedAmount?: number
+  /** 已签收金额（元），与 actualSignedAmount 抽屉口径一致 */
+  signedAmount?: number
+  isActualSigned?: boolean
   afterSaleNo?: string | null
   cardStatusLabel?: string
 }
@@ -198,6 +201,8 @@ export function normalizeBoardOrderRow(raw: Record<string, unknown>): BoardDrill
       raw.hasEffectiveAfterSale != null ? Boolean(raw.hasEffectiveAfterSale) : undefined,
     netDealAmount: raw.netDealAmount != null ? Number(raw.netDealAmount) : undefined,
     earnedAmount: raw.earnedAmount != null ? Number(raw.earnedAmount) : undefined,
+    signedAmount: Number(raw.signedAmount ?? 0),
+    isActualSigned: Boolean(raw.isActualSigned),
     afterSaleNo: raw.afterSaleNo != null ? displayCell(raw.afterSaleNo) : undefined,
     cardStatusLabel: raw.cardStatusLabel != null ? displayCell(raw.cardStatusLabel) : undefined,
   }

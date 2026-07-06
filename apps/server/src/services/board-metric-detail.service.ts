@@ -71,9 +71,9 @@ const METRIC_DEFS: Record<
   actualSignedAmount: {
     title: '已签收金额',
     formula:
-      '实际签收金额 = 已签收/已完成订单中，无售后、售后已取消，或成功商品退款 ≤ ¥20.00 的订单净额合计',
+      '已签收金额 = 已签收/已完成，且没有影响成交的售后退款订单金额合计',
     description:
-      '仅统计有效实际签收订单：已签收且无售后、售后取消/关闭，或商品退款不超过 ¥20.00（纯运费补偿不计入退款）。',
+      '只统计真正留下来的订单；纯运费补偿不影响，小额商品退款按现有签收规则处理。',
     valueKey: 'actualSignedAmount',
   },
   signedCount: {
@@ -195,9 +195,14 @@ function buildPageSummary(views: AnalyzedOrderView[]): Record<string, unknown> {
 
 function sortRows(rows: BoardDrillOrderRow[], sort: string): BoardDrillOrderRow[] {
   const list = [...rows]
+  const anchorSortKey = (name: string | undefined) => {
+    const n = (name || '').trim()
+    if (!n || n === '未归属') return '\uffff'
+    return n
+  }
   if (sort === 'anchor_asc') {
     list.sort((a, b) => {
-      const anchorCmp = (a.anchorName || '未归属').localeCompare(b.anchorName || '未归属', 'zh-CN')
+      const anchorCmp = anchorSortKey(a.anchorName).localeCompare(anchorSortKey(b.anchorName), 'zh-CN')
       if (anchorCmp !== 0) return anchorCmp
       return b.orderTime.localeCompare(a.orderTime)
     })
@@ -282,7 +287,7 @@ export async function buildBoardMetricDetail(params: {
   const isQualityMetric =
     params.metric === 'qualityReturnCount' || params.metric === 'qualityReturnRate'
   let sourceViews = matchMetricViews(displayViews, params.metric, params.tab)
-  if (isQualityMetric || params.metric === 'effectiveGmv') {
+  if (isQualityMetric || params.metric === 'effectiveGmv' || params.metric === 'actualSignedAmount') {
     sourceViews = dedupeViewsByMetricOrderNo(sourceViews)
   }
   const blacklist = buildBlacklistedBuyerIds(viewsForTotals)
@@ -292,15 +297,20 @@ export async function buildBoardMetricDetail(params: {
     (params.metric === 'actualSignedAmount' && !anchorId && !anchorName ? 'anchor_asc' : 'time_desc')
 
   const allRows = sortRows(
-    sourceViews.map((v) => {
-      const raw = rawByMatch.get(v.matchOrderId || v.orderId)
-      const row = mapViewToBoardDrillRow(
-        Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
-        { useBuyerRefund: true },
-      )
-      const blocked = blacklist.has(row.buyerKey)
-      return { ...row, isBlacklistedBuyer: blocked }
-    }),
+    sourceViews
+      .map((v) => {
+        const raw = rawByMatch.get(v.matchOrderId || v.orderId)
+        const row = mapViewToBoardDrillRow(
+          Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
+          { useBuyerRefund: true },
+        )
+        const blocked = blacklist.has(row.buyerKey)
+        return { ...row, isBlacklistedBuyer: blocked }
+      })
+      .filter((row) => {
+        if (params.metric !== 'actualSignedAmount') return true
+        return row.isActualSigned === true && Number(row.signedAmount ?? 0) > 0
+      }),
     sortMode,
   )
 

@@ -15,6 +15,7 @@ interface Props {
   emptyText?: string
   blacklistedBuyerIds?: string[]
   className?: string
+  amountMode?: 'default' | 'signed'
   manualAnchorAssign?: {
     anchorOptions: Array<{ id: string; name: string }>
     assigningOrderNo?: string | null
@@ -69,6 +70,7 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
   emptyText = '暂无明细',
   blacklistedBuyerIds = [],
   className = 'block md:hidden',
+  amountMode = 'default',
   manualAnchorAssign,
 }) => {
   const { formatMoney } = useAmountDisplay()
@@ -142,11 +144,24 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
               <FieldRow label="商品名称">
                 <span className="line-clamp-2 text-right">{displayCell(r.productName)}</span>
               </FieldRow>
-              <FieldRow label="商家应收/支付金额">
+              <FieldRow label={amountMode === 'signed' ? '已签收金额' : '商家应收/支付金额'}>
                 <span className="font-medium">
-                  {formatMoney(Number(r.merchantReceivableAmount ?? 0))}
+                  {formatMoney(
+                    Number(
+                      amountMode === 'signed'
+                        ? (r.signedAmount ?? 0)
+                        : (r.merchantReceivableAmount ?? 0),
+                    ),
+                  )}
                 </span>
               </FieldRow>
+              {amountMode === 'signed' ? (
+                <FieldRow label="支付金额">
+                  <span className="text-[11px] text-slate-500">
+                    {formatMoney(Number(r.merchantReceivableAmount ?? 0))}
+                  </span>
+                </FieldRow>
+              ) : null}
               <FieldRow label="退款金额">
                 <span className="text-[12px] font-semibold text-rose-600">
                   {formatMoney(Number(r.refundAmount ?? r.productRefundAmount ?? 0))}

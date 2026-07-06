@@ -321,6 +321,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
             blacklistedBuyerIds={liveBlacklist}
             loading={loading && !!data}
             emptyText="该指标下暂无匹配订单"
+            amountMode={metric === 'actualSignedAmount' ? 'signed' : 'default'}
           />
         </div>
       ) : null}

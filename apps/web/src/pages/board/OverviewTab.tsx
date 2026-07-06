@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import {
   AlertTriangle,
-  Banknote,
   ChevronDown,
   Package,
   PackageCheck,
@@ -106,14 +105,14 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
     icon: TrendingUp,
   },
   {
-    label: '有效成交额',
-    metricExplainKey: 'validSalesAmount',
-    drawerKey: 'effectiveGmv',
-    valueKey: 'validSalesAmount',
+    label: '已签收金额',
+    metricExplainKey: 'actualSignedAmount',
+    drawerKey: 'actualSignedAmount',
+    valueKey: 'actualSignedAmount',
     type: 'money',
     tone: 'green',
     hint: '点击查看明细',
-    helper: '已完成/已签收，且无在途售后、未成功退款的成交金额',
+    helper: '已签收/已完成且符合签收规则的订单金额',
     icon: Wallet,
   },
   {
@@ -152,17 +151,6 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
 ]
 
 const MORE_SUMMARY_CARDS: SummaryCardDef[] = [
-  {
-    label: '签收金额',
-    metricExplainKey: 'actualSignedAmount',
-    drawerKey: 'actualSignedAmount',
-    valueKey: 'actualSignedAmount',
-    type: 'money',
-    tone: 'green',
-    hint: '点击查看明细',
-    helper: '符合签收口径的到账金额',
-    icon: Banknote,
-  },
   {
     label: '签收单数',
     metricExplainKey: 'signedOrderCount',

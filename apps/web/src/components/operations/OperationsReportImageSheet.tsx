@@ -46,11 +46,11 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
   return (
     <div ref={ref} className="w-[720px] bg-white p-6 text-slate-900">
       <h1 className="text-xl font-bold">{data.title}</h1>
-      <p className="mt-1 text-sm text-slate-500">全店有效成交与直播经营数据（本地已同步）</p>
+      <p className="mt-1 text-sm text-slate-500">全店已签收金额与直播经营数据（本地已同步）</p>
 
       <div className="mt-4 grid grid-cols-3 gap-2">
-        <MetricCard label="全店有效成交" value={formatIntegerMoney(data.summary.validAmountYuan)} />
-        <MetricCard label="有效成交订单" value={formatOrderCount(data.summary.soldOrderCount)} />
+        <MetricCard label="全店已签收金额" value={formatIntegerMoney(data.summary.validAmountYuan)} />
+        <MetricCard label="已签收订单" value={formatOrderCount(data.summary.soldOrderCount)} />
         <MetricCard label="全店无效/刷单" value={formatOrderCount(data.summary.invalidOrderCount)} />
         <MetricCard label="退货单率" value={formatRatePercent(data.summary.returnOrderRate)} />
         <MetricCard label="成交人数" value={formatPeopleCount(data.summary.dealUserCount)} />
@@ -105,8 +105,8 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
                 实际直播 {liveTime} · 归属时段 {attributionRange}
               </p>
               <p className="mt-1 text-slate-700">
-                有效成交 {formatIntegerMoney(row.validAmountYuan)} · 支付单数{' '}
-                {formatOrderCount(paidCount)} · 有效成交订单 {formatOrderCount(row.soldOrderCount)}
+                已签收金额 {formatIntegerMoney(row.validAmountYuan)} · 支付单数{' '}
+                {formatOrderCount(paidCount)} · 已签收订单 {formatOrderCount(row.soldOrderCount)}
                 {' · '}
                 退货单 {formatOrderCount(row.returnOrderCount)}（
                 {formatRatePercent(row.returnOrderRate)}）
@@ -131,7 +131,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
                   {index + 1}. {item.productName}
                   <span className="text-slate-500">
                     {' '}
-                    · {formatIntegerMoney(item.validAmountYuan)} ·{' '}
+                    · 内部有效成交口径 {formatIntegerMoney(item.validAmountYuan)} ·{' '}
                     {formatOrderCount(item.soldOrderCount)} 单
                     {item.sampleTooSmall ? ' · 样本少，仅参考' : ''}
                   </span>
@@ -191,9 +191,12 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
 
       <div className="mt-5 border-t border-slate-200 pt-3 text-[10px] leading-relaxed text-slate-500">
         <p>
-          有效成交 = 已完成/已签收，且无在途售后、未成功退款的订单；按订单签收与售后状态认定。
+          已签收金额 = 经营总览同源口径：按订单签收与售后状态认定，与卡片「已签收金额」一致。
         </p>
-        <p className="mt-1">每小时成交 = 全店有效成交 ÷ 全部直播时长。</p>
+        <p className="mt-1">
+          商品榜金额标注为「内部有效成交口径」，仅用于运营复盘，与全店已签收金额不同。
+        </p>
+        <p className="mt-1">每小时成交 = 全店已签收金额 ÷ 全部直播时长。</p>
       </div>
     </div>
   )

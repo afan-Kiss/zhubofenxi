@@ -1,4 +1,4 @@
-import type { AnchorConfig } from '../types/analysis'
+import type { AnchorConfig, AnalyzedOrderView } from '../types/analysis'
 import type { UserRole } from '../types/roles'
 import { getAnchorConfigSync } from './anchor.service'
 import {
@@ -29,7 +29,6 @@ import { ensureManualAnchorOverrideCache } from './order-anchor-manual-override.
 import {
   countDailyReportOrders,
   listDailyReportShippedOrders,
-  sortDailyReportShippedOrders,
   roundMinutes,
   roundMoneyYuan,
   roundYuan,
@@ -50,6 +49,27 @@ import { enrichAnchorLeaderboardWithTrend, buildLeaderboardRowIntradayTrend, res
 import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
 
 const NO_LIVE_SESSION_TEXT = '未读取到直播场次'
+
+const EMPTY_SCHEDULE_ATTENDANCE: AnchorAttendanceStatusPayload = {
+  hasSchedule: false,
+  hasActualStartTime: false,
+  hasActualEndTime: false,
+  scheduledStartAt: null,
+  scheduledEndAt: null,
+  scheduledPeriodText: null,
+  actualStartAt: null,
+  actualStartText: null,
+  actualEndAt: null,
+  actualEndText: null,
+  sessionLabel: '',
+  shopName: '—',
+  displaySessionLabel: '—',
+}
+
+function isUnassignedAnchorView(v: AnalyzedOrderView): boolean {
+  const name = String(v.anchorName ?? '').trim()
+  return name === '未归属' || v.attributionType === 'unassigned'
+}
 
 export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   anchorName: string
@@ -103,6 +123,8 @@ export interface DailyReportPayload {
     unassignedLiveDurationMinutes: number
     unassignedLiveSessionCount: number
     liveSessionAttributionNote: string | null
+    unassignedShippedOrderCount?: number
+    unassignedShippedNote?: string | null
     overallHourlyAmountYuan: number | null
     liveRoomNewFollowers: LiveRoomNewFollowerRow[]
     totalNewFollowerCount: number
@@ -343,6 +365,9 @@ export async function buildDailyReport(params: {
   const remappedAll = await remapViewsWithScheduleOverlay(
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
+  const allPerformanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const storeWideShipped = sumDailyReportShippedFromViews(allPerformanceViews)
+  const storeWideInvalid = countDailyReportOrders(allPerformanceViews).invalidOrderCount
 
   const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
@@ -420,9 +445,41 @@ export async function buildDailyReport(params: {
     )
   }
 
-  const totalShippedAmountYuan = roundMoneyYuan(
-    anchorRows.reduce((sum, row) => sum + row.shippedAmountYuan, 0),
-  )
+  const unassignedPerformanceViews = allPerformanceViews.filter(isUnassignedAnchorView)
+  const unassignedShipped = sumDailyReportShippedFromViews(unassignedPerformanceViews)
+  const hasUnassignedAnchorRow = anchorRows.some((row) => row.anchorName === '未归属')
+  if (
+    !hasUnassignedAnchorRow &&
+    (unassignedShipped.soldOrderCount > 0 ||
+      unassignedShipped.shippedAmountYuan > 0 ||
+      countDailyReportOrders(unassignedPerformanceViews).invalidOrderCount > 0)
+  ) {
+    const unassignedInvalid = countDailyReportOrders(unassignedPerformanceViews).invalidOrderCount
+    anchorRows.push(
+      buildAnchorRow({
+        config,
+        anchorId: 'unassigned',
+        anchorName: '未归属',
+        shopName: '—',
+        reportDate: params.startDate,
+        shippedAmountYuan: unassignedShipped.shippedAmountYuan,
+        soldOrderCount: unassignedShipped.soldOrderCount,
+        invalidOrderCount: unassignedInvalid,
+        shippedOrders: listDailyReportShippedOrders(unassignedPerformanceViews, '未归属'),
+        sessions: [],
+        totalShippedAmountYuan: 0,
+        scheduleAttendance: EMPTY_SCHEDULE_ATTENDANCE,
+        liveTimeRange: NO_LIVE_SESSION_TEXT,
+        liveStartTime: null,
+        liveEndTime: null,
+        scheduleTimeRange: null,
+        scheduleMatched: false,
+        scheduleMatchReason: null,
+      }),
+    )
+  }
+
+  const totalShippedAmountYuan = storeWideShipped.shippedAmountYuan
   for (const row of anchorRows) {
     row.amountRatio = safeRatioPercent(row.shippedAmountYuan, totalShippedAmountYuan)
   }
@@ -433,7 +490,8 @@ export async function buildDailyReport(params: {
     return (a.sessionLabel ?? '').localeCompare(b.sessionLabel ?? '', 'zh-CN')
   })
 
-  const allPerformanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const totalSoldOrderCount = storeWideShipped.soldOrderCount
+  const totalInvalidOrderCount = storeWideInvalid
   let leaderboardRows = ensureAnchorPerformanceLeaderboardSlots(
     aggregateAnchorLeaderboard(allPerformanceViews),
     params.startDate,
@@ -495,8 +553,6 @@ export async function buildDailyReport(params: {
     }
   }
 
-  const totalSoldOrderCount = anchorRows.reduce((sum, row) => sum + row.soldOrderCount, 0)
-  const totalInvalidOrderCount = anchorRows.reduce((sum, row) => sum + row.invalidOrderCount, 0)
   const totalLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(
     liveAssignment.allSessions,
   )
@@ -518,14 +574,12 @@ export async function buildDailyReport(params: {
     0,
   )
   const totalLiveHours = safeDivide(totalLiveDurationMinutes, 60)
-  const summaryShippedOrders = anchorRows.flatMap((row) => row.shippedOrders ?? [])
-  const shippedOrderByNo = new Map<string, DailyReportShippedOrderLine>()
-  for (const line of summaryShippedOrders) {
-    if (!shippedOrderByNo.has(line.orderNo)) {
-      shippedOrderByNo.set(line.orderNo, line)
-    }
-  }
-  const dedupedSummaryShippedOrders = sortDailyReportShippedOrders([...shippedOrderByNo.values()])
+  const dedupedSummaryShippedOrders = listDailyReportShippedOrders(allPerformanceViews)
+  const unassignedShippedOrderCount = unassignedShipped.soldOrderCount
+  const unassignedShippedNote =
+    unassignedShippedOrderCount > 0
+      ? `有 ${unassignedShippedOrderCount} 笔订单暂未归到主播，已计入全店合计，请在主播归属里检查。`
+      : null
 
   const dateLabel = formatDailyReportDateLabel(params.startDate)
 
@@ -544,6 +598,8 @@ export async function buildDailyReport(params: {
       unassignedLiveDurationMinutes: liveAssignment.unassignedLiveDurationMinutes,
       unassignedLiveSessionCount: liveAssignment.unassignedLiveSessionCount,
       liveSessionAttributionNote,
+      unassignedShippedOrderCount,
+      unassignedShippedNote,
       overallHourlyAmountYuan: roundYuan(
         totalLiveHours != null ? safeDivide(totalShippedAmountYuan, totalLiveHours) : null,
       ),

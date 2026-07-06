@@ -71,6 +71,8 @@ export interface DailyReportPayload {
     unassignedLiveDurationMinutes?: number
     unassignedLiveSessionCount?: number
     liveSessionAttributionNote?: string | null
+    unassignedShippedOrderCount?: number
+    unassignedShippedNote?: string | null
     overallHourlyAmountYuan: number | null
     liveRoomNewFollowers: Array<{
       liveAccountName: string
@@ -338,6 +340,11 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
         {data.summary.liveSessionAttributionNote ? (
           <p className="mt-3 border-t border-rose-100 pt-3 text-[12px] leading-relaxed text-amber-800">
             {data.summary.liveSessionAttributionNote}
+          </p>
+        ) : null}
+        {data.summary.unassignedShippedNote ? (
+          <p className="mt-3 border-t border-rose-100 pt-3 text-[12px] leading-relaxed text-amber-800">
+            {data.summary.unassignedShippedNote}
           </p>
         ) : null}
         {(data.summary.liveRoomNewFollowers?.length ?? 0) > 0 && (

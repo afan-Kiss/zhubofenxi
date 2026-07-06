@@ -66,6 +66,8 @@ anchorSchedulesRouter.post('/copy', async (req, res, next) => {
       fromDate,
       toDate,
       createdBy: req.user?.username,
+      forceHistoricalScheduleChange: Boolean(body.forceHistoricalScheduleChange),
+      changeReason: body.changeReason ? String(body.changeReason) : undefined,
     })
     sendOk(res, { ok: true, ...data, ...buildScheduleMutationResult(toDate) })
   } catch (err) {
@@ -103,6 +105,8 @@ anchorSchedulesRouter.post('/', async (req, res, next) => {
       schedules,
       createdBy: req.user?.username,
       confirm: Boolean(body.confirm),
+      forceHistoricalScheduleChange: Boolean(body.forceHistoricalScheduleChange),
+      changeReason: body.changeReason ? String(body.changeReason) : undefined,
     })
     sendOk(res, { ok: true, ...data, ...buildScheduleMutationResult(date) })
   } catch (err) {

@@ -378,6 +378,7 @@ export interface OpsReviewNotePayload {
 }
 
 export interface DailyOperationsSummary {
+  /** 全店已签收金额（与经营总览 actualSignedAmount 同源） */
   validAmountYuan: number
   anchorAssignedValidAmountYuan?: number
   unassignedValidAmountYuan?: number

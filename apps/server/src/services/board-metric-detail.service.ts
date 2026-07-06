@@ -167,6 +167,27 @@ function matchMetricViews(views: AnalyzedOrderView[], metric: BoardMetricKey, ta
   }
 }
 
+const METRICS_ORDER_DEDUPE: BoardMetricKey[] = [
+  'actualSignedAmount',
+  'signedCount',
+  'signRate',
+  'effectiveGmv',
+  'qualityReturnCount',
+  'qualityReturnRate',
+]
+
+function needsMetricOrderDedupe(metric: BoardMetricKey): boolean {
+  return METRICS_ORDER_DEDUPE.includes(metric)
+}
+
+function countDedupedSignedViews(views: AnalyzedOrderView[]): number {
+  return dedupeViewsByMetricOrderNo(views.filter((v) => isEffectiveSignedView(v))).length
+}
+
+function countDedupedUnsignedViews(views: AnalyzedOrderView[]): number {
+  return dedupeViewsByMetricOrderNo(views.filter((v) => !isEffectiveSignedView(v))).length
+}
+
 function buildPageSummary(views: AnalyzedOrderView[]): Record<string, unknown> {
   const m = calculateBusinessMetrics(views)
   return {
@@ -287,9 +308,11 @@ export async function buildBoardMetricDetail(params: {
   const isQualityMetric =
     params.metric === 'qualityReturnCount' || params.metric === 'qualityReturnRate'
   let sourceViews = matchMetricViews(displayViews, params.metric, params.tab)
-  if (isQualityMetric || params.metric === 'effectiveGmv' || params.metric === 'actualSignedAmount') {
+  if (needsMetricOrderDedupe(params.metric)) {
     sourceViews = dedupeViewsByMetricOrderNo(sourceViews)
   }
+  const signedTabCount = countDedupedSignedViews(viewsForTotals)
+  const unsignedTabCount = countDedupedUnsignedViews(viewsForTotals)
   const blacklist = buildBlacklistedBuyerIds(viewsForTotals)
 
   const sortMode =
@@ -322,14 +345,27 @@ export async function buildBoardMetricDetail(params: {
   const tabs =
     params.metric === 'signRate' || params.metric === 'signedCount'
       ? [
-          { key: 'signed', label: '已签收', count: viewsForTotals.filter((v) => isEffectiveSignedView(v)).length },
+          { key: 'signed', label: '已签收', count: signedTabCount },
           {
             key: 'unsigned',
             label: '未签收/售后',
-            count: viewsForTotals.filter((v) => !isEffectiveSignedView(v)).length,
+            count: unsignedTabCount,
           },
         ]
       : []
+
+  const matchedOrders = (() => {
+    if (isQualityMetric) return totals.qualityRefundOrderCount
+    if (params.metric === 'effectiveGmv') {
+      return dedupeViewsByMetricOrderNo(viewsForTotals.filter((v) => isValidRevenueOrder(v))).length
+    }
+    if (params.metric === 'signedCount' || params.metric === 'signRate') {
+      return params.tab === 'unsigned' ? unsignedTabCount : totals.signedOrderCount
+    }
+    if (params.metric === 'actualSignedAmount') return totals.signedOrderCount
+    if (needsMetricOrderDedupe(params.metric)) return sourceViews.length
+    return sourceViews.length
+  })()
 
   const unmatchedOfficialQualityCount = isQualityMetric
     ? countUnmatchedOfficialQualityCases(getQualityBadCasesSync())
@@ -354,11 +390,7 @@ export async function buildBoardMetricDetail(params: {
     },
     summary: {
       totalOrders: totals.periodOrderCount,
-      matchedOrders: isQualityMetric
-        ? totals.qualityRefundOrderCount
-        : params.metric === 'effectiveGmv'
-          ? totals.shippedOrderCount
-          : sourceViews.length,
+      matchedOrders,
       value: valueRaw,
       valueRaw,
       valueText: formatValueText(params.metric, valueRaw),

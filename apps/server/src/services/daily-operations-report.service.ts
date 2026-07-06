@@ -30,7 +30,7 @@ import {
   safeDivide,
   safeRatioPercent,
 } from './daily-report-order.util'
-import { sumValidRevenueFromViews } from './valid-revenue-order.service'
+import { calculateBusinessMetrics } from './business-metrics.service'
 import { centToYuan } from '../utils/money'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { aggregateAfterSalesReasons } from './after-sales-reason-normalize.service'
@@ -68,6 +68,19 @@ import {
   resolveFallbackSessionDisplay,
   type AnchorAttendanceStatusPayload,
 } from '../utils/anchor-attendance-status.util'
+
+function sumSignedDisplayFromViews(views: AnalyzedOrderView[]): {
+  validAmountCent: number
+  validAmountYuan: number
+  soldOrderCount: number
+} {
+  const m = calculateBusinessMetrics(views)
+  return {
+    validAmountCent: Math.round(m.actualSignedAmount * 100),
+    validAmountYuan: m.actualSignedAmount,
+    soldOrderCount: m.signedOrderCount,
+  }
+}
 
 export interface DailyOperationsAnchorRow extends AnchorAttendanceStatusPayload {
   anchorName: string
@@ -349,7 +362,7 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
       anchor.anchorId,
       anchor.anchorName,
     )
-    const validRevenue = sumValidRevenueFromViews(performanceViews)
+    const validRevenue = sumSignedDisplayFromViews(performanceViews)
     const validAmountCent = validRevenue.validAmountCent
     const validAmountYuan = validRevenue.validAmountYuan
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
@@ -445,12 +458,12 @@ export async function buildDailyOperationsReport(params: {
 
   const anchorRows = await buildDailyOperationsAnchorRowsForDay(params)
 
-  const storeWideValid = sumValidRevenueFromViews(performanceViewsAll)
+  const storeWideValid = sumSignedDisplayFromViews(performanceViewsAll)
   const anchorAssignedValidCent = anchorRows.reduce((sum, row) => sum + row.validAmountCent, 0)
   const unassignedViews = dedupeViewsByMetricOrderNo(performanceViewsAll).filter(
     (v) => v.attributionType === 'unassigned',
   )
-  const unassignedValid = sumValidRevenueFromViews(unassignedViews)
+  const unassignedValid = sumSignedDisplayFromViews(unassignedViews)
 
   const validAmountCent = storeWideValid.validAmountCent
   const validAmountYuan = storeWideValid.validAmountYuan
@@ -519,7 +532,7 @@ export async function buildDailyOperationsReport(params: {
   const statisticsIntegrityWarnings: string[] = []
   if (unassignedValid.soldOrderCount > 0) {
     statisticsIntegrityWarnings.push(
-      `有 ${unassignedValid.soldOrderCount} 单有效成交未归属主播（${unassignedValid.validAmountYuan.toFixed(2)} 元），全店汇总已计入、主播表为已归属口径。`,
+      `有 ${unassignedValid.soldOrderCount} 单已签收金额未归属主播（${unassignedValid.validAmountYuan.toFixed(2)} 元），全店汇总已计入、主播表为已归属口径。`,
     )
   }
   if (unassignedInvalidOrderCount > 0) {

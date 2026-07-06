@@ -10,6 +10,33 @@ import { isDateScheduleConfirmed } from './anchor-schedule-confirm.service'
 import { buildEffectiveScheduleRowsForDate } from '../utils/anchor-effective-schedule.util'
 import { listActiveTemplatesForDate } from './anchor-schedule-template.service'
 
+const HISTORICAL_SCHEDULE_OVERRIDE_MESSAGE =
+  '历史已确认排班不能直接覆盖，请先明确选择「修改历史排班」并填写原因'
+
+function shanghaiTodayDateKey(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+}
+
+async function assertHistoricalScheduleChangeAllowed(params: {
+  date: string
+  forceHistoricalScheduleChange?: boolean
+  changeReason?: string
+  createdBy?: string
+}): Promise<void> {
+  if (params.date >= shanghaiTodayDateKey()) return
+  const confirmed = await isDateScheduleConfirmed(params.date)
+  if (!confirmed) return
+  const reason = params.changeReason?.trim()
+  if (!params.forceHistoricalScheduleChange || !reason) {
+    throw new Error(HISTORICAL_SCHEDULE_OVERRIDE_MESSAGE)
+  }
+  console.warn('[anchor-schedule] historical confirmed schedule override', {
+    date: params.date,
+    reason,
+    createdBy: params.createdBy ?? null,
+  })
+}
+
 export type DailyScheduleSource = 'manual' | 'generated_default' | 'virtual_template'
 
 export type EffectiveScheduleSource = 'manual' | 'generated_default' | 'virtual_template'
@@ -454,7 +481,16 @@ export async function saveDailySchedules(params: {
   }>
   createdBy?: string
   confirm?: boolean
+  forceHistoricalScheduleChange?: boolean
+  changeReason?: string
 }): Promise<{ date: string; schedules: DailyScheduleDto[]; warnings: string[] }> {
+  await assertHistoricalScheduleChangeAllowed({
+    date: params.date,
+    forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
+    changeReason: params.changeReason,
+    createdBy: params.createdBy,
+  })
+
   let validation: ReturnType<typeof validateScheduleDraft>
   try {
     validation = validateScheduleDraft(params.date, params.schedules)
@@ -528,7 +564,16 @@ export async function copyDailySchedules(params: {
   fromDate: string
   toDate: string
   createdBy?: string
+  forceHistoricalScheduleChange?: boolean
+  changeReason?: string
 }): Promise<{ date: string; schedules: DailyScheduleDto[]; warnings: string[] }> {
+  await assertHistoricalScheduleChangeAllowed({
+    date: params.toDate,
+    forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
+    changeReason: params.changeReason,
+    createdBy: params.createdBy,
+  })
+
   const source = await prisma.anchorDailySchedule.findMany({
     where: { scheduleDate: params.fromDate, enabled: true },
     orderBy: { startAt: 'asc' },

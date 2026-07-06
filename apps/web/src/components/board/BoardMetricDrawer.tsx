@@ -137,7 +137,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     setTab('')
     setData(null)
     setError(null)
-  }, [metric, startDate, endDate, open])
+  }, [metric, startDate, endDate, open, anchorId, anchorName, preset, overviewStableSnapshot])
 
   const isRefundMetric = metric === 'returnAmount' || metric === 'returnCount'
   const isQualityMetric = metric === 'qualityReturnCount' || metric === 'qualityReturnRate'

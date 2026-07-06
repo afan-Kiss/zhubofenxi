@@ -1,6 +1,7 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { centToYuan } from '../utils/money'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
+import { pickProductName } from './order-row-mapper.service'
 import { isLowPriceBrushOrderView } from './low-price-brush-order.service'
 import { isActualAfterSaleOrder } from './operations-after-sale-order.util'
 
@@ -61,8 +62,25 @@ export function sumDailyReportShippedFromViews(views: AnalyzedOrderView[]): {
 
 export interface DailyReportShippedOrderLine {
   orderNo: string
+  productTitle: string
   amountYuan: number
   anchorName?: string
+}
+
+function pickProductTitleFromView(v: AnalyzedOrderView): string {
+  const raw = (v as AnalyzedOrderView & { raw?: Record<string, unknown> }).raw
+  const title = pickProductName(raw)
+  return title && title !== '—' ? title : '商品名称未同步'
+}
+
+export function sortDailyReportShippedOrders(
+  lines: DailyReportShippedOrderLine[],
+): DailyReportShippedOrderLine[] {
+  return [...lines].sort((a, b) => {
+    const anchorCmp = (a.anchorName ?? '').localeCompare(b.anchorName ?? '', 'zh-CN')
+    if (anchorCmp !== 0) return anchorCmp
+    return (a.productTitle ?? '').localeCompare(b.productTitle ?? '', 'zh-CN')
+  })
 }
 
 /** 真实发货订单明细（与 sumDailyReportShippedFromViews 同一订单池） */
@@ -80,12 +98,12 @@ export function listDailyReportShippedOrders(
     const resolvedAnchorName = (anchorName ?? v.anchorName ?? '').trim()
     lines.push({
       orderNo,
+      productTitle: pickProductTitleFromView(v),
       amountYuan: Math.round(centToYuan(v.paymentBaseCent) * 100) / 100,
       ...(resolvedAnchorName ? { anchorName: resolvedAnchorName } : {}),
     })
   }
-  lines.sort((a, b) => a.orderNo.localeCompare(b.orderNo, 'zh-CN'))
-  return lines
+  return sortDailyReportShippedOrders(lines)
 }
 
 export function countDailyReportOrders(views: AnalyzedOrderView[]): {

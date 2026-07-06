@@ -106,7 +106,7 @@ function checkDailyReportImageSheetStatic(): void {
   const required = [
     '真实发货订单',
     '已剔除售后/关闭/取消',
-    'orderNo',
+    'productTitle',
     'amountYuan',
     '本场关闭/退货单',
     '不计入真实发货',
@@ -115,10 +115,34 @@ function checkDailyReportImageSheetStatic(): void {
     if (!text.includes(token)) fail(`DailyReportImageSheet 缺少文案/字段: ${token}`)
     else ok(`含 ${token}`)
   }
+  if (text.includes('font-mono') && text.includes('order.orderNo')) {
+    fail('DailyReportImageSheet 不应在图片中展示订单号')
+  } else {
+    ok('日报图片展示商品标题而非订单号')
+  }
   if (text.includes('qualityReturnRate')) {
     fail('DailyReportImageSheet 不应展示品退率')
   } else {
     ok('日报图片未展示品退率')
+  }
+}
+
+function checkAnchorPerformanceSignedAmountLabel(): void {
+  section('主播业绩页已签收金额文案')
+  const files = [
+    '../../web/src/pages/board/AnchorPerformanceTab.tsx',
+    '../../web/src/components/board/AnchorLeaderboardPanel.tsx',
+    '../../web/src/components/board/MobileAnchorLeaderboardCards.tsx',
+  ]
+  for (const rel of files) {
+    const text = fs.readFileSync(path.resolve(__dirname, rel), 'utf-8')
+    if (text.includes('有效成交额')) {
+      fail(`${rel} 仍展示「有效成交额」，应改为「已签收金额」`)
+    } else if (!text.includes('已签收金额')) {
+      fail(`${rel} 缺少「已签收金额」展示`)
+    } else {
+      ok(`${path.basename(rel)} 已使用已签收金额`)
+    }
   }
 }
 
@@ -493,6 +517,7 @@ async function printDbCounts(): Promise<void> {
 async function main(): Promise<void> {
   console.log('[verify-anchor-performance-daily-report-integrity] 开始\n')
   checkDailyReportImageSheetStatic()
+  checkAnchorPerformanceSignedAmountLabel()
   checkAnchorPerformanceNoQualityReturnRate()
   await printDbCounts()
   await auditQualityRefundGoldenOrder()

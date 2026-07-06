@@ -54,6 +54,11 @@ export function anchorRowGmv(row: AnchorLeaderboardRow): number {
   return Number(v ?? 0)
 }
 
+export function anchorRowActualSignedAmount(row: AnchorLeaderboardRow): number {
+  const v = row.actualSignedAmount
+  return Number(v ?? 0)
+}
+
 export function anchorRowValidSales(row: AnchorLeaderboardRow): number {
   const v = row.validSalesAmount ?? row.effectiveGmv
   return Number(v ?? 0)
@@ -188,6 +193,7 @@ export function aggregateSummaryFromAnchorRows(
   if (rows.length === 0) return {}
   let totalGmv = 0
   let validSalesAmount = 0
+  let actualSignedAmount = 0
   let paidOrderCount = 0
   let returnCount = 0
   let returnAmount = 0
@@ -198,6 +204,7 @@ export function aggregateSummaryFromAnchorRows(
   for (const row of rows) {
     totalGmv += anchorRowGmv(row)
     validSalesAmount += anchorRowValidSales(row)
+    actualSignedAmount += anchorRowActualSignedAmount(row)
     paidOrderCount += anchorRowPaidCount(row)
     returnCount += anchorRowReturnCount(row)
     returnAmount += anchorRowRefundAmount(row)
@@ -213,6 +220,7 @@ export function aggregateSummaryFromAnchorRows(
     gmv: totalGmv,
     validSalesAmount,
     effectiveGmv: validSalesAmount,
+    actualSignedAmount,
     orderCount: paidOrderCount,
     paidOrderCount,
     returnRate: refundRate,

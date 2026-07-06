@@ -29,6 +29,7 @@ import { ensureManualAnchorOverrideCache } from './order-anchor-manual-override.
 import {
   countDailyReportOrders,
   listDailyReportShippedOrders,
+  sortDailyReportShippedOrders,
   roundMinutes,
   roundMoneyYuan,
   roundYuan,
@@ -427,10 +428,9 @@ export async function buildDailyReport(params: {
   }
 
   anchorRows.sort((a, b) => {
-    if (b.shippedAmountYuan !== a.shippedAmountYuan) {
-      return b.shippedAmountYuan - a.shippedAmountYuan
-    }
-    return a.anchorName.localeCompare(b.anchorName, 'zh-CN')
+    const nameCmp = a.anchorName.localeCompare(b.anchorName, 'zh-CN')
+    if (nameCmp !== 0) return nameCmp
+    return (a.sessionLabel ?? '').localeCompare(b.sessionLabel ?? '', 'zh-CN')
   })
 
   const allPerformanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
@@ -525,9 +525,7 @@ export async function buildDailyReport(params: {
       shippedOrderByNo.set(line.orderNo, line)
     }
   }
-  const dedupedSummaryShippedOrders = [...shippedOrderByNo.values()].sort((a, b) =>
-    a.orderNo.localeCompare(b.orderNo, 'zh-CN'),
-  )
+  const dedupedSummaryShippedOrders = sortDailyReportShippedOrders([...shippedOrderByNo.values()])
 
   const dateLabel = formatDailyReportDateLabel(params.startDate)
 

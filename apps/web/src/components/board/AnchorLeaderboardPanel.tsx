@@ -8,7 +8,7 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnRefundCount,
   anchorRowLivePeriodLines,
-  anchorRowValidSales,
+  anchorRowActualSignedAmount,
   isHighRefundRate,
   type AnchorLeaderboardRow,
 } from '../../lib/anchor-leaderboard-row'
@@ -122,7 +122,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
             <tr>
               <th className="py-2.5 pl-4 pr-2">主播</th>
               <th className="py-2 pr-2 text-right">支付金额</th>
-              <th className="py-2 pr-2 text-right">有效成交额</th>
+              <th className="py-2 pr-2 text-right">已签收金额</th>
               <th className="py-2 pr-2 text-right">支付单数</th>
               <th className="py-2 pr-2 text-right">退款率</th>
               <th
@@ -182,7 +182,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     </td>
                     <td className="py-2 text-right tabular-nums">{formatMoney(anchorRowGmv(a))}</td>
                     <td className="py-2 text-right tabular-nums">
-                      {formatMoney(anchorRowValidSales(a))}
+                      {formatMoney(anchorRowActualSignedAmount(a))}
                     </td>
                     <td className="py-2 text-right tabular-nums">
                       {formatCount(anchorRowPaidCount(a))}

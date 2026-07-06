@@ -19,7 +19,7 @@ import {
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
 import { isStatusSignedView } from './order-sign-status.service'
 
-function pickProductName(raw: Record<string, unknown> | undefined): string {
+export function pickProductName(raw: Record<string, unknown> | undefined): string {
   if (!raw) return '—'
   const skus = raw.skus
   if (Array.isArray(skus) && skus.length > 0) {

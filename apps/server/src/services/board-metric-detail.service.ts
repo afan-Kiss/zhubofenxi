@@ -69,7 +69,7 @@ const METRIC_DEFS: Record<
     valueKey: 'effectiveGmv',
   },
   actualSignedAmount: {
-    title: '实际签收金额',
+    title: '已签收金额',
     formula:
       '实际签收金额 = 已签收/已完成订单中，无售后、售后已取消，或成功商品退款 ≤ ¥20.00 的订单净额合计',
     description:
@@ -195,7 +195,13 @@ function buildPageSummary(views: AnalyzedOrderView[]): Record<string, unknown> {
 
 function sortRows(rows: BoardDrillOrderRow[], sort: string): BoardDrillOrderRow[] {
   const list = [...rows]
-  if (sort === 'amount_desc') {
+  if (sort === 'anchor_asc') {
+    list.sort((a, b) => {
+      const anchorCmp = (a.anchorName || '未归属').localeCompare(b.anchorName || '未归属', 'zh-CN')
+      if (anchorCmp !== 0) return anchorCmp
+      return b.orderTime.localeCompare(a.orderTime)
+    })
+  } else if (sort === 'amount_desc') {
     list.sort((a, b) => b.payAmount - a.payAmount)
   } else if (sort === 'refund_desc') {
     list.sort((a, b) => b.productRefundAmount - a.productRefundAmount)
@@ -281,6 +287,10 @@ export async function buildBoardMetricDetail(params: {
   }
   const blacklist = buildBlacklistedBuyerIds(viewsForTotals)
 
+  const sortMode =
+    params.sort ??
+    (params.metric === 'actualSignedAmount' && !anchorId && !anchorName ? 'anchor_asc' : 'time_desc')
+
   const allRows = sortRows(
     sourceViews.map((v) => {
       const raw = rawByMatch.get(v.matchOrderId || v.orderId)
@@ -291,7 +301,7 @@ export async function buildBoardMetricDetail(params: {
       const blocked = blacklist.has(row.buyerKey)
       return { ...row, isBlacklistedBuyer: blocked }
     }),
-    params.sort ?? 'time_desc',
+    sortMode,
   )
 
   const page = Math.max(1, Math.floor(params.page ?? 1))

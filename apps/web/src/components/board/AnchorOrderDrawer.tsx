@@ -239,8 +239,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
   const showInitialSkeleton = loading && !data && !error
   const showSignedTab = showAnchorDrillSignedTab(preset)
 
-  const shippedOrderAmount =
-    statNum(stats, 'validSalesAmount') || statNum(stats, 'effectiveGmv')
+  const signedAmountYuan = statNum(stats, 'actualSignedAmount')
 
   const summaryText =
     stats && !error
@@ -308,8 +307,8 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
       text: `支付金额 ${formatMoney(statNum(stats, 'gmv') || statNum(stats, 'totalGmv'))}`,
     },
     {
-      key: 'validSales',
-      text: `有效成交额 ${formatMoney(shippedOrderAmount)}`,
+      key: 'signedAmount',
+      text: `已签收金额 ${formatMoney(signedAmountYuan)}`,
     },
     {
       key: 'orders',

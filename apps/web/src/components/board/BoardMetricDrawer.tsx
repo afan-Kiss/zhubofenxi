@@ -109,6 +109,9 @@ export const BoardMetricDrawer: React.FC<Props> = ({
         if (tab) qs.set('tab', tab)
         if (anchorId) qs.set('anchorId', anchorId)
         if (anchorName) qs.set('anchorName', anchorName)
+        if (metric === 'actualSignedAmount' && !anchorId && !anchorName) {
+          qs.set('sort', 'anchor_asc')
+        }
         if (overviewStableSnapshot) qs.set('overviewStableSnapshot', 'true')
         const res = await apiRequest<MetricDetailData>(`/api/board/metric-detail?${qs}`, {
           signal: controller.signal,

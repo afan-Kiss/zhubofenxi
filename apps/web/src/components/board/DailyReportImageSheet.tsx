@@ -18,6 +18,7 @@ import type { AnchorLeaderboardRow, AnchorTrend } from '../../lib/anchor-leaderb
 
 export interface DailyReportShippedOrderLine {
   orderNo: string
+  productTitle: string
   amountYuan: number
   anchorName?: string
 }
@@ -153,6 +154,15 @@ function LiveRoomFollowerLine({
   )
 }
 
+function compareShippedOrderLines(
+  a: DailyReportShippedOrderLine,
+  b: DailyReportShippedOrderLine,
+): number {
+  const anchorCmp = (a.anchorName ?? '').localeCompare(b.anchorName ?? '', 'zh-CN')
+  if (anchorCmp !== 0) return anchorCmp
+  return (a.productTitle ?? '').localeCompare(b.productTitle ?? '', 'zh-CN')
+}
+
 function ShippedOrdersBlock({
   orders,
   compact = false,
@@ -162,7 +172,7 @@ function ShippedOrdersBlock({
   compact?: boolean
   showAnchorName?: boolean
 }) {
-  const list = orders ?? []
+  const list = [...(orders ?? [])].sort(compareShippedOrderLines)
   if (list.length === 0) {
     return (
       <p className={`${compact ? 'text-[10px]' : 'text-[11px]'} text-slate-400`}>
@@ -180,11 +190,10 @@ function ShippedOrdersBlock({
           key={order.orderNo}
           className={`flex flex-wrap items-center gap-1.5 ${compact ? 'text-[10px]' : 'text-[11px]'} leading-5`}
         >
-          <span className="font-mono text-slate-700">{order.orderNo}</span>
           {showAnchorName && order.anchorName ? (
             <AnchorNameBadge name={order.anchorName} compact={compact} />
           ) : null}
-          <span className="text-slate-400">·</span>
+          <span className="min-w-0 flex-1 text-slate-700">{order.productTitle || '商品名称未同步'}</span>
           <span className="tabular-nums text-slate-700">{formatMoney(order.amountYuan)}</span>
         </div>
       ))}

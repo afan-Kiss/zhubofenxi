@@ -8,7 +8,7 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnRefundCount,
   anchorRowLivePeriodLines,
-  anchorRowValidSales,
+  anchorRowActualSignedAmount,
   isHighRefundRate,
   anchorRowTrend,
   type AnchorLeaderboardRow,
@@ -157,7 +157,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
 
             <div className="mt-3 grid grid-cols-2 gap-2">
               <MetricCell label="支付金额" value={formatMoney(anchorRowGmv(a))} />
-              <MetricCell label="有效成交额" value={formatMoney(anchorRowValidSales(a))} />
+              <MetricCell label="已签收金额" value={formatMoney(anchorRowActualSignedAmount(a))} />
               <MetricCell label="支付单数" value={formatCount(anchorRowPaidCount(a))} />
               <MetricCell
                 label="退款率"

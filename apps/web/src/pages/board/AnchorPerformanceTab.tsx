@@ -51,7 +51,7 @@ interface AnchorSummaryCardDef {
   helper: string
   hint: string
   icon: LucideIcon
-  valueKey: 'totalGmv' | 'validSalesAmount' | 'orderCount' | 'returnRate'
+  valueKey: 'totalGmv' | 'actualSignedAmount' | 'orderCount' | 'returnRate'
 }
 
 const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
@@ -67,15 +67,15 @@ const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
     valueKey: 'totalGmv',
   },
   {
-    label: '有效成交额',
-    metricExplainKey: 'validSalesAmount',
-    drawerKey: 'effectiveGmv',
+    label: '已签收金额',
+    metricExplainKey: 'actualSignedAmount',
+    drawerKey: 'actualSignedAmount',
     type: 'money',
     tone: 'green',
-    helper: '已完成/已签收，且无在途售后、未成功退款的成交金额',
+    helper: '已签收/已完成且符合签收规则的订单金额',
     hint: '点击查看明细',
     icon: Wallet,
-    valueKey: 'validSalesAmount',
+    valueKey: 'actualSignedAmount',
   },
   {
     label: '支付单数',
@@ -110,6 +110,8 @@ function anchorSummaryMetricValue(
       return Number(cards.totalGmv ?? cards.gmv ?? 0)
     case 'effectiveGmv':
       return Number(cards.validSalesAmount ?? cards.effectiveGmv ?? 0)
+    case 'actualSignedAmount':
+      return Number(cards.actualSignedAmount ?? 0)
     case 'orderCount':
       return Number(cards.orderCount ?? cards.paidOrderCount ?? 0)
     case 'returnRate':
@@ -121,9 +123,7 @@ function anchorSummaryMetricValue(
 
 function anchorCardRawValue(cards: Record<string, unknown>, key: AnchorSummaryCardDef['valueKey']): number {
   if (key === 'totalGmv') return Number(cards.totalGmv ?? cards.gmv ?? 0)
-  if (key === 'validSalesAmount') {
-    return Number(cards.validSalesAmount ?? cards.effectiveGmv ?? 0)
-  }
+  if (key === 'actualSignedAmount') return Number(cards.actualSignedAmount ?? 0)
   if (key === 'orderCount') return Number(cards.orderCount ?? 0)
   return Number(cards.returnRate ?? 0)
 }

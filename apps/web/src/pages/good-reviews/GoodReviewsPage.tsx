@@ -10,9 +10,13 @@ import {
   formatMoneyFromCent,
   GOOD_REVIEWS_DEFAULT_DAYS,
   GOOD_REVIEWS_PAGE_LIMIT,
+  GOOD_REVIEW_SHOP_SYNC_ORDER,
+  getGoodReviewShopTabIndex,
+  mergeGoodReviewSyncResults,
   type GoodReviewItemView,
   type GoodReviewListFilters,
   type GoodReviewPagePayload,
+  type GoodReviewShopKey,
   type GoodReviewShopView,
   type GoodReviewSyncResult,
 } from '../../lib/good-reviews'
@@ -20,13 +24,14 @@ import { GoodReviewOrderRow } from '../../components/good-reviews/GoodReviewOrde
 import { GoodReviewDetailDrawer } from '../../components/good-reviews/GoodReviewDetailDrawer'
 import { GoodReviewFiltersBar } from '../../components/good-reviews/GoodReviewFiltersBar'
 import { GoodReviewCopyScriptButton } from '../../components/good-reviews/GoodReviewCopyScriptButton'
+import { GoodReviewSyncProgressButton } from '../../components/good-reviews/GoodReviewSyncProgressButton'
 import {
   GoodReviewImage,
   closeGoodReviewImageSessionBeacon,
   ensureGoodReviewImageSession,
 } from '../../components/good-reviews/GoodReviewImage'
 
-const SHOP_TAB_ORDER = ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu']
+const SHOP_TAB_ORDER = [...GOOD_REVIEW_SHOP_SYNC_ORDER]
 
 function mergeUniqueReviews(
   prev: GoodReviewItemView[],
@@ -172,12 +177,16 @@ export const GoodReviewsPage: React.FC = () => {
   const [reviews, setReviews] = useState<GoodReviewItemView[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(false)
-  const [activeShop, setActiveShop] = useState(SHOP_TAB_ORDER[0]!)
+  const [activeShop, setActiveShop] = useState<GoodReviewShopKey>(SHOP_TAB_ORDER[0]!)
   const [initialLoading, setInitialLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [autoRefreshing, setAutoRefreshing] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [syncAllProgress, setSyncAllProgress] = useState(0)
+  const [syncAllLabel, setSyncAllLabel] = useState('')
+  const [refreshSyncProgress, setRefreshSyncProgress] = useState(0)
+  const [refreshSyncLabel, setRefreshSyncLabel] = useState('')
   const [banner, setBanner] = useState<{ tone: 'success' | 'warning' | 'error'; text: string } | null>(
     null,
   )
@@ -293,20 +302,32 @@ export const GoodReviewsPage: React.FC = () => {
   )
 
   const syncCurrentShop = useCallback(
-    async (shopKey: string, opts?: { background?: boolean }): Promise<boolean> => {
+    async (
+      shopKey: string,
+      opts?: {
+        background?: boolean
+        onProgress?: (progress: number, label: string) => void
+      },
+    ): Promise<boolean> => {
       const seq = ++syncSeqRef.current
+      const shopLabel =
+        shops.find((s) => s.shopKey === shopKey)?.shopName ?? shopKey
       if (opts?.background) setAutoRefreshing(true)
-      else setSyncing(true)
+      else opts?.onProgress?.(12, `正在同步 ${shopLabel}...`)
       try {
+        opts?.onProgress?.(35, `正在读取 ${shopLabel} 最近 2 天好评...`)
         await apiRequest<GoodReviewSyncResult>('/api/good-reviews/sync', {
           method: 'POST',
           body: JSON.stringify({ shop: shopKey, days: GOOD_REVIEWS_DEFAULT_DAYS }),
         })
         if (seq !== syncSeqRef.current || !mountedRef.current) return false
+        opts?.onProgress?.(88, '正在刷新列表...')
         await loadFirstPage(shopKey, { silent: true })
         if (opts?.background) {
           autoSyncStatusByShopRef.current.set(shopKey, 'synced')
           setAutoSyncFailed(false)
+        } else {
+          opts?.onProgress?.(100, '同步完成')
         }
         return true
       } catch (err) {
@@ -315,17 +336,15 @@ export const GoodReviewsPage: React.FC = () => {
           autoSyncStatusByShopRef.current.set(shopKey, 'failed')
           setAutoSyncFailed(true)
         } else {
+          opts?.onProgress?.(0, '')
           setError(err instanceof Error ? err.message : '同步失败，请稍后重试')
         }
         return false
       } finally {
-        if (mountedRef.current) {
-          if (opts?.background) setAutoRefreshing(false)
-          else setSyncing(false)
-        }
+        if (mountedRef.current && opts?.background) setAutoRefreshing(false)
       }
     },
-    [loadFirstPage],
+    [loadFirstPage, shops],
   )
 
   useEffect(() => {
@@ -388,11 +407,18 @@ export const GoodReviewsPage: React.FC = () => {
     setError('')
     setBanner(null)
     setAutoSyncFailed(false)
+    setRefreshSyncProgress(0)
+    setRefreshSyncLabel('')
     autoSyncStatusByShopRef.current.delete(activeShop)
     try {
       await loadFirstPage(activeShop)
       autoSyncStatusByShopRef.current.set(activeShop, 'syncing')
-      const ok = await syncCurrentShop(activeShop)
+      const ok = await syncCurrentShop(activeShop, {
+        onProgress: (progress, label) => {
+          setRefreshSyncProgress(progress)
+          setRefreshSyncLabel(label)
+        },
+      })
       if (!ok) {
         setBanner({
           tone: 'warning',
@@ -403,33 +429,58 @@ export const GoodReviewsPage: React.FC = () => {
       setError(err instanceof Error ? err.message : '刷新失败')
     } finally {
       setRefreshing(false)
+      window.setTimeout(() => {
+        setRefreshSyncProgress(0)
+        setRefreshSyncLabel('')
+      }, 500)
     }
   }
 
   const handleSyncAll = async () => {
     setSyncing(true)
+    setSyncAllProgress(0)
+    setSyncAllLabel('准备同步全部店铺...')
     setError('')
     setBanner(null)
+    const startedAt = new Date().toISOString()
+    const shopResults: GoodReviewSyncResult['shops'] = []
+    const total = SHOP_TAB_ORDER.length
     try {
-      const result = await apiRequest<GoodReviewSyncResult>('/api/good-reviews/sync', {
-        method: 'POST',
-        body: JSON.stringify({ shop: 'all', days: GOOD_REVIEWS_DEFAULT_DAYS }),
-      })
-      setBanner(formatGoodReviewSyncMessage(result))
+      for (let i = 0; i < total; i++) {
+        const shopKey = SHOP_TAB_ORDER[i]!
+        const shopName = shopNameByKey.get(shopKey) ?? shopKey
+        const basePct = Math.round((i / total) * 100)
+        setSyncAllProgress(basePct)
+        setSyncAllLabel(`正在同步 ${shopName}（${i + 1}/${total}）...`)
+        const result = await apiRequest<GoodReviewSyncResult>('/api/good-reviews/sync', {
+          method: 'POST',
+          body: JSON.stringify({ shop: shopKey, days: GOOD_REVIEWS_DEFAULT_DAYS }),
+        })
+        shopResults.push(...result.shops)
+        setSyncAllProgress(Math.round(((i + 1) / total) * 100))
+      }
+      const merged = mergeGoodReviewSyncResults(shopResults, startedAt)
+      setSyncAllLabel('全部店铺同步完成')
+      setBanner(formatGoodReviewSyncMessage(merged))
       await loadFirstPage(activeShop, { silent: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : '同步失败')
       setBanner({
         tone: 'error',
-        text: '同步失败：四个店铺都没有同步成功，请检查 Cookie 或接口状态',
+        text: '同步失败：店铺都没有同步成功，请检查 Cookie 或接口状态',
       })
     } finally {
       setSyncing(false)
+      window.setTimeout(() => {
+        setSyncAllProgress(0)
+        setSyncAllLabel('')
+      }, 600)
     }
   }
 
   const lastSyncedLabel = formatLocalDateTime(lastSyncedAt)
-  const busy = initialLoading || refreshing || syncing || autoRefreshing
+  const refreshBusy = refreshing
+  const busy = initialLoading || refreshBusy || syncing || autoRefreshing
   const filterStatusParts = describeGoodReviewFilters(queryFilters)
   const filterActive = hasActiveGoodReviewFilters(queryFilters)
 
@@ -439,25 +490,28 @@ export const GoodReviewsPage: React.FC = () => {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <h1 className="text-xl font-semibold text-slate-900">好评中心</h1>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <button
-              type="button"
+            <GoodReviewSyncProgressButton
+              variant="secondary"
+              testId="good-reviews-refresh"
+              disabled={busy && !refreshBusy}
+              busy={refreshBusy}
+              progress={refreshSyncProgress}
+              idleLabel="刷新最近 2 天"
+              busyLabel={refreshSyncLabel || '正在刷新最近 2 天...'}
+              idleIcon={<RefreshCw size={14} />}
               onClick={() => void handleRefreshLocal()}
-              disabled={busy}
-              className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-              刷新最近 2 天
-            </button>
-            <button
-              type="button"
+            />
+            <GoodReviewSyncProgressButton
+              variant="primary"
+              testId="good-reviews-sync-all"
+              disabled={busy && !syncing}
+              busy={syncing}
+              progress={syncAllProgress}
+              idleLabel="立即同步全部店铺好评"
+              busyLabel={syncAllLabel || '正在同步全部店铺好评...'}
+              idleIcon={<ThumbsUp size={14} />}
               onClick={() => void handleSyncAll()}
-              disabled={busy}
-              data-testid="good-reviews-sync-all"
-              className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-70"
-            >
-              {syncing ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
-              {syncing ? '正在同步全部店铺好评...' : '立即同步全部店铺好评'}
-            </button>
+            />
           </div>
         </div>
         <p className="max-w-3xl text-sm text-slate-500">
@@ -506,14 +560,17 @@ export const GoodReviewsPage: React.FC = () => {
           .slice()
           .sort(
             (a, b) =>
-              SHOP_TAB_ORDER.indexOf(a.shopKey) - SHOP_TAB_ORDER.indexOf(b.shopKey),
+              getGoodReviewShopTabIndex(a.shopKey) - getGoodReviewShopTabIndex(b.shopKey),
           )
           .map((shop) => (
             <button
               key={shop.shopKey}
               type="button"
               data-testid={`good-reviews-tab-${shop.shopKey}`}
-              onClick={() => setActiveShop(shop.shopKey)}
+              onClick={() => {
+                const idx = getGoodReviewShopTabIndex(shop.shopKey)
+                if (idx >= 0) setActiveShop(GOOD_REVIEW_SHOP_SYNC_ORDER[idx]!)
+              }}
               className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                 activeShop === shop.shopKey
                   ? 'bg-white text-slate-900 shadow-md ring-2 ring-rose-100'

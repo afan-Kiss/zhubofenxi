@@ -91,6 +91,37 @@ export const GOOD_REVIEWS_DEFAULT_DAYS = 2
 export const GOOD_REVIEWS_PAGE_LIMIT = 30
 export const GOOD_REVIEWS_MAX_LIMIT = 50
 
+/** 全店手动同步顺序（与好评中心 Tab 一致） */
+export const GOOD_REVIEW_SHOP_SYNC_ORDER = [
+  'shiyuju',
+  'hetianyayu',
+  'xiangyu',
+  'xyxiangyu',
+] as const
+
+export type GoodReviewShopKey = (typeof GOOD_REVIEW_SHOP_SYNC_ORDER)[number]
+
+export function getGoodReviewShopTabIndex(shopKey: string): number {
+  return (GOOD_REVIEW_SHOP_SYNC_ORDER as readonly string[]).indexOf(shopKey)
+}
+
+export function mergeGoodReviewSyncResults(
+  shopResults: GoodReviewSyncShopResult[],
+  startedAt: string,
+): GoodReviewSyncResult {
+  const finishedAt = new Date().toISOString()
+  const successShopCount = shopResults.filter((s) => s.success).length
+  return {
+    ok: successShopCount > 0,
+    startedAt,
+    finishedAt,
+    totalShopCount: shopResults.length,
+    successShopCount,
+    failedShopCount: shopResults.length - successShopCount,
+    shops: shopResults,
+  }
+}
+
 export const GOOD_REVIEW_MATERIAL_TAG_OPTIONS = [
   '手镯',
   '平安扣',

@@ -681,13 +681,42 @@ export async function buildGoodReviewArkOrderDetail(params: {
   orderId: string
   shop: string
 }): Promise<QianfanOrderDetailResolveResult> {
-  const shopKey = resolveGoodReviewShopKey(params.shop)
+  const orderId = String(params.orderId || '').trim()
+  const shopInput = String(params.shop || '').trim()
+  const shopKey = resolveGoodReviewShopKey(shopInput)
+  if (!orderId) {
+    return {
+      ok: false,
+      orderId: '',
+      packageId: '',
+      shop: shopInput,
+      shopName: shopKey ? getGoodReviewShopName(shopKey) : shopInput || '未知店铺',
+      serviceUrl: '',
+      finalOpenUrl: '',
+      hasTicket: false,
+      fallbackToBaseUrl: false,
+      attempts: [],
+      error: '请提供订单号',
+    }
+  }
   if (!shopKey) {
-    throw new QianfanOrderOpenTicketError('无效的店铺参数')
+    return {
+      ok: false,
+      orderId,
+      packageId: normalizePackageId(orderId),
+      shop: shopInput,
+      shopName: shopInput || '未知店铺',
+      serviceUrl: '',
+      finalOpenUrl: '',
+      hasTicket: false,
+      fallbackToBaseUrl: false,
+      attempts: [],
+      error: '无效的店铺参数',
+    }
   }
   return resolveQianfanOrderDetail({
-    orderId: params.orderId,
-    shop: params.shop,
+    orderId,
+    shop: shopInput,
     source: 'good-review',
   })
 }

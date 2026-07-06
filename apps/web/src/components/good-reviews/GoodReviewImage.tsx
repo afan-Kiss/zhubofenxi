@@ -7,6 +7,24 @@ const PLACEHOLDER =
     '<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" fill="#f1f5f9"/><text x="60" y="64" text-anchor="middle" fill="#94a3b8" font-size="12">图片不可用</text></svg>',
   )
 
+const SESSION_KEY = 'good-review-image-session-id'
+
+function readSessionId(): string | null {
+  try {
+    return sessionStorage.getItem(SESSION_KEY)
+  } catch {
+    return null
+  }
+}
+
+function writeSessionId(id: string): void {
+  try {
+    sessionStorage.setItem(SESSION_KEY, id)
+  } catch {
+    /* sessionStorage 不可用时忽略 */
+  }
+}
+
 interface Props {
   rawUrl: string
   alt: string
@@ -18,7 +36,7 @@ export function buildGoodReviewImageProxyUrl(rawUrl: string | null | undefined):
   if (!rawUrl) return PLACEHOLDER
   const params = new URLSearchParams()
   params.set('url', rawUrl)
-  const sessionId = sessionStorage.getItem('good-review-image-session-id')
+  const sessionId = readSessionId()
   if (sessionId) params.set('sessionId', sessionId)
   return `/api/good-reviews/image-proxy?${params.toString()}`
 }
@@ -43,18 +61,26 @@ export const GoodReviewImage: React.FC<Props> = ({ rawUrl, alt, className, onCli
 }
 
 export function ensureGoodReviewImageSession(): string {
-  const key = 'good-review-image-session-id'
-  let id = sessionStorage.getItem(key)
+  let id = readSessionId()
   if (!id) {
     id = randomUuid()
-    sessionStorage.setItem(key, id)
+    writeSessionId(id)
   }
   return id
 }
 
 export function closeGoodReviewImageSessionBeacon(): void {
-  const id = sessionStorage.getItem('good-review-image-session-id')
+  let id: string | null = null
+  try {
+    id = sessionStorage.getItem(SESSION_KEY)
+  } catch {
+    return
+  }
   if (!id) return
-  const blob = new Blob([JSON.stringify({ sessionId: id })], { type: 'application/json' })
-  navigator.sendBeacon('/api/good-reviews/image-session/close', blob)
+  try {
+    const blob = new Blob([JSON.stringify({ sessionId: id })], { type: 'application/json' })
+    navigator.sendBeacon('/api/good-reviews/image-session/close', blob)
+  } catch {
+    /* sendBeacon 不可用时忽略 */
+  }
 }

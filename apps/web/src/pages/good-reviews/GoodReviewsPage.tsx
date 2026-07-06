@@ -1,10 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2, RefreshCw, Star, ThumbsUp } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
 import {
+  buildGoodReviewsListUrl,
   formatGoodReviewSyncMessage,
   formatLocalDateTime,
   formatMoneyFromCent,
+  GOOD_REVIEWS_DEFAULT_DAYS,
+  GOOD_REVIEWS_PAGE_LIMIT,
   type GoodReviewItemView,
   type GoodReviewPagePayload,
   type GoodReviewShopView,
@@ -19,6 +22,20 @@ import {
 } from '../../components/good-reviews/GoodReviewImage'
 
 const SHOP_TAB_ORDER = ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu']
+
+function mergeUniqueReviews(
+  prev: GoodReviewItemView[],
+  next: GoodReviewItemView[],
+): GoodReviewItemView[] {
+  const seen = new Set(prev.map((r) => r.id))
+  const out = [...prev]
+  for (const row of next) {
+    if (seen.has(row.id)) continue
+    seen.add(row.id)
+    out.push(row)
+  }
+  return out
+}
 
 function StatCard({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -110,10 +127,17 @@ function ReviewCard({
 }
 
 export const GoodReviewsPage: React.FC = () => {
-  const [payload, setPayload] = useState<GoodReviewPagePayload | null>(null)
+  const [shops, setShops] = useState<GoodReviewShopView[]>([])
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
+  const [filteredReviewCount, setFilteredReviewCount] = useState(0)
+  const [reviews, setReviews] = useState<GoodReviewItemView[]>([])
+  const [nextCursor, setNextCursor] = useState<string | null>(null)
+  const [hasMore, setHasMore] = useState(false)
   const [activeShop, setActiveShop] = useState(SHOP_TAB_ORDER[0]!)
-  const [loading, setLoading] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [autoRefreshing, setAutoRefreshing] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [banner, setBanner] = useState<{ tone: 'success' | 'warning' | 'error'; text: string } | null>(
     null,
@@ -121,60 +145,168 @@ export const GoodReviewsPage: React.FC = () => {
   const [error, setError] = useState('')
   const [detailReview, setDetailReview] = useState<GoodReviewItemView | null>(null)
 
+  const abortRef = useRef<AbortController | null>(null)
+  const requestSeqRef = useRef(0)
+  const syncSeqRef = useRef(0)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const autoSyncedShopRef = useRef<string | null>(null)
+  const mountedRef = useRef(true)
+
   useEffect(() => {
+    mountedRef.current = true
     ensureGoodReviewImageSession()
     const onClose = () => closeGoodReviewImageSessionBeacon()
     window.addEventListener('pagehide', onClose)
     return () => {
+      mountedRef.current = false
       window.removeEventListener('pagehide', onClose)
       onClose()
+      abortRef.current?.abort()
     }
   }, [])
 
   const shopNameByKey = useMemo(() => {
     const map = new Map<string, string>()
-    for (const shop of payload?.shops ?? []) {
+    for (const shop of shops) {
       map.set(shop.shopKey, shop.shopName)
     }
     return map
-  }, [payload?.shops])
+  }, [shops])
 
-  const loadLocal = useCallback(async (shopKey?: string) => {
-    const shop = shopKey ?? activeShop
-    const data = await apiRequest<GoodReviewPagePayload>(
-      `/api/good-reviews?shop=${encodeURIComponent(shop)}&limit=200`,
-    )
-    setPayload(data)
-    return data
-  }, [activeShop])
+  const applyPayload = useCallback((data: GoodReviewPagePayload, append: boolean) => {
+    setShops(data.shops)
+    setLastSyncedAt(data.lastSyncedAt)
+    setFilteredReviewCount(data.filteredReviewCount ?? data.reviews.length)
+    setReviews((prev) => (append ? mergeUniqueReviews(prev, data.reviews) : data.reviews))
+    setNextCursor(data.nextCursor ?? null)
+    setHasMore(Boolean(data.hasMore))
+  }, [])
+
+  const fetchPage = useCallback(
+    async (params: {
+      shop: string
+      cursor?: string | null
+      append?: boolean
+      signal?: AbortSignal
+    }): Promise<GoodReviewPagePayload | null> => {
+      const seq = ++requestSeqRef.current
+      const url = buildGoodReviewsListUrl({
+        shop: params.shop,
+        days: GOOD_REVIEWS_DEFAULT_DAYS,
+        limit: GOOD_REVIEWS_PAGE_LIMIT,
+        cursor: params.cursor,
+      })
+      try {
+        const data = await apiRequest<GoodReviewPagePayload>(url, { signal: params.signal })
+        if (seq !== requestSeqRef.current || !mountedRef.current) return null
+        applyPayload(data, Boolean(params.append))
+        return data
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return null
+        if (seq !== requestSeqRef.current || !mountedRef.current) return null
+        throw err
+      }
+    },
+    [applyPayload],
+  )
+
+  const loadFirstPage = useCallback(
+    async (shopKey: string, opts?: { silent?: boolean }) => {
+      abortRef.current?.abort()
+      const controller = new AbortController()
+      abortRef.current = controller
+      if (!opts?.silent) setInitialLoading(true)
+      setError('')
+      try {
+        await fetchPage({ shop: shopKey, signal: controller.signal })
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '读取最近 2 天好评失败，请稍后重试')
+      } finally {
+        if (mountedRef.current) setInitialLoading(false)
+      }
+    },
+    [fetchPage],
+  )
+
+  const syncCurrentShop = useCallback(
+    async (shopKey: string, opts?: { background?: boolean }) => {
+      const seq = ++syncSeqRef.current
+      if (opts?.background) setAutoRefreshing(true)
+      else setSyncing(true)
+      try {
+        await apiRequest<GoodReviewSyncResult>('/api/good-reviews/sync', {
+          method: 'POST',
+          body: JSON.stringify({ shop: shopKey, days: GOOD_REVIEWS_DEFAULT_DAYS }),
+        })
+        if (seq !== syncSeqRef.current || !mountedRef.current) return
+        await loadFirstPage(shopKey, { silent: true })
+      } catch (err) {
+        if (seq !== syncSeqRef.current || !mountedRef.current) return
+        if (!opts?.background) {
+          setError(err instanceof Error ? err.message : '同步失败，请稍后重试')
+        }
+      } finally {
+        if (mountedRef.current) {
+          if (opts?.background) setAutoRefreshing(false)
+          else setSyncing(false)
+        }
+      }
+    },
+    [loadFirstPage],
+  )
 
   useEffect(() => {
     void (async () => {
-      setLoading(true)
-      setError('')
-      try {
-        await loadLocal(activeShop)
-      } catch (err) {
-        setError(err instanceof Error ? err.message : '读取本地好评数据失败')
-      } finally {
-        setLoading(false)
+      await loadFirstPage(activeShop)
+      if (autoSyncedShopRef.current !== activeShop) {
+        autoSyncedShopRef.current = activeShop
+        void syncCurrentShop(activeShop, { background: true })
       }
     })()
-  }, [activeShop, loadLocal])
+  }, [activeShop, loadFirstPage, syncCurrentShop])
+
+  useEffect(() => {
+    const el = loadMoreRef.current
+    if (!el || !hasMore || loadingMore || initialLoading) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return
+        if (!hasMore || loadingMore || !nextCursor) return
+        void (async () => {
+          setLoadingMore(true)
+          setError('')
+          try {
+            await fetchPage({
+              shop: activeShop,
+              cursor: nextCursor,
+              append: true,
+            })
+          } catch (err) {
+            setError(err instanceof Error ? err.message : '加载更多好评失败')
+          } finally {
+            setLoadingMore(false)
+          }
+        })()
+      },
+      { rootMargin: '120px' },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [activeShop, fetchPage, hasMore, initialLoading, loadingMore, nextCursor])
 
   const activeShopView = useMemo<GoodReviewShopView | null>(() => {
-    if (!payload) return null
-    return payload.shops.find((s) => s.shopKey === activeShop) ?? payload.shops[0] ?? null
-  }, [payload, activeShop])
+    return shops.find((s) => s.shopKey === activeShop) ?? shops[0] ?? null
+  }, [shops, activeShop])
 
   const handleRefreshLocal = async () => {
     setRefreshing(true)
     setError('')
     setBanner(null)
     try {
-      await loadLocal(activeShop)
+      await loadFirstPage(activeShop)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '刷新本地数据失败')
+      setError(err instanceof Error ? err.message : '刷新失败')
     } finally {
       setRefreshing(false)
     }
@@ -187,10 +319,10 @@ export const GoodReviewsPage: React.FC = () => {
     try {
       const result = await apiRequest<GoodReviewSyncResult>('/api/good-reviews/sync', {
         method: 'POST',
-        body: JSON.stringify({ shop: 'all' }),
+        body: JSON.stringify({ shop: 'all', days: GOOD_REVIEWS_DEFAULT_DAYS }),
       })
       setBanner(formatGoodReviewSyncMessage(result))
-      await loadLocal(activeShop)
+      await loadFirstPage(activeShop, { silent: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : '同步失败')
       setBanner({
@@ -202,7 +334,8 @@ export const GoodReviewsPage: React.FC = () => {
     }
   }
 
-  const lastSyncedLabel = formatLocalDateTime(payload?.lastSyncedAt)
+  const lastSyncedLabel = formatLocalDateTime(lastSyncedAt)
+  const busy = initialLoading || refreshing || syncing || autoRefreshing
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
@@ -213,32 +346,38 @@ export const GoodReviewsPage: React.FC = () => {
             <button
               type="button"
               onClick={() => void handleRefreshLocal()}
-              disabled={loading || refreshing || syncing}
+              disabled={busy}
               className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {refreshing ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-              刷新页面数据
+              刷新最近 2 天
             </button>
             <button
               type="button"
               onClick={() => void handleSyncAll()}
-              disabled={loading || refreshing || syncing}
+              disabled={busy}
               data-testid="good-reviews-sync-all"
               className="inline-flex items-center gap-1 rounded-full bg-rose-500 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-rose-600 disabled:cursor-not-allowed disabled:opacity-70"
             >
               {syncing ? <Loader2 size={14} className="animate-spin" /> : <ThumbsUp size={14} />}
-              {syncing ? '正在同步四个店铺...' : '立即同步全部店铺好评'}
+              {syncing ? '正在同步全部店铺好评...' : '立即同步全部店铺好评'}
             </button>
           </div>
         </div>
         <p className="max-w-3xl text-sm text-slate-500">
-          查看四个店铺的评分、买家晒图和真实评价内容，用来判断店铺口碑，也方便挑选直播间能用的信任素材。
+          默认展示最近 2 天好评，打开页面会自动更新一次；往下拉会继续加载更多。
         </p>
         <p className="text-sm text-slate-600">
           {lastSyncedLabel
             ? `最后同步：${lastSyncedLabel}`
-            : '还没有同步过，点击右上角按钮获取最新好评'}
+            : '还没有同步过，打开页面会自动尝试更新当前店铺'}
         </p>
+        {autoRefreshing ? (
+          <p className="flex items-center gap-1.5 text-xs text-rose-600">
+            <Loader2 size={12} className="animate-spin" />
+            正在更新当前店铺最近 2 天好评...
+          </p>
+        ) : null}
       </div>
 
       {banner ? (
@@ -262,7 +401,7 @@ export const GoodReviewsPage: React.FC = () => {
       ) : null}
 
       <div className="flex flex-wrap gap-2">
-        {(payload?.shops ?? [])
+        {(shops.length > 0 ? shops : SHOP_TAB_ORDER.map((k) => ({ shopKey: k, shopName: k })))
           .slice()
           .sort(
             (a, b) =>
@@ -280,15 +419,15 @@ export const GoodReviewsPage: React.FC = () => {
                   : 'bg-white/60 text-slate-600 hover:bg-white'
               }`}
             >
-              {shop.shopName}
+              {'shopName' in shop && shop.shopName ? shop.shopName : shop.shopKey}
             </button>
           ))}
       </div>
 
-      {loading ? (
+      {initialLoading ? (
         <div className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-white px-4 py-8 text-sm text-slate-500">
           <Loader2 size={16} className="animate-spin" />
-          正在读取本地好评数据...
+          正在读取最近 2 天好评...
         </div>
       ) : activeShopView ? (
         <>
@@ -314,26 +453,37 @@ export const GoodReviewsPage: React.FC = () => {
               <StatCard label="已回复" value={activeShopView.repliedCount} />
               <StatCard label="待互动好评" value={activeShopView.pendingInteractionCount} />
               <StatCard label="待处理差评" value={activeShopView.pendingBadReviewCount} />
-              <StatCard
-                label="本页展示"
-                value={payload?.reviews.length ?? 0}
-              />
+              <StatCard label="最近 2 天" value={filteredReviewCount} />
             </div>
           </div>
 
           <div className="space-y-3">
-            {(payload?.reviews ?? []).length > 0 ? (
-              payload!.reviews.map((review) => (
-                <ReviewCard
-                  key={review.id}
-                  review={review}
-                  shopName={shopNameByKey.get(review.shopKey)}
-                  onOpen={setDetailReview}
-                />
-              ))
+            {reviews.length > 0 ? (
+              <>
+                {reviews.map((review) => (
+                  <ReviewCard
+                    key={review.id}
+                    review={review}
+                    shopName={shopNameByKey.get(review.shopKey)}
+                    onOpen={setDetailReview}
+                  />
+                ))}
+                <div ref={loadMoreRef} className="py-2 text-center text-xs text-slate-400">
+                  {loadingMore ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Loader2 size={12} className="animate-spin" />
+                      正在加载更多...
+                    </span>
+                  ) : hasMore ? (
+                    '继续下滑加载更多'
+                  ) : (
+                    '已加载全部最近 2 天好评'
+                  )}
+                </div>
+              </>
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-10 text-center text-sm text-slate-500">
-                当前店铺还没有本地好评数据，可点击右上角「立即同步全部店铺好评」获取最新内容。
+                当前店铺最近 2 天还没有本地好评，页面会自动尝试同步；也可点击「立即同步全部店铺好评」。
               </div>
             )}
           </div>

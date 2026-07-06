@@ -1,3 +1,4 @@
+import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { GOOD_REVIEW_SHOPS } from '../../config/good-review-shops.constants'
 import { getGoodReviewLastSyncedAt } from './good-review-store.service'
@@ -7,10 +8,15 @@ import {
   resolveReviewImages,
 } from './good-review-normalize.service'
 import type {
+  GoodReviewCursorPayload,
   GoodReviewItemView,
   GoodReviewPagePayload,
   GoodReviewShopView,
 } from './good-review.types'
+
+const DEFAULT_DAYS = 2
+const DEFAULT_LIMIT = 30
+const MAX_LIMIT = 50
 
 function parseJsonArray(raw: string | null | undefined): string[] {
   if (!raw) return []
@@ -109,25 +115,135 @@ function rowToReviewView(row: {
   }
 }
 
+export function encodeGoodReviewCursor(payload: GoodReviewCursorPayload): string {
+  return Buffer.from(JSON.stringify(payload)).toString('base64url')
+}
+
+export function decodeGoodReviewCursor(raw: string): GoodReviewCursorPayload | null {
+  try {
+    const parsed = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as GoodReviewCursorPayload
+    if (!parsed?.id || !parsed.reviewTime || !parsed.syncedAt) return null
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+function resolveReviewRange(params: {
+  days?: number
+  startDate?: string
+  endDate?: string
+}): { rangeStart: Date; rangeEnd: Date } {
+  const now = new Date()
+  const startRaw = params.startDate?.trim()
+  const endRaw = params.endDate?.trim()
+  if (startRaw && endRaw) {
+    const rangeStart = new Date(`${startRaw}T00:00:00.000Z`)
+    const rangeEnd = new Date(`${endRaw}T23:59:59.999Z`)
+    if (!Number.isNaN(rangeStart.getTime()) && !Number.isNaN(rangeEnd.getTime())) {
+      return { rangeStart, rangeEnd }
+    }
+  }
+  const days = Math.max(1, params.days ?? DEFAULT_DAYS)
+  return {
+    rangeStart: new Date(now.getTime() - days * 24 * 60 * 60 * 1000),
+    rangeEnd: now,
+  }
+}
+
+function buildFilteredWhere(params: {
+  shopKey?: string
+  rangeStart: Date
+  rangeEnd: Date
+}): Prisma.GoodReviewWhereInput {
+  const base: Prisma.GoodReviewWhereInput = {
+    reviewTime: {
+      not: null,
+      gte: params.rangeStart,
+      lte: params.rangeEnd,
+    },
+  }
+  if (params.shopKey) {
+    return { shopKey: params.shopKey, ...base }
+  }
+  return base
+}
+
+function buildCursorWhere(
+  cursor: GoodReviewCursorPayload,
+  baseWhere: Prisma.GoodReviewWhereInput,
+): Prisma.GoodReviewWhereInput {
+  const cursorReviewTime = new Date(cursor.reviewTime)
+  const cursorSyncedAt = new Date(cursor.syncedAt)
+  return {
+    AND: [
+      baseWhere,
+      {
+        OR: [
+          { reviewTime: { lt: cursorReviewTime } },
+          {
+            reviewTime: cursorReviewTime,
+            syncedAt: { lt: cursorSyncedAt },
+          },
+          {
+            reviewTime: cursorReviewTime,
+            syncedAt: cursorSyncedAt,
+            id: { lt: cursor.id },
+          },
+        ],
+      },
+    ],
+  }
+}
+
 export async function queryGoodReviews(params?: {
   shop?: string
   limit?: number
+  cursor?: string
+  days?: number
+  startDate?: string
+  endDate?: string
 }): Promise<GoodReviewPagePayload> {
   const shopKey = params?.shop?.trim()
-  const limit = Math.min(Math.max(params?.limit ?? 200, 1), 500)
+  const limit = Math.min(Math.max(params?.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT)
+  const { rangeStart, rangeEnd } = resolveReviewRange({
+    days: params?.days,
+    startDate: params?.startDate,
+    endDate: params?.endDate,
+  })
+  const filteredWhere = buildFilteredWhere({ shopKey, rangeStart, rangeEnd })
+  const decodedCursor = params?.cursor?.trim()
+    ? decodeGoodReviewCursor(params.cursor.trim())
+    : null
+  const pageWhere =
+    decodedCursor != null ? buildCursorWhere(decodedCursor, filteredWhere) : filteredWhere
 
-  const reviewWhere = shopKey ? { shopKey } : undefined
+  const reviewWhereAll = shopKey ? { shopKey } : undefined
 
-  const [lastSyncedAt, snapshotRows, reviewRows, totalReviewCount] = await Promise.all([
-    getGoodReviewLastSyncedAt(),
-    prisma.goodReviewShopSnapshot.findMany({ orderBy: { shopKey: 'asc' } }),
-    prisma.goodReview.findMany({
-      where: reviewWhere,
-      orderBy: [{ reviewTime: 'desc' }, { syncedAt: 'desc' }],
-      take: limit,
-    }),
-    prisma.goodReview.count({ where: reviewWhere }),
-  ])
+  const [lastSyncedAt, snapshotRows, reviewRows, totalReviewCount, filteredReviewCount] =
+    await Promise.all([
+      getGoodReviewLastSyncedAt(),
+      prisma.goodReviewShopSnapshot.findMany({ orderBy: { shopKey: 'asc' } }),
+      prisma.goodReview.findMany({
+        where: pageWhere,
+        orderBy: [{ reviewTime: 'desc' }, { syncedAt: 'desc' }, { id: 'desc' }],
+        take: limit + 1,
+      }),
+      prisma.goodReview.count({ where: reviewWhereAll }),
+      prisma.goodReview.count({ where: filteredWhere }),
+    ])
+
+  const hasMore = reviewRows.length > limit
+  const pageRows = hasMore ? reviewRows.slice(0, limit) : reviewRows
+  const lastRow = pageRows[pageRows.length - 1]
+  const nextCursor =
+    hasMore && lastRow?.reviewTime
+      ? encodeGoodReviewCursor({
+          reviewTime: lastRow.reviewTime.toISOString(),
+          syncedAt: lastRow.syncedAt.toISOString(),
+          id: lastRow.id,
+        })
+      : null
 
   const snapshotByKey = new Map(snapshotRows.map((row) => [row.shopKey, row]))
   const shops: GoodReviewShopView[] = GOOD_REVIEW_SHOPS.map((def) => {
@@ -154,8 +270,13 @@ export async function queryGoodReviews(params?: {
   return {
     lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
     shops,
-    reviews: reviewRows.map(rowToReviewView),
+    reviews: pageRows.map(rowToReviewView),
     totalReviewCount,
-    returnedReviewCount: reviewRows.length,
+    returnedReviewCount: pageRows.length,
+    filteredReviewCount,
+    nextCursor,
+    hasMore,
+    rangeStart: rangeStart.toISOString(),
+    rangeEnd: rangeEnd.toISOString(),
   }
 }

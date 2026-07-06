@@ -6,7 +6,7 @@ import {
   type GoodReviewItemView,
 } from '../../lib/good-reviews'
 import { GoodReviewOrderRow } from './GoodReviewOrderRow'
-import { GoodReviewImage } from './GoodReviewImage'
+import { GoodReviewImage, buildGoodReviewImageProxyUrl } from './GoodReviewImage'
 
 interface Props {
   open: boolean
@@ -70,7 +70,7 @@ export const GoodReviewDetailDrawer: React.FC<Props> = ({
                 rawUrl={url}
                 alt="买家晒图"
                 className="h-24 w-24 rounded-xl object-cover"
-                onClick={() => window.open(`/api/good-reviews/image-proxy?url=${encodeURIComponent(url)}`, '_blank')}
+                onClick={() => window.open(buildGoodReviewImageProxyUrl(url), '_blank', 'noopener,noreferrer')}
               />
             ))}
           </div>

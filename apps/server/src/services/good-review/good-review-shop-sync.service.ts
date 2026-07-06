@@ -21,6 +21,7 @@ function formatSettledError(result: PromiseRejectedResult): string {
 
 export async function syncGoodReviewsForShop(
   shop: GoodReviewShopDefinition,
+  options?: { days?: number },
 ): Promise<GoodReviewSyncShopResult> {
   const syncedAt = new Date()
   const partialErrors: string[] = []
@@ -68,7 +69,7 @@ export async function syncGoodReviewsForShop(
   }
   let managerError: string | undefined
   try {
-    reviewPayload = await fetchAllGoodReviews(shop)
+    reviewPayload = await fetchAllGoodReviews(shop, { days: options?.days })
   } catch (err) {
     managerError = err instanceof Error ? err.message : String(err)
     partialErrors.push(`好评列表: ${managerError}`)

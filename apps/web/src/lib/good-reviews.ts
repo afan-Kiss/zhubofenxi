@@ -46,6 +46,11 @@ export interface GoodReviewPagePayload {
   reviews: GoodReviewItemView[]
   totalReviewCount: number
   returnedReviewCount?: number
+  filteredReviewCount?: number
+  nextCursor?: string | null
+  hasMore?: boolean
+  rangeStart?: string
+  rangeEnd?: string
 }
 
 export interface GoodReviewSyncShopResult {
@@ -77,6 +82,24 @@ export interface GoodReviewSyncResult {
   successShopCount: number
   failedShopCount: number
   shops: GoodReviewSyncShopResult[]
+}
+
+export const GOOD_REVIEWS_DEFAULT_DAYS = 2
+export const GOOD_REVIEWS_PAGE_LIMIT = 30
+export const GOOD_REVIEWS_MAX_LIMIT = 50
+
+export function buildGoodReviewsListUrl(params: {
+  shop: string
+  limit?: number
+  days?: number
+  cursor?: string | null
+}): string {
+  const q = new URLSearchParams()
+  q.set('shop', params.shop)
+  q.set('days', String(params.days ?? GOOD_REVIEWS_DEFAULT_DAYS))
+  q.set('limit', String(params.limit ?? GOOD_REVIEWS_PAGE_LIMIT))
+  if (params.cursor) q.set('cursor', params.cursor)
+  return `/api/good-reviews?${q.toString()}`
 }
 
 export function formatGoodReviewSyncMessage(result: GoodReviewSyncResult): {
@@ -120,7 +143,7 @@ export function formatGoodReviewSyncMessage(result: GoodReviewSyncResult): {
   }
   return {
     tone: 'error',
-    text: '同步失败：四个店铺都没有同步成功，请检查 Cookie 或接口状态',
+    text: '同步失败：店铺都没有同步成功，请检查 Cookie 或接口状态',
   }
 }
 
@@ -149,5 +172,15 @@ export function buildGoodReviewArkOrderDetailUrl(orderId: string, shopKey: strin
 }
 
 export function openGoodReviewArkOrderDetail(orderId: string, shopKey: string): void {
-  window.open(buildGoodReviewArkOrderDetailUrl(orderId, shopKey), '_blank', 'noopener,noreferrer')
+  const url = buildGoodReviewArkOrderDetailUrl(orderId, shopKey)
+  const win = window.open('about:blank', '_blank', 'noopener,noreferrer')
+  if (win) {
+    try {
+      win.location.href = url
+    } catch {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    }
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
 }

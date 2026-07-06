@@ -66,8 +66,25 @@ goodReviewsRouter.get('/', async (req, res, next) => {
       sendFail(res, '无效的店铺参数')
       return
     }
-    const limit = Number(req.query.limit ?? 200)
-    const data = await queryGoodReviews({ shop: shop || undefined, limit })
+    const limitRaw = req.query.limit
+    const limit =
+      limitRaw != null && String(limitRaw).trim() !== ''
+        ? Number(limitRaw)
+        : undefined
+    const daysRaw = req.query.days
+    const days =
+      daysRaw != null && String(daysRaw).trim() !== '' ? Number(daysRaw) : undefined
+    const cursor = String(req.query.cursor ?? '').trim() || undefined
+    const startDate = String(req.query.startDate ?? '').trim() || undefined
+    const endDate = String(req.query.endDate ?? '').trim() || undefined
+    const data = await queryGoodReviews({
+      shop: shop || undefined,
+      limit,
+      cursor,
+      days,
+      startDate,
+      endDate,
+    })
     sendOk(res, data)
   } catch (err) {
     next(err)
@@ -76,13 +93,14 @@ goodReviewsRouter.get('/', async (req, res, next) => {
 
 goodReviewsRouter.post('/sync', async (req, res, next) => {
   try {
-    const body = (req.body ?? {}) as { shop?: string }
+    const body = (req.body ?? {}) as { shop?: string; days?: number }
     const shop = String(body.shop ?? 'all').trim() || 'all'
     if (shop !== 'all' && !resolveGoodReviewShopKey(shop)) {
       sendFail(res, '无效的店铺参数')
       return
     }
-    const result = await syncGoodReviews({ shop })
+    const days = body.days != null ? Number(body.days) : 2
+    const result = await syncGoodReviews({ shop, days })
     sendOk(res, result)
   } catch (err) {
     next(err)
@@ -139,15 +157,29 @@ goodReviewsRouter.get('/ark-order-detail', async (req, res, next) => {
     }
 
     if (!result.finalOpenUrl) {
-      const shopKey = resolveGoodReviewShopKey(shop)!
+      const shopKey = resolveGoodReviewShopKey(shop)
       res
         .status(400)
         .setHeader('Content-Type', 'text/html; charset=utf-8')
         .send(
           htmlGoodReviewArkOrderFallbackPage({
             serviceUrl: result.serviceUrl,
-            shopName: getGoodReviewShopName(shopKey),
+            shopName: shopKey ? getGoodReviewShopName(shopKey) : shop || '未知店铺',
             message: result.error || '无法打开订单详情',
+          }),
+        )
+      return
+    }
+
+    if (result.fallbackToBaseUrl && !result.hasTicket) {
+      res
+        .status(200)
+        .setHeader('Content-Type', 'text/html; charset=utf-8')
+        .send(
+          htmlGoodReviewArkOrderFallbackPage({
+            serviceUrl: result.finalOpenUrl,
+            shopName: result.shopName,
+            message: '未能换到 ticket，已回退基础详情链接',
           }),
         )
       return

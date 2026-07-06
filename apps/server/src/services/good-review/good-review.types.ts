@@ -124,12 +124,24 @@ export interface GoodReviewItemView {
   syncedAt: string
 }
 
+export interface GoodReviewCursorPayload {
+  reviewTime: string
+  syncedAt: string
+  id: string
+}
+
 export interface GoodReviewPagePayload {
   lastSyncedAt: string | null
   shops: GoodReviewShopView[]
   reviews: GoodReviewItemView[]
-  /** 数据库真实评价总数（不受 limit 影响） */
+  /** 数据库真实评价总数（不受 limit / 日期过滤影响） */
   totalReviewCount: number
   /** 本次接口返回的评价条数 */
   returnedReviewCount: number
+  /** 当前查询条件下（如最近两天）的评价总数 */
+  filteredReviewCount: number
+  nextCursor: string | null
+  hasMore: boolean
+  rangeStart: string
+  rangeEnd: string
 }

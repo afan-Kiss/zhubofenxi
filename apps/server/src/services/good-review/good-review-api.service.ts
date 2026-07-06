@@ -120,7 +120,10 @@ export async function fetchReviewManagerPage(
   }
 }
 
-export async function fetchAllGoodReviews(shop: GoodReviewShopDefinition): Promise<{
+export async function fetchAllGoodReviews(
+  shop: GoodReviewShopDefinition,
+  options?: { days?: number },
+): Promise<{
   reviews: NormalizedGoodReview[]
   totalReviewCount: number | null
   fetchedReviewCount: number
@@ -137,6 +140,11 @@ export async function fetchAllGoodReviews(shop: GoodReviewShopDefinition): Promi
   const maxPages = Math.ceil(maxReviews / REVIEW_PAGE_SIZE)
   let truncated = false
   let warning: string | undefined
+  const days = options?.days
+  const cutoff =
+    days != null && days > 0
+      ? new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+      : null
 
   for (let page = 1; page <= maxPages; page++) {
     const pageResult = await fetchReviewManagerPage(shop, page)
@@ -144,7 +152,23 @@ export async function fetchAllGoodReviews(shop: GoodReviewShopDefinition): Promi
     if (total == null && pageResult.total != null) total = pageResult.total
     if (pageResult.items.length === 0) break
 
+    let pageHasInRange = false
+    let pageAllTimedBeforeCutoff = true
+
     for (const item of pageResult.items) {
+      if (cutoff) {
+        if (item.reviewTime) {
+          if (item.reviewTime >= cutoff) {
+            pageHasInRange = true
+            pageAllTimedBeforeCutoff = false
+          } else {
+            continue
+          }
+        } else {
+          continue
+        }
+      }
+
       if (seen.has(item.dedupeKey)) continue
       seen.add(item.dedupeKey)
       all.push(item)
@@ -156,6 +180,17 @@ export async function fetchAllGoodReviews(shop: GoodReviewShopDefinition): Promi
     }
 
     if (truncated) break
+
+    if (cutoff && pageResult.items.length > 0) {
+      const timed = pageResult.items.filter((i) => i.reviewTime instanceof Date)
+      if (timed.length > 0 && timed.every((i) => i.reviewTime! < cutoff)) {
+        break
+      }
+      if (!pageHasInRange && pageAllTimedBeforeCutoff && timed.length === 0 && page > 3) {
+        break
+      }
+    }
+
     if (pageResult.items.length < REVIEW_PAGE_SIZE) break
     if (total != null && all.length >= total) break
     if (page >= maxPages && (total == null || all.length < total)) {
@@ -165,7 +200,7 @@ export async function fetchAllGoodReviews(shop: GoodReviewShopDefinition): Promi
     }
   }
 
-  if (!truncated && total != null && all.length < total) {
+  if (!truncated && !cutoff && total != null && all.length < total) {
     truncated = true
     warning = `已拉取 ${all.length} 条，平台显示共 ${total} 条，可能未全部同步`
   }

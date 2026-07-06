@@ -68,6 +68,7 @@ export const GoodReviewOrderRow: React.FC<Props> = ({ orderId, shopKey, compact 
       <button
         type="button"
         data-testid="good-reviews-ark-order-detail"
+        title="打开千帆订单详情"
         onClick={() => openGoodReviewArkOrderDetail(trimmed, shopKey)}
         className="inline-flex items-center gap-1 rounded-full border border-rose-100 bg-rose-50 px-2 py-0.5 text-[11px] font-medium text-rose-700 hover:bg-rose-100"
       >

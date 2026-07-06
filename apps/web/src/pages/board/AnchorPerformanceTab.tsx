@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CalendarDays, ChevronDown, Package, Percent, TrendingUp, Wallet, type LucideIcon } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
@@ -13,7 +13,7 @@ import { AnchorPocketSummaryPanel } from '../../components/board/AnchorPocketSum
 import { AnchorAuditExportPanel } from '../../components/board/AnchorAuditExportPanel'
 import { MetricStatLabel } from '../../components/board/MetricStatLabel'
 import { BusinessSyncProgressCard } from '../../components/board/BusinessSyncProgressCard'
-import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
+import { resolveProgressCardVariant, isBusinessSyncActive } from '../../lib/business-sync-ui'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
 import {
   anchorRowRate,
@@ -191,6 +191,47 @@ export const AnchorPerformanceTab: React.FC = () => {
   const [shipmentPhotos, setShipmentPhotos] = useState<DailyReportImageItem[]>([])
   const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
   const [reportPhotosStale, setReportPhotosStale] = useState(false)
+  const [realtimeSyncHint, setRealtimeSyncHint] = useState<string | null>(null)
+  const autoSyncCooldownRef = useRef<Map<string, number>>(new Map())
+  const AUTO_SYNC_COOLDOWN_MS = 3 * 60 * 1000
+
+  useEffect(() => {
+    if (preset !== 'today' && preset !== 'yesterday') {
+      setRealtimeSyncHint(null)
+      return
+    }
+
+    const rangeKey = `${preset}:${startDate}:${endDate}`
+    const now = Date.now()
+    const lastTriggered = autoSyncCooldownRef.current.get(rangeKey) ?? 0
+    if (now - lastTriggered < AUTO_SYNC_COOLDOWN_MS) return
+
+    const syncing = isBusinessSyncActive(syncMeta?.businessSync?.status)
+    if (syncing || activeSyncJob || triggerSyncBusy) return
+
+    autoSyncCooldownRef.current.set(rangeKey, now)
+    setRealtimeSyncHint(
+      preset === 'today'
+        ? '正在更新今日数据，完成后会自动刷新。'
+        : '正在更新昨日数据，完成后会自动刷新。',
+    )
+    void triggerBusinessSync()
+  }, [
+    preset,
+    startDate,
+    endDate,
+    syncMeta?.businessSync?.status,
+    activeSyncJob,
+    triggerSyncBusy,
+    triggerBusinessSync,
+  ])
+
+  useEffect(() => {
+    const syncing = isBusinessSyncActive(syncMeta?.businessSync?.status)
+    if (!syncing && !activeSyncJob && !triggerSyncBusy) {
+      setRealtimeSyncHint(null)
+    }
+  }, [syncMeta?.businessSync?.status, activeSyncJob, triggerSyncBusy])
 
   const handleShipmentImagesChange = useCallback((images: DailyReportImageItem[]) => {
     setShipmentPhotos(images)
@@ -357,6 +398,9 @@ export const AnchorPerformanceTab: React.FC = () => {
           <p className="mt-0.5 text-sm text-slate-500">按归属时段汇总各主播经营表现</p>
           {!dataFreshnessLoading && freshnessLine ? (
             <p className="mt-1 text-xs text-slate-400">{freshnessLine}</p>
+          ) : null}
+          {realtimeSyncHint ? (
+            <p className="mt-1 text-xs text-rose-600">{realtimeSyncHint}</p>
           ) : null}
         </div>
         {(preset === 'today' || preset === 'yesterday') && startDate ? (

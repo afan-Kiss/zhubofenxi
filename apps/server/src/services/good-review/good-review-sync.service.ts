@@ -6,8 +6,12 @@ import { syncGoodReviewsForShop } from './good-review-shop-sync.service'
 import { repairCorruptedGoodReviewImages, touchGoodReviewSyncMeta } from './good-review-store.service'
 import type { GoodReviewSyncResult } from './good-review.types'
 
-export async function syncGoodReviews(params?: { shop?: string }): Promise<GoodReviewSyncResult> {
+export async function syncGoodReviews(params?: {
+  shop?: string
+  days?: number
+}): Promise<GoodReviewSyncResult> {
   const startedAt = new Date()
+  const syncDays = params?.days ?? 2
   const targets = listGoodReviewShopTargets(params?.shop ?? 'all')
 
   if (targets.length === 0) {
@@ -24,7 +28,9 @@ export async function syncGoodReviews(params?: { shop?: string }): Promise<GoodR
   }
 
   const settled = await Promise.all(
-    targets.map((shop: GoodReviewShopDefinition) => syncGoodReviewsForShop(shop)),
+    targets.map((shop: GoodReviewShopDefinition) =>
+      syncGoodReviewsForShop(shop, { days: syncDays }),
+    ),
   )
 
   const successShopCount = settled.filter((s) => s.success).length

@@ -13,8 +13,9 @@ import {
 import { addDaysShanghai } from '../src/utils/business-timezone'
 import {
   isNoAfterSaleText,
-  viewHasRefundAfterSaleSignal,
-} from '../src/services/business-metrics.service'
+  viewHasAfterSaleStatusSignal,
+} from '../src/services/after-sale-status-signal.service'
+import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
 config({ path: path.resolve(__dirname, '../.env') })
@@ -125,22 +126,53 @@ async function main(): Promise<void> {
   }
 
   const businessMetrics = read('server/src/services/business-metrics.service.ts')
+  const signalService = read('server/src/services/after-sale-status-signal.service.ts')
+  const operationsAfterSale = read('server/src/services/operations-after-sale-order.util.ts')
+  const validRevenue = read('server/src/services/valid-revenue-order.service.ts')
+  const metricDetail = read('server/src/services/board-metric-detail.service.ts')
   const orderMetricSets = read('server/src/services/order-metric-sets.service.ts')
   const monthlyClose = read('server/src/services/monthly-close-reconciliation.service.ts')
 
-  if (businessMetrics.includes('function isNoAfterSaleText')) {
-    ok('business-metrics 存在 isNoAfterSaleText')
+  if (signalService.includes('isNoAfterSaleText') && signalService.includes('isPositiveAfterSaleText')) {
+    ok('after-sale-status-signal 存在公共售后判断')
   } else {
-    fail('business-metrics 缺少 isNoAfterSaleText')
+    fail('after-sale-status-signal 缺少公共售后判断')
+  }
+
+  if (businessMetrics.includes('after-sale-status-signal.service')) {
+    ok('business-metrics 复用 after-sale-status-signal')
+  } else {
+    fail('business-metrics 未复用公共售后工具')
   }
 
   if (
-    !businessMetrics.includes("afterSale.includes('售后')") &&
-    businessMetrics.includes('AFTER_SALE_POSITIVE_KEYWORDS')
+    operationsAfterSale.includes('isNoAfterSaleText') &&
+    operationsAfterSale.includes('isPositiveAfterSaleText') &&
+    !operationsAfterSale.includes('/售后|退款|退货/')
   ) {
-    ok('售后正向判断不再仅靠 afterSale.includes(售后)')
+    ok('operations-after-sale 复用公共工具且无裸匹配')
   } else {
-    fail('售后正向判断仍仅用「售后」二字')
+    fail('operations-after-sale 未复用公共工具或仍裸匹配')
+  }
+
+  if (validRevenue.includes('isNoAfterSaleText')) {
+    ok('valid-revenue-order 复用 isNoAfterSaleText')
+  } else {
+    fail('valid-revenue-order 未复用 isNoAfterSaleText')
+  }
+
+  const dedupeBlock = metricDetail.slice(
+    metricDetail.indexOf('METRICS_ORDER_DEDUPE'),
+    metricDetail.indexOf('METRICS_ORDER_DEDUPE') + 400,
+  )
+  if (
+    dedupeBlock.includes("'returnAmount'") &&
+    dedupeBlock.includes("'returnCount'") &&
+    dedupeBlock.includes("'returnRate'")
+  ) {
+    ok('METRICS_ORDER_DEDUPE 含退款类指标')
+  } else {
+    fail('METRICS_ORDER_DEDUPE 未含 returnAmount/returnCount/returnRate')
   }
 
   if (orderMetricSets.includes('afterSaleRelatedOrderCount') && orderMetricSets.includes('dedupeOrderCountByOrderNo')) {
@@ -254,8 +286,8 @@ async function main(): Promise<void> {
   }
 
   if (
-    !businessMetrics.includes("negWords.some((w) => raw.includes(w)) && raw.includes('售后')") &&
-    businessMetrics.includes('NO_AFTER_SALE_PHRASES')
+    !signalService.includes("negWords.some((w) => raw.includes(w)) && raw.includes('售后')") &&
+    signalService.includes('NO_AFTER_SALE_PHRASES')
   ) {
     ok('isNoAfterSaleText 使用明确负例短语，无宽泛 未+售后 规则')
   } else {
@@ -281,11 +313,23 @@ async function main(): Promise<void> {
       fail(`isNoAfterSaleText 未识别「${text}」`)
     }
     const view = { afterSaleStatusText: text } as AnalyzedOrderView
-    if (!viewHasRefundAfterSaleSignal(view)) {
+    if (!viewHasAfterSaleStatusSignal(view)) {
       ok(`「${text}」不算售后信号`)
     } else {
       fail(`「${text}」被误判为售后信号`)
     }
+  }
+
+  const operationsNegatives = ['暂无售后', '未申请售后', '未发起售后', '售后状态：无']
+  for (const text of operationsNegatives) {
+    const view = { afterSaleStatusText: text } as AnalyzedOrderView
+    if (!isActualAfterSaleOrder(view)) ok(`运营「${text}」不算售后`)
+    else fail(`运营「${text}」被误判为售后`)
+  }
+  for (const text of ['售后完成未退款', '售后申请未处理', '退款成功', '退货退款']) {
+    const view = { afterSaleStatusText: text } as AnalyzedOrderView
+    if (isActualAfterSaleOrder(view)) ok(`运营「${text}」算售后`)
+    else fail(`运营「${text}」未识别为售后`)
   }
 
   const positiveTexts = [
@@ -306,7 +350,7 @@ async function main(): Promise<void> {
       fail(`isNoAfterSaleText 误伤「${text}」`)
     }
     const view = { afterSaleStatusText: text } as AnalyzedOrderView
-    if (viewHasRefundAfterSaleSignal(view)) {
+    if (viewHasAfterSaleStatusSignal(view)) {
       ok(`「${text}」算售后信号`)
     } else {
       fail(`「${text}」未识别为售后信号`)

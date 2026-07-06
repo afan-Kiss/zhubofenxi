@@ -1,5 +1,6 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { centToYuan } from '../utils/money'
+import { isNoAfterSaleText, isPositiveAfterSaleText } from './after-sale-status-signal.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 
 const VALID_ORDER_STATUS_RE = /已完成|已签收/
@@ -8,9 +9,10 @@ const VALID_ORDER_STATUS_RE = /已完成|已签收/
 const AFTER_SALE_CANCEL_RE =
   /售后取消|买家取消售后|客户取消售后|售后已取消/
 
-/** 无售后 / 未申请售后 */
-const EMPTY_AFTER_SALE_RE =
-  /^(?:无售后|未售后|未申请售后|无退款)?$|^-$|^—$/
+/** 无售后 / 未申请售后 — 与 isNoAfterSaleText 保持一致 */
+function isEmptyAfterSaleStatus(afterSaleStatus: string): boolean {
+  return isNoAfterSaleText(afterSaleStatus)
+}
 
 /** 售后处理中 / 已退款等：排除有效成交（售后状态优先于订单状态） */
 const EXCLUDED_AFTER_SALE_RE =
@@ -129,7 +131,7 @@ function explainAfterSaleStatus(
     return { valid: true, reason: '客户取消售后，计入有效成交' }
   }
 
-  if (EMPTY_AFTER_SALE_RE.test(afterSaleStatus)) {
+  if (isEmptyAfterSaleStatus(afterSaleStatus)) {
     return explainRefundBlocked(refundCent, view)
   }
 
@@ -181,7 +183,7 @@ function explainRefundStatus(
     return { valid: true, reason: '售后关闭且无退款，计入有效成交' }
   }
 
-  if (/退款|退货|售后/.test(refundStatus)) {
+  if (isPositiveAfterSaleText(refundStatus)) {
     recordUnknownAfterSale(view, refundStatus)
     return { valid: false, reason: `未知售后状态（${refundStatus}），暂不计入` }
   }

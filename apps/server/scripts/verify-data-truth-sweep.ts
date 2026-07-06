@@ -22,8 +22,10 @@ import { addDaysShanghai, formatDateKeyShanghai } from '../src/utils/business-ti
 import type { BoardDrillOrderRow } from '../src/services/order-row-mapper.service'
 import {
   isNoAfterSaleText,
-  viewHasRefundAfterSaleSignal,
-} from '../src/services/business-metrics.service'
+  viewHasAfterSaleStatusSignal,
+} from '../src/services/after-sale-status-signal.service'
+import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
+import { explainValidRevenueOrder } from '../src/services/valid-revenue-order.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
 config({ path: path.resolve(__dirname, '../.env') })
@@ -167,6 +169,34 @@ async function checkOverviewSignedDrawers(): Promise<void> {
   const dupesSignRate = countDuplicateOrderNos(signRateBundle.rows)
   if (dupesSignRate.length === 0) ok('signRate 抽屉无重复 P 单')
   else fail(`signRate 抽屉重复 P 单: ${dupesSignRate.slice(0, 5).join(', ')}`)
+
+  const cardReturnCount = num(summary.returnOrderCount ?? summary.refundOrderCount)
+  const returnCountBundle = await fetchMetricDetailBundle({
+    metric: 'returnCount',
+    startDate: START_DATE,
+    endDate: END_DATE,
+  })
+  if (returnCountBundle.summary.matchedOrders === cardReturnCount) {
+    ok(
+      `returnCount matchedOrders ${returnCountBundle.summary.matchedOrders} === 卡片 refundOrderCount`,
+    )
+  } else {
+    fail(
+      `returnCount matchedOrders ${returnCountBundle.summary.matchedOrders} !== 卡片 ${cardReturnCount}`,
+    )
+  }
+  const dupesReturnCount = countDuplicateOrderNos(returnCountBundle.rows)
+  if (dupesReturnCount.length === 0) ok('returnCount 抽屉无重复 P 单')
+  else fail(`returnCount 抽屉重复 P 单: ${dupesReturnCount.slice(0, 5).join(', ')}`)
+
+  const returnAmountBundle = await fetchMetricDetailBundle({
+    metric: 'returnAmount',
+    startDate: START_DATE,
+    endDate: END_DATE,
+  })
+  const dupesReturnAmount = countDuplicateOrderNos(returnAmountBundle.rows)
+  if (dupesReturnAmount.length === 0) ok('returnAmount 抽屉无重复 P 单')
+  else fail(`returnAmount 抽屉重复 P 单: ${dupesReturnAmount.slice(0, 5).join(', ')}`)
 
   for (const metric of SIGNED_METRICS) {
     const src = fs.readFileSync(
@@ -629,22 +659,71 @@ function readRepo(rel: string): string {
 
 function checkAfterSaleAndHealthTailStatic(): void {
   console.log('\n=== 0. 售后信号与数据健康尾巴（静态） ===')
+  const signalService = readRepo('server/src/services/after-sale-status-signal.service.ts')
   const businessMetrics = readRepo('server/src/services/business-metrics.service.ts')
+  const operationsAfterSale = readRepo('server/src/services/operations-after-sale-order.util.ts')
+  const validRevenue = readRepo('server/src/services/valid-revenue-order.service.ts')
+  const metricDetail = readRepo('server/src/services/board-metric-detail.service.ts')
   const orderMetricSets = readRepo('server/src/services/order-metric-sets.service.ts')
   const rollingStore = readRepo('server/src/services/rolling-data-health-close-store.service.ts')
   const rollingService = readRepo('server/src/services/rolling-data-health-close.service.ts')
   const monthlyClose = readRepo('server/src/services/monthly-close-reconciliation.service.ts')
   const panel = readRepo('web/src/components/board/DataHealthPanel.tsx')
 
-  if (businessMetrics.includes('isNoAfterSaleText')) {
-    ok('business-metrics 含 isNoAfterSaleText')
+  if (signalService.includes('isNoAfterSaleText') && signalService.includes('isPositiveAfterSaleText')) {
+    ok('after-sale-status-signal 含 isNoAfterSaleText / isPositiveAfterSaleText')
   } else {
-    fail('business-metrics 缺少 isNoAfterSaleText')
+    fail('after-sale-status-signal 缺少公共售后判断')
+  }
+
+  if (businessMetrics.includes('after-sale-status-signal.service')) {
+    ok('business-metrics 复用 after-sale-status-signal')
+  } else {
+    fail('business-metrics 未复用公共售后工具')
   }
 
   if (
-    !businessMetrics.includes("afterSale.includes('售后')") &&
-    businessMetrics.includes('AFTER_SALE_POSITIVE_KEYWORDS')
+    operationsAfterSale.includes('isNoAfterSaleText') &&
+    operationsAfterSale.includes('isPositiveAfterSaleText') &&
+    !operationsAfterSale.includes('/售后|退款|退货/')
+  ) {
+    ok('operations-after-sale 复用公共工具且无裸 /售后|退款|退货/')
+  } else {
+    fail('operations-after-sale 未复用公共工具或仍裸匹配售后文案')
+  }
+
+  if (validRevenue.includes('isNoAfterSaleText')) {
+    ok('valid-revenue-order 复用 isNoAfterSaleText')
+  } else {
+    fail('valid-revenue-order 未复用 isNoAfterSaleText')
+  }
+
+  if (
+    metricDetail.includes("'returnAmount'") &&
+    metricDetail.includes("'returnCount'") &&
+    metricDetail.includes("'returnRate'") &&
+    metricDetail.includes('METRICS_ORDER_DEDUPE')
+  ) {
+    const dedupeBlock = metricDetail.slice(
+      metricDetail.indexOf('METRICS_ORDER_DEDUPE'),
+      metricDetail.indexOf('METRICS_ORDER_DEDUPE') + 400,
+    )
+    if (
+      dedupeBlock.includes("'returnAmount'") &&
+      dedupeBlock.includes("'returnCount'") &&
+      dedupeBlock.includes("'returnRate'")
+    ) {
+      ok('METRICS_ORDER_DEDUPE 含 returnAmount / returnCount / returnRate')
+    } else {
+      fail('METRICS_ORDER_DEDUPE 未含退款类指标')
+    }
+  } else {
+    fail('board-metric-detail 缺少退款类去重配置')
+  }
+
+  if (
+    !signalService.includes("afterSale.includes('售后')") &&
+    signalService.includes('POSITIVE_AFTER_SALE_KEYWORDS')
   ) {
     ok('售后正向判断不依赖裸「售后」二字')
   } else {
@@ -679,8 +758,8 @@ function checkAfterSaleAndHealthTailStatic(): void {
   }
 
   if (
-    !businessMetrics.includes("negWords.some((w) => raw.includes(w)) && raw.includes('售后')") &&
-    businessMetrics.includes('NO_AFTER_SALE_PHRASES')
+    !signalService.includes("negWords.some((w) => raw.includes(w)) && raw.includes('售后')") &&
+    signalService.includes('NO_AFTER_SALE_PHRASES')
   ) {
     ok('isNoAfterSaleText 使用明确负例短语')
   } else {
@@ -727,8 +806,62 @@ function checkNoAfterSaleTextRuntime(): void {
     if (isNoAfterSaleText(text)) fail(`正例「${text}」被误判为无售后`)
     else ok(`正例「${text}」未被误判为无售后`)
     const view = { afterSaleStatusText: text } as AnalyzedOrderView
-    if (viewHasRefundAfterSaleSignal(view)) ok(`正例「${text}」算售后信号`)
+    if (viewHasAfterSaleStatusSignal(view)) ok(`正例「${text}」算售后信号`)
     else fail(`正例「${text}」未识别为售后信号`)
+  }
+}
+
+function mockAfterSaleView(afterSaleStatusText: string): AnalyzedOrderView {
+  return { afterSaleStatusText } as AnalyzedOrderView
+}
+
+function mockValidRevenueView(afterSaleStatusText: string): AnalyzedOrderView {
+  return {
+    includedInGmv: true,
+    effectiveGmvCent: 10000,
+    orderStatusText: '已完成',
+    afterSaleStatusText,
+    productRefundAmountCent: 0,
+    returnAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+  } as AnalyzedOrderView
+}
+
+function checkOperationsAfterSaleRuntime(): void {
+  console.log('\n=== 0c. 运营报表售后运行时断言 ===')
+  const negatives = ['暂无售后', '未申请售后', '未发起售后', '售后状态：无']
+  for (const text of negatives) {
+    if (!isActualAfterSaleOrder(mockAfterSaleView(text))) ok(`运营负例「${text}」不算售后`)
+    else fail(`运营负例「${text}」被误判为售后`)
+  }
+  const positives = ['售后完成未退款', '售后申请未处理', '退款成功', '退货退款']
+  for (const text of positives) {
+    if (isActualAfterSaleOrder(mockAfterSaleView(text))) ok(`运营正例「${text}」算售后`)
+    else fail(`运营正例「${text}」未识别为售后`)
+  }
+}
+
+function checkValidRevenueNoAfterSaleRuntime(): void {
+  console.log('\n=== 0d. 有效成交无售后运行时断言 ===')
+  const noAfterSaleTexts = [
+    '暂无售后',
+    '未发起售后',
+    '未产生售后',
+    '没有售后',
+    '售后状态：无',
+    '无退款',
+    '无退货',
+  ]
+  for (const text of noAfterSaleTexts) {
+    const explain = explainValidRevenueOrder(mockValidRevenueView(text))
+    if (explain.valid) ok(`有效成交负例「${text}」可计入（无退款时）`)
+    else fail(`有效成交负例「${text}」被误踢：${explain.reason}`)
+  }
+  const blockedTexts = ['退款成功', '售后处理中', '退货退款', '仅退款', '已退款']
+  for (const text of blockedTexts) {
+    const explain = explainValidRevenueOrder(mockValidRevenueView(text))
+    if (!explain.valid) ok(`有效成交正例「${text}」正确排除`)
+    else fail(`有效成交正例「${text}」未被排除`)
   }
 }
 
@@ -738,6 +871,8 @@ async function main(): Promise<void> {
 
   checkAfterSaleAndHealthTailStatic()
   checkNoAfterSaleTextRuntime()
+  checkOperationsAfterSaleRuntime()
+  checkValidRevenueNoAfterSaleRuntime()
 
   await bootstrapQualityBadCaseCache()
   await checkOverviewSignedDrawers()

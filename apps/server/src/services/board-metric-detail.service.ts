@@ -172,6 +172,9 @@ const METRICS_ORDER_DEDUPE: BoardMetricKey[] = [
   'signedCount',
   'signRate',
   'effectiveGmv',
+  'returnAmount',
+  'returnCount',
+  'returnRate',
   'qualityReturnCount',
   'qualityReturnRate',
 ]
@@ -367,6 +370,13 @@ export async function buildBoardMetricDetail(params: {
         : totals.signedOrderCount
     }
     if (params.metric === 'actualSignedAmount') return totals.signedOrderCount
+    if (
+      params.metric === 'returnAmount' ||
+      params.metric === 'returnCount' ||
+      params.metric === 'returnRate'
+    ) {
+      return totals.refundOrderCount
+    }
     if (needsMetricOrderDedupe(params.metric)) return sourceViews.length
     return sourceViews.length
   })()

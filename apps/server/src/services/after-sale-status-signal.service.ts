@@ -1,0 +1,69 @@
+import type { AnalyzedOrderView } from '../types/analysis'
+
+const NO_AFTER_SALE_PHRASES = [
+  '无',
+  '无售后',
+  '暂无售后',
+  '未申请售后',
+  '未发起售后',
+  '未产生售后',
+  '没有售后',
+  '售后无',
+  '售后状态无',
+  '售后状态：无',
+  '售后状态:无',
+  '无退款',
+  '无退货',
+] as const
+
+const POSITIVE_AFTER_SALE_KEYWORDS = [
+  '退款',
+  '退货',
+  '仅退',
+  '售后中',
+  '售后完成',
+  '售后关闭',
+  '售后申请',
+  '售后处理中',
+  '退款成功',
+  '退款中',
+  '退货退款',
+  '仅退款',
+  '已退款',
+  '申请退款',
+] as const
+
+/** 售后状态文案表示「无售后/未申请」时返回 true（不算售后信号） */
+export function isNoAfterSaleText(text: string): boolean {
+  const raw = text.trim()
+  if (!raw || raw === '—' || raw === '-') return true
+  const normalized = raw.replace(/\s+/g, '')
+  return NO_AFTER_SALE_PHRASES.some((phrase) => {
+    const phraseNorm = phrase.replace(/\s+/g, '')
+    return normalized === phraseNorm || raw === phrase
+  })
+}
+
+/** 售后状态文案表示真实售后/退款信号时返回 true */
+export function isPositiveAfterSaleText(text: string): boolean {
+  const raw = text.trim()
+  if (!raw || isNoAfterSaleText(raw)) return false
+  return POSITIVE_AFTER_SALE_KEYWORDS.some((keyword) => raw.includes(keyword))
+}
+
+export function resolveAfterSaleStatusCombinedText(view: AnalyzedOrderView): string {
+  return [view.afterSaleStatusText, view.afterSaleStatusLabel, view.afterSaleDisplayType]
+    .filter(Boolean)
+    .join(' ')
+}
+
+/** 视图是否携带售后/退款状态信号（不含金额强信号） */
+export function viewHasAfterSaleStatusSignal(view: AnalyzedOrderView): boolean {
+  if (view.isReturnRefund || view.isRefundOnly || view.isRealProductRefund) return true
+  if (view.afterSaleClosedNoRefund) return true
+  if (view.isQualityReturn) return true
+  const afterSale = resolveAfterSaleStatusCombinedText(view)
+  if (!afterSale) return false
+  if (isNoAfterSaleText(afterSale)) return false
+  return isPositiveAfterSaleText(afterSale)
+}

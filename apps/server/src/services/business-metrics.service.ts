@@ -12,6 +12,10 @@ import { aggregateRefundAmountCentByOrderNo } from './order-refund-metrics.servi
 import { dedupeOrderCountByOrderNo } from './order-master-match.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { sumValidRevenueFromViews } from './valid-revenue-order.service'
+import {
+  isNoAfterSaleText,
+  viewHasAfterSaleStatusSignal,
+} from './after-sale-status-signal.service'
 /** 全站经营指标统一计算（看板 / 排行 / 钻取 / 导出共用） */
 
 export const BUSINESS_METRICS_VERSION = 'v11-valid-revenue-pool-2026-06'
@@ -111,60 +115,10 @@ function viewIsCancelled(v: AnalyzedOrderView): boolean {
   return ['已取消', '取消', '交易关闭', '已关闭'].some((k) => text.includes(k))
 }
 
-const AFTER_SALE_POSITIVE_KEYWORDS = [
-  '退款',
-  '退货',
-  '仅退',
-  '售后中',
-  '售后完成',
-  '售后关闭',
-  '售后申请',
-  '售后处理中',
-  '退款成功',
-  '退款中',
-  '退货退款',
-  '仅退款',
-  '已退款',
-  '申请退款',
-] as const
-
-const NO_AFTER_SALE_PHRASES = [
-  '无',
-  '无售后',
-  '暂无售后',
-  '未申请售后',
-  '未发起售后',
-  '未产生售后',
-  '没有售后',
-  '售后无',
-  '售后状态无',
-  '售后状态：无',
-  '售后状态:无',
-  '无退款',
-  '无退货',
-] as const
-
-/** 售后状态文案表示「无售后/未申请」时返回 true（不算售后信号） */
-export function isNoAfterSaleText(text: string): boolean {
-  const raw = text.trim()
-  if (!raw || raw === '—' || raw === '-') return true
-  const normalized = raw.replace(/\s+/g, '')
-  return NO_AFTER_SALE_PHRASES.some((phrase) => {
-    const phraseNorm = phrase.replace(/\s+/g, '')
-    return normalized === phraseNorm || raw === phrase
-  })
-}
+export { isNoAfterSaleText } from './after-sale-status-signal.service'
 
 export function viewHasRefundAfterSaleSignal(v: AnalyzedOrderView): boolean {
-  if (v.isReturnRefund || v.isRefundOnly || v.isRealProductRefund) return true
-  if (v.afterSaleClosedNoRefund) return true
-  if (v.isQualityReturn) return true
-  const afterSale = [v.afterSaleStatusText, v.afterSaleStatusLabel, v.afterSaleDisplayType]
-    .filter(Boolean)
-    .join(' ')
-  if (isNoAfterSaleText(afterSale)) return false
-  if (!afterSale) return false
-  return AFTER_SALE_POSITIVE_KEYWORDS.some((k) => afterSale.includes(k))
+  return viewHasAfterSaleStatusSignal(v)
 }
 
 /** Drawer / 退款单数卡片：涉及退款、退货退款、售后关闭、已支付后取消等 */

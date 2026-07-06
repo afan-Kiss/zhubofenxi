@@ -1,4 +1,8 @@
 import type { AnalyzedOrderView } from '../types/analysis'
+import {
+  isNoAfterSaleText,
+  isPositiveAfterSaleText,
+} from './after-sale-status-signal.service'
 import { normalizeAfterSalesReason } from './after-sales-reason-normalize.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo, calcRefundRate } from './calc-refund-rate.service'
 import { viewCountsAsPaidOrder } from './business-metrics.service'
@@ -35,9 +39,25 @@ export function countOperationsRefundOrders(views: AnalyzedOrderView[]): number 
   return computeOperationsRefundMetricsFromViews(views).refundOrderCount
 }
 
-const REFUND_STATUS_RE =
-  /退款中|退款成功|退货退款|已退款|售后成功|售后中|售后完成|退货完成|退款完成/i
-const NO_AFTER_SALE_STATUS_RE = /无售后|未售后|无退款|关闭.*无退款|售后关闭/i
+function resolveRefundStatusText(view: AnalyzedOrderView): string {
+  return String(
+    (view as { refundStatusText?: string }).refundStatusText ??
+      (view as { refundStatus?: string }).refundStatus ??
+      '',
+  ).trim()
+}
+
+function resolveAfterSaleStatusText(view: AnalyzedOrderView): string {
+  return String(view.afterSaleStatusText || view.afterSaleStatusLabel || '').trim()
+}
+
+function statusTextSignalsAfterSale(text: string): boolean | null {
+  const trimmed = text.trim()
+  if (!trimmed) return null
+  if (isNoAfterSaleText(trimmed)) return false
+  if (isPositiveAfterSaleText(trimmed)) return true
+  return null
+}
 
 /** 订单是否发生实际退款/退货/售后（用于下钻过滤） */
 export function isActualAfterSaleOrder(view: AnalyzedOrderView): boolean {
@@ -50,21 +70,13 @@ export function isActualAfterSaleOrder(view: AnalyzedOrderView): boolean {
   if (view.isReturnRefund || view.isReturnRefundOrder || view.isRealProductRefund) return true
   if (view.isReturned) return true
 
-  const refundStatus = String(
-    (view as { refundStatusText?: string }).refundStatusText ??
-      (view as { refundStatus?: string }).refundStatus ??
-      '',
-  ).trim()
-  if (refundStatus && REFUND_STATUS_RE.test(refundStatus)) return true
+  const refundSignal = statusTextSignalsAfterSale(resolveRefundStatusText(view))
+  if (refundSignal === true) return true
 
-  const afterSaleStatus = String(
-    view.afterSaleStatusText || view.afterSaleStatusLabel || '',
-  ).trim()
-  if (afterSaleStatus) {
-    if (NO_AFTER_SALE_STATUS_RE.test(afterSaleStatus)) return false
-    if (REFUND_STATUS_RE.test(afterSaleStatus)) return true
-    if (/售后|退款|退货/.test(afterSaleStatus)) return true
-  }
+  const afterSaleSignal = statusTextSignalsAfterSale(resolveAfterSaleStatusText(view))
+  if (afterSaleSignal === true) return true
+  if (afterSaleSignal === false) return false
+  if (refundSignal === false) return false
 
   return false
 }

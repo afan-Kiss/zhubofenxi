@@ -35,6 +35,10 @@ function main(): void {
   const liveAccount = read('web/src/lib/live-account.ts')
   const syncMetaService = read('server/src/services/board-sync-meta.service.ts')
   const boardLiveQuery = read('web/src/lib/board-live-query.ts')
+  const signalService = read('server/src/services/after-sale-status-signal.service.ts')
+  const operationsAfterSale = read('server/src/services/operations-after-sale-order.util.ts')
+  const validRevenue = read('server/src/services/valid-revenue-order.service.ts')
+  const metricDetail = read('server/src/services/board-metric-detail.service.ts')
 
   if (overview.includes('staleMessage')) {
     ok('OverviewTab 使用 staleMessage')
@@ -218,6 +222,42 @@ function main(): void {
     }
   }
   assertNoExtraBanned(panel, 'DataHealthPanel')
+
+  if (
+    operationsAfterSale.includes('isNoAfterSaleText') &&
+    operationsAfterSale.includes('isPositiveAfterSaleText') &&
+    !operationsAfterSale.includes('/售后|退款|退货/')
+  ) {
+    ok('operations-after-sale 复用公共售后判断且无裸匹配')
+  } else {
+    fail('operations-after-sale 售后判断未统一')
+  }
+
+  if (validRevenue.includes('isNoAfterSaleText')) {
+    ok('valid-revenue-order 复用 isNoAfterSaleText')
+  } else {
+    fail('valid-revenue-order 未复用 isNoAfterSaleText')
+  }
+
+  const dedupeBlock = metricDetail.slice(
+    metricDetail.indexOf('METRICS_ORDER_DEDUPE'),
+    metricDetail.indexOf('METRICS_ORDER_DEDUPE') + 400,
+  )
+  if (
+    dedupeBlock.includes("'returnAmount'") &&
+    dedupeBlock.includes("'returnCount'") &&
+    dedupeBlock.includes("'returnRate'")
+  ) {
+    ok('退款类指标抽屉配置 P 单去重')
+  } else {
+    fail('METRICS_ORDER_DEDUPE 未含退款类指标')
+  }
+
+  if (signalService.includes('isNoAfterSaleText') && signalService.includes('viewHasAfterSaleStatusSignal')) {
+    ok('存在 after-sale-status-signal 公共模块')
+  } else {
+    fail('缺少 after-sale-status-signal 公共模块')
+  }
 
   console.log('\n=== API 字段冒烟 ===')
   void buildBoardSyncMetaForApi()

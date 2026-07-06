@@ -149,8 +149,11 @@ export const GoodReviewsPage: React.FC = () => {
   const requestSeqRef = useRef(0)
   const syncSeqRef = useRef(0)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
-  const autoSyncedShopRef = useRef<string | null>(null)
+  const loadingMoreRef = useRef(false)
+  const inFlightCursorRef = useRef<string | null>(null)
+  const autoSyncStatusByShopRef = useRef<Map<string, 'syncing' | 'synced' | 'failed'>>(new Map())
   const mountedRef = useRef(true)
+  const [autoSyncFailed, setAutoSyncFailed] = useState(false)
 
   useEffect(() => {
     mountedRef.current = true
@@ -229,7 +232,7 @@ export const GoodReviewsPage: React.FC = () => {
   )
 
   const syncCurrentShop = useCallback(
-    async (shopKey: string, opts?: { background?: boolean }) => {
+    async (shopKey: string, opts?: { background?: boolean }): Promise<boolean> => {
       const seq = ++syncSeqRef.current
       if (opts?.background) setAutoRefreshing(true)
       else setSyncing(true)
@@ -238,13 +241,22 @@ export const GoodReviewsPage: React.FC = () => {
           method: 'POST',
           body: JSON.stringify({ shop: shopKey, days: GOOD_REVIEWS_DEFAULT_DAYS }),
         })
-        if (seq !== syncSeqRef.current || !mountedRef.current) return
+        if (seq !== syncSeqRef.current || !mountedRef.current) return false
         await loadFirstPage(shopKey, { silent: true })
+        if (opts?.background) {
+          autoSyncStatusByShopRef.current.set(shopKey, 'synced')
+          setAutoSyncFailed(false)
+        }
+        return true
       } catch (err) {
-        if (seq !== syncSeqRef.current || !mountedRef.current) return
-        if (!opts?.background) {
+        if (seq !== syncSeqRef.current || !mountedRef.current) return false
+        if (opts?.background) {
+          autoSyncStatusByShopRef.current.set(shopKey, 'failed')
+          setAutoSyncFailed(true)
+        } else {
           setError(err instanceof Error ? err.message : '同步失败，请稍后重试')
         }
+        return false
       } finally {
         if (mountedRef.current) {
           if (opts?.background) setAutoRefreshing(false)
@@ -257,35 +269,43 @@ export const GoodReviewsPage: React.FC = () => {
 
   useEffect(() => {
     void (async () => {
+      setAutoSyncFailed(false)
       await loadFirstPage(activeShop)
-      if (autoSyncedShopRef.current !== activeShop) {
-        autoSyncedShopRef.current = activeShop
-        void syncCurrentShop(activeShop, { background: true })
-      }
+      const syncStatus = autoSyncStatusByShopRef.current.get(activeShop)
+      if (syncStatus === 'synced' || syncStatus === 'syncing') return
+      autoSyncStatusByShopRef.current.set(activeShop, 'syncing')
+      await syncCurrentShop(activeShop, { background: true })
     })()
   }, [activeShop, loadFirstPage, syncCurrentShop])
 
   useEffect(() => {
     const el = loadMoreRef.current
-    if (!el || !hasMore || loadingMore || initialLoading) return
+    if (!el || !hasMore || initialLoading) return
 
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((e) => e.isIntersecting)) return
-        if (!hasMore || loadingMore || !nextCursor) return
+        if (loadingMoreRef.current || !hasMore || !nextCursor) return
+        if (inFlightCursorRef.current === nextCursor) return
+
+        const cursorToLoad = nextCursor
+        loadingMoreRef.current = true
+        inFlightCursorRef.current = cursorToLoad
+        setLoadingMore(true)
+        setError('')
         void (async () => {
-          setLoadingMore(true)
-          setError('')
           try {
             await fetchPage({
               shop: activeShop,
-              cursor: nextCursor,
+              cursor: cursorToLoad,
               append: true,
             })
           } catch (err) {
             setError(err instanceof Error ? err.message : '加载更多好评失败')
           } finally {
-            setLoadingMore(false)
+            loadingMoreRef.current = false
+            inFlightCursorRef.current = null
+            if (mountedRef.current) setLoadingMore(false)
           }
         })()
       },
@@ -293,7 +313,7 @@ export const GoodReviewsPage: React.FC = () => {
     )
     observer.observe(el)
     return () => observer.disconnect()
-  }, [activeShop, fetchPage, hasMore, initialLoading, loadingMore, nextCursor])
+  }, [activeShop, fetchPage, hasMore, initialLoading, nextCursor])
 
   const activeShopView = useMemo<GoodReviewShopView | null>(() => {
     return shops.find((s) => s.shopKey === activeShop) ?? shops[0] ?? null
@@ -303,8 +323,18 @@ export const GoodReviewsPage: React.FC = () => {
     setRefreshing(true)
     setError('')
     setBanner(null)
+    setAutoSyncFailed(false)
+    autoSyncStatusByShopRef.current.delete(activeShop)
     try {
       await loadFirstPage(activeShop)
+      autoSyncStatusByShopRef.current.set(activeShop, 'syncing')
+      const ok = await syncCurrentShop(activeShop)
+      if (!ok) {
+        setBanner({
+          tone: 'warning',
+          text: '自动更新失败，当前先展示本地已有好评。可以点「刷新最近 2 天」再试一次。',
+        })
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : '刷新失败')
     } finally {
@@ -378,6 +408,11 @@ export const GoodReviewsPage: React.FC = () => {
             正在更新当前店铺最近 2 天好评...
           </p>
         ) : null}
+        {autoSyncFailed && !autoRefreshing ? (
+          <p className="text-xs text-amber-700">
+            自动更新失败，当前先展示本地已有好评。可以点「刷新最近 2 天」再试一次。
+          </p>
+        ) : null}
       </div>
 
       {banner ? (
@@ -446,14 +481,14 @@ export const GoodReviewsPage: React.FC = () => {
               </div>
             </div>
             <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-              <StatCard label="评价总数" value={activeShopView.totalReviewCount} />
-              <StatCard label="有图评价" value={activeShopView.withImageCount} />
-              <StatCard label="有文字评价" value={activeShopView.withTextCount} />
-              <StatCard label="未回复" value={activeShopView.unrepliedCount} />
-              <StatCard label="已回复" value={activeShopView.repliedCount} />
-              <StatCard label="待互动好评" value={activeShopView.pendingInteractionCount} />
-              <StatCard label="待处理差评" value={activeShopView.pendingBadReviewCount} />
-              <StatCard label="最近 2 天" value={filteredReviewCount} />
+              <StatCard label="累计评价总数" value={activeShopView.totalReviewCount} />
+              <StatCard label="累计有图评价" value={activeShopView.withImageCount} />
+              <StatCard label="累计有文字评价" value={activeShopView.withTextCount} />
+              <StatCard label="累计未回复" value={activeShopView.unrepliedCount} />
+              <StatCard label="累计已回复" value={activeShopView.repliedCount} />
+              <StatCard label="当前待互动好评" value={activeShopView.pendingInteractionCount} />
+              <StatCard label="当前待处理差评" value={activeShopView.pendingBadReviewCount} />
+              <StatCard label="最近 2 天展示" value={filteredReviewCount} />
             </div>
           </div>
 
@@ -483,7 +518,9 @@ export const GoodReviewsPage: React.FC = () => {
               </>
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-10 text-center text-sm text-slate-500">
-                当前店铺最近 2 天还没有本地好评，页面会自动尝试同步；也可点击「立即同步全部店铺好评」。
+                {autoSyncFailed
+                  ? '最近 2 天暂时没有读取到好评；如果确认平台有新好评，请检查 Cookie 或点刷新重试。'
+                  : '当前店铺最近 2 天还没有本地好评，页面会自动尝试同步；也可点击「刷新最近 2 天」或「立即同步全部店铺好评」。'}
               </div>
             )}
           </div>

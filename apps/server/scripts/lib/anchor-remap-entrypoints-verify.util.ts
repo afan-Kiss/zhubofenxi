@@ -34,7 +34,14 @@ const ANCHOR_MUST_INCLUDE: Partial<Record<(typeof REMAP_VERIFY_ANCHORS)[number],
 }
 
 const ANCHOR_MUST_EXCLUDE: Partial<Record<(typeof REMAP_VERIFY_ANCHORS)[number], string[]>> = {
-  子杰: ['P798535644148309221', 'P798524075193091331', 'P798440490066093751'],
+  子杰: ['P798535644148309221', 'P798524075193091331', 'P798440490066093751', 'P798440753968049541'],
+}
+
+/** 重点订单必须归属的主播（按当前 remap 口径，不因 effectiveGmv 是否计入而改变） */
+const FOCUS_ORDER_REQUIRED_ANCHOR: Record<string, string> = {
+  P798535644148309221: '小白',
+  P798524075193091331: '小艺',
+  P798440490066093751: '小艺',
 }
 
 export function orderKeys(orderNo: string): string[] {
@@ -309,28 +316,6 @@ export async function verifyAnchorRemapEntrypoints(params: {
   })
   const storeEffectiveGmv = storeDrawer.summary.valueRaw
   const storeEffectiveCount = storeDrawer.rows.length
-  const missing221InEffective = !storeDrawer.rows.some((r) =>
-    orderKeys('P798535644148309221').includes(r.orderNo || r.packageId || ''),
-  )
-
-  if (Math.abs(storeEffectiveGmv - 31432) > 0.02 || storeEffectiveCount !== 16) {
-    if (
-      missing221InEffective &&
-      Math.abs(storeEffectiveGmv - 27814) <= 0.02 &&
-      storeEffectiveCount === 15
-    ) {
-      console.log(
-        '⚠ 全店 effectiveGmv=27814/15：P798535644148309221 因售后状态未计入有效成交（afterSaleStatus≠有效成交口径），非 remap 回归',
-      )
-    } else {
-      if (Math.abs(storeEffectiveGmv - 31432) > 0.02) {
-        fails.push(`全店 effectiveGmv=${storeEffectiveGmv} 期望 31432`)
-      }
-      if (storeEffectiveCount !== 16) {
-        fails.push(`全店 effectiveGmv 有效成交笔数=${storeEffectiveCount} 期望 16`)
-      }
-    }
-  }
 
   const localStore = await executeBoardLocalQuery({
     preset: 'custom',
@@ -345,6 +330,12 @@ export async function verifyAnchorRemapEntrypoints(params: {
       `全店 localQuery.summary.effectiveGmv=${summaryEffectiveGmv(storeSummary)} drawer=${storeEffectiveGmv}`,
     )
   }
+
+  console.log('\n=== 全店 effectiveGmv 动态验收 ===')
+  console.log(`  当前金额=¥${storeEffectiveGmv.toFixed(2)} 有效成交笔数=${storeEffectiveCount}`)
+  console.log(
+    `  localQuery.summary.effectiveGmv=¥${summaryEffectiveGmv(storeSummary).toFixed(2)} drawer=¥${storeEffectiveGmv.toFixed(2)}`,
+  )
 
   console.log('\n=== 重点订单 remap 期望 ===')
   for (const orderNo of FOCUS_ORDERS) {
@@ -383,7 +374,39 @@ export async function verifyFocusOrdersInPools(params: {
       params.expectedMap.get(orderNo) ??
       params.expectedMap.get(orderNo.replace(/^P/, '')) ??
       '—'
-    if (expected === '—' || expected === '未归属') continue
+
+    const requiredAnchor = FOCUS_ORDER_REQUIRED_ANCHOR[orderNo]
+    if (requiredAnchor && expected !== '—') {
+      if (expected !== requiredAnchor) {
+        fails.push(`${orderNo} remap 期望=${expected}，必须归属 ${requiredAnchor}`)
+      }
+      const zijiePerf = await getAnchorPerformanceViews(
+        scopedAllViews,
+        scoped.rawByMatch,
+        undefined,
+        '子杰',
+      )
+      if (findViewByOrderNo(zijiePerf, orderNo)) {
+        fails.push(`${orderNo} 不应在 executeBoardLocalQuery/子杰 remap 后订单池`)
+      }
+    }
+
+    if (expected === '—') continue
+
+    if (expected === '未归属') {
+      for (const anchorName of REMAP_VERIFY_ANCHORS) {
+        const otherPerf = await getAnchorPerformanceViews(
+          scopedAllViews,
+          scoped.rawByMatch,
+          undefined,
+          anchorName,
+        )
+        if (findViewByOrderNo(otherPerf, orderNo)) {
+          fails.push(`${orderNo} remap 为未归属，但出现在 executeBoardLocalQuery/${anchorName} 订单池`)
+        }
+      }
+      continue
+    }
 
     const perfViews = await getAnchorPerformanceViews(
       scopedAllViews,

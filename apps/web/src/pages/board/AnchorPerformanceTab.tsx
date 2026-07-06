@@ -193,13 +193,17 @@ export const AnchorPerformanceTab: React.FC = () => {
   const [reportPhotosStale, setReportPhotosStale] = useState(false)
   const [realtimeSyncHint, setRealtimeSyncHint] = useState<string | null>(null)
   const autoSyncCooldownRef = useRef<Map<string, number>>(new Map())
+  const autoSyncFailedRef = useRef(false)
   const AUTO_SYNC_COOLDOWN_MS = 3 * 60 * 1000
+  const REALTIME_SYNC_FAIL_HINT = '自动更新失败，当前先展示本地已有数据。可以稍后刷新。'
 
   useEffect(() => {
-    if (preset !== 'today' && preset !== 'yesterday') {
-      setRealtimeSyncHint(null)
-      return
-    }
+    autoSyncFailedRef.current = false
+    setRealtimeSyncHint(null)
+  }, [preset, startDate, endDate])
+
+  useEffect(() => {
+    if (preset !== 'today' && preset !== 'yesterday') return
 
     const rangeKey = `${preset}:${startDate}:${endDate}`
     const now = Date.now()
@@ -216,6 +220,13 @@ export const AnchorPerformanceTab: React.FC = () => {
         : '正在更新昨日数据，完成后会自动刷新。',
     )
     void triggerBusinessSync()
+      .then(() => {
+        autoSyncFailedRef.current = false
+      })
+      .catch(() => {
+        autoSyncFailedRef.current = true
+        setRealtimeSyncHint(REALTIME_SYNC_FAIL_HINT)
+      })
   }, [
     preset,
     startDate,
@@ -227,11 +238,14 @@ export const AnchorPerformanceTab: React.FC = () => {
   ])
 
   useEffect(() => {
+    if (preset !== 'today' && preset !== 'yesterday') return
     const syncing = isBusinessSyncActive(syncMeta?.businessSync?.status)
-    if (!syncing && !activeSyncJob && !triggerSyncBusy) {
-      setRealtimeSyncHint(null)
-    }
-  }, [syncMeta?.businessSync?.status, activeSyncJob, triggerSyncBusy])
+    if (syncing || activeSyncJob || triggerSyncBusy) return
+    if (autoSyncFailedRef.current) return
+    setRealtimeSyncHint((prev) =>
+      prev === REALTIME_SYNC_FAIL_HINT ? prev : null,
+    )
+  }, [preset, syncMeta?.businessSync?.status, activeSyncJob, triggerSyncBusy])
 
   const handleShipmentImagesChange = useCallback((images: DailyReportImageItem[]) => {
     setShipmentPhotos(images)

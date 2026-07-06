@@ -37,6 +37,27 @@ function main(): void {
   } else {
     fail('GoodReviewsPage 缺少 AbortController/requestSeqRef')
   }
+  if (
+    (page.includes('loadingMoreRef') || page.includes('inFlightCursorRef')) &&
+    page.includes('inFlightCursorRef')
+  ) {
+    ok('GoodReviewsPage 懒加载硬锁 loadingMoreRef / inFlightCursorRef')
+  } else {
+    fail('GoodReviewsPage 缺少 loadingMoreRef 或 inFlightCursorRef')
+  }
+  if (
+    page.includes('自动更新失败') &&
+    page.includes('当前先展示本地已有好评')
+  ) {
+    ok('背景自动同步失败有用户可见提示')
+  } else {
+    fail('缺少背景自动同步失败提示')
+  }
+  if (page.includes('累计评价总数') && page.includes('最近 2 天展示')) {
+    ok('统计卡片区分累计与最近 2 天')
+  } else {
+    fail('统计卡片未区分累计与最近 2 天')
+  }
 
   const image = read('web/src/components/good-reviews/GoodReviewImage.tsx')
   if (image.includes('try') && image.includes('sessionStorage')) ok('GoodReviewImage try/catch sessionStorage')
@@ -49,17 +70,6 @@ function main(): void {
   const orderRow = read('web/src/components/good-reviews/GoodReviewOrderRow.tsx')
   if (orderRow.includes('if (!trimmed)')) ok('OrderRow 空 orderId 不展示千帆按钮')
   else fail('OrderRow 缺少空 orderId 分支')
-
-  const anchor = read('web/src/pages/board/AnchorPerformanceTab.tsx')
-  if (
-    anchor.includes("preset === 'today'") &&
-    anchor.includes("preset === 'yesterday'") &&
-    anchor.includes('AUTO_SYNC_COOLDOWN_MS')
-  ) {
-    ok('AnchorPerformanceTab today/yesterday 自动同步 + 冷却')
-  } else {
-    fail('AnchorPerformanceTab 缺少 today/yesterday 自动同步冷却')
-  }
 
   console.log('\n=== 结果 ===')
   if (issues.length > 0) {

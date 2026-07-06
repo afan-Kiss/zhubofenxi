@@ -10,6 +10,7 @@ import {
 import type {
   GoodReviewCursorPayload,
   GoodReviewItemView,
+  GoodReviewListFilters,
   GoodReviewPagePayload,
   GoodReviewShopView,
 } from './good-review.types'
@@ -79,6 +80,7 @@ function rowToReviewView(row: {
   reviewText: string | null
   reviewImagesJson: string
   reviewTagsJson: string
+  materialTagsJson?: string
   rawJson: string | null
   isAnonymous: boolean
   likeCount: number
@@ -106,6 +108,7 @@ function rowToReviewView(row: {
     reviewText: row.reviewText,
     reviewImages: resolveReviewImages(row.reviewImagesJson, row.rawJson),
     reviewTags: parseJsonArray(row.reviewTagsJson),
+    materialTags: parseJsonArray(row.materialTagsJson),
     isAnonymous: row.isAnonymous,
     likeCount: row.likeCount,
     replyCount: row.replyCount,
@@ -114,6 +117,8 @@ function rowToReviewView(row: {
     syncedAt: row.syncedAt.toISOString(),
   }
 }
+
+export { rowToReviewView }
 
 export function encodeGoodReviewCursor(payload: GoodReviewCursorPayload): string {
   return Buffer.from(JSON.stringify(payload)).toString('base64url')
@@ -151,10 +156,43 @@ function resolveReviewRange(params: {
   }
 }
 
+function buildMaterialFilters(filters?: GoodReviewListFilters): Prisma.GoodReviewWhereInput[] {
+  if (!filters) return []
+  const extra: Prisma.GoodReviewWhereInput[] = []
+  if (filters.hasImage) {
+    extra.push({ NOT: { reviewImagesJson: '[]' } }, { NOT: { reviewImagesJson: '' } })
+  }
+  if (filters.hasText) {
+    extra.push({ reviewText: { not: null } }, { NOT: { reviewText: '' } })
+  }
+  if (filters.replyStatus === 'replied') {
+    extra.push({ replyCount: { gt: 0 } })
+  } else if (filters.replyStatus === 'unreplied') {
+    extra.push({ replyCount: 0 })
+  }
+  const itemKeyword = filters.itemKeyword?.trim()
+  if (itemKeyword) {
+    extra.push({ itemName: { contains: itemKeyword } })
+  }
+  const reviewKeyword = filters.reviewKeyword?.trim()
+  if (reviewKeyword) {
+    extra.push({ reviewText: { contains: reviewKeyword } })
+  }
+  if (filters.minProductScore != null && Number.isFinite(filters.minProductScore)) {
+    extra.push({ productScore: { gte: filters.minProductScore } })
+  }
+  const materialTag = filters.materialTag?.trim()
+  if (materialTag) {
+    extra.push({ materialTagsJson: { contains: `"${materialTag}"` } })
+  }
+  return extra
+}
+
 function buildFilteredWhere(params: {
   shopKey?: string
   rangeStart: Date
   rangeEnd: Date
+  filters?: GoodReviewListFilters
 }): Prisma.GoodReviewWhereInput {
   const base: Prisma.GoodReviewWhereInput = {
     reviewTime: {
@@ -163,10 +201,12 @@ function buildFilteredWhere(params: {
       lte: params.rangeEnd,
     },
   }
+  const materialFilters = buildMaterialFilters(params.filters)
+  const andParts: Prisma.GoodReviewWhereInput[] = [base, ...materialFilters]
   if (params.shopKey) {
-    return { shopKey: params.shopKey, ...base }
+    andParts.unshift({ shopKey: params.shopKey })
   }
-  return base
+  return andParts.length === 1 ? andParts[0]! : { AND: andParts }
 }
 
 function buildCursorWhere(
@@ -203,6 +243,13 @@ export async function queryGoodReviews(params?: {
   days?: number
   startDate?: string
   endDate?: string
+  hasImage?: boolean
+  hasText?: boolean
+  replyStatus?: 'replied' | 'unreplied'
+  itemKeyword?: string
+  reviewKeyword?: string
+  minProductScore?: number
+  materialTag?: string
 }): Promise<GoodReviewPagePayload> {
   const shopKey = params?.shop?.trim()
   const limit = Math.min(Math.max(params?.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT)
@@ -211,7 +258,16 @@ export async function queryGoodReviews(params?: {
     startDate: params?.startDate,
     endDate: params?.endDate,
   })
-  const filteredWhere = buildFilteredWhere({ shopKey, rangeStart, rangeEnd })
+  const filters: GoodReviewListFilters = {
+    hasImage: params?.hasImage,
+    hasText: params?.hasText,
+    replyStatus: params?.replyStatus,
+    itemKeyword: params?.itemKeyword,
+    reviewKeyword: params?.reviewKeyword,
+    minProductScore: params?.minProductScore,
+    materialTag: params?.materialTag,
+  }
+  const filteredWhere = buildFilteredWhere({ shopKey, rangeStart, rangeEnd, filters })
   const decodedCursor = params?.cursor?.trim()
     ? decodeGoodReviewCursor(params.cursor.trim())
     : null

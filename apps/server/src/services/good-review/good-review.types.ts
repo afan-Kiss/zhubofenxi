@@ -99,6 +99,16 @@ export interface GoodReviewShopView {
   syncedAt: string | null
 }
 
+export interface GoodReviewListFilters {
+  hasImage?: boolean
+  hasText?: boolean
+  replyStatus?: 'replied' | 'unreplied'
+  itemKeyword?: string
+  reviewKeyword?: string
+  minProductScore?: number
+  materialTag?: string
+}
+
 export interface GoodReviewItemView {
   id: string
   shopKey: string
@@ -116,6 +126,7 @@ export interface GoodReviewItemView {
   reviewText: string | null
   reviewImages: string[]
   reviewTags: string[]
+  materialTags: string[]
   isAnonymous: boolean
   likeCount: number
   replyCount: number

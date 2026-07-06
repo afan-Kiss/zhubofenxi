@@ -705,6 +705,7 @@ model GoodReview {
   reviewText       String?
   reviewImagesJson String    @default("[]")
   reviewTagsJson   String    @default("[]")
+  materialTagsJson String    @default("[]")
   isAnonymous      Boolean   @default(false)
   likeCount        Int       @default(0)
   replyCount       Int       @default(0)

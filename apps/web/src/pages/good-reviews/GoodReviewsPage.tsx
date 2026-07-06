@@ -3,18 +3,23 @@ import { Loader2, RefreshCw, Star, ThumbsUp } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
 import {
   buildGoodReviewsListUrl,
+  DEFAULT_GOOD_REVIEW_LIST_FILTERS,
+  describeGoodReviewFilters,
   formatGoodReviewSyncMessage,
   formatLocalDateTime,
   formatMoneyFromCent,
   GOOD_REVIEWS_DEFAULT_DAYS,
   GOOD_REVIEWS_PAGE_LIMIT,
   type GoodReviewItemView,
+  type GoodReviewListFilters,
   type GoodReviewPagePayload,
   type GoodReviewShopView,
   type GoodReviewSyncResult,
 } from '../../lib/good-reviews'
 import { GoodReviewOrderRow } from '../../components/good-reviews/GoodReviewOrderRow'
 import { GoodReviewDetailDrawer } from '../../components/good-reviews/GoodReviewDetailDrawer'
+import { GoodReviewFiltersBar } from '../../components/good-reviews/GoodReviewFiltersBar'
+import { GoodReviewCopyScriptButton } from '../../components/good-reviews/GoodReviewCopyScriptButton'
 import {
   GoodReviewImage,
   closeGoodReviewImageSessionBeacon,
@@ -43,6 +48,17 @@ function StatCard({ label, value }: { label: string; value: React.ReactNode }) {
       <div className="text-[11px] text-slate-500">{label}</div>
       <div className="mt-1 text-sm font-semibold text-slate-900">{value}</div>
     </div>
+  )
+}
+
+function hasActiveGoodReviewFilters(filters: GoodReviewListFilters): boolean {
+  return (
+    filters.content !== 'all' ||
+    filters.replyStatus !== 'all' ||
+    filters.minProductScore !== 'all' ||
+    Boolean(filters.materialTag.trim()) ||
+    Boolean(filters.itemKeyword.trim()) ||
+    Boolean(filters.reviewKeyword.trim())
   )
 }
 
@@ -107,6 +123,29 @@ function ReviewCard({
               ))}
             </div>
           ) : null}
+          {(review.materialTags?.length ?? 0) > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {review.materialTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] text-rose-700"
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <div
+            className="mt-2 flex flex-wrap items-center gap-2"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
+          >
+            <GoodReviewCopyScriptButton
+              review={review}
+              shopName={shopName ?? review.shopKey}
+              compact
+            />
+          </div>
           <div
             className="mt-2"
             onClick={(e) => e.stopPropagation()}
@@ -144,6 +183,10 @@ export const GoodReviewsPage: React.FC = () => {
   )
   const [error, setError] = useState('')
   const [detailReview, setDetailReview] = useState<GoodReviewItemView | null>(null)
+  const [filters, setFilters] = useState<GoodReviewListFilters>(DEFAULT_GOOD_REVIEW_LIST_FILTERS)
+  const [queryFilters, setQueryFilters] = useState<GoodReviewListFilters>(
+    DEFAULT_GOOD_REVIEW_LIST_FILTERS,
+  )
 
   const abortRef = useRef<AbortController | null>(null)
   const requestSeqRef = useRef(0)
@@ -152,8 +195,11 @@ export const GoodReviewsPage: React.FC = () => {
   const loadingMoreRef = useRef(false)
   const inFlightCursorRef = useRef<string | null>(null)
   const autoSyncStatusByShopRef = useRef<Map<string, 'syncing' | 'synced' | 'failed'>>(new Map())
+  const queryFiltersRef = useRef(queryFilters)
   const mountedRef = useRef(true)
   const [autoSyncFailed, setAutoSyncFailed] = useState(false)
+
+  queryFiltersRef.current = queryFilters
 
   useEffect(() => {
     mountedRef.current = true
@@ -166,6 +212,20 @@ export const GoodReviewsPage: React.FC = () => {
       onClose()
       abortRef.current?.abort()
     }
+  }, [])
+
+  useEffect(() => {
+    const delay =
+      filters.itemKeyword.trim() || filters.reviewKeyword.trim() ? 400 : 0
+    const t = window.setTimeout(() => {
+      setQueryFilters({ ...filters })
+    }, delay)
+    return () => window.clearTimeout(t)
+  }, [filters])
+
+  const handleReviewUpdated = useCallback((updated: GoodReviewItemView) => {
+    setReviews((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+    setDetailReview((prev) => (prev?.id === updated.id ? updated : prev))
   }, [])
 
   const shopNameByKey = useMemo(() => {
@@ -198,6 +258,7 @@ export const GoodReviewsPage: React.FC = () => {
         days: GOOD_REVIEWS_DEFAULT_DAYS,
         limit: GOOD_REVIEWS_PAGE_LIMIT,
         cursor: params.cursor,
+        filters: queryFiltersRef.current,
       })
       try {
         const data = await apiRequest<GoodReviewPagePayload>(url, { signal: params.signal })
@@ -268,15 +329,18 @@ export const GoodReviewsPage: React.FC = () => {
   )
 
   useEffect(() => {
+    void loadFirstPage(activeShop)
+  }, [activeShop, queryFilters, loadFirstPage])
+
+  useEffect(() => {
     void (async () => {
       setAutoSyncFailed(false)
-      await loadFirstPage(activeShop)
       const syncStatus = autoSyncStatusByShopRef.current.get(activeShop)
       if (syncStatus === 'synced' || syncStatus === 'syncing') return
       autoSyncStatusByShopRef.current.set(activeShop, 'syncing')
       await syncCurrentShop(activeShop, { background: true })
     })()
-  }, [activeShop, loadFirstPage, syncCurrentShop])
+  }, [activeShop, syncCurrentShop])
 
   useEffect(() => {
     const el = loadMoreRef.current
@@ -366,6 +430,8 @@ export const GoodReviewsPage: React.FC = () => {
 
   const lastSyncedLabel = formatLocalDateTime(lastSyncedAt)
   const busy = initialLoading || refreshing || syncing || autoRefreshing
+  const filterStatusParts = describeGoodReviewFilters(queryFilters)
+  const filterActive = hasActiveGoodReviewFilters(queryFilters)
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
@@ -459,6 +525,15 @@ export const GoodReviewsPage: React.FC = () => {
           ))}
       </div>
 
+      <GoodReviewFiltersBar filters={filters} onChange={setFilters} />
+
+      {!initialLoading ? (
+        <p className="text-xs text-slate-500">
+          {filterStatusParts.join(' · ')} · 已展示 {reviews.length}
+          {filteredReviewCount > reviews.length ? ` / ${filteredReviewCount} 条` : ' 条'}
+        </p>
+      ) : null}
+
       {initialLoading ? (
         <div className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-white px-4 py-8 text-sm text-slate-500">
           <Loader2 size={16} className="animate-spin" />
@@ -518,9 +593,11 @@ export const GoodReviewsPage: React.FC = () => {
               </>
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-10 text-center text-sm text-slate-500">
-                {autoSyncFailed
-                  ? '最近 2 天暂时没有读取到好评；如果确认平台有新好评，请检查 Cookie 或点刷新重试。'
-                  : '当前店铺最近 2 天还没有本地好评，页面会自动尝试同步；也可点击「刷新最近 2 天」或「立即同步全部店铺好评」。'}
+                {filterActive
+                  ? '最近 2 天没有找到符合条件的好评，可以放宽筛选条件试试。'
+                  : autoSyncFailed
+                    ? '最近 2 天暂时没有读取到好评；如果确认平台有新好评，请检查 Cookie 或点刷新重试。'
+                    : '当前店铺最近 2 天还没有本地好评，页面会自动尝试同步；也可点击「刷新最近 2 天」或「立即同步全部店铺好评」。'}
               </div>
             )}
           </div>
@@ -532,6 +609,7 @@ export const GoodReviewsPage: React.FC = () => {
         review={detailReview}
         shopName={detailReview ? shopNameByKey.get(detailReview.shopKey) : null}
         onClose={() => setDetailReview(null)}
+        onReviewUpdated={handleReviewUpdated}
       />
     </div>
   )

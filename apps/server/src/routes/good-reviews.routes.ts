@@ -9,6 +9,7 @@ import {
 } from '../config/good-review-shops.constants'
 import { queryGoodReviews } from '../services/good-review/good-review-query.service'
 import { syncGoodReviews } from '../services/good-review/good-review-sync.service'
+import { updateGoodReviewMaterialTags } from '../services/good-review/good-review-material-tags.service'
 import {
   buildGoodReviewArkOrderDetail,
   htmlGoodReviewArkOrderFallbackPage,
@@ -77,6 +78,17 @@ goodReviewsRouter.get('/', async (req, res, next) => {
     const cursor = String(req.query.cursor ?? '').trim() || undefined
     const startDate = String(req.query.startDate ?? '').trim() || undefined
     const endDate = String(req.query.endDate ?? '').trim() || undefined
+    const hasImage = String(req.query.hasImage ?? '').trim() === 'true' ? true : undefined
+    const hasText = String(req.query.hasText ?? '').trim() === 'true' ? true : undefined
+    const replyStatusRaw = String(req.query.replyStatus ?? '').trim()
+    const replyStatus =
+      replyStatusRaw === 'replied' || replyStatusRaw === 'unreplied' ? replyStatusRaw : undefined
+    const itemKeyword = String(req.query.itemKeyword ?? '').trim() || undefined
+    const reviewKeyword = String(req.query.reviewKeyword ?? '').trim() || undefined
+    const minScoreRaw = String(req.query.minProductScore ?? '').trim()
+    const minProductScore =
+      minScoreRaw && Number.isFinite(Number(minScoreRaw)) ? Number(minScoreRaw) : undefined
+    const materialTag = String(req.query.materialTag ?? '').trim() || undefined
     const data = await queryGoodReviews({
       shop: shop || undefined,
       limit,
@@ -84,6 +96,13 @@ goodReviewsRouter.get('/', async (req, res, next) => {
       days,
       startDate,
       endDate,
+      hasImage,
+      hasText,
+      replyStatus,
+      itemKeyword,
+      reviewKeyword,
+      minProductScore,
+      materialTag,
     })
     sendOk(res, data)
   } catch (err) {
@@ -102,6 +121,25 @@ goodReviewsRouter.post('/sync', async (req, res, next) => {
     const days = body.days != null ? Number(body.days) : 2
     const result = await syncGoodReviews({ shop, days })
     sendOk(res, result)
+  } catch (err) {
+    next(err)
+  }
+})
+
+goodReviewsRouter.post('/:id/material-tags', async (req, res, next) => {
+  try {
+    const id = String(req.params.id ?? '').trim()
+    if (!id) {
+      sendFail(res, '无效的评价 ID')
+      return
+    }
+    const tags = (req.body as { tags?: unknown })?.tags
+    const updated = await updateGoodReviewMaterialTags({ id, tags: tags as string[] })
+    if (!updated) {
+      sendFail(res, '未找到该条好评', 404)
+      return
+    }
+    sendOk(res, { review: updated })
   } catch (err) {
     next(err)
   }

@@ -1,3 +1,5 @@
+import { apiRequest } from './api'
+
 export interface GoodReviewShopView {
   shopKey: string
   shopName: string
@@ -32,6 +34,7 @@ export interface GoodReviewItemView {
   reviewText: string | null
   reviewImages: string[]
   reviewTags: string[]
+  materialTags: string[]
   isAnonymous: boolean
   likeCount: number
   replyCount: number
@@ -88,18 +91,173 @@ export const GOOD_REVIEWS_DEFAULT_DAYS = 2
 export const GOOD_REVIEWS_PAGE_LIMIT = 30
 export const GOOD_REVIEWS_MAX_LIMIT = 50
 
+export const GOOD_REVIEW_MATERIAL_TAG_OPTIONS = [
+  '手镯',
+  '平安扣',
+  '送礼',
+  '性价比',
+  '颜色好看',
+  '细腻',
+  '油润',
+  '客服服务好',
+  '物流快',
+  '复购',
+  '其他',
+] as const
+
+export type GoodReviewContentFilter = 'all' | 'hasImage' | 'hasText' | 'both'
+export type GoodReviewReplyFilter = 'all' | 'unreplied' | 'replied'
+export type GoodReviewMinScoreFilter = 'all' | '5' | '4'
+
+export interface GoodReviewListFilters {
+  content: GoodReviewContentFilter
+  replyStatus: GoodReviewReplyFilter
+  itemKeyword: string
+  reviewKeyword: string
+  minProductScore: GoodReviewMinScoreFilter
+  materialTag: string
+}
+
+export const DEFAULT_GOOD_REVIEW_LIST_FILTERS: GoodReviewListFilters = {
+  content: 'all',
+  replyStatus: 'all',
+  itemKeyword: '',
+  reviewKeyword: '',
+  minProductScore: 'all',
+  materialTag: '',
+}
+
 export function buildGoodReviewsListUrl(params: {
   shop: string
   limit?: number
   days?: number
   cursor?: string | null
+  filters?: GoodReviewListFilters
 }): string {
   const q = new URLSearchParams()
   q.set('shop', params.shop)
   q.set('days', String(params.days ?? GOOD_REVIEWS_DEFAULT_DAYS))
   q.set('limit', String(params.limit ?? GOOD_REVIEWS_PAGE_LIMIT))
   if (params.cursor) q.set('cursor', params.cursor)
+  const f = params.filters ?? DEFAULT_GOOD_REVIEW_LIST_FILTERS
+  if (f.content === 'hasImage' || f.content === 'both') q.set('hasImage', 'true')
+  if (f.content === 'hasText' || f.content === 'both') q.set('hasText', 'true')
+  if (f.replyStatus === 'replied') q.set('replyStatus', 'replied')
+  if (f.replyStatus === 'unreplied') q.set('replyStatus', 'unreplied')
+  if (f.itemKeyword.trim()) q.set('itemKeyword', f.itemKeyword.trim())
+  if (f.reviewKeyword.trim()) q.set('reviewKeyword', f.reviewKeyword.trim())
+  if (f.minProductScore === '5') q.set('minProductScore', '5')
+  if (f.minProductScore === '4') q.set('minProductScore', '4')
+  if (f.materialTag.trim()) q.set('materialTag', f.materialTag.trim())
   return `/api/good-reviews?${q.toString()}`
+}
+
+export function describeGoodReviewFilters(filters: GoodReviewListFilters): string[] {
+  const parts: string[] = ['最近 2 天']
+  if (filters.content === 'hasImage') parts.push('有图评价')
+  else if (filters.content === 'hasText') parts.push('有文字评价')
+  else if (filters.content === 'both') parts.push('有图有文字')
+  if (filters.replyStatus === 'unreplied') parts.push('未回复')
+  if (filters.replyStatus === 'replied') parts.push('已回复')
+  if (filters.itemKeyword.trim()) parts.push(`商品：${filters.itemKeyword.trim()}`)
+  if (filters.reviewKeyword.trim()) parts.push(`评价：${filters.reviewKeyword.trim()}`)
+  if (filters.minProductScore === '5') parts.push('5 分')
+  if (filters.minProductScore === '4') parts.push('4 分及以上')
+  if (filters.materialTag.trim()) parts.push(`标签：${filters.materialTag.trim()}`)
+  return parts
+}
+
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      // fallback below
+    }
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  document.body.appendChild(textarea)
+  textarea.select()
+  try {
+    return document.execCommand('copy')
+  } finally {
+    document.body.removeChild(textarea)
+  }
+}
+
+const LIVE_SCRIPT_FORBIDDEN = ['保证', '绝对', '升值', '收藏级']
+
+function truncateReviewText(text: string, maxLen: number): string {
+  const trimmed = text.trim()
+  if (trimmed.length <= maxLen) return trimmed
+  return `${trimmed.slice(0, maxLen)}…`
+}
+
+function sanitizeLiveScriptLine(line: string): string {
+  let out = line
+  for (const word of LIVE_SCRIPT_FORBIDDEN) {
+    out = out.replaceAll(word, '')
+  }
+  return out.replace(/\s{2,}/g, ' ').trim()
+}
+
+export function buildGoodReviewLiveScript(
+  review: GoodReviewItemView,
+  shopName: string,
+): string {
+  const item = review.itemName?.trim() || ''
+  const snippet = review.reviewText?.trim()
+    ? truncateReviewText(review.reviewText.trim(), 60)
+    : null
+
+  let mainScript = ''
+  if (snippet) {
+    mainScript = `有玉友收到后说“${snippet}”。`
+    if (item) {
+      mainScript += `喜欢这款【${item}】的姐妹，可以重点看看。`
+    } else {
+      mainScript += '这种真实反馈比我们自己说更有参考。'
+    }
+  } else if (item) {
+    mainScript = `有玉友反馈，这款【${item}】上手效果不错，细节也满意。喜欢这种感觉的可以重点看看。`
+  } else {
+    mainScript = '这条买家没有写很多字，但给了好评，说明收到后整体是认可的。'
+  }
+
+  const extras: string[] = []
+  if (review.reviewImages.length > 0) {
+    extras.push('这条还有买家实拍图，大家可以参考真实上手效果，不是只看灯光图。')
+  }
+  if (review.productScore != null) {
+    extras.push(`商品评分 ${review.productScore} 分，说明收到后的满意度还是不错的。`)
+  }
+
+  const usableScript = sanitizeLiveScriptLine([mainScript, ...extras].join(''))
+
+  const lines = ['【直播间可用好评】', `店铺：${shopName || review.shopKey}`]
+  if (item) lines.push(`商品：${item}`)
+  if (snippet) lines.push(`买家反馈：${snippet}`)
+  lines.push('可用话术：', usableScript)
+  return lines.join('\n')
+}
+
+export async function saveGoodReviewMaterialTags(
+  reviewId: string,
+  tags: string[],
+): Promise<GoodReviewItemView> {
+  const data = await apiRequest<{ review: GoodReviewItemView }>(
+    `/api/good-reviews/${encodeURIComponent(reviewId)}/material-tags`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ tags }),
+    },
+  )
+  return data.review
 }
 
 export function formatGoodReviewSyncMessage(result: GoodReviewSyncResult): {

@@ -223,7 +223,7 @@ async function verifyAnchorConsistency(): Promise<void> {
     startDate: START,
     endDate: END,
   })
-  const anchorRows = (local.anchors ?? []) as Array<Record<string, unknown>>
+  const anchorRows = (local.anchorLeaderboard ?? []) as Array<Record<string, unknown>>
 
   for (const anchorName of ANCHORS) {
     let drawerValue = 0

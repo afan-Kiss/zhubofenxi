@@ -41,6 +41,7 @@
     "verify:good-reviews-pagination": "tsx apps/server/scripts/verify-good-reviews-pagination.ts",
     "verify:good-review-ark-detail": "tsx apps/server/scripts/verify-good-review-ark-detail.ts",
     "verify:good-reviews-page-static": "tsx apps/server/scripts/verify-good-reviews-page-static.ts",
+    "verify:good-reviews-ui-real": "tsx apps/server/scripts/verify-good-reviews-ui-real.ts",
     "verify:anchor-realtime-sync-static": "tsx apps/server/scripts/verify-anchor-realtime-sync-static.ts",
     "verify:good-review-material-center": "tsx apps/server/scripts/verify-good-review-material-center.ts",
     "verify:order-pay-time-prefilter": "tsx apps/server/scripts/verify-order-pay-time-prefilter.ts",

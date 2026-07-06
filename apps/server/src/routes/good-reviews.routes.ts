@@ -20,6 +20,7 @@ import {
   proxyGoodReviewImage,
   touchGoodReviewImageSession,
 } from '../services/good-review/good-review-image-proxy.service'
+import { diagnoseGoodReviewImages } from '../services/good-review/good-review-image-diagnostics.service'
 import fs from 'node:fs'
 
 export const goodReviewsRouter = Router()
@@ -59,6 +60,23 @@ goodReviewsRouter.post('/image-session/close', (req, res) => {
 })
 
 goodReviewsRouter.use(attachRequestUser, requireAuth)
+
+goodReviewsRouter.get('/image-diagnostics', async (req, res, next) => {
+  try {
+    const shop = String(req.query.shop ?? '').trim() || undefined
+    if (shop && !resolveGoodReviewShopKey(shop)) {
+      sendFail(res, '无效的店铺参数')
+      return
+    }
+    const limitRaw = req.query.limit
+    const limit =
+      limitRaw != null && String(limitRaw).trim() !== '' ? Number(limitRaw) : undefined
+    const data = await diagnoseGoodReviewImages({ shop, limit })
+    sendOk(res, data)
+  } catch (err) {
+    next(err)
+  }
+})
 
 goodReviewsRouter.get('/', async (req, res, next) => {
   try {

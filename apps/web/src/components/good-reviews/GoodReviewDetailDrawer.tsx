@@ -3,6 +3,7 @@ import { BoardDrawerShell } from '../board/BoardDrawerShell'
 import {
   formatLocalDateTime,
   formatMoneyFromCent,
+  resolveGoodReviewThumb,
   type GoodReviewItemView,
 } from '../../lib/good-reviews'
 import { GoodReviewOrderRow } from './GoodReviewOrderRow'
@@ -30,6 +31,8 @@ export const GoodReviewDetailDrawer: React.FC<Props> = ({
   const price = formatMoneyFromCent(review.itemPriceCent)
   const timeLabel = review.reviewTimeText ?? formatLocalDateTime(review.reviewTime)
   const displayShop = shopName ?? review.shopKey
+  const thumbUrl = resolveGoodReviewThumb(review)
+  const thumbFromReview = !review.itemImage && Boolean(review.reviewImages?.[0])
 
   return (
     <BoardDrawerShell
@@ -86,13 +89,17 @@ export const GoodReviewDetailDrawer: React.FC<Props> = ({
         </section>
 
         <div className="flex gap-3">
-          {review.itemImage ? (
+          {thumbUrl ? (
             <GoodReviewImage
-              rawUrl={review.itemImage}
-              alt={review.itemName ?? '商品图'}
+              rawUrl={thumbUrl}
+              alt={thumbFromReview ? '买家晒图' : (review.itemName ?? '商品图')}
               className="h-20 w-20 shrink-0 rounded-xl object-cover"
             />
-          ) : null}
+          ) : (
+            <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-[11px] text-slate-400">
+              无图
+            </div>
+          )}
           <div className="min-w-0 flex-1 space-y-1 text-sm text-slate-600">
             {price ? <div>商品价格：{price}</div> : null}
             {review.productScore != null ? <div>商品评分：{review.productScore}</div> : null}

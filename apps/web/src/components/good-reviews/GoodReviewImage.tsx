@@ -30,6 +30,7 @@ interface Props {
   alt: string
   className?: string
   onClick?: () => void
+  debugUrl?: boolean
 }
 
 export function buildGoodReviewImageProxyUrl(rawUrl: string | null | undefined): string {
@@ -41,17 +42,37 @@ export function buildGoodReviewImageProxyUrl(rawUrl: string | null | undefined):
   return `/api/good-reviews/image-proxy?${params.toString()}`
 }
 
-export const GoodReviewImage: React.FC<Props> = ({ rawUrl, alt, className, onClick }) => {
+export const GoodReviewImage: React.FC<Props> = ({
+  rawUrl,
+  alt,
+  className,
+  onClick,
+  debugUrl = import.meta.env.DEV,
+}) => {
   const [failed, setFailed] = useState(false)
-  const src = useMemo(() => {
-    if (!rawUrl || failed) return PLACEHOLDER
-    return buildGoodReviewImageProxyUrl(rawUrl)
-  }, [rawUrl, failed])
+  const proxyUrl = useMemo(() => buildGoodReviewImageProxyUrl(rawUrl), [rawUrl])
+  const src = !rawUrl || failed ? PLACEHOLDER : proxyUrl
+  const title =
+    debugUrl && rawUrl ? `代理：${proxyUrl}\n原始：${rawUrl}` : failed ? '图片加载失败' : undefined
+
+  if (failed) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-slate-100 text-center text-[10px] leading-tight text-slate-400 ${className ?? ''}`}
+        title={title}
+        onClick={onClick}
+        role={onClick ? 'button' : undefined}
+      >
+        图片加载失败
+      </div>
+    )
+  }
 
   return (
     <img
       src={src}
       alt={alt}
+      title={title}
       className={className}
       loading="lazy"
       onClick={onClick}

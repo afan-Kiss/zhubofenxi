@@ -13,6 +13,12 @@ const USER_AGENT =
 const ALLOWED_HOST_SUFFIXES = [
   'qimg.xiaohongshu.com',
   'sns-img-qc.xhscdn.com',
+  'sns-img-hw.xhscdn.com',
+  'sns-img-bd.xhscdn.com',
+  'sns-webpic-qc.xhscdn.com',
+  'sns-webpic-hw.xhscdn.com',
+  'sns-webpic-bd.xhscdn.com',
+  'ci.xiaohongshu.com',
   'xhscdn.com',
   'xiaohongshu.com',
 ]
@@ -58,6 +64,21 @@ function extFromContentType(contentType: string): string {
   if (ct.includes('webp')) return '.webp'
   if (ct.includes('gif')) return '.gif'
   return '.jpg'
+}
+
+function warnImageProxy(message: string, detail: Record<string, string>): void {
+  const parts = Object.entries(detail)
+    .map(([k, v]) => `${k}=${v}`)
+    .join(' ')
+  console.warn(`[good-review-image-proxy] ${message} ${parts}`)
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return '(invalid)'
+  }
 }
 
 export function isAllowedGoodReviewImageUrl(rawUrl: string): boolean {
@@ -238,8 +259,15 @@ export async function proxyGoodReviewImage(params: {
 }): Promise<{ ok: true; file: string; contentType: string } | { ok: false; message: string }> {
   cleanupGoodReviewImageCache()
 
-  const normalized = normalizeProxyImageUrl(params.rawUrl)
+  const rawTrimmed = params.rawUrl.trim()
+  const rawHost = hostOf(normalizeReviewImageUrl(rawTrimmed) ?? rawTrimmed)
+  const normalized = normalizeProxyImageUrl(rawTrimmed)
   if (!normalized) {
+    warnImageProxy('reject', {
+      rawHost,
+      normalized: '(rejected)',
+      reason: '不在允许的图片域名白名单',
+    })
     return { ok: false, message: '不允许的图片地址' }
   }
 
@@ -277,7 +305,13 @@ export async function proxyGoodReviewImage(params: {
     writeMeta(meta)
     return { ok: true, file: localPath, contentType }
   } catch (err) {
-    return { ok: false, message: err instanceof Error ? err.message : '下载图片失败' }
+    const message = err instanceof Error ? err.message : '下载图片失败'
+    warnImageProxy('download-failed', {
+      rawHost,
+      normalizedHost: hostOf(normalized),
+      reason: message,
+    })
+    return { ok: false, message }
   }
 }
 

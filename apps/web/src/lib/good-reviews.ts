@@ -91,6 +91,16 @@ export const GOOD_REVIEWS_DEFAULT_DAYS = 2
 export const GOOD_REVIEWS_PAGE_LIMIT = 30
 export const GOOD_REVIEWS_MAX_LIMIT = 50
 
+export const GOOD_REVIEW_UI_VERSION = 'good-review-material-v2'
+
+/** 列表/详情缩略图：商品图优先，否则买家晒图第一张 */
+export function resolveGoodReviewThumb(review: {
+  itemImage: string | null
+  reviewImages?: string[] | null
+}): string | null {
+  return review.itemImage || review.reviewImages?.[0] || null
+}
+
 /** 全店手动同步顺序（与好评中心 Tab 一致） */
 export const GOOD_REVIEW_SHOP_SYNC_ORDER = [
   'shiyuju',

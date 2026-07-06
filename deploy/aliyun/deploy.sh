@@ -121,6 +121,16 @@ verify_web_build() {
     fi
   fi
   log "web build OK: $script_src"
+  local dist_js
+  dist_js="$(grep -oE 'assets/index-[^"]+\.js' "$index" | head -1 || true)"
+  if [[ -n "$dist_js" && -f "$DEPLOY_DIR/apps/web/dist/$dist_js" ]]; then
+    grep -q '同步全部店铺好评' "$DEPLOY_DIR/apps/web/dist/$dist_js" || fail "dist JS 缺少「同步全部店铺好评」"
+    grep -q '加载更多好评' "$DEPLOY_DIR/apps/web/dist/$dist_js" || fail "dist JS 缺少「加载更多好评」"
+    grep -q 'good-review-material-v2' "$DEPLOY_DIR/apps/web/dist/$dist_js" || fail "dist JS 缺少版本标记"
+    log "dist JS 文案验收通过"
+  else
+    fail "无法定位 dist JS 文件: ${dist_js:-empty}"
+  fi
 }
 
 write_deploy_build_meta() {

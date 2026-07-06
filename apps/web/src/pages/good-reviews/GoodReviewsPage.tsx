@@ -11,8 +11,10 @@ import {
   GOOD_REVIEWS_DEFAULT_DAYS,
   GOOD_REVIEWS_PAGE_LIMIT,
   GOOD_REVIEW_SHOP_SYNC_ORDER,
+  GOOD_REVIEW_UI_VERSION,
   getGoodReviewShopTabIndex,
   mergeGoodReviewSyncResults,
+  resolveGoodReviewThumb,
   type GoodReviewItemView,
   type GoodReviewListFilters,
   type GoodReviewPagePayload,
@@ -78,6 +80,8 @@ function ReviewCard({
 }) {
   const price = formatMoneyFromCent(review.itemPriceCent)
   const timeLabel = review.reviewTimeText ?? formatLocalDateTime(review.reviewTime)
+  const thumbUrl = resolveGoodReviewThumb(review)
+  const thumbFromReview = !review.itemImage && Boolean(review.reviewImages?.[0])
   return (
     <article
       className="cursor-pointer rounded-2xl border border-slate-100 bg-white p-3 shadow-sm transition hover:border-rose-100 hover:shadow-md"
@@ -89,10 +93,10 @@ function ReviewCard({
       tabIndex={0}
     >
       <div className="flex gap-3">
-        {review.itemImage ? (
+        {thumbUrl ? (
           <GoodReviewImage
-            rawUrl={review.itemImage}
-            alt={review.itemName ?? '商品图'}
+            rawUrl={thumbUrl}
+            alt={thumbFromReview ? '买家晒图' : (review.itemName ?? '商品图')}
             className="h-16 w-16 shrink-0 rounded-xl object-cover"
           />
         ) : (
@@ -361,6 +365,30 @@ export const GoodReviewsPage: React.FC = () => {
     })()
   }, [activeShop, syncCurrentShop])
 
+  const loadMorePage = useCallback(async () => {
+    if (loadingMoreRef.current || !hasMore || !nextCursor) return
+    if (inFlightCursorRef.current === nextCursor) return
+
+    const cursorToLoad = nextCursor
+    loadingMoreRef.current = true
+    inFlightCursorRef.current = cursorToLoad
+    setLoadingMore(true)
+    setError('')
+    try {
+      await fetchPage({
+        shop: activeShop,
+        cursor: cursorToLoad,
+        append: true,
+      })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '加载更多好评失败')
+    } finally {
+      loadingMoreRef.current = false
+      inFlightCursorRef.current = null
+      if (mountedRef.current) setLoadingMore(false)
+    }
+  }, [activeShop, fetchPage, hasMore, nextCursor])
+
   useEffect(() => {
     const el = loadMoreRef.current
     if (!el || !hasMore || initialLoading) return
@@ -368,35 +396,13 @@ export const GoodReviewsPage: React.FC = () => {
     const observer = new IntersectionObserver(
       (entries) => {
         if (!entries.some((e) => e.isIntersecting)) return
-        if (loadingMoreRef.current || !hasMore || !nextCursor) return
-        if (inFlightCursorRef.current === nextCursor) return
-
-        const cursorToLoad = nextCursor
-        loadingMoreRef.current = true
-        inFlightCursorRef.current = cursorToLoad
-        setLoadingMore(true)
-        setError('')
-        void (async () => {
-          try {
-            await fetchPage({
-              shop: activeShop,
-              cursor: cursorToLoad,
-              append: true,
-            })
-          } catch (err) {
-            setError(err instanceof Error ? err.message : '加载更多好评失败')
-          } finally {
-            loadingMoreRef.current = false
-            inFlightCursorRef.current = null
-            if (mountedRef.current) setLoadingMore(false)
-          }
-        })()
+        void loadMorePage()
       },
       { rootMargin: '120px' },
     )
     observer.observe(el)
     return () => observer.disconnect()
-  }, [activeShop, fetchPage, hasMore, initialLoading, nextCursor])
+  }, [hasMore, initialLoading, loadMorePage])
 
   const activeShopView = useMemo<GoodReviewShopView | null>(() => {
     return shops.find((s) => s.shopKey === activeShop) ?? shops[0] ?? null
@@ -487,35 +493,48 @@ export const GoodReviewsPage: React.FC = () => {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-4">
       <div className="space-y-2">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <h1 className="text-xl font-semibold text-slate-900">好评中心</h1>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <GoodReviewSyncProgressButton
-              variant="secondary"
-              testId="good-reviews-refresh"
-              disabled={busy && !refreshBusy}
-              busy={refreshBusy}
-              progress={refreshSyncProgress}
-              idleLabel="刷新最近 2 天"
-              busyLabel={refreshSyncLabel || '正在刷新最近 2 天...'}
-              idleIcon={<RefreshCw size={14} />}
-              onClick={() => void handleRefreshLocal()}
-            />
-            <GoodReviewSyncProgressButton
-              variant="primary"
-              testId="good-reviews-sync-all"
-              disabled={busy && !syncing}
-              busy={syncing}
-              progress={syncAllProgress}
-              idleLabel="立即同步全部店铺好评"
-              busyLabel={syncAllLabel || '正在同步全部店铺好评...'}
-              idleIcon={<ThumbsUp size={14} />}
-              onClick={() => void handleSyncAll()}
-            />
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h1 className="text-xl font-semibold text-slate-900">好评中心</h1>
+            <span className="text-[10px] text-slate-400" data-testid="good-reviews-ui-version">
+              好评中心版本：{GOOD_REVIEW_UI_VERSION}
+            </span>
+          </div>
+          <div
+            className="rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50/80 to-white p-3 shadow-sm"
+            data-testid="good-reviews-sync-bar"
+          >
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <GoodReviewSyncProgressButton
+                variant="secondary"
+                testId="good-reviews-refresh"
+                disabled={busy && !refreshBusy}
+                busy={refreshBusy}
+                progress={refreshSyncProgress}
+                idleLabel="刷新当前店铺最近 2 天"
+                busyLabel={refreshSyncLabel || '正在刷新当前店铺最近 2 天...'}
+                idleIcon={<RefreshCw size={14} />}
+                onClick={() => void handleRefreshLocal()}
+              />
+              <GoodReviewSyncProgressButton
+                variant="primary"
+                testId="good-reviews-sync-all-visible"
+                disabled={busy && !syncing}
+                busy={syncing}
+                progress={syncAllProgress}
+                idleLabel="同步全部店铺好评"
+                busyLabel={syncAllLabel || '正在同步全部店铺好评...'}
+                idleIcon={<ThumbsUp size={14} />}
+                onClick={() => void handleSyncAll()}
+              />
+            </div>
+            <p className="mt-2 text-xs text-slate-500">
+              当前店铺会自动更新；需要四个店一起更新时，点「同步全部店铺好评」。
+            </p>
           </div>
         </div>
         <p className="max-w-3xl text-sm text-slate-500">
-          默认展示最近 2 天好评，打开页面会自动更新一次；往下拉会继续加载更多。
+          默认展示最近 2 天好评，打开页面会自动更新一次；往下拉或点底部按钮会继续加载更多。
         </p>
         <p className="text-sm text-slate-600">
           {lastSyncedLabel
@@ -635,17 +654,30 @@ export const GoodReviewsPage: React.FC = () => {
                     onOpen={setDetailReview}
                   />
                 ))}
-                <div ref={loadMoreRef} className="py-2 text-center text-xs text-slate-400">
-                  {loadingMore ? (
-                    <span className="inline-flex items-center gap-1">
-                      <Loader2 size={12} className="animate-spin" />
-                      正在加载更多...
-                    </span>
-                  ) : hasMore ? (
-                    '继续下滑加载更多'
+                <div ref={loadMoreRef} className="space-y-2 py-2">
+                  {hasMore ? (
+                    <button
+                      type="button"
+                      data-testid="good-reviews-load-more"
+                      disabled={loadingMore}
+                      onClick={() => void loadMorePage()}
+                      className="mx-auto flex w-full max-w-sm items-center justify-center gap-1.5 rounded-full border border-rose-200 bg-white px-4 py-2.5 text-sm font-medium text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {loadingMore ? (
+                        <>
+                          <Loader2 size={14} className="animate-spin" />
+                          正在加载更多...
+                        </>
+                      ) : (
+                        '加载更多好评'
+                      )}
+                    </button>
                   ) : (
-                    '已加载全部最近 2 天好评'
+                    <p className="text-center text-xs text-slate-400">已加载完最近 2 天好评</p>
                   )}
+                  {hasMore && !loadingMore ? (
+                    <p className="text-center text-[11px] text-slate-400">继续下滑也会自动加载</p>
+                  ) : null}
                 </div>
               </>
             ) : (
@@ -668,6 +700,10 @@ export const GoodReviewsPage: React.FC = () => {
         onClose={() => setDetailReview(null)}
         onReviewUpdated={handleReviewUpdated}
       />
+
+      <p className="pb-4 text-center text-[10px] text-slate-400">
+        好评中心版本：{GOOD_REVIEW_UI_VERSION}
+      </p>
     </div>
   )
 }

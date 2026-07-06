@@ -11,6 +11,7 @@ interface Props {
   variant?: 'primary' | 'secondary'
   testId?: string
   disabled?: boolean
+  className?: string
   onClick: () => void
 }
 
@@ -24,6 +25,7 @@ export const GoodReviewSyncProgressButton: React.FC<Props> = ({
   variant = 'primary',
   testId,
   disabled = false,
+  className = '',
   onClick,
 }) => {
   const fillWidth = busy ? Math.min(100, Math.max(0, progress)) : 0
@@ -35,7 +37,9 @@ export const GoodReviewSyncProgressButton: React.FC<Props> = ({
       onClick={onClick}
       disabled={disabled || busy}
       data-testid={testId}
-      className={`relative overflow-hidden rounded-full px-3 py-2 text-sm font-medium shadow-sm transition disabled:cursor-not-allowed disabled:opacity-70 ${
+      className={`relative w-full overflow-hidden rounded-xl px-4 py-2.5 text-sm font-medium shadow-sm transition sm:w-auto sm:rounded-full sm:px-3 sm:py-2 ${
+        disabled && !busy ? 'opacity-60' : ''
+      } disabled:cursor-not-allowed ${className} ${
         isPrimary
           ? 'bg-rose-500 text-white hover:bg-rose-600'
           : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'

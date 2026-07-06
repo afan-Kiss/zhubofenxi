@@ -59,7 +59,8 @@ function extractImageUrlFromValue(item: unknown): string | null {
   if (typeof item === 'string') return normalizeReviewImageUrl(item)
   const rec = asRecord(item)
   if (!rec) return null
-  return normalizeReviewImageUrl(
+
+  const direct = normalizeReviewImageUrl(
     pickString(rec, [
       'link',
       'url',
@@ -72,8 +73,28 @@ function extractImageUrlFromValue(item: unknown): string | null {
       'image_link',
       'cover',
       'path',
+      'originalUrl',
+      'original_url',
+      'thumbnailUrl',
+      'thumbnail_url',
+      'urlDefault',
+      'url_default',
+      'traceId',
+      'fileId',
+      'livePhoto',
     ]),
   )
+  if (direct) return direct
+
+  const infoList = rec.infoList ?? rec.info_list
+  if (Array.isArray(infoList)) {
+    for (const entry of infoList) {
+      const url = extractImageUrlFromValue(entry)
+      if (url) return url
+    }
+  }
+
+  return null
 }
 
 function pickImageUrlArray(obj: Record<string, unknown>, keys: string[]): string[] {

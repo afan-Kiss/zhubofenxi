@@ -24,6 +24,7 @@ import {
   DRAWER_VERIFY_METRICS,
   verifyMetricDrawerAttribution,
 } from './lib/metric-detail-attribution-verify.util'
+import { verifyLocalQueryAnchorRemap } from './lib/anchor-remap-entrypoints-verify.util'
 
 config({ path: path.resolve(__dirname, '../.env') })
 
@@ -210,6 +211,21 @@ async function main(): Promise<void> {
     process.exit(1)
   }
   console.log('✓ PASS: 子杰/小白/小艺 全部 metric drawer 主播池与 summary 一致')
+
+  console.log('\n=== 8. executeBoardLocalQuery 主播筛选入口 ===')
+  const localQueryFails: string[] = []
+  for (const anchorName of ['子杰', '小白', '小艺'] as const) {
+    localQueryFails.push(
+      ...(await verifyLocalQueryAnchorRemap({ startDate, endDate, anchorName })),
+    )
+  }
+  if (localQueryFails.length > 0) {
+    for (const f of localQueryFails.slice(0, 20)) console.log(`  - ${f}`)
+    console.log('\n=== 验收（local query 主播筛选）===')
+    console.log(`✗ FAIL: ${localQueryFails.length} 项`)
+    process.exit(1)
+  }
+  console.log('✓ PASS: executeBoardLocalQuery 子杰/小白/小艺 先 remap 再过滤')
 }
 
 main()

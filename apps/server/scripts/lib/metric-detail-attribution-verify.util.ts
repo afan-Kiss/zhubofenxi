@@ -28,11 +28,11 @@ export const ANCHOR_DRAWER_NAMES = ['子杰', '小白', '小艺'] as const
 
 const ANCHOR_MUST_INCLUDE: Partial<Record<(typeof ANCHOR_DRAWER_NAMES)[number], string[]>> = {
   小白: ['P798535644148309221'],
-  小艺: ['P798440490066093751'],
+  小艺: ['P798524075193091331', 'P798440490066093751'],
 }
 
 const ANCHOR_MUST_EXCLUDE: Partial<Record<(typeof ANCHOR_DRAWER_NAMES)[number], string[]>> = {
-  子杰: ['P798535644148309221', 'P798440490066093751'],
+  子杰: ['P798535644148309221', 'P798524075193091331', 'P798440490066093751'],
 }
 
 type MetricValueMode = 'amount' | 'count' | 'rate'

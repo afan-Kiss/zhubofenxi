@@ -14,7 +14,6 @@ import {
   isBusinessCacheWarmupRunning,
 } from './business-cache.service'
 import {
-  filterViewsByAnchorSpec,
   getAnchorPerformanceViews,
 } from './board-scoped-views.service'
 
@@ -197,16 +196,6 @@ function buildSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unkno
 
 
 
-function filterViewsByAnchor(
-  views: AnalyzedOrderView[],
-  anchorId?: string,
-  anchorName?: string,
-): AnalyzedOrderView[] {
-  return filterViewsByAnchorSpec(views, anchorId, anchorName)
-}
-
-
-
 export async function executeBoardLocalQuery(params: {
 
   preset: BoardLiveQueryPreset
@@ -373,10 +362,19 @@ export async function executeBoardLocalQuery(params: {
   const scopedAllViews = filterViewsForCoreMetrics(
     role && username ? filterViewsForStaffScope(allViews, role, username) : allViews,
   )
-  const views = filterViewsByAnchor(scopedAllViews, anchorId, anchorName)
+  const hasAnchorFilter = Boolean(anchorId?.trim() || anchorName?.trim())
+
+  const performanceViews = await getAnchorPerformanceViews(
+    scopedAllViews,
+    rawByMatch,
+    hasAnchorFilter ? anchorId : undefined,
+    hasAnchorFilter ? anchorName : undefined,
+  )
+  const summarySourceViews = hasAnchorFilter ? performanceViews : scopedAllViews
+  const displayOrderCount = hasAnchorFilter ? performanceViews.length : scopedAllViews.length
 
   let dataDisplayStatus = resolveBoardDataDisplayStatus({
-    orderCountInRange: views.length,
+    orderCountInRange: displayOrderCount,
     totalOrderCount,
     lastSuccessAt: syncMeta.businessSync.lastSuccessAt,
     syncStatus: syncMeta.businessSync.status,
@@ -385,7 +383,7 @@ export async function executeBoardLocalQuery(params: {
   if (boardCache.stale) {
     dataDisplayStatus = 'failed_with_cache'
   } else if (
-    views.length > 0 &&
+    displayOrderCount > 0 &&
     syncMeta.businessSync.status === 'failed'
   ) {
     dataDisplayStatus = syncMeta.businessSync.lastSuccessAt
@@ -396,7 +394,7 @@ export async function executeBoardLocalQuery(params: {
   if (
     AUTO_SYNC_ON_VIEW_MISSING &&
     (dataDisplayStatus === 'syncing_no_cache' ||
-      (views.length === 0 && totalOrderCount > 0 && syncMeta.businessSync.status === 'running'))
+      (displayOrderCount === 0 && totalOrderCount > 0 && syncMeta.businessSync.status === 'running'))
   ) {
     void handleLocalDataCoverageMissing()
     syncMeta = await getBusinessSyncStatus()
@@ -407,7 +405,7 @@ export async function executeBoardLocalQuery(params: {
     dataDisplayStatus = 'coverage_missing'
   } else if (
     !AUTO_SYNC_ON_VIEW_MISSING &&
-    views.length === 0 &&
+    displayOrderCount === 0 &&
     totalOrderCount > 0 &&
     syncMeta.businessSync.status !== 'running' &&
     syncMeta.businessSync.status !== 'queued'
@@ -416,9 +414,11 @@ export async function executeBoardLocalQuery(params: {
   }
 
   let recalculatedSummary =
-    views.length === boardCache.orderCount && !boardCache.stale
+    !hasAnchorFilter &&
+    scopedAllViews.length === boardCache.orderCount &&
+    !boardCache.stale
       ? { ...boardCache.summary }
-      : buildSummaryFromViews(views)
+      : buildSummaryFromViews(summarySourceViews)
 
   const stableApplied = await applyLastMonthStableSummary({
     preset: params.preset,
@@ -427,14 +427,6 @@ export async function executeBoardLocalQuery(params: {
   })
   const summary = stableApplied.summary
 
-  const performanceBaseViews =
-    anchorId?.trim() || anchorName?.trim() ? views : scopedAllViews
-  const performanceViews = await getAnchorPerformanceViews(
-    performanceBaseViews,
-    rawByMatch,
-    anchorId,
-    anchorName,
-  )
   const anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
 
   const cacheLiveSessions = boardCache.liveSessions ?? []
@@ -493,13 +485,13 @@ export async function executeBoardLocalQuery(params: {
   if (
     isBusinessCacheWarmupRunning() &&
     !cacheHit &&
-    views.length === 0 &&
+    displayOrderCount === 0 &&
     dataDisplayStatus !== 'syncing_no_cache'
   ) {
     progressMessage = boardCachePreparingMessage()
   }
 
-  if (views.length > 0 && syncMeta.businessSync.status === 'failed') {
+  if (displayOrderCount > 0 && syncMeta.businessSync.status === 'failed') {
     const shopHealth = await getAllShopCookieHealth()
     const cookieBlocksSync = shopHealth.some(
       (h) => h.hasCookie && !h.ok,
@@ -563,11 +555,11 @@ export async function executeBoardLocalQuery(params: {
 
     progress: {
 
-      totalPages: views.length > 0 ? 1 : 0,
+      totalPages: displayOrderCount > 0 ? 1 : 0,
 
-      fetchedPages: views.length > 0 ? 1 : 0,
+      fetchedPages: displayOrderCount > 0 ? 1 : 0,
 
-      totalOrders: views.length,
+      totalOrders: displayOrderCount,
 
       message: progressMessage,
 
@@ -583,7 +575,7 @@ export async function executeBoardLocalQuery(params: {
 
     allOrders: [],
 
-    ordersTotal: views.length,
+    ordersTotal: displayOrderCount,
 
     page,
 

@@ -1,6 +1,8 @@
 import React from 'react'
 import { CalendarRange } from 'lucide-react'
 import { formatBoardStatRangeLabel } from '../../lib/board-stat-range-label'
+import { useDataFreshness } from '../../hooks/useDataFreshness'
+import { formatDataFreshnessTime } from '../../lib/data-freshness'
 
 interface Props {
   startDate: string
@@ -8,13 +10,39 @@ interface Props {
   className?: string
 }
 
+function buildWindowTextWithFreshness(
+  windowText: string,
+  includesTodayRealtime: boolean,
+  latestOrderTime: string | null | undefined,
+  lastSyncAt: string | null | undefined,
+): string {
+  if (!includesTodayRealtime) return windowText
+  const updatedAt = latestOrderTime ?? lastSyncAt
+  if (!updatedAt) return windowText
+  return `${windowText} · 数据更新 ${formatDataFreshnessTime(updatedAt)}`
+}
+
 export const BoardStatRangeNote: React.FC<Props> = ({
   startDate,
   endDate,
   className = '',
 }) => {
-  if (!startDate || !endDate) return null
-  const meta = formatBoardStatRangeLabel(startDate, endDate)
+  const meta =
+    startDate && endDate ? formatBoardStatRangeLabel(startDate, endDate) : null
+  const { data: freshness } = useDataFreshness(
+    meta?.includesTodayRealtime ? startDate : undefined,
+    meta?.includesTodayRealtime ? endDate : undefined,
+  )
+
+  if (!startDate || !endDate || !meta) return null
+
+  const windowText = buildWindowTextWithFreshness(
+    meta.windowText,
+    meta.includesTodayRealtime,
+    freshness?.latestOrderTime,
+    freshness?.lastQianfanSyncAt,
+  )
+  const mobileWindowText = windowText.replace(/ 00:00:00| 23:59:59/g, '')
   return (
     <div
       className={`flex gap-2.5 rounded-xl border border-sky-100/80 bg-gradient-to-r from-sky-50/70 to-white px-3 py-2.5 text-[11px] leading-relaxed text-slate-600 shadow-sm ${className}`}
@@ -24,8 +52,8 @@ export const BoardStatRangeNote: React.FC<Props> = ({
       </span>
       <div className="min-w-0">
         <div className="font-medium text-slate-700">
-          <span className="sm:hidden">统计：{meta.windowText.replace(/ 00:00:00| 23:59:59/g, '')}</span>
-          <span className="hidden sm:inline">统计窗口：{meta.windowText}</span>
+          <span className="sm:hidden">统计：{mobileWindowText}</span>
+          <span className="hidden sm:inline">统计窗口：{windowText}</span>
         </div>
         <div className="mt-0.5 text-slate-500">
           <span className="sm:hidden">支付时间归属 · 与接口查询一致{meta.includesTodayRealtime ? ' · 含今日实时' : ''}</span>

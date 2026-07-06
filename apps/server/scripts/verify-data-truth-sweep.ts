@@ -22,6 +22,7 @@ import { addDaysShanghai, formatDateKeyShanghai } from '../src/utils/business-ti
 import type { BoardDrillOrderRow } from '../src/services/order-row-mapper.service'
 import {
   isNoAfterSaleText,
+  isPositiveAfterSaleText,
   viewHasAfterSaleStatusSignal,
 } from '../src/services/after-sale-status-signal.service'
 import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
@@ -170,7 +171,9 @@ async function checkOverviewSignedDrawers(): Promise<void> {
   if (dupesSignRate.length === 0) ok('signRate 抽屉无重复 P 单')
   else fail(`signRate 抽屉重复 P 单: ${dupesSignRate.slice(0, 5).join(', ')}`)
 
-  const cardReturnCount = num(summary.returnOrderCount ?? summary.refundOrderCount)
+  const cardReturnCount = num(
+    summary.returnCount ?? summary.returnOrderCount ?? summary.refundOrderCount,
+  )
   const returnCountBundle = await fetchMetricDetailBundle({
     metric: 'returnCount',
     startDate: START_DATE,
@@ -178,11 +181,11 @@ async function checkOverviewSignedDrawers(): Promise<void> {
   })
   if (returnCountBundle.summary.matchedOrders === cardReturnCount) {
     ok(
-      `returnCount matchedOrders ${returnCountBundle.summary.matchedOrders} === 卡片 refundOrderCount`,
+      `returnCount matchedOrders ${returnCountBundle.summary.matchedOrders} === 卡片 returnCount/refundOrderCount ${cardReturnCount}`,
     )
   } else {
     fail(
-      `returnCount matchedOrders ${returnCountBundle.summary.matchedOrders} !== 卡片 ${cardReturnCount}`,
+      `returnCount matchedOrders ${returnCountBundle.summary.matchedOrders} !== 卡片 returnCount/refundOrderCount ${cardReturnCount}`,
     )
   }
   const dupesReturnCount = countDuplicateOrderNos(returnCountBundle.rows)
@@ -783,6 +786,9 @@ function checkNoAfterSaleTextRuntime(): void {
     '未产生售后',
     '没有售后',
     '售后状态：无',
+    '售后：无',
+    '退款状态：无',
+    '退货状态：无',
     '无退款',
     '无退货',
   ]
@@ -808,6 +814,12 @@ function checkNoAfterSaleTextRuntime(): void {
     const view = { afterSaleStatusText: text } as AnalyzedOrderView
     if (viewHasAfterSaleStatusSignal(view)) ok(`正例「${text}」算售后信号`)
     else fail(`正例「${text}」未识别为售后信号`)
+  }
+
+  if (isPositiveAfterSaleText('售后完成未退款')) {
+    ok('isPositiveAfterSaleText「售后完成未退款」')
+  } else {
+    fail('isPositiveAfterSaleText 未识别「售后完成未退款」')
   }
 }
 

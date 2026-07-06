@@ -13,6 +13,7 @@ import {
 import { addDaysShanghai } from '../src/utils/business-timezone'
 import {
   isNoAfterSaleText,
+  isPositiveAfterSaleText,
   viewHasAfterSaleStatusSignal,
 } from '../src/services/after-sale-status-signal.service'
 import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
@@ -303,6 +304,9 @@ async function main(): Promise<void> {
     '未产生售后',
     '没有售后',
     '售后状态：无',
+    '售后：无',
+    '退款状态：无',
+    '退货状态：无',
     '无退款',
     '无退货',
   ]
@@ -355,6 +359,12 @@ async function main(): Promise<void> {
     } else {
       fail(`「${text}」未识别为售后信号`)
     }
+  }
+
+  if (isPositiveAfterSaleText('售后完成未退款')) {
+    ok('isPositiveAfterSaleText「售后完成未退款」')
+  } else {
+    fail('isPositiveAfterSaleText 未识别「售后完成未退款」')
   }
 
   console.log('\n=== 运行时冒烟 ===')

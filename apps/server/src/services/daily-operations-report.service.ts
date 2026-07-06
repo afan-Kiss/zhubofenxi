@@ -69,6 +69,11 @@ import {
   type AnchorAttendanceStatusPayload,
 } from '../utils/anchor-attendance-status.util'
 
+function isUnassignedOperationsView(v: AnalyzedOrderView): boolean {
+  const name = String(v.anchorName ?? '').trim()
+  return name === '未归属' || v.attributionType === 'unassigned'
+}
+
 function sumSignedDisplayFromViews(views: AnalyzedOrderView[]): {
   validAmountCent: number
   validAmountYuan: number
@@ -461,7 +466,7 @@ export async function buildDailyOperationsReport(params: {
   const storeWideValid = sumSignedDisplayFromViews(performanceViewsAll)
   const anchorAssignedValidCent = anchorRows.reduce((sum, row) => sum + row.validAmountCent, 0)
   const unassignedViews = dedupeViewsByMetricOrderNo(performanceViewsAll).filter(
-    (v) => v.attributionType === 'unassigned',
+    isUnassignedOperationsView,
   )
   const unassignedValid = sumSignedDisplayFromViews(unassignedViews)
 
@@ -478,10 +483,10 @@ export async function buildDailyOperationsReport(params: {
   const storeWideInvalid = countDailyReportOrders(remappedAll)
   const invalidOrderCount = storeWideInvalid.invalidOrderCount
   const unassignedInvalidViews = dedupeViewsByMetricOrderNo(remappedAll).filter(
-    (v) => v.attributionType === 'unassigned',
+    isUnassignedOperationsView,
   )
   const assignedInvalidViews = dedupeViewsByMetricOrderNo(remappedAll).filter(
-    (v) => v.attributionType !== 'unassigned',
+    (v) => !isUnassignedOperationsView(v),
   )
   const anchorAssignedInvalidOrderCount =
     countDailyReportOrders(assignedInvalidViews).invalidOrderCount

@@ -146,11 +146,11 @@ function matchMetricViews(views: AnalyzedOrderView[], metric: BoardMetricKey, ta
       return views.filter((v) => isValidRevenueOrder(v))
     case 'actualSignedAmount':
     case 'signedCount':
-      if (tab === 'unsigned') return views.filter((v) => !isEffectiveSignedView(v))
-      return views.filter((v) => isEffectiveSignedView(v))
-    case 'signRate':
-      if (tab === 'unsigned') return views.filter((v) => !isEffectiveSignedView(v))
-      return views.filter((v) => isEffectiveSignedView(v))
+    case 'signRate': {
+      const paidViews = views.filter((v) => viewCountsAsPaidOrder(v))
+      if (tab === 'unsigned') return paidViews.filter((v) => !isEffectiveSignedView(v))
+      return paidViews.filter((v) => isEffectiveSignedView(v))
+    }
     case 'returnAmount':
     case 'returnCount':
     case 'returnRate':
@@ -181,11 +181,13 @@ function needsMetricOrderDedupe(metric: BoardMetricKey): boolean {
 }
 
 function countDedupedSignedViews(views: AnalyzedOrderView[]): number {
-  return dedupeViewsByMetricOrderNo(views.filter((v) => isEffectiveSignedView(v))).length
+  const paidViews = views.filter((v) => viewCountsAsPaidOrder(v))
+  return dedupeViewsByMetricOrderNo(paidViews.filter((v) => isEffectiveSignedView(v))).length
 }
 
 function countDedupedUnsignedViews(views: AnalyzedOrderView[]): number {
-  return dedupeViewsByMetricOrderNo(views.filter((v) => !isEffectiveSignedView(v))).length
+  const paidViews = views.filter((v) => viewCountsAsPaidOrder(v))
+  return dedupeViewsByMetricOrderNo(paidViews.filter((v) => !isEffectiveSignedView(v))).length
 }
 
 function buildPageSummary(views: AnalyzedOrderView[]): Record<string, unknown> {
@@ -360,7 +362,9 @@ export async function buildBoardMetricDetail(params: {
       return dedupeViewsByMetricOrderNo(viewsForTotals.filter((v) => isValidRevenueOrder(v))).length
     }
     if (params.metric === 'signedCount' || params.metric === 'signRate') {
-      return params.tab === 'unsigned' ? unsignedTabCount : totals.signedOrderCount
+      return params.tab === 'unsigned'
+        ? Math.max(0, totals.orderCount - totals.signedOrderCount)
+        : totals.signedOrderCount
     }
     if (params.metric === 'actualSignedAmount') return totals.signedOrderCount
     if (needsMetricOrderDedupe(params.metric)) return sourceViews.length

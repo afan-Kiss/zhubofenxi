@@ -9,6 +9,7 @@ import { confirmDailySchedules } from './anchor-schedule-confirm.service'
 import { isDateScheduleConfirmed } from './anchor-schedule-confirm.service'
 import { buildEffectiveScheduleRowsForDate } from '../utils/anchor-effective-schedule.util'
 import { listActiveTemplatesForDate } from './anchor-schedule-template.service'
+import { writeOperationLog } from './audit.service'
 
 const HISTORICAL_SCHEDULE_OVERRIDE_MESSAGE =
   '历史已确认排班不能直接覆盖，请先明确选择「修改历史排班」并填写原因'
@@ -22,10 +23,10 @@ async function assertHistoricalScheduleChangeAllowed(params: {
   forceHistoricalScheduleChange?: boolean
   changeReason?: string
   createdBy?: string
-}): Promise<void> {
-  if (params.date >= shanghaiTodayDateKey()) return
+}): Promise<string | undefined> {
+  if (params.date >= shanghaiTodayDateKey()) return undefined
   const confirmed = await isDateScheduleConfirmed(params.date)
-  if (!confirmed) return
+  if (!confirmed) return undefined
   const reason = params.changeReason?.trim()
   if (!params.forceHistoricalScheduleChange || !reason) {
     throw new Error(HISTORICAL_SCHEDULE_OVERRIDE_MESSAGE)
@@ -35,6 +36,27 @@ async function assertHistoricalScheduleChangeAllowed(params: {
     reason,
     createdBy: params.createdBy ?? null,
   })
+  await writeOperationLog({
+    username: params.createdBy ?? null,
+    action: 'unknown',
+    module: 'admin',
+    description: `历史已确认排班强制修改：${params.date}`,
+    meta: {
+      operationType: 'historical_schedule_override',
+      date: params.date,
+      changeReason: reason,
+      createdBy: params.createdBy ?? null,
+    },
+  })
+  return `历史修改原因：${reason}`
+}
+
+function appendHistoricalOverrideNote(
+  baseNote: string | null | undefined,
+  overrideNote: string | undefined,
+): string | null {
+  const parts = [baseNote?.trim(), overrideNote].filter((s) => s && s.length > 0)
+  return parts.length > 0 ? parts.join('；') : null
 }
 
 export type DailyScheduleSource = 'manual' | 'generated_default' | 'virtual_template'
@@ -374,8 +396,9 @@ export async function generateDefaultSchedulesForDate(params: {
   const isHistoricalConfirmed =
     date < shanghaiTodayDateKey() && (await isDateScheduleConfirmed(date))
 
+  let historicalOverrideNote: string | undefined
   if (overwrite && isHistoricalConfirmed) {
-    await assertHistoricalScheduleChangeAllowed({
+    historicalOverrideNote = await assertHistoricalScheduleChangeAllowed({
       date,
       forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
       changeReason: params.changeReason,
@@ -420,7 +443,7 @@ export async function generateDefaultSchedulesForDate(params: {
   })
 
   if (!overwrite && templatesToCreate.length > 0 && isHistoricalConfirmed) {
-    await assertHistoricalScheduleChangeAllowed({
+    historicalOverrideNote = await assertHistoricalScheduleChangeAllowed({
       date,
       forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
       changeReason: params.changeReason,
@@ -445,7 +468,7 @@ export async function generateDefaultSchedulesForDate(params: {
       enabled: true,
       locked: false,
       confirmed: false,
-      note: t.note,
+      note: appendHistoricalOverrideNote(t.note, historicalOverrideNote),
       createdBy: params.createdBy ?? null,
     }
   })
@@ -506,7 +529,7 @@ export async function saveDailySchedules(params: {
   forceHistoricalScheduleChange?: boolean
   changeReason?: string
 }): Promise<{ date: string; schedules: DailyScheduleDto[]; warnings: string[] }> {
-  await assertHistoricalScheduleChangeAllowed({
+  const historicalOverrideNote = await assertHistoricalScheduleChangeAllowed({
     date: params.date,
     forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
     changeReason: params.changeReason,
@@ -563,7 +586,7 @@ export async function saveDailySchedules(params: {
         enabled: true,
         locked: false,
         confirmed: false,
-        note: s.note?.trim() || null,
+        note: appendHistoricalOverrideNote(s.note?.trim() || null, historicalOverrideNote),
         createdBy: params.createdBy ?? null,
       },
     })
@@ -589,7 +612,7 @@ export async function copyDailySchedules(params: {
   forceHistoricalScheduleChange?: boolean
   changeReason?: string
 }): Promise<{ date: string; schedules: DailyScheduleDto[]; warnings: string[] }> {
-  await assertHistoricalScheduleChangeAllowed({
+  const historicalOverrideNote = await assertHistoricalScheduleChangeAllowed({
     date: params.toDate,
     forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
     changeReason: params.changeReason,
@@ -638,7 +661,10 @@ export async function copyDailySchedules(params: {
         enabled: row.enabled,
         locked: false,
         confirmed: false,
-        note: row.note ? `复制自 ${params.fromDate}：${row.note}` : `复制自 ${params.fromDate}`,
+        note: appendHistoricalOverrideNote(
+          row.note ? `复制自 ${params.fromDate}：${row.note}` : `复制自 ${params.fromDate}`,
+          historicalOverrideNote,
+        ),
         createdBy: params.createdBy ?? null,
       },
     })

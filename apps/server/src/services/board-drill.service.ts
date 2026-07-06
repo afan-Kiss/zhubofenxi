@@ -75,6 +75,7 @@ import {
   STAFF_UNBOUND_MESSAGE,
 } from './staff-anchor-scope.service'
 import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
+import { dedupeViewsByMetricOrderNo } from './calc-refund-rate.service'
 
 function shouldExposeSignedDrillTab(preset?: string): boolean {
   if (!preset || preset === 'yesterday' || preset === 'today') return false
@@ -346,9 +347,14 @@ export async function buildAnchorDrill(params: {
   )
 
   const anchorViews = performanceScoped
+  const dedupedAnchorViews = dedupeViewsByMetricOrderNo(anchorViews)
+  const dedupedSignedViews = dedupeViewsByMetricOrderNo(
+    anchorViews.filter((v) => isEffectiveSignedView(v)),
+  )
   const statusType = params.statusType ?? 'all'
-  const drillViews = filterDrillViewsByStatus(anchorViews, statusType)
-  const signedCount = anchorViews.filter((v) => isEffectiveSignedView(v)).length
+  const drillViews = statusType === 'signed' ? dedupedSignedViews : dedupedAnchorViews
+  const signedCount = dedupedSignedViews.length
+  const allOrderCount = dedupedAnchorViews.length
   const leaderboard = aggregateAnchorLeaderboard(performanceScoped)
   const stats =
     leaderboard.find((a) =>
@@ -409,10 +415,10 @@ export async function buildAnchorDrill(params: {
     blacklistedBuyerIds: [...blacklist],
     tabs: shouldExposeSignedDrillTab(params.preset)
       ? [
-          { key: 'all', label: '全部订单', count: anchorViews.length },
+          { key: 'all', label: '全部订单', count: allOrderCount },
           { key: 'signed', label: '实际签收', count: signedCount },
         ]
-      : [{ key: 'all', label: '全部订单', count: anchorViews.length }],
+      : [{ key: 'all', label: '全部订单', count: allOrderCount }],
     pagination: {
       page,
       pageSize,

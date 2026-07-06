@@ -66,6 +66,50 @@ function extFromContentType(contentType: string): string {
   return '.jpg'
 }
 
+/** 优先尝试较小变体，避免原图超过代理大小限制 */
+export function buildGoodReviewImageFetchCandidates(sourceUrl: string): string[] {
+  const normalized = normalizeReviewImageUrl(sourceUrl.trim())
+  if (!normalized) return [sourceUrl.trim()]
+
+  const out: string[] = []
+  const push = (u: string | null | undefined) => {
+    const text = u?.trim()
+    if (!text || out.includes(text)) return
+    if (!isAllowedGoodReviewImageUrl(text)) return
+    out.push(text)
+  }
+
+  try {
+    const url = new URL(normalized)
+    const host = url.hostname.toLowerCase()
+    const baseNoQuery = `${url.origin}${url.pathname}`
+    const bangIdx = url.pathname.indexOf('!')
+    const pathWithoutBang = bangIdx >= 0 ? url.pathname.slice(0, bangIdx) : url.pathname
+    const baseWithoutBang = `${url.origin}${pathWithoutBang}`
+
+    if (host.includes('xhscdn.com') || host.includes('xiaohongshu.com')) {
+      if (host.includes('sns-img-')) {
+        push(normalized.replace(host, host.replace('sns-img-', 'sns-webpic-')))
+      }
+      push(`${baseWithoutBang}!nd_dft_wlteh_webp_3`)
+      push(`${baseWithoutBang}!nd_prv_wheh_jpg_3`)
+      push(`${baseNoQuery}?imageView2/2/w/1280/format/webp`)
+      push(`${baseNoQuery}?imageMogr2/thumbnail/1280x/format/webp`)
+    }
+  } catch {
+    /* ignore malformed url */
+  }
+
+  push(normalized)
+  return out
+}
+
+function resolveGoodReviewImageMaxBytes(): number {
+  const maxBytesRaw = process.env.GOOD_REVIEW_IMAGE_MAX_BYTES?.trim()
+  const parsedMax = maxBytesRaw ? Number(maxBytesRaw) : 20 * 1024 * 1024
+  return Number.isFinite(parsedMax) && parsedMax > 0 ? Math.round(parsedMax) : 20 * 1024 * 1024
+}
+
 function warnImageProxy(message: string, detail: Record<string, string>): void {
   const parts = Object.entries(detail)
     .map(([k, v]) => `${k}=${v}`)
@@ -193,12 +237,10 @@ export function closeGoodReviewImageSession(sessionId: string): void {
   }
 }
 
-async function downloadImage(sourceUrl: string): Promise<{ buffer: Buffer; contentType: string }> {
-  const maxBytesRaw = process.env.GOOD_REVIEW_IMAGE_MAX_BYTES?.trim()
-  const parsedMax = maxBytesRaw ? Number(maxBytesRaw) : 10 * 1024 * 1024
-  const maxBytes =
-    Number.isFinite(parsedMax) && parsedMax > 0 ? Math.round(parsedMax) : 10 * 1024 * 1024
-
+async function downloadImageOnce(
+  sourceUrl: string,
+  maxBytes: number,
+): Promise<{ buffer: Buffer; contentType: string }> {
   let currentUrl = sourceUrl
   for (let hop = 0; hop <= 5; hop++) {
     const res = await fetch(currentUrl, {
@@ -253,6 +295,26 @@ async function downloadImage(sourceUrl: string): Promise<{ buffer: Buffer; conte
   throw new Error('图片跳转次数过多')
 }
 
+async function downloadImage(sourceUrl: string): Promise<{ buffer: Buffer; contentType: string; fetchedUrl: string }> {
+  const maxBytes = resolveGoodReviewImageMaxBytes()
+  const candidates = buildGoodReviewImageFetchCandidates(sourceUrl)
+  let lastError: Error | null = null
+
+  for (let i = 0; i < candidates.length; i++) {
+    const candidate = candidates[i]!
+    const isOriginal = i === candidates.length - 1
+    const limit = isOriginal ? maxBytes : Math.min(maxBytes, 12 * 1024 * 1024)
+    try {
+      const result = await downloadImageOnce(candidate, limit)
+      return { ...result, fetchedUrl: candidate }
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error('下载图片失败')
+    }
+  }
+
+  throw lastError ?? new Error('下载图片失败')
+}
+
 export async function proxyGoodReviewImage(params: {
   rawUrl: string
   sessionId?: string
@@ -285,7 +347,7 @@ export async function proxyGoodReviewImage(params: {
   }
 
   try {
-    const { buffer, contentType } = await downloadImage(normalized)
+    const { buffer, contentType, fetchedUrl } = await downloadImage(normalized)
     ensureCacheDir()
     const ext = extFromContentType(contentType)
     const localPath = filePath(cacheKey, ext)
@@ -293,7 +355,7 @@ export async function proxyGoodReviewImage(params: {
     const meta: GoodReviewImageCacheMeta = {
       cacheKey,
       sourceUrlHash: cacheKey,
-      sourceUrl: normalized,
+      sourceUrl: fetchedUrl,
       localPath,
       contentType,
       createdAt: nowIso,

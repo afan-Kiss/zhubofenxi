@@ -41,6 +41,16 @@ goodReviewsRouter.get('/image-proxy', attachRequestUser, requireAuth, async (req
     }
     const result = await proxyGoodReviewImage({ rawUrl: decoded, sessionId })
     if (!result.ok) {
+      const accept = String(req.headers.accept ?? '')
+      if (accept.includes('image/') || accept.includes('*/*')) {
+        res.status(502)
+        res.setHeader('Content-Type', 'image/svg+xml; charset=utf-8')
+        res.setHeader('Cache-Control', 'no-store')
+        res.send(
+          `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="120" viewBox="0 0 320 120"><rect width="320" height="120" fill="#f8fafc"/><text x="160" y="56" text-anchor="middle" fill="#64748b" font-size="14">图片加载失败</text><text x="160" y="78" text-anchor="middle" fill="#94a3b8" font-size="11">${result.message.replace(/[<>&"]/g, '')}</text></svg>`,
+        )
+        return
+      }
       sendFail(res, result.message, 404)
       return
     }

@@ -11,6 +11,7 @@ import {
 } from '../../src/services/board-scoped-views.service'
 import { filterViewsForCoreMetrics } from '../../src/services/metrics-exclusion.service'
 import { calculateBusinessMetrics } from '../../src/services/business-metrics.service'
+import { isValidRevenueOrder } from '../../src/services/valid-revenue-order.service'
 import { resolveMetricOrderNo } from '../../src/services/calc-refund-rate.service'
 import {
   ANCHOR_DRAWER_NAMES,
@@ -179,6 +180,10 @@ export async function verifyLocalQueryAnchorRemap(params: {
   return fails
 }
 
+function countEffectiveGmvViews(views: AnalyzedOrderView[]): number {
+  return views.filter((v) => isValidRevenueOrder(v)).length
+}
+
 export async function verifyAnchorEntrypointPoolConsistency(params: {
   startDate: string
   endDate: string
@@ -186,6 +191,23 @@ export async function verifyAnchorEntrypointPoolConsistency(params: {
 }): Promise<string[]> {
   const fails: string[] = []
   const label = params.anchorName
+
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: params.startDate,
+    endDate: params.endDate,
+    role: 'super_admin',
+    username: 'verify-script',
+  })
+  const scopedAllViews = filterViewsForCoreMetrics(scoped.views)
+  const performanceViews = await getAnchorPerformanceViews(
+    scopedAllViews,
+    scoped.rawByMatch,
+    undefined,
+    params.anchorName,
+  )
+  const perfMetrics = calculateBusinessMetrics(performanceViews)
+  const expectedEffectiveRows = countEffectiveGmvViews(performanceViews)
 
   const local = await executeBoardLocalQuery({
     preset: 'custom',
@@ -220,12 +242,8 @@ export async function verifyAnchorEntrypointPoolConsistency(params: {
   const localGmv = summaryEffectiveGmv(localTop)
   const perfGmv = summaryEffectiveGmv(localPerf)
   const drawerGmv = metricDetail.summary.valueRaw
+  const drawerRows = metricDetail.rows.length
   const drillGmv = metricNum(drillStats?.effectiveGmv ?? drillStats?.validSalesAmount)
-
-  const localCount = summaryOrderCount(localTop)
-  const perfCount = summaryOrderCount(localPerf)
-  const drawerCount = metricDetail.summary.matchedOrders
-  const drillCount = metricNum(drillStats?.orderCount ?? drillStats?.paidOrderCount)
 
   if (Math.abs(localGmv - drawerGmv) > 0.02) {
     fails.push(`${label}: localQuery.summary.effectiveGmv=${localGmv} drawer=${drawerGmv}`)
@@ -236,15 +254,17 @@ export async function verifyAnchorEntrypointPoolConsistency(params: {
   if (drillStats && Math.abs(drillGmv - drawerGmv) > 0.02) {
     fails.push(`${label}: buildAnchorDrill.effectiveGmv=${drillGmv} drawer=${drawerGmv}`)
   }
+  if (Math.abs(perfMetrics.validSalesAmount - drawerGmv) > 0.02) {
+    fails.push(`${label}: performanceViews.validSalesAmount=${perfMetrics.validSalesAmount} drawer=${drawerGmv}`)
+  }
 
-  if (Math.abs(localCount - drawerCount) > 0.01) {
-    fails.push(`${label}: localQuery.summary.orderCount=${localCount} drawer=${drawerCount}`)
+  if (drawerRows !== expectedEffectiveRows) {
+    fails.push(
+      `${label}: drawer.effectiveGmv rows=${drawerRows} performanceViews有效成交=${expectedEffectiveRows}`,
+    )
   }
-  if (Math.abs(perfCount - drawerCount) > 0.01) {
-    fails.push(`${label}: localQuery.anchorPerformanceSummary.orderCount=${perfCount} drawer=${drawerCount}`)
-  }
-  if (drillStats && Math.abs(drillCount - drawerCount) > 0.01) {
-    fails.push(`${label}: buildAnchorDrill.orderCount=${drillCount} drawer=${drawerCount}`)
+  if (metricDetail.paginationTotal !== drawerRows) {
+    fails.push(`${label}: drawer pagination.total=${metricDetail.paginationTotal} rows=${drawerRows}`)
   }
 
   return fails
@@ -288,13 +308,13 @@ export async function verifyAnchorRemapEntrypoints(params: {
     endDate: params.endDate,
   })
   const storeEffectiveGmv = storeDrawer.summary.valueRaw
-  const storeEffectiveCount = storeDrawer.summary.matchedOrders
+  const storeEffectiveCount = storeDrawer.rows.length
 
   if (Math.abs(storeEffectiveGmv - 31432) > 0.02) {
     fails.push(`全店 effectiveGmv=${storeEffectiveGmv} 期望 31432`)
   }
   if (storeEffectiveCount !== 16) {
-    fails.push(`全店 effectiveGmv 笔数=${storeEffectiveCount} 期望 16`)
+    fails.push(`全店 effectiveGmv 有效成交笔数=${storeEffectiveCount} 期望 16`)
   }
 
   const localStore = await executeBoardLocalQuery({
@@ -321,4 +341,74 @@ export async function verifyAnchorRemapEntrypoints(params: {
   }
 
   return { fails, storeEffectiveGmv, storeEffectiveCount, expectedMap }
+}
+
+export async function verifyFocusOrdersInPools(params: {
+  startDate: string
+  endDate: string
+  expectedMap: Map<string, string>
+}): Promise<string[]> {
+  const fails: string[] = []
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: params.startDate,
+    endDate: params.endDate,
+    role: 'super_admin',
+    username: 'verify-script',
+  })
+  const scopedAllViews = filterViewsForCoreMetrics(scoped.views)
+  const storeEffective = await fetchMetricDetailBundle({
+    metric: 'effectiveGmv',
+    startDate: params.startDate,
+    endDate: params.endDate,
+  })
+
+  for (const orderNo of FOCUS_ORDERS) {
+    const expected =
+      params.expectedMap.get(orderNo) ??
+      params.expectedMap.get(orderNo.replace(/^P/, '')) ??
+      '—'
+    if (expected === '—' || expected === '未归属') continue
+
+    const perfViews = await getAnchorPerformanceViews(
+      scopedAllViews,
+      scoped.rawByMatch,
+      undefined,
+      expected,
+    )
+    if (!findViewByOrderNo(perfViews, orderNo)) {
+      fails.push(`${orderNo} 应在 executeBoardLocalQuery/${expected} remap 后订单池，但未找到`)
+    }
+
+    const inStoreEffective = storeEffective.rows.some((r) =>
+      orderKeys(orderNo).includes(r.orderNo || r.packageId || ''),
+    )
+    const drawer = await fetchMetricDetailBundle({
+      metric: 'effectiveGmv',
+      startDate: params.startDate,
+      endDate: params.endDate,
+      anchorName: expected,
+    })
+    const inAnchorDrawer = drawer.rows.some((r) =>
+      orderKeys(orderNo).includes(r.orderNo || r.packageId || ''),
+    )
+    if (inStoreEffective && !inAnchorDrawer) {
+      fails.push(`${orderNo} 在全店 effectiveGmv 中，但 ${expected} drawer 缺失`)
+    }
+
+    for (const anchorName of REMAP_VERIFY_ANCHORS) {
+      if (anchorName === expected) continue
+      const otherPerf = await getAnchorPerformanceViews(
+        scopedAllViews,
+        scoped.rawByMatch,
+        undefined,
+        anchorName,
+      )
+      if (findViewByOrderNo(otherPerf, orderNo)) {
+        fails.push(`${orderNo} 不应在 executeBoardLocalQuery/${anchorName} remap 后订单池`)
+      }
+    }
+  }
+
+  return fails
 }

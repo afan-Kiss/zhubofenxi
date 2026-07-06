@@ -13,6 +13,7 @@ import {
   REMAP_VERIFY_ANCHORS,
   orderKeys,
   verifyAnchorRemapEntrypoints,
+  verifyFocusOrdersInPools,
 } from './lib/anchor-remap-entrypoints-verify.util'
 import {
   fetchMetricDetailBundle,
@@ -43,12 +44,12 @@ async function main(): Promise<void> {
 
   const { fails, storeEffectiveGmv, storeEffectiveCount, expectedMap } =
     await verifyAnchorRemapEntrypoints({ startDate, endDate })
+  const focusPoolFails = await verifyFocusOrdersInPools({ startDate, endDate, expectedMap })
 
   console.log('\n=== 2. 全店 effectiveGmv ===')
-  console.log(`valueRaw=¥${storeEffectiveGmv.toFixed(2)} matchedOrders=${storeEffectiveCount}`)
+  console.log(`valueRaw=¥${storeEffectiveGmv.toFixed(2)} 有效成交笔数=${storeEffectiveCount}`)
 
-  console.log('\n=== 3. 重点订单入口归属 ===')
-  const focusFails: string[] = []
+  console.log('\n=== 3. 重点订单入口归属（日志） ===')
   for (const orderNo of FOCUS_ORDERS) {
     const expected =
       expectedMap.get(orderNo) ??
@@ -77,19 +78,8 @@ async function main(): Promise<void> {
     }
 
     console.log(
-      `  ${orderNo}: expected=${expected} store=${inStore ? 'Y' : 'N'} anchors=[${anchorChecks.join(',') || '—'}]`,
+      `  ${orderNo}: expected=${expected} storeEffective=${inStore ? 'Y' : 'N'} effectiveGmvAnchors=[${anchorChecks.join(',') || '—'}]`,
     )
-
-    if (expected !== '—' && expected !== '未归属') {
-      if (!anchorChecks.includes(expected)) {
-        focusFails.push(`${orderNo} 应在 ${expected} 入口，实际 anchors=[${anchorChecks.join(',') || '—'}]`)
-      }
-      for (const anchorName of REMAP_VERIFY_ANCHORS) {
-        if (anchorName !== expected && anchorChecks.includes(anchorName)) {
-          focusFails.push(`${orderNo} 不应在 ${anchorName} 入口`)
-        }
-      }
-    }
   }
 
   console.log('\n=== 4. 三入口同池（effectiveGmv / orderCount）===')
@@ -121,11 +111,11 @@ async function main(): Promise<void> {
     const localSummary = local.summary as Record<string, unknown>
     const drillStats = drill.stats as Record<string, unknown> | null
     console.log(
-      `  ${anchorName}: localGmv=${Number(localSummary.effectiveGmv ?? 0).toFixed(2)}/${Number(localSummary.orderCount ?? 0)} drawer=${drawer.summary.valueRaw.toFixed(2)}/${drawer.summary.matchedOrders} drill=${Number(drillStats?.effectiveGmv ?? 0).toFixed(2)}/${Number(drillStats?.orderCount ?? 0)}`,
+      `  ${anchorName}: localGmv=${Number(localSummary.effectiveGmv ?? 0).toFixed(2)} drawer=${drawer.summary.valueRaw.toFixed(2)}/${drawer.rows.length} drill=${Number(drillStats?.effectiveGmv ?? 0).toFixed(2)}`,
     )
   }
 
-  const allFails = [...fails, ...focusFails]
+  const allFails = [...fails, ...focusPoolFails]
 
   console.log('\n=== 验收 ===')
   if (allFails.length > 0) {

@@ -121,7 +121,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
 
       <div className="mt-5 grid grid-cols-2 gap-3">
         <div className="rounded-xl border border-slate-200 p-3">
-          <p className="text-xs font-semibold text-slate-700">热卖商品 TOP 5</p>
+          <p className="text-xs font-semibold text-slate-700">热卖商品前 5</p>
           {hotItems.length === 0 ? (
             <p className="mt-2 text-xs text-slate-500">暂无数据</p>
           ) : (
@@ -141,7 +141,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
           )}
         </div>
         <div className="rounded-xl border border-slate-200 p-3">
-          <p className="text-xs font-semibold text-slate-700">高退货商品 TOP 5</p>
+          <p className="text-xs font-semibold text-slate-700">退货较多前 5</p>
           {highReturnItems.length === 0 ? (
             <p className="mt-2 text-xs text-slate-500">暂无数据</p>
           ) : (

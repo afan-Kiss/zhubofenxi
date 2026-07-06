@@ -315,6 +315,33 @@ export function accountSyncReason(account: LiveAccountPublic): string {
   return 'Cookie 暂不可同步，请到系统设置查看原因。'
 }
 
+export function formatShopCookieIssue(account: LiveAccountPublic): string {
+  const name = getAccountDisplayName(account)
+  const reason = resolveAccountCookieFriendlyReason(account)
+  if (reason === 'Cookie 已过期' || reason === 'Cookie 缺少关键字段') {
+    return `${name}：${reason}`
+  }
+  if (reason && !reason.startsWith('尚未收到')) {
+    return `${name}：${reason}`
+  }
+  return `${name} Cookie 暂不可同步`
+}
+
+export function buildCookieHealthSummaryLine(payload: CookieHealthPayload | null): string | null {
+  if (!payload || payload.degraded) return null
+  const enabled = payload.accounts.filter((a) => a.enabled && !(a.legacyShopKey && !a.officialShopKey))
+  if (enabled.length === 0) return null
+  const okCount = enabled.filter((a) => accountCanSyncOrders(a)).length
+  const issueCount = enabled.length - okCount
+  if (issueCount === 0) {
+    return `${okCount} 个店正常`
+  }
+  if (okCount === 0) {
+    return `${issueCount} 个店需处理`
+  }
+  return `${okCount} 个店正常 / ${issueCount} 个店需处理`
+}
+
 export function buildCookieBannerMessage(payload: CookieHealthPayload | null): string | null {
   if (!payload) return null
   if (payload.degraded && payload.errorMessage) {
@@ -327,28 +354,34 @@ export function buildCookieBannerMessage(payload: CookieHealthPayload | null): s
     if (a.healthStatus) return isCookieHealthBlocking(a.healthStatus)
     return !accountCanSyncOrders(a)
   })
-  const syncable = enabled.filter((a) => accountCanSyncOrders(a))
+  const syncable = enabled.filter((a) => {
+    if (a.legacyShopKey && !a.officialShopKey) return false
+    return accountCanSyncOrders(a)
+  })
   const missing = notSyncable.filter((a) => !a.hasCookie)
 
   if (notSyncable.length === 0) return null
-
-  if (notSyncable.length === 1 && syncable.length === 0) {
-    const acc = notSyncable[0]!
-    return `直播号「${acc.name}」${accountSyncReason(acc)}`
-  }
-
-  if (notSyncable.length === 1 && syncable.length > 0) {
-    const acc = notSyncable[0]!
-    return `直播号「${acc.name}」${accountSyncReason(acc)}（其余 ${syncable.length} 个可同步）`
-  }
-
-  if (syncable.length > 0) {
-    return `${notSyncable.length} 个直播号 Cookie 暂不可同步，${syncable.length} 个可同步。`
-  }
 
   if (missing.length === enabled.length) {
     return `${missing.length} 个直播号未收到 Cookie，请到系统设置更新或由机器人上传。`
   }
 
-  return `${notSyncable.length} 个直播号 Cookie 暂不可同步，点击查看原因。`
+  if (notSyncable.length === 1 && syncable.length === 0) {
+    const acc = notSyncable[0]!
+    return formatShopCookieIssue(acc)
+  }
+
+  const MAX_SHOW = 3
+  const shown = notSyncable.slice(0, MAX_SHOW).map(formatShopCookieIssue)
+  let message = shown.join('；')
+  if (notSyncable.length > MAX_SHOW) {
+    message += `；等 ${notSyncable.length} 个店`
+  }
+  if (syncable.length > 0) {
+    message += `；其余 ${syncable.length} 个店正常。`
+  } else if (!message.endsWith('。')) {
+    message += '。'
+  }
+
+  return message
 }

@@ -22,7 +22,7 @@ import {
   type BoardMetricKey,
 } from '../../components/board/BoardMetricDrawer'
 import { BusinessSyncProgressCard } from '../../components/board/BusinessSyncProgressCard'
-import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
+import { DataHealthPanel } from '../../components/board/DataHealthPanel'
 import type { QualityFeedbackStatus } from '../../components/board/OfficialQualitySyncNote'
 import {
   BoardLiveQueryAutoRefresh,
@@ -30,10 +30,8 @@ import {
 } from '../../providers/BoardLiveQueryProvider'
 import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
-import { formatDataFreshnessTime } from '../../lib/data-freshness'
-import type { OverviewMeta } from '../../lib/board-live-query'
-import { apiRequest } from '../../lib/api'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
+import { apiRequest } from '../../lib/api'
 
 function summaryMetricValue(ds: Record<string, unknown>, metric: BoardMetricKey): number {
   switch (metric) {
@@ -197,18 +195,6 @@ const MORE_SUMMARY_CARDS: SummaryCardDef[] = [
   },
 ]
 
-function formatOverviewVersionLine(overviewMeta: OverviewMeta | null | undefined): string | null {
-  if (!overviewMeta) return null
-  const parts: string[] = ['本地已同步数据']
-  const syncLabel = overviewMeta.lastQianfanSyncAt
-    ? formatDataFreshnessTime(overviewMeta.lastQianfanSyncAt)
-    : overviewMeta.cacheBuiltAt
-      ? formatDataFreshnessTime(overviewMeta.cacheBuiltAt)
-      : null
-  if (syncLabel) parts.push(`${syncLabel} 更新`)
-  if (overviewMeta.dataVersionId) parts.push(`版本 ${overviewMeta.dataVersionId}`)
-  return parts.join(' · ')
-}
 
 function qualityReturnCardNote(
   qualityFeedback: QualityFeedbackStatus | null | undefined,
@@ -249,7 +235,12 @@ export const OverviewTab: React.FC = () => {
     syncMeta,
     activeSyncJob,
     totalRawOrders,
+    totalRawLiveSessions,
+    totalAfterSaleRecords,
+    totalQualityCases,
     cookieHealth,
+    staleMessage,
+    lastSyncedAt,
     dataDisplayStatus,
     startDate,
     endDate,
@@ -275,15 +266,9 @@ export const OverviewTab: React.FC = () => {
   const hasMetrics = Boolean(ds)
   const showMetrics = hasMetrics && boardDataVisible
   const qualityNote = qualityReturnCardNote(qualityFeedback)
-  const versionLine = formatOverviewVersionLine(overviewMeta)
   const stableWarning = overviewMeta?.stableVsLatest?.needsManualUpdate
     ? overviewMeta.stableVsLatest.message
     : null
-  const staleCacheWarning =
-    overviewMeta?.cacheStale || overviewMeta?.fallbackReason
-      ? overviewMeta?.dataVersionText ??
-        '当前展示上一次成功缓存，数据可能不是最新。'
-      : null
 
   const overviewTransitionKey = [
     'overview',
@@ -365,14 +350,13 @@ export const OverviewTab: React.FC = () => {
   return (
     <div className="mx-auto max-w-7xl space-y-4">
       <BoardLiveQueryAutoRefresh />
-      <CookieHealthBanner cookieHealth={cookieHealth} />
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">经营总览</h2>
-          <p className="mt-0.5 text-sm text-slate-500">本期经营大盘 · 支付、有效成交与品退</p>
-          {versionLine ? (
-            <p className="mt-1 text-xs text-slate-500">{versionLine}</p>
-          ) : status === 'loading' ? (
+          <p className="mt-0.5 text-sm text-slate-500">
+            本期经营大盘 · 支付、已签收、退款、品退
+          </p>
+          {status === 'loading' && !displaySummary ? (
             <p className="mt-1 text-xs text-slate-400">正在读取本地数据…</p>
           ) : null}
           {overviewMeta?.stableSnapshot?.label ? (
@@ -380,11 +364,20 @@ export const OverviewTab: React.FC = () => {
           ) : null}
         </div>
       </div>
-      {staleCacheWarning ? (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          {staleCacheWarning}
-        </div>
-      ) : null}
+
+      <DataHealthPanel
+        boardSyncUiMode={boardSyncUiMode}
+        staleMessage={staleMessage}
+        activeSyncJob={activeSyncJob}
+        lastSyncedAt={lastSyncedAt}
+        lastSuccessAt={syncMeta?.businessSync.lastSuccessAt ?? null}
+        totalRawOrders={totalRawOrders}
+        totalRawLiveSessions={totalRawLiveSessions}
+        totalAfterSaleRecords={totalAfterSaleRecords}
+        totalQualityCases={totalQualityCases}
+        cookieHealth={cookieHealth}
+      />
+
       {stableWarning ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p>{stableWarning}</p>

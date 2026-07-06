@@ -52,6 +52,8 @@ interface BoardLiveQueryContextValue {
   activeSyncJob: BoardActiveSyncJob | null
   totalRawOrders: number
   totalRawLiveSessions: number
+  totalAfterSaleRecords: number
+  totalQualityCases: number
   cookieHealth: CookieHealthPayload | null
   staleMessage: string | null
   startDate: string
@@ -104,6 +106,8 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   const activeSyncJob = syncMeta?.activeSyncJob ?? null
   const totalRawOrders = syncMeta?.totalRawOrders ?? 0
   const totalRawLiveSessions = syncMeta?.totalRawLiveSessions ?? 0
+  const totalAfterSaleRecords = syncMeta?.totalAfterSaleRecords ?? 0
+  const totalQualityCases = syncMeta?.totalQualityCases ?? 0
 
   /** 仅当 loadedRangeKey 与当前 rangeKey 一致时，才向 UI 暴露 summary / data */
   const showSummaryForUi = rangeMatched ? displaySummary : null
@@ -194,10 +198,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
         overviewFallback?: string | null,
       ) => {
         if (overviewMetaStale || overviewFallback) {
-          setStaleMessage(
-            overviewFallback ??
-              '当前展示上一次成功缓存，数据可能不是最新。',
-          )
+          setStaleMessage('缓存重建失败，当前展示上一次成功数据。')
           return
         }
         const uiMode = deriveBoardSyncUiMode({
@@ -212,11 +213,9 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
         } else if (uiMode === 'syncing_with_data') {
           setStaleMessage(null)
         } else if (displayStatus === 'failed_with_cache') {
-          setStaleMessage(
-            progressMessage || '本次更新失败，当前展示上一次成功同步数据。',
-          )
+          setStaleMessage('本次更新失败，当前展示上一次成功数据。')
         } else if (displayStatus === 'empty') {
-          setStaleMessage(progressMessage || '当前日期范围内暂无订单数据。')
+          setStaleMessage('当前日期范围内暂无订单。')
         } else {
           setStaleMessage(null)
         }
@@ -348,6 +347,8 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       activeSyncJob,
       totalRawOrders,
       totalRawLiveSessions,
+      totalAfterSaleRecords,
+      totalQualityCases,
       cookieHealth: syncMeta?.cookieHealth ?? null,
       staleMessage,
       startDate,
@@ -377,6 +378,8 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       activeSyncJob,
       totalRawOrders,
       totalRawLiveSessions,
+      totalAfterSaleRecords,
+      totalQualityCases,
       staleMessage,
       startDate,
       endDate,

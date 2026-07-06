@@ -132,6 +132,8 @@ export async function buildBoardSyncMetaForApi(): Promise<{
   activeSyncJob: BoardActiveSyncJobView | null
   totalRawOrders: number
   totalRawLiveSessions: number
+  totalAfterSaleRecords: number
+  totalQualityCases: number
   buyerProfileStatus: BuyerProfileStatusView
 }> {
   const [base, syncPayload, totalRawOrders, totalRawLiveSessions, afterSaleCount, qualityCaseCount, buyerCacheRow] =
@@ -188,6 +190,8 @@ export async function buildBoardSyncMetaForApi(): Promise<{
     activeSyncJob,
     totalRawOrders,
     totalRawLiveSessions,
+    totalAfterSaleRecords: afterSaleCount,
+    totalQualityCases: qualityCaseCount,
     buyerProfileStatus,
   }
 }

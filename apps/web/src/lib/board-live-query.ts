@@ -47,6 +47,8 @@ export interface BoardSyncMeta {
   activeSyncJob?: BoardActiveSyncJob | null
   totalRawOrders?: number
   totalRawLiveSessions?: number
+  totalAfterSaleRecords?: number
+  totalQualityCases?: number
   buyerProfileStatus?: BuyerProfileStatus
 }
 

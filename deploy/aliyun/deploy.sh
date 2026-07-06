@@ -98,6 +98,29 @@ install_deps_build() {
     log "VITE_BASE_PATH=$VITE_BASE_PATH"
   fi
   npm run build
+  verify_web_build
+}
+
+verify_web_build() {
+  local index="$DEPLOY_DIR/apps/web/dist/index.html"
+  [[ -f "$index" ]] || fail "缺少 apps/web/dist/index.html"
+  local script_src
+  script_src="$(grep -oE 'src="[^"]+"' "$index" | head -1 || true)"
+  if [[ -z "$script_src" ]]; then
+    fail "index.html 未找到 script src"
+  fi
+  if [[ "$script_src" == *'="//'* || "$script_src" == *"='//"* ]]; then
+    fail "index.html 静态资源为协议相对路径（会导致白屏）: $script_src"
+  fi
+  local bp="${WEB_BASE_PATH_VALUE:-}"
+  if [[ -n "$bp" && "$bp" != "/" ]]; then
+    bp="/${bp#/}"
+    bp="${bp%/}"
+    if ! grep -q "src=\"${bp}/assets/" "$index"; then
+      fail "index.html 静态资源路径异常: $script_src（期望 ${bp}/assets/...）"
+    fi
+  fi
+  log "web build OK: $script_src"
 }
 
 write_deploy_build_meta() {

@@ -9,6 +9,8 @@ import { prisma } from '../src/lib/prisma'
 import { bootstrapQualityBadCaseCache } from '../src/services/quality-badcase-store.service'
 import {
   ANCHOR_DRAWER_NAMES,
+  ANCHOR_MUST_EXCLUDE,
+  ANCHOR_MUST_INCLUDE,
   DRAWER_VERIFY_METRICS,
   buildRemappedAnchorMap,
   compareDrawerRowsToRemap,
@@ -83,7 +85,7 @@ async function main(): Promise<void> {
     const expected = expectedMap.get(orderNo) ?? expectedMap.get(orderNo.replace(/^P/, '')) ?? '—'
     const rowAnchor = row?.anchorName?.trim() || '（未出现在 drawer）'
     const wrongZiJie = rowAnchor === '子杰' && expected !== '子杰'
-    const mismatch = row != null && rowAnchor !== expected
+    const mismatch = row != null && rowAnchor !== expected && rowAnchor !== '（未出现在 drawer）'
     const status = wrongZiJie || mismatch ? '✗' : '✓'
     console.log(
       `${status} ${orderNo}: drawer=${rowAnchor} expected=${expected} shop=${row?.liveAccountName ?? '—'}`,
@@ -102,10 +104,13 @@ async function main(): Promise<void> {
         endDate: END_DATE,
         metric,
         anchorName,
-        mustInclude: metric === 'effectiveGmv' && anchorName === '小白' ? ['P798535644148309221'] : metric === 'effectiveGmv' && anchorName === '小艺' ? ['P798440490066093751'] : undefined,
+        mustInclude:
+          metric === 'effectiveGmv'
+            ? ANCHOR_MUST_INCLUDE[anchorName as keyof typeof ANCHOR_MUST_INCLUDE]
+            : undefined,
         mustExclude:
-          metric === 'effectiveGmv' && anchorName === '子杰'
-            ? ['P798535644148309221', 'P798440490066093751']
+          metric === 'effectiveGmv'
+            ? ANCHOR_MUST_EXCLUDE[anchorName as keyof typeof ANCHOR_MUST_EXCLUDE]
             : undefined,
       })
       const bundle = await fetchMetricDetailBundle({

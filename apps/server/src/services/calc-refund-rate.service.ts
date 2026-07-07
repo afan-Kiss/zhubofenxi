@@ -120,6 +120,35 @@ export function dedupeRefundMetricViewsByOrderNoMaxRefund(
   return out
 }
 
+/** 通用：同 P 单按 comparePriority 择优，保留原数组首次出现顺序 */
+export function dedupeViewsByOrderNoBestValue(
+  views: AnalyzedOrderView[],
+  comparePriority: (a: AnalyzedOrderView, b: AnalyzedOrderView) => number,
+): AnalyzedOrderView[] {
+  const bestByOrderNo = new Map<string, AnalyzedOrderView>()
+  for (const v of views) {
+    const no = resolveMetricOrderNo(v)
+    if (!no) continue
+    const prev = bestByOrderNo.get(no)
+    if (!prev || comparePriority(v, prev) > 0) {
+      bestByOrderNo.set(no, v)
+    }
+  }
+  const seen = new Set<string>()
+  const out: AnalyzedOrderView[] = []
+  for (const v of views) {
+    const no = resolveMetricOrderNo(v)
+    if (!no) {
+      out.push(v)
+      continue
+    }
+    if (seen.has(no)) continue
+    seen.add(no)
+    out.push(bestByOrderNo.get(no)!)
+  }
+  return out
+}
+
 /** 运费补偿抽屉：按 P 单保留 freightRefundAmountCent 最大的 view */
 export function dedupeFreightRefundViewsByOrderNoMaxFreight(
   views: AnalyzedOrderView[],

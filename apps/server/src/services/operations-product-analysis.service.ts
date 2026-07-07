@@ -1,7 +1,9 @@
+import type { UserRole } from '../types/roles'
 import type { AnalyzedOrderView } from '../types/analysis'
 import { prisma } from '../lib/prisma'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
+import { getAnchorPerformanceViews, getBoardScopedViewsForRange } from './board-scoped-views.service'
 import {
   pickItemIdFromRaw,
   pickProductNameFromRaw,
@@ -17,7 +19,7 @@ import {
   resolveProductRole,
   type OperationsProductRole,
 } from '../config/operations-product-role.config'
-import { isValidRevenueOrder } from './valid-revenue-order.service'
+import { isValidRevenueOrder, dedupeValidRevenueViewsByOrderNoBestValue } from './valid-revenue-order.service'
 import { viewCountsAsPaidOrder } from './business-metrics.service'
 import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
 
@@ -74,7 +76,7 @@ export async function buildOperationsProductAnalysis(
   rawByMatch: Map<string, Record<string, unknown>>,
 ): Promise<OperationsProductRow[]> {
   const withRaw = attachRawByMatchToViews(views, rawByMatch)
-  const deduped = dedupeViewsByMetricOrderNo(withRaw)
+  const deduped = dedupeValidRevenueViewsByOrderNoBestValue(withRaw)
   const dimensionRows = await prisma.productDimension.findMany()
   const dimensionByKey = new Map(dimensionRows.map((d) => [d.productKey, d]))
 
@@ -183,6 +185,24 @@ export async function buildOperationsProductAnalysis(
   }
 
   return rows.sort((a, b) => b.soldAmountYuan - a.soldAmountYuan)
+}
+
+/** 全日期范围重建商品分析（正确去重 paidOrderCount / buyerCount，避免逐日快照累加偏差） */
+export async function buildProductsForDateRange(params: {
+  startDate: string
+  endDate: string
+  role?: UserRole
+  username?: string
+}): Promise<OperationsProductRow[]> {
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: params.startDate,
+    endDate: params.endDate,
+    role: params.role,
+    username: params.username,
+  })
+  const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  return buildOperationsProductAnalysis(performanceViews, scoped.rawByMatch)
 }
 
 export async function buildOperationsProductDetail(params: {

@@ -10,13 +10,14 @@ import type { AnalyzedOrderView } from '../src/types/analysis'
 import { getBoardScopedViewsForRange } from '../src/services/board-scoped-views.service'
 import { filterViewsForCoreMetrics } from '../src/services/metrics-exclusion.service'
 import {
-  dedupeCoreMetricViewsByOrderNoBestValue,
   dedupeViewsByMetricOrderNo,
   resolveMetricOrderNo,
 } from '../src/services/calc-refund-rate.service'
 import {
+  dedupeValidRevenueViewsByOrderNoBestValue,
   explainValidRevenueOrder,
   isValidRevenueOrder,
+  resolveValidRevenueRefundAmountCent,
   sumValidRevenueFromViews,
 } from '../src/services/valid-revenue-order.service'
 import { centToYuan } from '../src/utils/money'
@@ -119,7 +120,7 @@ async function main(): Promise<void> {
   const firstDedupeTotal = sumValidRevenueFromViews(views)
   let bestTotalCent = 0
   let bestCount = 0
-  for (const v of dedupeCoreMetricViewsByOrderNoBestValue(views)) {
+  for (const v of dedupeValidRevenueViewsByOrderNoBestValue(views)) {
     if (!isValidRevenueOrder(v)) continue
     bestTotalCent += v.effectiveGmvCent
     bestCount += 1
@@ -129,7 +130,7 @@ async function main(): Promise<void> {
   console.log(
     `\n全量合计: 首条去重 ¥${firstDedupeTotal.validAmountYuan.toFixed(2)} (${firstDedupeTotal.soldOrderCount} 单)`,
   )
-  console.log(`         bestValue ¥${bestTotalYuan.toFixed(2)} (${bestCount} 单)`)
+  console.log(`         bestValidRevenue ¥${bestTotalYuan.toFixed(2)} (${bestCount} 单)`)
 
   const mismatches: Array<{
     orderNo: string
@@ -142,7 +143,7 @@ async function main(): Promise<void> {
 
   for (const [orderNo, list] of multiGroups) {
     const firstView = dedupeViewsByMetricOrderNo(list)[0]
-    const bestView = dedupeCoreMetricViewsByOrderNoBestValue(list)[0]
+    const bestView = dedupeValidRevenueViewsByOrderNoBestValue(list)[0]
     if (!firstView || !bestView) continue
 
     const firstCent = validCentForView(firstView)
@@ -160,7 +161,7 @@ async function main(): Promise<void> {
   }
 
   if (mismatches.length > 0) {
-    fail(`发现 ${mismatches.length} 个同 P 单首条/bestValue 有效成交不一致`)
+    fail(`发现 ${mismatches.length} 个同 P 单首条/bestValidRevenue 有效成交不一致`)
     for (const m of mismatches.slice(0, 20)) {
       console.log(`\n--- 订单 ${m.orderNo} ---`)
       console.log(`  首条 validCent=${m.firstCent} bestCent=${m.bestCent}`)
@@ -184,7 +185,7 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
-  ok(`同 P 单 ${multiGroups.length} 组多 view，首条与 bestValue 有效成交无差异`)
+  ok(`同 P 单 ${multiGroups.length} 组多 view，首条与 bestValidRevenue 有效成交无差异`)
   ok(
     `全量 validSalesAmount 一致: ¥${firstDedupeTotal.validAmountYuan.toFixed(2)} (${firstDedupeTotal.soldOrderCount} 单)`,
   )

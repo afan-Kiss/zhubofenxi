@@ -16,7 +16,11 @@ function isDailyReportClosedOrCancelledOrder(v: AnalyzedOrderView): boolean {
   return CLOSED_OR_CANCELLED_KEYWORDS.some((k) => orderStatus.includes(k))
 }
 
-/** 关闭/退货单：已关闭/已取消，或存在售后/退款（与真实发货剔除口径一致） */
+/**
+ * 关闭/退货单：已关闭/已取消，或存在售后/退款（与真实发货剔除口径一致）。
+ * 注意：有效成交口径中「售后关闭且无退款」仍可能计入 validRevenue；
+ * 但日报真实发货按「只要进过售后流程即剔除」处理，两者 intentionally 不同。
+ */
 export function isDailyReportInvalidOrder(v: AnalyzedOrderView): boolean {
   if (isDailyReportClosedOrCancelledOrder(v)) return true
   return isActualAfterSaleOrder(v)

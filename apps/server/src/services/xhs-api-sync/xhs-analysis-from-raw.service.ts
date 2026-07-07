@@ -91,6 +91,7 @@ function toLiveSession(
 export async function buildRawAnalyzeBundle(
   range: DateRangeResolved,
 ): Promise<RawAnalyzeBundle | null> {
+  /** 经营总览读路径：仅读本地 xhsRawOrder / 直播 / 结算 / 售后缓存 / 品退缓存，不请求平台 API */
   const orderCount = await prisma.xhsRawOrder.count()
   if (orderCount === 0) return null
 

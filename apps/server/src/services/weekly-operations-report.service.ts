@@ -8,14 +8,15 @@ import {
 import { getOpsReviewNote, type OpsReviewNotePayload } from './ops-review-note.service'
 import type { OperationsProductRow } from './operations-product-analysis.service'
 import { computeReturnOrderRateRatio } from './operations-after-sale-order.util'
-import { computeProductReturnRateByOrder } from './operations-product-analysis.service'
+import { buildProductsForDateRange, computeProductReturnRateByOrder } from './operations-product-analysis.service'
+import { buildPriceBandsForDateRange } from './operations-price-band.service'
+import { prisma } from '../lib/prisma'
+import { mergeAnchorRowsForRange } from './operations-anchor-ranking.service'
 import {
   buildWeeklyProductRankings,
   type ProductRankItem,
   type ProductRankingQuality,
 } from './operations-product-ranking.service'
-import { prisma } from '../lib/prisma'
-import { mergeAnchorRowsForRange } from './operations-anchor-ranking.service'
 import {
   buildBusinessInsightsFromSource,
   buildBusinessInsightsSourceFromComponents,
@@ -89,34 +90,36 @@ export function changePercent(current: number, previous: number): number | null 
 export function aggregateProductsFromSnapshots(
   snapshots: DailyOperationsReportPayload[],
 ): OperationsProductRow[] {
+  const flattened = snapshots.flatMap((snap) => snap.products)
+  if (flattened.length === 0) return []
+
   const map = new Map<string, OperationsProductRow & { topShopDayAmount: number }>()
-  for (const snap of snapshots) {
-    for (const p of snap.products) {
-      const existing = map.get(p.productKey)
-      if (!existing) {
-        map.set(p.productKey, { ...p, topShopDayAmount: p.soldAmountYuan })
-        continue
-      }
-      if (p.shopName && p.shopName !== '—' && p.soldAmountYuan >= existing.topShopDayAmount) {
-        existing.shopName = p.shopName
-        existing.topShopDayAmount = p.soldAmountYuan
-      }
-      existing.soldCount += p.soldCount
-      existing.soldOrderCount += p.soldOrderCount
-      existing.soldAmountYuan += p.soldAmountYuan
-      existing.buyerCount += p.buyerCount
-      existing.returnOrderCount += p.returnOrderCount
-      existing.returnRate = computeProductReturnRateByOrder(
-        existing.soldOrderCount,
-        existing.returnOrderCount,
-      )
-      const role = resolveProductRole({
-        soldCount: existing.soldCount,
-        returnRate: existing.returnRate,
-      })
-      existing.productRole = role
-      existing.productRoleLabel = productRoleLabel(role)
+  for (const p of flattened) {
+    const existing = map.get(p.productKey)
+    if (!existing) {
+      map.set(p.productKey, { ...p, topShopDayAmount: p.soldAmountYuan })
+      continue
     }
+    if (p.shopName && p.shopName !== '—' && p.soldAmountYuan >= existing.topShopDayAmount) {
+      existing.shopName = p.shopName
+      existing.topShopDayAmount = p.soldAmountYuan
+    }
+    existing.soldCount += p.soldCount
+    existing.soldOrderCount += p.soldOrderCount
+    existing.paidOrderCount = (existing.paidOrderCount ?? 0) + (p.paidOrderCount ?? 0)
+    existing.soldAmountYuan += p.soldAmountYuan
+    existing.buyerCount += p.buyerCount
+    existing.returnOrderCount += p.returnOrderCount
+    existing.returnRate = computeProductReturnRateByOrder(
+      existing.paidOrderCount ?? 0,
+      existing.returnOrderCount,
+    )
+    const role = resolveProductRole({
+      soldCount: existing.soldCount,
+      returnRate: existing.returnRate,
+    })
+    existing.productRole = role
+    existing.productRoleLabel = productRoleLabel(role)
   }
   return [...map.values()].map(({ topShopDayAmount: _drop, ...row }) => row)
 }
@@ -285,11 +288,12 @@ export function aggregatePriceBandsFromSnapshots(
         continue
       }
       existing.orderCount += band.orderCount
+      existing.paidOrderCount = (existing.paidOrderCount ?? 0) + (band.paidOrderCount ?? 0)
       existing.amountYuan += band.amountYuan
       existing.buyerCount += band.buyerCount
       existing.returnOrderCount += band.returnOrderCount
       existing.returnRate = computeReturnOrderRateRatio(
-        existing.orderCount,
+        existing.paidOrderCount ?? 0,
         existing.returnOrderCount,
       )
     }
@@ -376,7 +380,12 @@ export async function buildWeeklyOperationsReport(params: {
   }
 
   const summaryBase = aggregateWeeklySummary(snapshots)
-  const products = aggregateProductsFromSnapshots(snapshots)
+  const products = await buildProductsForDateRange({
+    startDate: params.weekStart,
+    endDate: params.weekEnd,
+    role: params.role,
+    username: params.username,
+  })
   const dimensions = await prisma.productDimension.findMany()
   const reviewNoteForRank = await getOpsReviewNote({
     reportDate: params.weekStart,
@@ -390,7 +399,12 @@ export async function buildWeeklyOperationsReport(params: {
 
   const reviewNote = reviewNoteForRank
 
-  const aggregatedPriceBands = aggregatePriceBandsFromSnapshots(snapshots)
+  const aggregatedPriceBands = await buildPriceBandsForDateRange({
+    startDate: params.weekStart,
+    endDate: params.weekEnd,
+    role: params.role,
+    username: params.username,
+  })
   const aggregatedAfterSales = aggregateAfterSalesFromSnapshots(snapshots)
   const mergedAnchorRows = mergeAnchorRowsForRange(snapshots.map((s) => s.anchors))
 

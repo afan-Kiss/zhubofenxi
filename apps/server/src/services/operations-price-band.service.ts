@@ -5,10 +5,12 @@ import {
   resolvePriceBandLabelFromCent,
   type OperationsPriceBandLabel,
 } from '../config/operations-price-band.config'
-import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
+import { resolveMetricOrderNo } from './calc-refund-rate.service'
 import { viewCountsAsPaidOrder } from './business-metrics.service'
 import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
-import { isValidRevenueOrder, resolveValidRevenueAmountCent } from './valid-revenue-order.service'
+import { dedupeValidRevenueViewsByOrderNoBestValue, isValidRevenueOrder, resolveValidRevenueAmountCent } from './valid-revenue-order.service'
+import type { UserRole } from '../types/roles'
+import { getAnchorPerformanceViews, getBoardScopedViewsForRange } from './board-scoped-views.service'
 import { safeDivide, safeRatioPercent } from './daily-report-order.util'
 import { computeReturnOrderRateRatio } from './operations-after-sale-order.util'
 
@@ -29,7 +31,7 @@ function isProductReturnOrder(v: AnalyzedOrderView): boolean {
 }
 
 export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): OperationsPriceBandRow[] {
-  const deduped = dedupeViewsByMetricOrderNo(views)
+  const deduped = dedupeValidRevenueViewsByOrderNoBestValue(views)
   type Bucket = {
     validRevenueOrderKeys: Set<string>
     paidOrderKeys: Set<string>
@@ -90,4 +92,22 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
       returnRate: computeReturnOrderRateRatio(paidOrderCount, returnOrderCount),
     }
   }).filter((row) => row.orderCount > 0 || row.returnOrderCount > 0)
+}
+
+/** 全日期范围重建价位带分析（避免逐日快照 buyerCount / paidOrderCount 累加偏差） */
+export async function buildPriceBandsForDateRange(params: {
+  startDate: string
+  endDate: string
+  role?: UserRole
+  username?: string
+}): Promise<OperationsPriceBandRow[]> {
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: params.startDate,
+    endDate: params.endDate,
+    role: params.role,
+    username: params.username,
+  })
+  const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  return buildOperationsPriceBandAnalysis(performanceViews)
 }

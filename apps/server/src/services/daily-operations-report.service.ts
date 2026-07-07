@@ -372,7 +372,7 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
     const validAmountYuan = validRevenue.validAmountYuan
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
     const { soldOrderCount } = validRevenue
-    const { invalidOrderCount: invalidFromAll } = countDailyReportOrders(anchorAllViews)
+    const { invalidOrderCount: invalidFromPerformance } = countDailyReportOrders(performanceViews)
     const anchorRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViews)
     const fixedDisplay = useShopSessionRules
       ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]
@@ -390,7 +390,7 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
     const hasData =
       validAmountYuan > 0 ||
       soldOrderCount > 0 ||
-      invalidFromAll > 0 ||
+      invalidFromPerformance > 0 ||
       sessions.length > 0 ||
       performanceViews.length > 0
 
@@ -416,7 +416,7 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
         validAmountCent,
         validAmountYuan,
         soldOrderCount,
-        invalidOrderCount: invalidFromAll,
+        invalidOrderCount: invalidFromPerformance,
         returnOrderCount: anchorRefundMetrics.refundOrderCount,
         paidOrderCount: anchorRefundMetrics.paidOrderCount,
         sessions,
@@ -477,15 +477,15 @@ export async function buildDailyOperationsReport(params: {
     row.amountRatio = safeRatioPercent(row.validAmountYuan, validAmountYuan)
   }
 
+  const storeWideInvalid = countDailyReportOrders(performanceViewsAll)
+  const invalidOrderCount = storeWideInvalid.invalidOrderCount
   const remappedAll = await remapViewsWithScheduleOverlay(
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
-  const storeWideInvalid = countDailyReportOrders(remappedAll)
-  const invalidOrderCount = storeWideInvalid.invalidOrderCount
-  const unassignedInvalidViews = dedupeViewsByMetricOrderNo(remappedAll).filter(
+  const unassignedInvalidViews = dedupeViewsByMetricOrderNo(performanceViewsAll).filter(
     isUnassignedOperationsView,
   )
-  const assignedInvalidViews = dedupeViewsByMetricOrderNo(remappedAll).filter(
+  const assignedInvalidViews = dedupeViewsByMetricOrderNo(performanceViewsAll).filter(
     (v) => !isUnassignedOperationsView(v),
   )
   const anchorAssignedInvalidOrderCount =

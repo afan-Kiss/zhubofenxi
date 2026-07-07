@@ -1,7 +1,7 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { centToYuan } from '../utils/money'
 import { isNoAfterSaleText, isPositiveAfterSaleText } from './after-sale-status-signal.service'
-import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
+import { dedupeViewsByMetricOrderNo, dedupeViewsByOrderNoBestValue, resolveMetricOrderNo } from './calc-refund-rate.service'
 
 const VALID_ORDER_STATUS_RE = /已完成|已签收/
 
@@ -237,12 +237,34 @@ export function resolveValidRevenueAmountCent(view: AnalyzedOrderView): number {
   return isValidRevenueOrder(view) ? view.effectiveGmvCent : 0
 }
 
+/** 同 P 单内选择更适合有效成交判定的视图：优先 valid=true，其次支付更完整 */
+function compareValidRevenueViewPriority(a: AnalyzedOrderView, b: AnalyzedOrderView): number {
+  const aValid = isValidRevenueOrder(a) ? 1 : 0
+  const bValid = isValidRevenueOrder(b) ? 1 : 0
+  if (aValid !== bValid) return aValid - bValid
+
+  const payDiff = (a.paymentBaseCent ?? 0) - (b.paymentBaseCent ?? 0)
+  if (payDiff !== 0) return payDiff
+
+  const gmvDiff = (a.effectiveGmvCent ?? 0) - (b.effectiveGmvCent ?? 0)
+  if (gmvDiff !== 0) return gmvDiff
+
+  return String(a.orderTimeText ?? '').localeCompare(String(b.orderTimeText ?? ''))
+}
+
+/** 有效成交按 P 单去重，优先 valid=true 且金额更完整的视图 */
+export function dedupeValidRevenueViewsByOrderNoBestValue(
+  views: AnalyzedOrderView[],
+): AnalyzedOrderView[] {
+  return dedupeViewsByOrderNoBestValue(views, compareValidRevenueViewPriority)
+}
+
 export function sumValidRevenueFromViews(views: AnalyzedOrderView[]): {
   validAmountCent: number
   validAmountYuan: number
   soldOrderCount: number
 } {
-  const deduped = dedupeViewsByMetricOrderNo(views)
+  const deduped = dedupeValidRevenueViewsByOrderNoBestValue(views)
   let validAmountCent = 0
   let soldOrderCount = 0
   for (const v of deduped) {

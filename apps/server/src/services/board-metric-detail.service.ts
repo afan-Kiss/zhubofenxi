@@ -32,6 +32,10 @@ import { resolveOverviewStableDrawerContext } from './overview-metric-snapshot.s
 import { isValidRevenueOrder } from './valid-revenue-order.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
+import { aggregateQualityRefundByAnchor } from './quality-refund-anchor-attribution.service'
+import { buildRawAnalyzeBundle } from './xhs-api-sync/xhs-analysis-from-raw.service'
+import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
+import { anchorLeaderboardRowMatches } from './anchor-attribution.util'
 
 export type BoardDataSource = 'local_db' | 'live_api'
 
@@ -312,6 +316,44 @@ export async function buildBoardMetricDetail(params: {
   const viewsWithRaw = attachRawByMatchToViews(coreViews, rawByMatch)
   const remappedViews = await remapViewsWithScheduleOverlay(viewsWithRaw)
 
+  const isQualityMetric =
+    params.metric === 'qualityReturnCount' || params.metric === 'qualityReturnRate'
+
+  let qualityMatchedViews: AnalyzedOrderView[] | null = null
+  let qualityMatchedCount: number | null = null
+
+  if (isQualityMetric) {
+    const liveBundle = await buildRawAnalyzeBundle(
+      resolveDateRange(normalizedPreset as DateRangePreset, range.startDate, range.endDate),
+    )
+    const liveSessions = liveBundle?.liveSessions ?? []
+    const agg = aggregateQualityRefundByAnchor({ views: coreViews, liveSessions })
+    const anchorQuery = { anchorId, anchorName }
+
+    if (anchorId || anchorName) {
+      const matched = agg.attributions.filter((attr) => {
+        if (anchorName === '未归属') return attr.anchorName === '未归属'
+        return anchorLeaderboardRowMatches(
+          { anchorId: attr.anchorId, anchorName: attr.anchorName },
+          anchorQuery,
+        )
+      })
+      qualityMatchedViews = matched.map((attr) => attr.view)
+      if (anchorName === '未归属') {
+        qualityMatchedCount = agg.unassigned.length
+      } else if (anchorName?.trim()) {
+        qualityMatchedCount = [...agg.byAnchorKey.values()]
+          .filter((b) => b.anchorName === anchorName.trim())
+          .reduce((sum, b) => sum + b.count, 0)
+      } else {
+        qualityMatchedCount = matched.length
+      }
+    } else {
+      qualityMatchedViews = agg.attributions.map((attr) => attr.view)
+      qualityMatchedCount = agg.totalQualityRefundCount
+    }
+  }
+
   let viewsForTotals = coreViews
   let displayViews = remappedViews
   if (anchorId || anchorName) {
@@ -321,11 +363,21 @@ export async function buildBoardMetricDetail(params: {
   }
 
   const totals = calculateBusinessMetrics(viewsForTotals)
-  const valueRaw = pickMetricValue(totals, def.valueKey)
+  let valueRaw = pickMetricValue(totals, def.valueKey)
 
-  const isQualityMetric =
-    params.metric === 'qualityReturnCount' || params.metric === 'qualityReturnRate'
-  let sourceViews = matchMetricViews(displayViews, params.metric, params.tab)
+  if (isQualityMetric && qualityMatchedCount != null) {
+    valueRaw =
+      params.metric === 'qualityReturnRate'
+        ? viewsForTotals.length > 0
+          ? qualityMatchedCount / Math.max(1, totals.orderCount)
+          : 0
+        : qualityMatchedCount
+  }
+
+  let sourceViews =
+    isQualityMetric && qualityMatchedViews
+      ? qualityMatchedViews
+      : matchMetricViews(displayViews, params.metric, params.tab)
   if (needsMetricOrderDedupe(params.metric)) {
     if (
       params.metric === 'returnAmount' ||
@@ -385,7 +437,7 @@ export async function buildBoardMetricDetail(params: {
       : []
 
   const matchedOrders = (() => {
-    if (isQualityMetric) return totals.qualityRefundOrderCount
+    if (isQualityMetric && qualityMatchedCount != null) return qualityMatchedCount
     if (params.metric === 'effectiveGmv') {
       return dedupeViewsByMetricOrderNo(viewsForTotals.filter((v) => isValidRevenueOrder(v))).length
     }

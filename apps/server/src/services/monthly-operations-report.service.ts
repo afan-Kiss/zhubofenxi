@@ -49,6 +49,8 @@ import {
   aggregateWeeklySummaryForAcceptance,
   changePercent,
 } from './weekly-operations-report.service'
+import { buildProductsForDateRange } from './operations-product-analysis.service'
+import { buildPriceBandsForDateRange } from './operations-price-band.service'
 
 const MONTH_KEY_RE = /^\d{4}-\d{2}$/
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -194,7 +196,12 @@ async function buildPreviousMonthSummary(params: {
   if (prevSnapshots.every((s) => s.summary.soldOrderCount === 0 && s.summary.validAmountYuan === 0)) {
     return null
   }
-  const prevProducts = aggregateProductsFromSnapshots(prevSnapshots)
+  const prevProducts = await buildProductsForDateRange({
+    startDate: prevStart,
+    endDate: prevEnd,
+    role: params.role,
+    username: params.username,
+  })
   return buildMonthlySummary(prevSnapshots, prevProducts)
 }
 
@@ -378,7 +385,12 @@ export async function getMonthlyOperationsReport(params: {
     username: params.username,
   })
 
-  const products = aggregateProductsFromSnapshots(snapshots)
+  const products = await buildProductsForDateRange({
+    startDate: range.startDate,
+    endDate: range.endDate,
+    role: params.role,
+    username: params.username,
+  })
   const summary = buildMonthlySummary(snapshots, products)
   const previousSummary = await buildPreviousMonthSummary({
     month: range.month,
@@ -401,7 +413,12 @@ export async function getMonthlyOperationsReport(params: {
     username: params.username,
   })
 
-  const aggregatedPriceBands = aggregatePriceBandsFromSnapshots(snapshots)
+  const aggregatedPriceBands = await buildPriceBandsForDateRange({
+    startDate: range.startDate,
+    endDate: range.endDate,
+    role: params.role,
+    username: params.username,
+  })
   const aggregatedAfterSales = aggregateAfterSalesFromSnapshots(snapshots)
   const mergedAnchorRows = mergeAnchorRowsForRange(snapshots.map((s) => s.anchors))
   const dimensions = await prisma.productDimension.findMany()

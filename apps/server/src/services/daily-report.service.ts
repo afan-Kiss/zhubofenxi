@@ -51,6 +51,7 @@ import {
   isRealtimeBoardPreset,
   resolveBoardPresetForSingleDay,
 } from '../utils/board-realtime-refresh.util'
+import { normalizeShopLabel, normalizeShopName } from '../utils/shop-name-normalize.util'
 
 const NO_LIVE_SESSION_TEXT = '未读取到直播场次'
 
@@ -234,16 +235,30 @@ function resolveAnchorNamesForLiveAccount(
   accountMap: Map<string, string[]>,
 ): string[] {
   const trimmed = liveAccountName.trim()
+  if (!trimmed) return []
+
   const exact = accountMap.get(trimmed)
   if (exact?.length) return exact
 
-  const found = new Set<string>()
-  for (const [key, names] of accountMap.entries()) {
-    if (key.includes(trimmed) || trimmed.includes(key)) {
-      for (const name of names) found.add(name)
+  const canonical = normalizeShopName(trimmed)
+  if (canonical) {
+    for (const [key, names] of accountMap.entries()) {
+      if (normalizeShopName(key) === canonical) {
+        return names
+      }
     }
   }
-  return [...found].sort((a, b) => a.localeCompare(b, 'zh-CN'))
+
+  const normalizedLabel = normalizeShopLabel(trimmed).toLowerCase()
+  if (normalizedLabel) {
+    for (const [key, names] of accountMap.entries()) {
+      if (normalizeShopLabel(key).toLowerCase() === normalizedLabel) {
+        return names
+      }
+    }
+  }
+
+  return []
 }
 
 function enrichLiveRoomNewFollowersWithAnchorNames(

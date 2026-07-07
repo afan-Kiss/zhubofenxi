@@ -49,6 +49,8 @@ export interface BusinessBoardCacheEntry {
   workbenchCacheMaxUpdatedAt: string | null
   sourceSyncJobId: string | null
   sourceDataMaxTime: string | null
+  /** 原始订单/直播/结算表 updatedAt 最大值，检测 rawJson/售后字段更新 */
+  sourceRawMaxUpdatedAt: string | null
   buildDurationMs: number
   stale?: boolean
   buildError?: string | null
@@ -142,6 +144,25 @@ async function resolveSourceDataMaxTime(): Promise<string | null> {
   return agg._max.orderTime?.toISOString() ?? null
 }
 
+export async function resolveSourceRawMaxUpdatedAt(): Promise<string | null> {
+  const [orderAgg, liveAgg, pendingAgg, settledAgg] = await Promise.all([
+    prisma.xhsRawOrder.aggregate({ _max: { updatedAt: true } }),
+    prisma.xhsRawLiveSession.aggregate({ _max: { updatedAt: true } }),
+    prisma.xhsRawPendingSettlement.aggregate({ _max: { updatedAt: true } }),
+    prisma.xhsRawSettledSettlement.aggregate({ _max: { updatedAt: true } }),
+  ])
+  const timestamps = [
+    orderAgg._max.updatedAt,
+    liveAgg._max.updatedAt,
+    pendingAgg._max.updatedAt,
+    settledAgg._max.updatedAt,
+  ]
+    .filter((d): d is Date => d != null)
+    .map((d) => d.getTime())
+  if (timestamps.length === 0) return null
+  return new Date(Math.max(...timestamps)).toISOString()
+}
+
 function evictBusinessBoardCacheEntry(
   key: string,
   preset: string,
@@ -215,6 +236,7 @@ export async function buildAndSetBusinessBoardCache(params: {
     }
     const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(coreViews)]
     const sourceDataMaxTime = await resolveSourceDataMaxTime()
+    const sourceRawMaxUpdatedAt = await resolveSourceRawMaxUpdatedAt()
     const workbenchCacheMaxUpdatedAt = (await getLatestWorkbenchCacheUpdatedAt())?.toISOString() ?? null
 
     const entry: BusinessBoardCacheEntry = {
@@ -235,6 +257,7 @@ export async function buildAndSetBusinessBoardCache(params: {
       workbenchCacheMaxUpdatedAt,
       sourceSyncJobId: await resolveLatestBusinessSyncJobId(),
       sourceDataMaxTime,
+      sourceRawMaxUpdatedAt,
       buildDurationMs: Date.now() - started,
       stale: false,
       buildError: null,
@@ -301,10 +324,22 @@ export async function getOrBuildBusinessBoardCache(params: {
   const hit = cache.get(key)
   if (hit && !params.forceRebuild) {
     const latestSourceMax = await resolveSourceDataMaxTime()
+    const latestRawMax = await resolveSourceRawMaxUpdatedAt()
+    const latestSyncJobId = await resolveLatestBusinessSyncJobId()
     if (hit.sourceDataMaxTime !== latestSourceMax) {
       logInfo(
         '经营缓存',
         `${presetLabel(params.preset)} 订单库有更新（${hit.sourceDataMaxTime ?? '—'} → ${latestSourceMax ?? '—'}），重建经营缓存`,
+      )
+    } else if (hit.sourceRawMaxUpdatedAt !== latestRawMax) {
+      logInfo(
+        '经营缓存',
+        `${presetLabel(params.preset)} 原始数据 updatedAt 有更新（${hit.sourceRawMaxUpdatedAt ?? '—'} → ${latestRawMax ?? '—'}），重建经营缓存`,
+      )
+    } else if (hit.sourceSyncJobId !== latestSyncJobId) {
+      logInfo(
+        '经营缓存',
+        `${presetLabel(params.preset)} 同步任务已更新（${hit.sourceSyncJobId ?? '—'} → ${latestSyncJobId ?? '—'}），重建经营缓存`,
       )
     } else {
       const latestWorkbenchAt = await getLatestWorkbenchCacheUpdatedAt()

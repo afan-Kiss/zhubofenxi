@@ -11,7 +11,7 @@ import {
   ANCHOR_NEW_SCHEDULE_START_DATE,
   ANCHOR_NEW_SCHEDULE_CUTOFF_DATE,
 } from '../config/anchor-schedule.constants'
-import { XIAOBAI_ANCHOR_CUTOFF_MS, SHOP_SESSION_ANCHOR_CUTOFF_MS } from './anchor-performance-attribution.service'
+import { XIAOBAI_ANCHOR_CUTOFF_MS, SHOP_SESSION_ANCHOR_CUTOFF_MS } from './anchor-session-cutoff.util'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import { addDaysShanghai } from '../utils/business-timezone'
 

@@ -354,7 +354,26 @@ function segmentToMatchResult(
   }
 }
 
-/** 真实场次按排班交集切段归属：每个主播最多一段 */
+function dedupeScheduleSegmentsForAnchor(
+  segments: LiveSessionScheduleSegment[],
+): LiveSessionScheduleSegment[] {
+  const seen = new Set<string>()
+  const kept: LiveSessionScheduleSegment[] = []
+  for (const seg of segments) {
+    const key = `${seg.originalSession.liveId}::${seg.clippedStartMs}::${seg.clippedEndMs}::${seg.scheduleRow.rowId}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    kept.push(seg)
+  }
+  return kept.sort(
+    (a, b) =>
+      a.clippedStartMs - b.clippedStartMs ||
+      b.overlapMinutes - a.overlapMinutes ||
+      a.originalSession.liveId.localeCompare(b.originalSession.liveId),
+  )
+}
+
+/** 真实场次按排班交集切段归属：同一主播可保留多场不重叠直播 */
 function assignDailyReportLiveSessionsByScheduleSegments(params: {
   sessions: DailyReportLiveSession[]
   scheduleRows: EffectiveScheduleRow[]
@@ -404,15 +423,16 @@ function assignDailyReportLiveSessionsByScheduleSegments(params: {
   }
 
   for (const [anchorName, segments] of segmentsByAnchor) {
-    if (segments.length > 1) {
+    const kept = dedupeScheduleSegmentsForAnchor(segments)
+    if (kept.length > 1) {
       console.warn(
         LOG_TAG,
         JSON.stringify({
           reportDate,
-          reason: 'multiple_segments_for_anchor_pick_best',
+          reason: 'multiple_sessions_for_anchor_keep_all',
           anchorName,
-          count: segments.length,
-          segments: segments.map((s) => ({
+          count: kept.length,
+          segments: kept.map((s) => ({
             liveId: s.originalSession.liveId,
             clipped: `${s.clippedStartTime}~${s.clippedEndTime}`,
             overlapMinutes: s.overlapMinutes,
@@ -421,32 +441,28 @@ function assignDailyReportLiveSessionsByScheduleSegments(params: {
       )
     }
 
-    const best =
-      segments.length === 1
-        ? segments[0]!
-        : segments.reduce((a, b) =>
-            b.overlapMinutes > a.overlapMinutes ||
-            (b.overlapMinutes === a.overlapMinutes && b.clippedStartMs > a.clippedStartMs)
-              ? b
-              : a,
-          )
+    const clippedSessions: DailyReportLiveSession[] = []
+    const matches: LiveSessionScheduleMatchResult[] = []
+    for (const segment of kept) {
+      const clipped = segmentToClippedSession(segment)
+      const match = segmentToMatchResult(segment, clipped)
 
-    const clipped = segmentToClippedSession(best)
-    const match = segmentToMatchResult(best, clipped)
+      logLiveSessionRow({
+        reportDate,
+        shopCode: clipped.sourceShopCode,
+        shopName: clipped.sourceShopName,
+        sellerLiveDetailDataCount: sessions.filter((s) => s.sourceShopCode === clipped.sourceShopCode)
+          .length,
+        session: clipped,
+        match,
+      })
 
-    logLiveSessionRow({
-      reportDate,
-      shopCode: clipped.sourceShopCode,
-      shopName: clipped.sourceShopName,
-      sellerLiveDetailDataCount: sessions.filter((s) => s.sourceShopCode === clipped.sourceShopCode)
-        .length,
-      session: clipped,
-      match,
-    })
-
-    assignedSessions.push(clipped)
-    byAnchor.set(anchorName, [clipped])
-    matchesByAnchor.set(anchorName, [match])
+      assignedSessions.push(clipped)
+      clippedSessions.push(clipped)
+      matches.push(match)
+    }
+    byAnchor.set(anchorName, clippedSessions)
+    matchesByAnchor.set(anchorName, matches)
   }
 
   return {
@@ -488,7 +504,7 @@ export async function resolveDailyReportLiveSessionAssignments(
   }
 }
 
-/** 真实场次 → 排班主播（按排班交集切段，每主播最多一段） */
+/** 真实场次 → 排班主播（按排班交集切段，同主播可保留多场） */
 export function assignDailyReportLiveSessionsToAnchors(
   sessions: DailyReportLiveSession[],
   scheduleRows: EffectiveScheduleRow[],
@@ -643,7 +659,15 @@ export function resolveAnchorLiveMatchHint(params: {
 export function sumUniqueDailyReportLiveDurationMinutes(
   sessions: DailyReportLiveSession[],
 ): number {
-  return sessions.reduce((sum, s) => sum + Math.max(0, s.durationMinutes), 0)
+  const seen = new Set<string>()
+  let sum = 0
+  for (const session of sessions) {
+    const key = buildDailyReportLiveSessionDedupeKey(session)
+    if (seen.has(key)) continue
+    seen.add(key)
+    sum += Math.max(0, session.durationMinutes)
+  }
+  return sum
 }
 
 /** 主播业绩/订单明细：按店真实场次 + 排班重叠归属某主播（仅排班匹配，不用订单支付时间） */

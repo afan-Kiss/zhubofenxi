@@ -36,7 +36,7 @@ const EMPTY_ATTENDANCE_PAYLOAD = toAttendanceStatusPayload(
 )
 
 export const ANCHOR_POCKET_CALIBER_NOTE =
-  '29元以下按刷单剔除；已退款单独扣除；售后处理中和未签收不算实际到账；资金流水只做校验。实际到账按订单支付日期归属并扣累计退款；经营总览退款按退款发生日期统计，两数可能不同。'
+  '这是订单侧预计留下金额，不是平台结算到账金额；平台佣金、服务费、账期差异未计入。29元以下按刷单剔除；已退款单独扣除；售后处理中和未签收不算预计留下；资金流水只做校验。预计留下按订单支付日期归属并扣累计退款；经营总览退款按退款发生日期统计，两数可能不同。'
 
 export interface AnchorPocketDataQualityWarning {
   type: string
@@ -357,7 +357,8 @@ export async function buildAnchorPocketSummary(params: {
     caliber: {
       brushThreshold: centToYuan(LOW_PRICE_BRUSH_THRESHOLD_CENT),
       note: ANCHOR_POCKET_CALIBER_NOTE,
-      settlementNote: '资金数据仅作校验，主播实际到账按订单签收和售后状态计算。',
+      settlementNote:
+        '这是订单侧预计留下金额，不是平台结算到账金额；平台佣金、服务费、账期差异未计入。资金数据仅作校验。',
     },
     anchors: enrichedAnchors,
     dataQualityWarnings: warnings,

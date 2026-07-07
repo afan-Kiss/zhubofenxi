@@ -254,9 +254,13 @@ function enrichValidationWithAnalysis(
   )
   validation.gmvReconciliation = checkGmvReconciliation(views, dedupe)
 
-  const orderIds = new Set(dedupe.uniqueOrders.map((o) => o.orderId))
+  const orderAnchorByOrderId = new Map<string, string>()
+  for (const v of views) {
+    if (v.anchorId && v.matchOrderId) orderAnchorByOrderId.set(v.matchOrderId, v.anchorId)
+  }
   validation.settlementReconciliation = checkSettlementReconciliation({
-    orderIds,
+    orders: dedupe.uniqueOrders,
+    anchorByMatchOrderId: orderAnchorByOrderId,
     settlement,
     views,
   })

@@ -28,6 +28,10 @@ import { formatDateKey } from '../utils/date-range'
 import { formatDateTime } from '../utils/time'
 import { sumCent } from '../utils/money'
 import { sumSettlementDirection } from './reconcile.service'
+import {
+  buildOrderSettlementKeyIndex,
+  resolveSettlementRecordCanonicalOrderId,
+} from './settlement-order-key-match.util'
 
 const OPTIONAL_TABLE_HINTS: Record<DownloadType, string> = {
   order: '订单列表接口无数据，无法生成经营看板',
@@ -431,20 +435,25 @@ export function checkGmvReconciliation(
 }
 
 export function checkSettlementReconciliation(params: {
-  orderIds: Set<string>
+  orders: NormalizedOrder[]
+  anchorByMatchOrderId?: Map<string, string>
   settlement?: SettlementPreprocessResult
   views: AnalyzedOrderView[]
 }): SettlementReconciliation {
-  const { orderIds, settlement, views } = params
+  const { settlement, views } = params
   const warnings: string[] = []
   const orderCount = views.length
+  const orderKeyIndex = buildOrderSettlementKeyIndex(
+    params.orders,
+    params.anchorByMatchOrderId ?? new Map(),
+  )
 
   if (!settlement) {
     return {
       orderCount,
       settledMatchedCount: 0,
       pendingMatchedCount: 0,
-      ordersWithoutSettlementCount: orderCount,
+      ordersWithoutSettlementCount: orderKeyIndex.canonicalOrderIds.size,
       settlementWithoutOrderCount: 0,
       nonCurrentOrderSettlementCount: 0,
       settledAmountCent: 0,
@@ -455,25 +464,32 @@ export function checkSettlementReconciliation(params: {
     }
   }
 
-  const allBills = [
-    ...settlement.pendingRecords,
-    ...settlement.settledRecords,
-  ]
-  const billOrderIds = new Set(allBills.map((r) => r.orderId).filter(Boolean))
+  const allBills = [...settlement.pendingRecords, ...settlement.settledRecords]
 
   const settledMatched = new Set<string>()
   const pendingMatched = new Set<string>()
+  const matchedCanonicalOrders = new Set<string>()
 
   for (const r of settlement.settledRecords) {
-    if (r.orderId && orderIds.has(r.orderId)) settledMatched.add(r.orderId)
+    const canonical = resolveSettlementRecordCanonicalOrderId(r, orderKeyIndex)
+    if (canonical) {
+      settledMatched.add(canonical)
+      matchedCanonicalOrders.add(canonical)
+    }
   }
   for (const r of settlement.pendingRecords) {
-    if (r.orderId && orderIds.has(r.orderId)) pendingMatched.add(r.orderId)
+    const canonical = resolveSettlementRecordCanonicalOrderId(r, orderKeyIndex)
+    if (canonical) {
+      pendingMatched.add(canonical)
+      matchedCanonicalOrders.add(canonical)
+    }
   }
 
-  const ordersWithoutSettlement = [...orderIds].filter((id) => !billOrderIds.has(id)).length
+  const ordersWithoutSettlement = [...orderKeyIndex.canonicalOrderIds].filter(
+    (id) => !matchedCanonicalOrders.has(id),
+  ).length
   const settlementWithoutOrder = allBills.filter(
-    (r) => r.orderId && !orderIds.has(r.orderId),
+    (r) => !resolveSettlementRecordCanonicalOrderId(r, orderKeyIndex),
   ).length
 
   if (settlementWithoutOrder > 0) {
@@ -645,9 +661,13 @@ export function runDataValidation(ctx: AnalysisContext): DataValidationReport {
   )
   const gmvReconciliation = checkGmvReconciliation(ctx.views, ctx.orderDedupe)
 
-  const orderIds = new Set(ctx.orderDedupe.uniqueOrders.map((o) => o.orderId))
+  const orderAnchorByOrderId = new Map<string, string>()
+  for (const v of ctx.views) {
+    if (v.anchorId && v.matchOrderId) orderAnchorByOrderId.set(v.matchOrderId, v.anchorId)
+  }
   const settlementReconciliation = checkSettlementReconciliation({
-    orderIds,
+    orders: ctx.orderDedupe.uniqueOrders,
+    anchorByMatchOrderId: orderAnchorByOrderId,
     settlement: ctx.settlement,
     views: ctx.views,
   })

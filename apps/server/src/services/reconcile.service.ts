@@ -7,6 +7,10 @@ import type {
 } from '../types/analysis'
 import { sumCent } from '../utils/money'
 import { normalizeSettlementRecords } from './settlement-normalizer.service'
+import {
+  resolveSettlementRecordCanonicalOrderId,
+  type OrderSettlementKeyIndex,
+} from './settlement-order-key-match.util'
 
 function splitValid(records: SettlementRecord[]) {
   const valid: SettlementRecord[] = []
@@ -69,8 +73,7 @@ export interface SettlementMaps {
 
 export function buildSettlementMaps(
   settlement: SettlementPreprocessResult | undefined,
-  orderAnchorByOrderId: Map<string, string>,
-  orderIds: Set<string>,
+  orderKeyIndex: OrderSettlementKeyIndex,
 ): SettlementMaps {
   const refundByOrder = new Map<string, number>()
   const byAnchor = new Map<string, AnchorSettlementBucket>()
@@ -90,19 +93,19 @@ export function buildSettlementMaps(
 
   const ingest = (records: SettlementRecord[], billType: 'pending' | 'settled') => {
     for (const r of records) {
-      if (!r.orderId) continue
-      if (!orderIds.has(r.orderId)) {
+      const canonicalOrderId = resolveSettlementRecordCanonicalOrderId(r, orderKeyIndex)
+      if (!canonicalOrderId) {
         billUnmatchedCount += 1
         continue
       }
 
-      const anchorId = orderAnchorByOrderId.get(r.orderId)
+      const anchorId = orderKeyIndex.anchorByCanonicalOrderId.get(canonicalOrderId)
       if (!anchorId) {
         billUnmatchedCount += 1
         if (r.direction === 'refund') {
           refundByOrder.set(
-            r.orderId,
-            (refundByOrder.get(r.orderId) ?? 0) + Math.abs(r.amountCent),
+            canonicalOrderId,
+            (refundByOrder.get(canonicalOrderId) ?? 0) + Math.abs(r.amountCent),
           )
         }
         continue
@@ -120,7 +123,7 @@ export function buildSettlementMaps(
       if (r.direction === 'refund') {
         const abs = Math.abs(r.amountCent)
         bucket.refundCent += abs
-        refundByOrder.set(r.orderId, (refundByOrder.get(r.orderId) ?? 0) + abs)
+        refundByOrder.set(canonicalOrderId, (refundByOrder.get(canonicalOrderId) ?? 0) + abs)
       }
       if (r.direction === 'fee') {
         bucket.feeCent += Math.abs(r.amountCent)

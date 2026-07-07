@@ -34,6 +34,7 @@ import {
   preprocessSettlementFromRecords,
   sumSettlementDirection,
 } from './reconcile.service'
+import { buildOrderSettlementKeyIndex } from './settlement-order-key-match.util'
 import { sumCent } from '../utils/money'
 import {
   computeOrderAmountMetrics,
@@ -583,9 +584,9 @@ export function prepareAnalysisArtifacts(input: AnalyzeInput): AnalysisArtifacts
     if (a?.anchorId && o.matchOrderId) orderAnchorByOrderId.set(o.matchOrderId, a.anchorId)
   }
 
-  const orderIds = new Set(dedupe.uniqueOrders.map((o) => o.matchOrderId))
+  const orderKeyIndex = buildOrderSettlementKeyIndex(dedupe.uniqueOrders, orderAnchorByOrderId)
   const settlement = preprocessSettlement(input.pending, input.settled)
-  const { refundByOrder } = buildSettlementMaps(settlement, orderAnchorByOrderId, orderIds)
+  const { refundByOrder } = buildSettlementMaps(settlement, orderKeyIndex)
 
   const hasReasonField = Boolean(
     input.order.mapping.mappings.find((m) => m.key === 'refundReason' && m.header),
@@ -625,12 +626,8 @@ export function runBusinessAnalysis(input: AnalyzeInput): BusinessAnalysisResult
   for (const v of views) {
     if (v.anchorId && v.matchOrderId) orderAnchorByOrderId.set(v.matchOrderId, v.anchorId)
   }
-  const orderIds = new Set(dedupe.uniqueOrders.map((o) => o.matchOrderId))
-  const { billUnmatchedCount, byAnchor } = buildSettlementMaps(
-    settlement,
-    orderAnchorByOrderId,
-    orderIds,
-  )
+  const orderKeyIndex = buildOrderSettlementKeyIndex(dedupe.uniqueOrders, orderAnchorByOrderId)
+  const { billUnmatchedCount, byAnchor } = buildSettlementMaps(settlement, orderKeyIndex)
 
   const orderCount = views.length
   const gmvCent = sumEffectiveGmvCent(views)
@@ -814,12 +811,8 @@ export function prepareAnalysisArtifactsFromRaw(
     const a = attributions.get(o.sourceRowIndex)
     if (a?.anchorId && o.matchOrderId) orderAnchorByOrderId.set(o.matchOrderId, a.anchorId)
   }
-  const orderIds = new Set(dedupe.uniqueOrders.map((o) => o.matchOrderId))
-  const { refundByOrder } = buildSettlementMaps(
-    settlement,
-    orderAnchorByOrderId,
-    orderIds,
-  )
+  const orderKeyIndex = buildOrderSettlementKeyIndex(dedupe.uniqueOrders, orderAnchorByOrderId)
+  const { refundByOrder } = buildSettlementMaps(settlement, orderKeyIndex)
 
   const orderQueries = buildLiveAccountOrderQueries(dedupe.uniqueOrders)
   void bootstrapWorkbenchCache()
@@ -866,12 +859,8 @@ export function runBusinessAnalysisFromRaw(bundle: RawAnalyzeBundle): BusinessAn
   for (const v of views) {
     if (v.anchorId && v.matchOrderId) orderAnchorByOrderId.set(v.matchOrderId, v.anchorId)
   }
-  const orderIds = new Set(dedupe.uniqueOrders.map((o) => o.matchOrderId))
-  const { billUnmatchedCount, byAnchor } = buildSettlementMaps(
-    settlement,
-    orderAnchorByOrderId,
-    orderIds,
-  )
+  const orderKeyIndex = buildOrderSettlementKeyIndex(dedupe.uniqueOrders, orderAnchorByOrderId)
+  const { billUnmatchedCount, byAnchor } = buildSettlementMaps(settlement, orderKeyIndex)
 
   const orderCount = views.length
   const gmvCent = sumEffectiveGmvCent(views)

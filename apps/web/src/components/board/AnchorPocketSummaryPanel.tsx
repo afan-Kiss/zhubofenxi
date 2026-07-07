@@ -114,10 +114,10 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
   return (
     <section className="rounded-xl border border-slate-200 bg-white" data-testid="anchor-pocket-summary">
       <div className="border-b border-slate-100 px-4 py-3">
-        <h3 className="text-base font-semibold text-slate-900">主播实际到账</h3>
+        <h3 className="text-base font-semibold text-slate-900">订单侧预计留下金额</h3>
         <p className="mt-1 text-xs leading-relaxed text-slate-500">
           {caliber?.note ??
-            '29元以下按刷单剔除；已完成退款从实际到账里扣掉；售后处理中和未签收不算实际到账；资金流水只做校验。'}
+            '这是订单侧预计留下金额，不是平台结算到账金额；平台佣金、服务费、账期差异未计入。'}
         </p>
         {caliber?.settlementNote ? (
           <p className="mt-1 text-xs text-slate-400">{caliber.settlementNote}</p>
@@ -144,7 +144,7 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
               <th className="px-3 py-2 font-medium text-right">已退款</th>
               <th className="px-3 py-2 font-medium text-right">售后处理中</th>
               <th className="px-3 py-2 font-medium text-right">未签收待确认</th>
-              <th className="px-3 py-2 font-medium text-right">实际到账</th>
+              <th className="px-3 py-2 font-medium text-right">预计留下金额</th>
               <th className="px-3 py-2 font-medium text-right">刷单金额</th>
               <th className="px-3 py-2 font-medium text-right">退款率</th>
               <th className="px-3 py-2 font-medium">说明</th>

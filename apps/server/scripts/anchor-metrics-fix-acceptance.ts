@@ -326,7 +326,8 @@ function testShopSessionAnchorRules(issues: string[]) {
   assert(june18EdgeEnd.anchorName === '飞云', '6.18 18:00 拾玉居晚场应归飞云', issues)
 
   assert(isInXiaoBaiOrderSlot(new Date('2026-06-18T14:30:00+08:00')), '14:30 在小白时段内', issues)
-  assert(isInXiaoBaiOrderSlot(new Date('2026-06-18T18:00:00+08:00')), '18:00 在小白时段内', issues)
+  assert(isInXiaoBaiOrderSlot(new Date('2026-06-18T17:59:59+08:00')), '17:59:59 在小白时段内', issues)
+  assert(!isInXiaoBaiOrderSlot(new Date('2026-06-18T18:00:00+08:00')), '18:00 不在小白时段内', issues)
   assert(!isInXiaoBaiOrderSlot(new Date('2026-06-18T18:01:00+08:00')), '18:01 不在小白时段内', issues)
   assert(
     isXiaoBaiAttributionActive(Date.parse('2026-06-18T15:00:00+08:00')),

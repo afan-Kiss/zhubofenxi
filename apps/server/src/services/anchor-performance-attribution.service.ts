@@ -2,20 +2,27 @@ import type { AnchorConfig, AnalyzedOrderView } from '../types/analysis'
 import { findAnchorByName } from './anchor-rules.service'
 import { getAnchorConfigSync } from './anchor.service'
 import { applyManualAnchorOverrideToView } from './order-anchor-manual-override.service'
-import { getTimeMinutes } from '../utils/time'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
+import { getTimeMinutes } from '../utils/time'
+import {
+  isInXiaoBaiOrderSlot,
+  isXiaoBaiAttributionActive,
+  SHOP_SESSION_ANCHOR_CUTOFF_MS,
+  XIAOBAI_ANCHOR_CUTOFF_MS,
+} from './anchor-session-cutoff.util'
 import {
   aggregateViewsMetrics,
   type BoardAnchorMetrics,
 } from './board-metrics.service'
 
-/** 2026-06-13 起：日报 / 主播业绩按「直播号 + 早晚场」固定归属，不再走后台时间段规则 */
-export const SHOP_SESSION_ANCHOR_CUTOFF_MS = Date.parse('2026-06-13T00:00:00+08:00')
-
-/** 2026-06-18 起：14:30–18:00 支付订单与对应直播场次归属「小白」 */
-export const XIAOBAI_ANCHOR_CUTOFF_MS = Date.parse('2026-06-18T00:00:00+08:00')
-export const XIAOBAI_SLOT_START_MINUTES = 14 * 60 + 30
-export const XIAOBAI_SLOT_END_MINUTES = 18 * 60
+export {
+  SHOP_SESSION_ANCHOR_CUTOFF_MS,
+  XIAOBAI_ANCHOR_CUTOFF_MS,
+  XIAOBAI_SLOT_START_MINUTES,
+  XIAOBAI_SLOT_END_MINUTES,
+  isInXiaoBaiOrderSlot,
+  isXiaoBaiAttributionActive,
+} from './anchor-session-cutoff.util'
 
 export type LiveSessionPeriod = 'morning' | 'evening'
 export type ShopSessionKey = 'xiangyu' | 'hetian' | 'shiyu'
@@ -61,19 +68,6 @@ export function isReportDateOnOrAfterShopSessionCutoff(startDate: string): boole
 export function isReportDateOnOrAfterXiaoBaiCutoff(startDate: string): boolean {
   const ms = Date.parse(`${startDate.trim()}T00:00:00+08:00`)
   return Number.isFinite(ms) && ms >= XIAOBAI_ANCHOR_CUTOFF_MS
-}
-
-export function isInXiaoBaiOrderSlot(date: Date): boolean {
-  const minutes = getTimeMinutes(date)
-  return minutes >= XIAOBAI_SLOT_START_MINUTES && minutes <= XIAOBAI_SLOT_END_MINUTES
-}
-
-export function isXiaoBaiAttributionActive(payMs: number): boolean {
-  return (
-    Number.isFinite(payMs) &&
-    payMs >= XIAOBAI_ANCHOR_CUTOFF_MS &&
-    isInXiaoBaiOrderSlot(new Date(payMs))
-  )
 }
 
 /** 6.18 起：14:30–18:00 且来源直播号为祥钰系 → 归小白（不含拾玉居/和田雅玉等） */

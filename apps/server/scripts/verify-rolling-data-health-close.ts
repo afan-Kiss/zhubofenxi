@@ -148,8 +148,8 @@ async function main(): Promise<void> {
 
   if (
     operationsAfterSale.includes('isNoAfterSaleText') &&
-    operationsAfterSale.includes('isActualRefundAfterSaleText') &&
-    !operationsAfterSale.includes('isPositiveAfterSaleText') &&
+    operationsAfterSale.includes('isOperationalAfterSaleText') &&
+    !operationsAfterSale.includes('isActualRefundAfterSaleText') &&
     !operationsAfterSale.includes('/售后|退款|退货/')
   ) {
     ok('operations-after-sale 复用公共工具且无裸匹配')
@@ -325,16 +325,27 @@ async function main(): Promise<void> {
     }
   }
 
-  const operationsNegatives = ['暂无售后', '未申请售后', '未发起售后', '售后状态：无']
+  const operationsNegatives = ['暂无售后', '未申请售后', '未发起售后', '售后状态：无', '无售后']
   for (const text of operationsNegatives) {
     const view = { afterSaleStatusText: text } as AnalyzedOrderView
-    if (!isActualAfterSaleOrder(view)) ok(`运营「${text}」不算售后`)
-    else fail(`运营「${text}」被误判为售后`)
+    if (!isActualAfterSaleOrder(view)) ok(`运营「${text}」不算售后相关`)
+    else fail(`运营「${text}」被误判为售后相关`)
   }
-  for (const text of ['售后完成未退款', '售后申请未处理', '退款成功', '退货退款']) {
+  for (const text of [
+    '售后申请',
+    '售后中',
+    '售后处理中',
+    '售后申请未处理',
+    '售后处理中未退款',
+    '售后关闭',
+    '关闭无退款',
+    '售后完成未退款',
+    '退款成功',
+    '退货退款',
+  ]) {
     const view = { afterSaleStatusText: text } as AnalyzedOrderView
-    if (isActualAfterSaleOrder(view)) ok(`运营「${text}」算售后`)
-    else fail(`运营「${text}」未识别为售后`)
+    if (isActualAfterSaleOrder(view)) ok(`运营「${text}」算售后相关`)
+    else fail(`运营「${text}」未识别为售后相关`)
   }
 
   const positiveTexts = [

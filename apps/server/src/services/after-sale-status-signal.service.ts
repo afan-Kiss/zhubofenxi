@@ -44,15 +44,14 @@ const POSITIVE_AFTER_SALE_KEYWORDS = [
   '申请退款',
 ] as const
 
-/** 0 元关闭类文案：不算实际退款售后 */
-const ACTUAL_REFUND_EXCLUDE_SUBSTRINGS = [
+/** 运营售后信号：买家已申请或进入售后流程，不等于已经退款 */
+const OPERATIONAL_AFTER_SALE_KEYWORDS = [
+  '售后申请',
+  '售后中',
+  '售后处理中',
+  '售后完成',
   '售后关闭',
-  '退款关闭',
   '关闭无退款',
-] as const
-
-/** 真实退款/退货/售后完成类关键词（不含进行中/申请类） */
-const ACTUAL_REFUND_KEYWORDS = [
   '退款成功',
   '退款中',
   '退款完成',
@@ -61,10 +60,10 @@ const ACTUAL_REFUND_KEYWORDS = [
   '退货退款',
   '仅退款',
   '已退款',
-  '售后完成',
   '售后成功',
   '平台已退款',
   '商家已退款',
+  '申请退款',
 ] as const
 
 const AFTER_SALE_STATUS_PART_SPLIT_RE = /[\s,，、;；|｜/\\]+/
@@ -108,7 +107,7 @@ function isSinglePositiveAfterSaleText(text: string): boolean {
   return POSITIVE_AFTER_SALE_KEYWORDS.some((keyword) => raw.includes(keyword))
 }
 
-/** 售后状态文案表示真实售后/退款信号时返回 true */
+/** 售后状态文案表示售后相关信号时返回 true（含申请/处理中/关闭，不等于已退款） */
 export function isPositiveAfterSaleText(text: string): boolean {
   const raw = text.trim()
   if (!raw || isNoAfterSaleText(raw)) return false
@@ -119,22 +118,21 @@ export function isPositiveAfterSaleText(text: string): boolean {
   return isSinglePositiveAfterSaleText(raw)
 }
 
-function isSingleActualRefundAfterSaleText(text: string): boolean {
+function isSingleOperationalAfterSaleText(text: string): boolean {
   const raw = text.trim()
   if (!raw || isSingleNoAfterSaleText(raw)) return false
-  if (ACTUAL_REFUND_EXCLUDE_SUBSTRINGS.some((ex) => raw.includes(ex))) return false
-  return ACTUAL_REFUND_KEYWORDS.some((keyword) => raw.includes(keyword))
+  return OPERATIONAL_AFTER_SALE_KEYWORDS.some((keyword) => raw.includes(keyword))
 }
 
-/** 文案表示实际退款/退货/售后完成（不含 0 元关闭类） */
-export function isActualRefundAfterSaleText(text: string): boolean {
+/** 运营售后信号：买家已申请或进入售后流程，不等于已经退款 */
+export function isOperationalAfterSaleText(text: string): boolean {
   const raw = text.trim()
   if (!raw || isNoAfterSaleText(raw)) return false
   const parts = splitAfterSaleStatusParts(raw)
   if (parts.length > 1) {
-    return parts.some((part) => isSingleActualRefundAfterSaleText(part))
+    return parts.some((part) => isSingleOperationalAfterSaleText(part))
   }
-  return isSingleActualRefundAfterSaleText(raw)
+  return isSingleOperationalAfterSaleText(raw)
 }
 
 export function resolveAfterSaleStatusCombinedText(view: AnalyzedOrderView): string {

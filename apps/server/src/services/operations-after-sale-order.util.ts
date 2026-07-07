@@ -1,7 +1,7 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import {
   isNoAfterSaleText,
-  isActualRefundAfterSaleText,
+  isOperationalAfterSaleText,
 } from './after-sale-status-signal.service'
 import { normalizeAfterSalesReason } from './after-sales-reason-normalize.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo, calcRefundRate } from './calc-refund-rate.service'
@@ -51,15 +51,15 @@ function resolveAfterSaleStatusText(view: AnalyzedOrderView): string {
   return String(view.afterSaleStatusText || view.afterSaleStatusLabel || '').trim()
 }
 
-function statusTextSignalsActualRefund(text: string): boolean | null {
+function statusTextSignalsOperationalAfterSale(text: string): boolean | null {
   const trimmed = text.trim()
   if (!trimmed) return null
   if (isNoAfterSaleText(trimmed)) return false
-  if (isActualRefundAfterSaleText(trimmed)) return true
+  if (isOperationalAfterSaleText(trimmed)) return true
   return null
 }
 
-/** 订单是否发生实际退款/退货/售后（用于下钻过滤） */
+/** 订单是否属于运营售后相关（含申请/处理中/关闭无退款；退款金额与退款单数另计） */
 export function isActualAfterSaleOrder(view: AnalyzedOrderView): boolean {
   if (view.isFreightRefundOnly) {
     return false
@@ -70,10 +70,10 @@ export function isActualAfterSaleOrder(view: AnalyzedOrderView): boolean {
   if (view.isReturnRefund || view.isReturnRefundOrder || view.isRealProductRefund) return true
   if (view.isReturned) return true
 
-  const refundSignal = statusTextSignalsActualRefund(resolveRefundStatusText(view))
+  const refundSignal = statusTextSignalsOperationalAfterSale(resolveRefundStatusText(view))
   if (refundSignal === true) return true
 
-  const afterSaleSignal = statusTextSignalsActualRefund(resolveAfterSaleStatusText(view))
+  const afterSaleSignal = statusTextSignalsOperationalAfterSale(resolveAfterSaleStatusText(view))
   if (afterSaleSignal === true) return true
   if (afterSaleSignal === false) return false
   if (refundSignal === false) return false
@@ -151,7 +151,7 @@ export function resolveOperationsAfterSalesReasonRaw(view: AnalyzedOrderView): s
   )
 }
 
-/** 是否计入运营报表售后原因榜（排除纯运费补偿） */
+/** 是否计入运营报表售后原因榜（排除纯运费补偿；含售后申请/处理中，不含仅 0 元退款） */
 export function viewCountsAsOperationsAfterSalesReasonOrder(view: AnalyzedOrderView): boolean {
   if (view.isFreightRefundOnly) return false
   return isActualAfterSaleOrder(view)

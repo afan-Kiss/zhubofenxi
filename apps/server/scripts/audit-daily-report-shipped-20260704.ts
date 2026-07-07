@@ -33,12 +33,17 @@ config({ path: path.resolve(__dirname, '../.env') })
 const AUDIT_DATE = '2026-07-04'
 
 const GOLDEN_SHIPPED: Record<string, number> = {
-  子杰: 3,
+  子杰: 1,
   小艺: 2,
-  飞云: 3,
+  飞云: 2,
   小红: 0,
 }
-const GOLDEN_TOTAL_SHIPPED = 8
+const GOLDEN_TOTAL_SHIPPED = 5
+
+/**
+ * 旧黄金值全店 8 单包含后来进入售后/关闭的订单；当前口径剔除后为 5 单。
+ * 见 verify-anchor-performance-daily-report-integrity.ts FIXED_20260704_* 注释。
+ */
 
 type ExclusionCategory =
   | '计入真实发货'
@@ -250,7 +255,7 @@ async function main(): Promise<void> {
   }
 
   section('4. 与固定黄金值对比')
-  console.log('黄金值（verify 脚本 FIXED_20260704，尚未修改）:')
+  console.log('黄金值（verify 脚本 FIXED_20260704，2026-07-07 更新为 5 单）:')
   for (const [name, expected] of Object.entries(GOLDEN_SHIPPED)) {
     console.log(`  ${name}: ${expected}`)
   }

@@ -39,16 +39,39 @@ const TARGET_QUALITY_ORDER = 'P795876371867202831'
 const TARGET_AFTER_SALE = 'R6720283133492612'
 const TARGET_QUALITY_ANCHOR = '飞云'
 
+/**
+ * 2026-07-04 真实发货黄金值（2026-07-07 更新）
+ *
+ * 旧黄金值全店 8 单（子杰 3 / 小艺 2 / 飞云 3）包含后来进入售后/关闭的订单：
+ * - P798690281340293991（子杰，售后处理中：待商家收货）
+ * - P798714646273341211（飞云，售后完成）
+ * - P798682298893211811（isDailyReportInvalidOrder=true）
+ *
+ * 当前日报「真实发货」按剔除售后/关闭/取消后的当前有效发货口径，因此为 5 单。
+ */
 const FIXED_20260704_SHIPPED: Record<string, number> = {
-  子杰: 3,
+  子杰: 1,
   小艺: 2,
-  飞云: 3,
+  飞云: 2,
   小红: 0,
 }
 const FIXED_20260704_INVALID: Record<string, number> = {
   小红: 2,
 }
-const FIXED_20260704_TOTAL_SHIPPED = 8
+const FIXED_20260704_TOTAL_SHIPPED = 5
+
+/** 旧黄金值计入、当前规则剔除的真实发货单 */
+const FIXED_20260704_EXCLUDED_FROM_SHIPPED = [
+  'P798690281340293991',
+  'P798714646273341211',
+  'P798682298893211811',
+] as const
+
+/** 小红关闭/售后完成单：计入 invalid，不计真实发货 */
+const FIXED_20260704_XIAOHONG_INVALID_ORDERS = [
+  'P798708088917130251',
+  'P798708220746130731',
+] as const
 
 const failures: string[] = []
 const warnings: string[] = []
@@ -410,11 +433,9 @@ async function auditDailyReport(dateKey: string): Promise<void> {
     if (report.summary.totalSoldOrderCount === 0) {
       warn('本地库无 2026-07-04 支付订单，跳过固定单数验收（请在生产环境复验）')
     } else {
-      let totalShipped = 0
       for (const [name, expected] of Object.entries(FIXED_20260704_SHIPPED)) {
         const row = report.anchors.find((r) => r.anchorName === name)
         const actual = row?.soldOrderCount ?? 0
-        totalShipped += actual
         if (countEq(actual, expected)) ok(`${name} 真实发货 ${actual} 单`)
         else fail(`${name} 真实发货应为 ${expected} 单，实际 ${actual}`)
       }
@@ -431,6 +452,106 @@ async function auditDailyReport(dateKey: string): Promise<void> {
           `全店真实发货应为 ${FIXED_20260704_TOTAL_SHIPPED}，实际 ${report.summary.totalSoldOrderCount}`,
         )
       }
+
+      const allPerformanceViews = await getAnchorPerformanceViews(
+        scoped.views,
+        scoped.rawByMatch,
+      )
+      await audit20260704ExcludedShippedOrders(report, allPerformanceViews)
+    }
+  }
+}
+
+function findViewByOrderNo(
+  views: ReturnType<typeof dedupeViewsByMetricOrderNo>,
+  orderNo: string,
+) {
+  return views.find((v) => (resolveMetricOrderNo(v) || v.orderId) === orderNo)
+}
+
+function isOrderInReportShipped(
+  report: Awaited<ReturnType<typeof buildDailyReport>>,
+  orderNo: string,
+): boolean {
+  if ((report.summary.shippedOrders ?? []).some((l) => l.orderNo === orderNo)) return true
+  return report.anchors.some((a) => (a.shippedOrders ?? []).some((l) => l.orderNo === orderNo))
+}
+
+async function audit20260704ExcludedShippedOrders(
+  report: Awaited<ReturnType<typeof buildDailyReport>>,
+  performanceViews: Awaited<ReturnType<typeof getAnchorPerformanceViews>>,
+): Promise<void> {
+  section('2026-07-04 剔除单显式断言')
+  const deduped = dedupeViewsByMetricOrderNo(performanceViews)
+
+  for (const orderNo of FIXED_20260704_EXCLUDED_FROM_SHIPPED) {
+    const v = findViewByOrderNo(deduped, orderNo)
+    if (!v) {
+      warn(`${orderNo} 不在 performanceViews（本地库可能无此单）`)
+      continue
+    }
+    if (isDailyReportInvalidOrder(v)) {
+      ok(`${orderNo} isDailyReportInvalidOrder=true（不应计入真实发货）`)
+    } else {
+      fail(`${orderNo} 应为 isDailyReportInvalidOrder=true`)
+    }
+    if (!isDailyReportShippedOrder(v)) {
+      ok(`${orderNo} 不计入真实发货`)
+    } else {
+      fail(`${orderNo} 不应 isDailyReportShippedOrder=true`)
+    }
+    if (!isOrderInReportShipped(report, orderNo)) {
+      ok(`${orderNo} 未出现在日报真实发货明细`)
+    } else {
+      fail(`${orderNo} 不应出现在日报真实发货明细`)
+    }
+  }
+
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: '2026-07-04',
+    endDate: '2026-07-04',
+  })
+  const xiaohongAnchor = resolveDailyReportAnchorsForDate(getAnchorConfigSync(), '2026-07-04').find(
+    (a) => a.anchorName === '小红',
+  )
+  const xiaohongViews = xiaohongAnchor
+    ? await getAnchorPerformanceViews(
+        scoped.views,
+        scoped.rawByMatch,
+        xiaohongAnchor.anchorId,
+        xiaohongAnchor.anchorName,
+      )
+    : []
+
+  for (const orderNo of FIXED_20260704_XIAOHONG_INVALID_ORDERS) {
+    const v = findViewByOrderNo(deduped, orderNo)
+    if (!v) {
+      warn(`${orderNo} 不在 performanceViews（本地库可能无此单）`)
+      continue
+    }
+    if (isDailyReportInvalidOrder(v)) {
+      ok(`${orderNo} isDailyReportInvalidOrder=true（小红关闭/售后，计入 invalid）`)
+    } else {
+      fail(`${orderNo} 应为 isDailyReportInvalidOrder=true`)
+    }
+    if (!isDailyReportShippedOrder(v)) {
+      ok(`${orderNo} 不计入真实发货`)
+    } else {
+      fail(`${orderNo} 不应计入真实发货`)
+    }
+    if (v.anchorName === '小红') {
+      ok(`${orderNo} 归属小红`)
+    } else {
+      fail(`${orderNo} 应归属小红，实际 ${v.anchorName}`)
+    }
+    const inXiaohongPool = xiaohongViews.some(
+      (x) => (resolveMetricOrderNo(x) || x.orderId) === orderNo,
+    )
+    if (inXiaohongPool) {
+      ok(`${orderNo} 在小红 performanceViews 关闭/退货池`)
+    } else {
+      warn(`${orderNo} 未在小红 performanceViews（归属字段已核对）`)
     }
   }
 }

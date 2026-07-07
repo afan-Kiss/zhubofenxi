@@ -180,6 +180,7 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
                 <FieldRow label="指定主播">
                   <OrderAnchorAssignControl
                     orderNo={orderNo}
+                    defaultAnchorName={r.anchorName}
                     anchorOptions={manualAnchorAssign.anchorOptions}
                     assigningOrderNo={manualAnchorAssign.assigningOrderNo}
                     onAssign={manualAnchorAssign.onAssign}

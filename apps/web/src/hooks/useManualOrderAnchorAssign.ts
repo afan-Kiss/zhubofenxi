@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiRequest } from '../lib/api'
 import { invalidateBoardLiveQueryCache } from '../lib/board-live-query-cache'
 
+function normalizeAnchorName(name: string | undefined | null): string {
+  const trimmed = String(name ?? '').trim()
+  return trimmed || '未归属'
+}
+
 export function useManualOrderAnchorAssign(params: {
   enabled: boolean
   onAssigned?: () => void
@@ -37,14 +42,18 @@ export function useManualOrderAnchorAssign(params: {
   }, [enabled])
 
   const handleManualAssign = useCallback(
-    async (orderNo: string, targetAnchorName: string) => {
-      if (!orderNo || !targetAnchorName) return
+    async (orderNo: string, targetAnchorName: string, currentAnchorName?: string) => {
+      const target = targetAnchorName.trim()
+      const current = normalizeAnchorName(currentAnchorName)
+      if (!orderNo || !target) return
+      if (target === current) return
+      if (target === '未归属') return
       setAssignError(null)
       setAssigningOrderNo(orderNo)
       try {
         await apiRequest('/api/board/order-anchor-manual-assign', {
           method: 'POST',
-          body: JSON.stringify({ orderNo, anchorName: targetAnchorName }),
+          body: JSON.stringify({ orderNo, anchorName: target }),
         })
         invalidateBoardLiveQueryCache('order-anchor-manual-assign')
         onAssigned?.()

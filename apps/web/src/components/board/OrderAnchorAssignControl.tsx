@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 
 interface AnchorOption {
   id: string
@@ -7,24 +7,53 @@ interface AnchorOption {
 
 interface Props {
   orderNo: string
+  /** 系统当前归属主播（默认选中，未改时不提交） */
+  defaultAnchorName?: string
   anchorOptions: AnchorOption[]
   assigningOrderNo?: string | null
   onAssign: (orderNo: string, anchorName: string) => void
   compact?: boolean
 }
 
+function normalizeAnchorName(name: string | undefined | null): string {
+  const trimmed = String(name ?? '').trim()
+  return trimmed || '未归属'
+}
+
 export const OrderAnchorAssignControl: React.FC<Props> = ({
   orderNo,
+  defaultAnchorName,
   anchorOptions,
   assigningOrderNo,
   onAssign,
   compact = false,
 }) => {
-  const [selected, setSelected] = useState('')
+  const currentAnchor = normalizeAnchorName(defaultAnchorName)
+  const mergedOptions = useMemo(() => {
+    const seen = new Set<string>()
+    const out: AnchorOption[] = []
+    const add = (name: string, id?: string) => {
+      const trimmed = name.trim()
+      if (!trimmed || seen.has(trimmed)) return
+      seen.add(trimmed)
+      out.push({ id: id ?? `anchor-${trimmed}`, name: trimmed })
+    }
+    add(currentAnchor, `current-${currentAnchor}`)
+    for (const option of anchorOptions) add(option.name, option.id)
+    return out
+  }, [anchorOptions, currentAnchor])
+
+  const [selected, setSelected] = useState(currentAnchor)
+
+  useEffect(() => {
+    setSelected(currentAnchor)
+  }, [orderNo, currentAnchor])
+
   const busy = assigningOrderNo === orderNo
+  const changed = selected !== currentAnchor
 
   const handleAssign = () => {
-    if (!selected || busy) return
+    if (!selected || busy || !changed) return
     onAssign(orderNo, selected)
   }
 
@@ -37,8 +66,7 @@ export const OrderAnchorAssignControl: React.FC<Props> = ({
         className="max-w-[120px] rounded-lg border border-rose-200 bg-white px-2 py-1 text-[11px] text-slate-700 disabled:opacity-50"
         aria-label={`为订单 ${orderNo} 指定主播`}
       >
-        <option value="">选择主播</option>
-        {anchorOptions.map((a) => (
+        {mergedOptions.map((a) => (
           <option key={a.id} value={a.name}>
             {a.name}
           </option>
@@ -46,11 +74,11 @@ export const OrderAnchorAssignControl: React.FC<Props> = ({
       </select>
       <button
         type="button"
-        disabled={!selected || busy}
+        disabled={!changed || busy}
         onClick={handleAssign}
         className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {busy ? '保存中…' : '指定'}
+        {busy ? '保存中…' : changed ? '保存' : '已归属'}
       </button>
     </div>
   )

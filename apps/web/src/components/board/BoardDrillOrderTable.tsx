@@ -296,6 +296,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                       <td className="px-2 py-1.5">
                         <OrderAnchorAssignControl
                           orderNo={boardRowDisplayOrderNo(r)}
+                          defaultAnchorName={r.anchorName}
                           anchorOptions={manualAnchorAssign.anchorOptions}
                           assigningOrderNo={manualAnchorAssign.assigningOrderNo}
                           onAssign={manualAnchorAssign.onAssign}

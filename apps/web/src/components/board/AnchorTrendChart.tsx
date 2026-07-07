@@ -151,8 +151,9 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   const resolved = trend ?? null
   const isReport = variant === 'report'
   const showZeroPerformanceTrend = isReport || includeZeroPerformance
+  // 日报单卡：保留服务端 HH:mm 自然时间走势，避免相对分钟桶压扁晚场成交
   const useRelativeIntraday =
-    resolved?.mode === 'intraday' && showZeroPerformanceTrend
+    resolved?.mode === 'intraday' && showZeroPerformanceTrend && !isReport
 
   const chartData = useMemo(() => {
     const points = resolved?.points ?? []

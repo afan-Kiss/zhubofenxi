@@ -545,9 +545,9 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
                 dataKey={s.dataKey}
                 name={s.dataKey}
                 stroke={s.color}
-                strokeWidth={2}
+                strokeWidth={isReport ? 2.5 : 2}
                 dot={false}
-                connectNulls={false}
+                connectNulls={isReport}
                 activeDot={isReport ? false : { r: 3.5, fill: s.color, stroke: '#fff', strokeWidth: 1 }}
                 isAnimationActive={!isReport}
               />

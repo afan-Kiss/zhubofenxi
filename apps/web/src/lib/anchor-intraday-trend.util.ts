@@ -161,7 +161,7 @@ export function buildRelativeIntradayCompareSeries(
     for (let i = 0; i < perAnchor.length; i++) {
       const item = perAnchor[i]!
       if (bucketIndex > item.maxBucket) {
-        row[`anchor_${i}`] = null
+        row[`anchor_${i}`] = 0
       } else {
         row[`anchor_${i}`] = item.bucketValues.get(bucketIndex) ?? 0
       }

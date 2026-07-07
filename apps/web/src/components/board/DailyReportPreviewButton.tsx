@@ -18,12 +18,15 @@ function isTrendChartElementReady(el: Element): boolean {
   const trendState = el.getAttribute('data-anchor-trend-chart')
   const compareState = el.getAttribute('data-anchor-trend-compare')
   const state = trendState ?? compareState
+  if (state === 'empty') return false
   if (state !== 'ready') return false
   const svg = el.querySelector('svg')
-  return Boolean(svg && svg.getBoundingClientRect().height > 0)
+  if (!svg || svg.getBoundingClientRect().height <= 0) return false
+  const paths = svg.querySelectorAll('path.recharts-curve, path.recharts-area-curve')
+  return paths.length > 0
 }
 
-async function waitForTrendChartsReady(root: HTMLElement, timeoutMs = 5000): Promise<void> {
+async function waitForTrendChartsReady(root: HTMLElement, timeoutMs = 8000): Promise<void> {
   const charts = Array.from(
     root.querySelectorAll('[data-anchor-trend-chart], [data-anchor-trend-compare]'),
   )
@@ -254,7 +257,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     const restorePhotos = await prepareExportPhotosForCapture(node)
     try {
       await waitForNextPaint()
-      await new Promise((resolve) => window.setTimeout(resolve, 120))
+      await new Promise((resolve) => window.setTimeout(resolve, 200))
       const dataUrl = await renderSheetToPng(node)
       setImageDataUrl(dataUrl)
       onGenerated?.()
@@ -271,7 +274,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     void (async () => {
       setCapturing(true)
       await waitForNextPaint()
-      await new Promise((resolve) => window.setTimeout(resolve, 320))
+      await new Promise((resolve) => window.setTimeout(resolve, 500))
       if (cancelled || token !== captureTokenRef.current) return
       try {
         await captureImage()
@@ -325,10 +328,16 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
 
   if (!isSingleDay) return null
 
+  const sheetWidthPx = sheetPhotos.some((p) => p.dataUrl) ? 960 : 700
+
   const sheetPortal =
     report
       ? createPortal(
-          <div aria-hidden className="pointer-events-none fixed left-[-9999px] top-0">
+          <div
+            aria-hidden
+            className="pointer-events-none fixed left-0 top-0 -z-50 opacity-0"
+            style={{ width: sheetWidthPx }}
+          >
             <DailyReportImageSheet ref={sheetRef} data={report} shipmentPhotos={sheetPhotos} />
           </div>,
           document.body,

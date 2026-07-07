@@ -90,6 +90,7 @@
     "verify:single-order-anchor-attribution": "tsx apps/server/scripts/verify-single-order-anchor-attribution.ts",
     "verify:anchor-attribution-by-effective-schedule": "tsx apps/server/scripts/verify-anchor-attribution-by-effective-schedule.ts",
     "verify:board-metric-detail-anchor-attribution": "tsx apps/server/scripts/verify-board-metric-detail-anchor-attribution.ts",
+    "verify:manual-override-ops-cache": "tsx apps/server/scripts/verify-manual-override-ops-cache.ts",
     "verify:anchor-remap-entrypoints": "tsx apps/server/scripts/verify-anchor-remap-entrypoints.ts",
     "verify:signed-amount-copy-and-entrypoints": "tsx apps/server/scripts/verify-signed-amount-copy-and-entrypoints.ts",
     "verify:daily-report-live-sessions": "tsx apps/server/scripts/verify-daily-report-live-sessions-shiyuju.ts",

@@ -474,21 +474,24 @@ export function invalidateBusinessBoardCache(): void {
   logInfo('经营缓存', '已清空全部缓存条目')
 }
 
-function prewarmOperationsReportsAfterRebuild(): void {
-  void import('./operations-report-cache.service').then((m) =>
-    m.prewarmCommonOperationsReportsAfterBusinessSync().catch((err) => {
+function prewarmOperationsReportsAfterRebuild(reason: string): void {
+  void import('./operations-report-cache.service').then(async (m) => {
+    m.invalidateOperationsReportCache(reason)
+    try {
+      await m.prewarmOperationsReportCache(reason, { forceRebuild: true })
+    } catch (err) {
       logWarn(
         '运营报表缓存',
         `同步后提前计算失败：${err instanceof Error ? err.message : String(err)}`,
       )
-    }),
-  )
+    }
+  })
 }
 
 /** 数据同步 / 维护后：先清空再按常用范围重建（与其他重建请求串行执行） */
 export async function invalidateAndRebuildBusinessBoardCache(reason: string): Promise<void> {
   await enqueueFullBusinessCacheRebuild(reason)
-  prewarmOperationsReportsAfterRebuild()
+  prewarmOperationsReportsAfterRebuild(reason)
 }
 
 /** 排班保存等场景：立即清空缓存，全量重建放入后台队列，避免 HTTP 超时 */
@@ -496,5 +499,5 @@ export function scheduleBusinessBoardCacheRebuild(reason: string): void {
   invalidateBusinessBoardCache()
   logInfo('经营缓存', `因「${reason}」触发后台全量重建`)
   void enqueueFullBusinessCacheRebuild(reason, { invalidateFirst: false })
-  prewarmOperationsReportsAfterRebuild()
+  prewarmOperationsReportsAfterRebuild(reason)
 }

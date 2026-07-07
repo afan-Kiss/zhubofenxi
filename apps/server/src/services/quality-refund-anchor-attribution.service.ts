@@ -11,6 +11,7 @@ import { dedupeOrderCountByOrderNo } from './order-master-match.service'
 import { findBestLiveSession } from './live-session.service'
 import { viewCountsAsQualityRefund } from './quality-refund-resolution.service'
 import { resolveQualityRefundInfo } from './quality-refund-resolution.service'
+import { resolveManualAnchorOverrideForView } from './order-anchor-manual-override.service'
 import { getAnchorConfigSync } from './anchor.service'
 
 const RAW_ORDER_PLACE_TIME_KEYS = [
@@ -28,6 +29,7 @@ export type QualityRefundAnchorAttributionType =
   | 'live_session_anchor'
   | 'live_session_time_rule'
   | 'unassigned'
+  | 'manual_override'
 
 export interface QualityRefundAnchorAttribution {
   orderNo: string
@@ -160,6 +162,35 @@ export function resolveQualityRefundAnchorByOrderTime(params: {
     verifySource: 'after_sale_workbench',
   })
   const paymentAnchorName = view.anchorName?.trim() || '未归属'
+
+  const manual = resolveManualAnchorOverrideForView(view)
+  if (manual) {
+    const anchorKey =
+      manual.anchorName === '未归属'
+        ? '未归属'
+        : anchorGroupKey({
+            anchorId: manual.anchorId,
+            anchorName: manual.anchorName,
+          } as AnalyzedOrderView)
+    return {
+      orderNo,
+      view,
+      orderTime,
+      orderTimeText,
+      anchorId: manual.anchorId,
+      anchorName: manual.anchorName,
+      anchorKey,
+      matchedLiveSessionId: null,
+      matchedLiveStartTime: null,
+      matchedLiveEndTime: null,
+      attributionType: 'manual_override',
+      qualitySource: qualityInfo.qualityMainSource,
+      qualitySourceLabel: qualityInfo.verifyDisplayLabel,
+      qualityReasonText: qualityInfo.qualityReasonText,
+      unassignedReason: null,
+      paymentAnchorName,
+    }
+  }
 
   let anchorId = ''
   let anchorName = '未归属'

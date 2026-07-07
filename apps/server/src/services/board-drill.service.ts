@@ -484,6 +484,11 @@ export async function buildAnchorQualityRefundDrill(params: {
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
 
+  const { ensureManualAnchorOverrideCache } = await import(
+    './order-anchor-manual-override.service'
+  )
+  await ensureManualAnchorOverrideCache()
+
   const range = resolveDateRange(
     (params.preset ?? 'custom') as DateRangePreset,
     params.startDate,

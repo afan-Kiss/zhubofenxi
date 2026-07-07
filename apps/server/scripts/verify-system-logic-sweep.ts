@@ -15,11 +15,19 @@ import {
 } from '../src/services/order-refund-metrics.service'
 import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
 import { isEffectiveSignedView } from '../src/services/strict-after-sale-metrics.service'
+import {
+  explainValidRevenueOrder,
+  isValidRevenueOrder,
+  resolveValidRevenueRefundAmountCent,
+} from '../src/services/valid-revenue-order.service'
+import { computeOperationsRefundMetricsFromViews } from '../src/services/operations-after-sale-order.util'
+import { buildOrderMetricSets } from '../src/services/order-metric-sets.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
 const ROOT = path.resolve(__dirname, '../..')
 const REPO_ROOT = path.resolve(__dirname, '../../..')
 const issues: string[] = []
+const warnings: string[] = []
 
 function ok(msg: string): void {
   console.log(`  ✓ ${msg}`)
@@ -28,6 +36,11 @@ function ok(msg: string): void {
 function fail(msg: string): void {
   issues.push(msg)
   console.log(`  ✗ ${msg}`)
+}
+
+function warn(msg: string): void {
+  warnings.push(msg)
+  console.log(`  ⚠ ${msg}`)
 }
 
 function read(rel: string): string {
@@ -187,6 +200,85 @@ function main(): void {
   if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
   else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
 
+  const freightValidView = {
+    ...freightView,
+    effectiveGmvCent: 50000,
+  } as AnalyzedOrderView
+  if (resolveValidRevenueRefundAmountCent(freightValidView) === 0) {
+    ok('纯运费 resolveValidRevenueRefundAmountCent=0')
+  } else {
+    fail('纯运费 resolveValidRevenueRefundAmountCent 非 0')
+  }
+  if (isValidRevenueOrder(freightValidView)) ok('纯运费 isValidRevenueOrder=true')
+  else fail(`纯运费 isValidRevenueOrder=false: ${explainValidRevenueOrder(freightValidView).reason}`)
+  const realValidView = {
+    ...realView,
+    orderStatusText: '已完成',
+    effectiveGmvCent: 50000,
+    returnAmountCent: 1800,
+  } as AnalyzedOrderView
+  if (!isValidRevenueOrder(realValidView)) ok('真实商品退款 isValidRevenueOrder=false')
+  else fail('真实商品退款 isValidRevenueOrder 误判')
+
+  console.log('\n=== 运营退款单数去重 ===')
+  const orderNo = 'P-OPS-REFUND-SYSTEM-VERIFY'
+  const opsViews = [
+    { packageId: orderNo, includedInGmv: true, productRefundAmountCent: 0 } as AnalyzedOrderView,
+    {
+      packageId: orderNo,
+      includedInGmv: true,
+      productRefundAmountCent: 1800,
+      afterSaleStatusText: '退款成功',
+    } as AnalyzedOrderView,
+  ]
+  const ops = computeOperationsRefundMetricsFromViews(opsViews)
+  const board = buildOrderMetricSets(opsViews)
+  if (ops.refundOrderCount === 1 && board.refundOrderCount === 1) {
+    ok('运营/看板退款单数均为 1')
+  } else {
+    fail(`运营=${ops.refundOrderCount} 看板=${board.refundOrderCount}`)
+  }
+
+  console.log('\n=== 有效成交 / 运费抽屉 / 运营去重（静态） ===')
+  const validRevenueSvc = read('server/src/services/valid-revenue-order.service.ts')
+  const businessAnalysis = read('server/src/services/business-analysis.service.ts')
+  const metricDetailSvc = read('server/src/services/board-metric-detail.service.ts')
+  const calcRefundRate = read('server/src/services/calc-refund-rate.service.ts')
+  if (validRevenueSvc.includes('if (view.isFreightRefundOnly) return 0')) {
+    ok('valid-revenue 排除纯运费退款金额')
+  } else {
+    fail('valid-revenue 未排除纯运费')
+  }
+  if (businessAnalysis.includes('classification.isFreightRefundOnly')) {
+    ok('business-analysis 纯运费不污染 boardRefundCent')
+  } else {
+    fail('business-analysis 未隔离纯运费 boardRefundCent')
+  }
+  if (metricDetailSvc.includes('dedupeFreightRefundViewsByOrderNoMaxFreight')) {
+    ok('board-metric-detail 运费抽屉去重')
+  } else {
+    fail('board-metric-detail 缺少运费去重')
+  }
+  if (calcRefundRate.includes('dedupeFreightRefundViewsByOrderNoMaxFreight')) {
+    ok('calc-refund-rate 导出 dedupeFreightRefundViewsByOrderNoMaxFreight')
+  } else {
+    fail('calc-refund-rate 缺少 dedupeFreightRefundViewsByOrderNoMaxFreight')
+  }
+
+  console.log('\n=== Drawer 双请求（已知问题，warning） ===')
+  const drawerEffectCount = (metricDrawer.match(/useEffect\s*\(/g) ?? []).length
+  if (
+    drawerEffectCount >= 2 &&
+    metricDrawer.includes('setPage(1)') &&
+    metricDrawer.includes('/api/board/metric-detail')
+  ) {
+    warn(
+      'BoardMetricDrawer 当前存在 reset effect + fetch effect，打开 Drawer 可能发起 2 次 metric-detail 请求，后续单独修',
+    )
+  } else {
+    ok('BoardMetricDrawer 未发现 reset+fetch 双 effect 模式')
+  }
+
   console.log('\n=== 请求职责边界（静态） ===')
   const buyerRanking = read('server/src/services/buyer-ranking-cache.service.ts')
   const scheduler = read('server/src/services/scheduler.service.ts')
@@ -252,6 +344,10 @@ function main(): void {
   }
 
   console.log('\n=== 结果 ===')
+  if (warnings.length > 0) {
+    console.log(`WARN (${warnings.length})`)
+    for (const w of warnings) console.log(` - ${w}`)
+  }
   if (issues.length > 0) {
     console.log(`FAIL (${issues.length})`)
     for (const i of issues) console.log(` - ${i}`)

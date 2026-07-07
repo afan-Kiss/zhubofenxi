@@ -154,15 +154,25 @@ function buildViews(
       workbench,
       { buyerStrict: true },
     )
-    const returnAmountCent =
-      classification.productRefundAmountCent + classification.freightRefundAmountCent
+    const returnAmountCent = classification.isFreightRefundOnly
+      ? classification.freightRefundAmountCent
+      : classification.productRefundAmountCent + classification.freightRefundAmountCent
+    // returnAmountCent = 售后总金额展示字段，可能含运费，不得用于核心退款/有效成交口径
+    // productRefundAmountCent = 商品退款金额（分），不含纯运费补偿
 
     const afterSaleRecords = accountCacheKey
       ? rawAfterSalesByOrderNo?.get(accountCacheKey) ?? []
       : []
     let boardRefundCent = boardRefundResolved.productRefundAmountCent
-    if (afterSaleAgg && afterSaleAgg.refundAmountCent > 0) {
+    if (
+      !classification.isFreightRefundOnly &&
+      afterSaleAgg &&
+      afterSaleAgg.refundAmountCent > 0
+    ) {
       boardRefundCent = afterSaleAgg.refundAmountCent
+    }
+    if (classification.isFreightRefundOnly) {
+      boardRefundCent = 0
     }
     const strictFields = computeStrictOrderViewFields({
       order: o,
@@ -233,7 +243,9 @@ function buildViews(
       finalAfterSaleReason: strictFields.finalAfterSaleReason || undefined,
       finalAfterSaleStatus: strictFields.finalAfterSaleStatus || undefined,
       returnAmountCent,
-      productRefundAmountCent: strictFields.successfulRefundAmountCent || boardRefundCent,
+      productRefundAmountCent: classification.isFreightRefundOnly
+        ? 0
+        : strictFields.successfulRefundAmountCent || boardRefundCent,
       buyerProductRefundAmountCent: buyerRefundResolved.productRefundAmountCent,
       buyerProductRefundSource: buyerRefundResolved.refundAmountSource,
       buyerProductRefundAmountWarning: buyerRefundResolved.refundAmountWarning,
@@ -242,7 +254,9 @@ function buildViews(
         buyerRefundResolved.afterSalesWorkbenchRefundAmountCent,
       refundIncludesFreight: buyerRefundResolved.refundIncludesFreight,
       freightRefundAmountCent: classification.freightRefundAmountCent,
-      realAfterSaleAmountCent: classification.realAfterSaleAmountCent,
+      realAfterSaleAmountCent: classification.isFreightRefundOnly
+        ? 0
+        : classification.realAfterSaleAmountCent,
       isFreightRefundOnly: classification.isFreightRefundOnly,
       afterSaleClosedNoRefund: classification.afterSaleClosedNoRefund,
       isReturnRefund: classification.isReturnRefund,

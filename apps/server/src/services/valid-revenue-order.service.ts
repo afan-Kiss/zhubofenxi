@@ -86,8 +86,9 @@ function resolveRefundStatusText(view: AnalyzedOrderView): string {
   )
 }
 
-/** 订单退款金额（商品退款 / 退货退款 / 实际售后金额取最大） */
+/** 订单退款金额（商品退款 / 退货退款 / 实际售后金额取最大；纯运费补偿返回 0） */
 export function resolveValidRevenueRefundAmountCent(view: AnalyzedOrderView): number {
+  if (view.isFreightRefundOnly) return 0
   return Math.max(
     view.productRefundAmountCent ?? 0,
     view.returnAmountCent ?? 0,
@@ -206,6 +207,10 @@ export function explainValidRevenueOrder(view: AnalyzedOrderView): ValidRevenueE
 
   if (!hasValidRevenueOrderStatus(view)) {
     return { valid: false, reason: '订单状态不是已完成/已签收' }
+  }
+
+  if (view.isFreightRefundOnly) {
+    return { valid: true, reason: '仅退运费，仍计入有效成交' }
   }
 
   const refundCent = resolveValidRevenueRefundAmountCent(view)

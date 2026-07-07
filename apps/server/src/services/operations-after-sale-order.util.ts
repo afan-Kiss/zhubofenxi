@@ -4,7 +4,7 @@ import {
   isOperationalAfterSaleText,
 } from './after-sale-status-signal.service'
 import { normalizeAfterSalesReason } from './after-sales-reason-normalize.service'
-import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo, calcRefundRate } from './calc-refund-rate.service'
+import { resolveMetricOrderNo, calcRefundRate } from './calc-refund-rate.service'
 import { viewCountsAsPaidOrder } from './business-metrics.service'
 import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
 
@@ -14,14 +14,13 @@ export interface OperationsRefundMetrics {
   rate: number | null
 }
 
-/** 运营报表：选定范围内退款单数 / 支付单数（与经营看板退款率口径一致） */
+/** 运营报表：选定范围内退款单数 / 支付单数（与经营看板 buildOrderMetricSets 口径一致） */
 export function computeOperationsRefundMetricsFromViews(
   views: AnalyzedOrderView[],
 ): OperationsRefundMetrics {
-  const deduped = dedupeViewsByMetricOrderNo(views)
   const paidOrderNos: string[] = []
   const refundOrderNos: string[] = []
-  for (const v of deduped) {
+  for (const v of views) {
     const no = resolveMetricOrderNo(v)
     if (!no) continue
     if (viewCountsAsPaidOrder(v)) paidOrderNos.push(no)

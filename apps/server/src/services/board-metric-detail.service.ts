@@ -3,7 +3,7 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { mapViewToBoardDrillRow, type BoardDrillOrderRow } from './order-row-mapper.service'
 import { normalizeBoardPreset } from './board-metrics.service'
 import { formatCount, formatRate, formatYuan } from '../utils/money'
-import { dedupeViewsByMetricOrderNo, dedupeRefundMetricViewsByOrderNoMaxRefund, dedupeCoreMetricViewsByOrderNoBestValue } from './calc-refund-rate.service'
+import { dedupeViewsByMetricOrderNo, dedupeRefundMetricViewsByOrderNoMaxRefund, dedupeCoreMetricViewsByOrderNoBestValue, dedupeFreightRefundViewsByOrderNoMaxFreight } from './calc-refund-rate.service'
 import {
   calculateBusinessMetrics,
   pickMetricValue,
@@ -179,6 +179,7 @@ const METRICS_ORDER_DEDUPE: BoardMetricKey[] = [
   'returnRate',
   'qualityReturnCount',
   'qualityReturnRate',
+  'freightRefundAmount',
 ]
 
 function usesCoreMetricBestValueDedupe(metric: BoardMetricKey): boolean {
@@ -332,6 +333,8 @@ export async function buildBoardMetricDetail(params: {
       params.metric === 'returnRate'
     ) {
       sourceViews = dedupeRefundMetricViewsByOrderNoMaxRefund(sourceViews)
+    } else if (params.metric === 'freightRefundAmount') {
+      sourceViews = dedupeFreightRefundViewsByOrderNoMaxFreight(sourceViews)
     } else if (usesCoreMetricBestValueDedupe(params.metric)) {
       sourceViews = dedupeCoreMetricViewsByOrderNoBestValue(sourceViews)
     } else {
@@ -401,6 +404,9 @@ export async function buildBoardMetricDetail(params: {
       params.metric === 'returnRate'
     ) {
       return totals.refundOrderCount
+    }
+    if (params.metric === 'freightRefundAmount') {
+      return sourceViews.length
     }
     if (needsMetricOrderDedupe(params.metric)) return sourceViews.length
     return sourceViews.length

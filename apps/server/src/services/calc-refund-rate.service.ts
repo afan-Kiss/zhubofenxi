@@ -120,6 +120,36 @@ export function dedupeRefundMetricViewsByOrderNoMaxRefund(
   return out
 }
 
+/** 运费补偿抽屉：按 P 单保留 freightRefundAmountCent 最大的 view */
+export function dedupeFreightRefundViewsByOrderNoMaxFreight(
+  views: AnalyzedOrderView[],
+): AnalyzedOrderView[] {
+  const bestByOrderNo = new Map<string, AnalyzedOrderView>()
+  for (const v of views) {
+    const no = resolveMetricOrderNo(v)
+    if (!no) continue
+    const prev = bestByOrderNo.get(no)
+    const cent = v.freightRefundAmountCent ?? 0
+    const prevCent = prev?.freightRefundAmountCent ?? 0
+    if (!prev || cent > prevCent) {
+      bestByOrderNo.set(no, v)
+    }
+  }
+  const seen = new Set<string>()
+  const out: AnalyzedOrderView[] = []
+  for (const v of views) {
+    const no = resolveMetricOrderNo(v)
+    if (!no) {
+      out.push(v)
+      continue
+    }
+    if (seen.has(no)) continue
+    seen.add(no)
+    out.push(bestByOrderNo.get(no)!)
+  }
+  return out
+}
+
 function toOrderNoSet(nos: Iterable<string>): Set<string> {
   const set = new Set<string>()
   for (const raw of nos) {

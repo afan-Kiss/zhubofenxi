@@ -26,7 +26,7 @@ import {
   isOperationalAfterSaleText,
   viewHasAfterSaleStatusSignal,
 } from '../src/services/after-sale-status-signal.service'
-import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
+import { isActualAfterSaleOrder, computeOperationsRefundMetricsFromViews } from '../src/services/operations-after-sale-order.util'
 import {
   resolveViewRefundAmountCent,
   viewCountsAsRefundOrder,
@@ -37,10 +37,19 @@ import {
 } from '../src/services/business-metrics.service'
 import { isEffectiveSignedView } from '../src/services/strict-after-sale-metrics.service'
 import { buildOrderMetricSets } from '../src/services/order-metric-sets.service'
-import { resolveMetricOrderNo } from '../src/services/calc-refund-rate.service'
-import { explainValidRevenueOrder, sumValidRevenueFromViews } from '../src/services/valid-revenue-order.service'
+import {
+  resolveMetricOrderNo,
+  dedupeFreightRefundViewsByOrderNoMaxFreight,
+  dedupeCoreMetricViewsByOrderNoBestValue,
+} from '../src/services/calc-refund-rate.service'
+import {
+  explainValidRevenueOrder,
+  isValidRevenueOrder,
+  resolveValidRevenueRefundAmountCent,
+  sumValidRevenueFromViews,
+} from '../src/services/valid-revenue-order.service'
+import { viewCountsAsQualityRefund } from '../src/services/quality-refund-resolution.service'
 import { buildAnchorMetricDetail } from '../src/services/anchor-metric-detail.service'
-import { dedupeCoreMetricViewsByOrderNoBestValue } from '../src/services/calc-refund-rate.service'
 import { filterViewsForCoreMetrics } from '../src/services/metrics-exclusion.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
@@ -1009,6 +1018,41 @@ function checkAfterSaleAndHealthTailStatic(): void {
     fail('resolveViewRefundAmountCent 未排除 isFreightRefundOnly')
   }
 
+  if (validRevenue.includes('if (view.isFreightRefundOnly) return 0')) {
+    ok('resolveValidRevenueRefundAmountCent 排除 isFreightRefundOnly')
+  } else {
+    fail('resolveValidRevenueRefundAmountCent 未排除 isFreightRefundOnly')
+  }
+  if (validRevenue.includes('仅退运费，仍计入有效成交')) {
+    ok('explainValidRevenueOrder 纯运费仍计入有效成交')
+  } else {
+    fail('explainValidRevenueOrder 未处理纯运费有效成交')
+  }
+
+  const dedupeBlockFreight = metricDetail.slice(
+    metricDetail.indexOf('METRICS_ORDER_DEDUPE'),
+    metricDetail.indexOf('METRICS_ORDER_DEDUPE') + 500,
+  )
+  if (dedupeBlockFreight.includes("'freightRefundAmount'")) {
+    ok('METRICS_ORDER_DEDUPE 含 freightRefundAmount')
+  } else {
+    fail('METRICS_ORDER_DEDUPE 未含 freightRefundAmount')
+  }
+  if (metricDetail.includes('dedupeFreightRefundViewsByOrderNoMaxFreight')) {
+    ok('board-metric-detail 使用 dedupeFreightRefundViewsByOrderNoMaxFreight')
+  } else {
+    fail('board-metric-detail 未使用 dedupeFreightRefundViewsByOrderNoMaxFreight')
+  }
+
+  if (
+    !operationsAfterSale.includes('dedupeViewsByMetricOrderNo(views)') &&
+    operationsAfterSale.includes('viewCountsAsRefundOrder(v)')
+  ) {
+    ok('运营退款单数遍历全部 views 后 P 单去重')
+  } else {
+    fail('运营退款单数仍先 dedupeViewsByMetricOrderNo 首条保留')
+  }
+
   if (
     rollingStore.includes('afterSaleSignalRecordCount') &&
     rollingService.includes('afterSaleRelatedOrderCount')
@@ -1250,6 +1294,7 @@ function mockFreightOnlyView(): AnalyzedOrderView {
   return {
     packageId: 'PKG-FREIGHT-VERIFY',
     includedInGmv: true,
+    effectiveGmvCent: 50000,
     paymentBaseCent: 50000,
     isFreightRefundOnly: true,
     freightRefundAmountCent: 1800,
@@ -1313,6 +1358,121 @@ function checkFreightRefundOnlyRuntime(): void {
   else fail('真实售后 viewCountsAsRefundOrder 未识别')
   if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
   else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
+
+  if (resolveValidRevenueRefundAmountCent(freightView) === 0) {
+    ok('纯运费 resolveValidRevenueRefundAmountCent=0')
+  } else {
+    fail(`纯运费 resolveValidRevenueRefundAmountCent=${resolveValidRevenueRefundAmountCent(freightView)}`)
+  }
+  if (isValidRevenueOrder(freightView)) ok('纯运费 isValidRevenueOrder=true')
+  else fail(`纯运费 isValidRevenueOrder=false: ${explainValidRevenueOrder(freightView).reason}`)
+  const freightValidExplain = explainValidRevenueOrder(freightView)
+  if (freightValidExplain.reason.includes('仅退运费')) {
+    ok('纯运费有效成交 reason 含「仅退运费」')
+  } else {
+    fail(`纯运费有效成交 reason=${freightValidExplain.reason}`)
+  }
+  const realValidView = {
+    ...realView,
+    orderStatusText: '已完成',
+    effectiveGmvCent: 50000,
+    returnAmountCent: 1800,
+  } as AnalyzedOrderView
+  if (resolveValidRevenueRefundAmountCent(realValidView) === 1800) {
+    ok('真实商品退款 resolveValidRevenueRefundAmountCent=1800')
+  } else {
+    fail('真实商品退款 resolveValidRevenueRefundAmountCent 非 1800')
+  }
+  if (!isValidRevenueOrder(realValidView)) ok('真实商品退款 isValidRevenueOrder=false')
+  else fail('真实商品退款 isValidRevenueOrder 误判为 true')
+
+  const validRevenue = sumValidRevenueFromViews([freightView])
+  if (validRevenue.validAmountYuan === 500) ok('纯运费计入有效成交金额 500')
+  else fail(`纯运费有效成交金额=${validRevenue.validAmountYuan}`)
+}
+
+function checkOperationsRefundDedupeRuntime(): void {
+  console.log('\n=== 0h. 运营退款单数与看板去重一致 ===')
+  const orderNo = 'P-OPS-REFUND-DEDUPE-VERIFY'
+  const viewFirst = {
+    packageId: orderNo,
+    includedInGmv: true,
+    productRefundAmountCent: 0,
+    orderStatusText: '已完成',
+  } as AnalyzedOrderView
+  const viewSecond = {
+    packageId: orderNo,
+    includedInGmv: true,
+    productRefundAmountCent: 1800,
+    afterSaleStatusText: '退款成功',
+    orderStatusText: '已完成',
+  } as AnalyzedOrderView
+  const ops = computeOperationsRefundMetricsFromViews([viewFirst, viewSecond])
+  const board = buildOrderMetricSets([viewFirst, viewSecond])
+  if (ops.refundOrderCount === 1) ok('运营退款单数=1（首条无退款+后续有退款）')
+  else fail(`运营退款单数=${ops.refundOrderCount}，期望 1`)
+  if (board.refundOrderCount === ops.refundOrderCount) {
+    ok(`运营退款单数=${ops.refundOrderCount} 与看板 ${board.refundOrderCount} 一致`)
+  } else {
+    fail(`运营退款单数 ${ops.refundOrderCount} !== 看板 ${board.refundOrderCount}`)
+  }
+}
+
+function checkFreightDrawerDedupeRuntime(): void {
+  console.log('\n=== 0i. 运费补偿抽屉 P 单去重 ===')
+  const orderNo = 'P-FREIGHT-DRAWER-DEDUPE'
+  const low = {
+    packageId: orderNo,
+    isFreightRefundOnly: true,
+    freightRefundAmountCent: 1800,
+    includedInGmv: true,
+  } as AnalyzedOrderView
+  const high = {
+    packageId: orderNo,
+    isFreightRefundOnly: true,
+    freightRefundAmountCent: 3600,
+    includedInGmv: true,
+  } as AnalyzedOrderView
+  const deduped = dedupeFreightRefundViewsByOrderNoMaxFreight([low, high])
+  if (deduped.length === 1) ok('同一 P 单运费视图去重后 1 条')
+  else fail(`去重后 ${deduped.length} 条，期望 1`)
+  if (deduped[0]?.freightRefundAmountCent === 3600) ok('保留 freightRefundAmountCent 较大者')
+  else fail(`保留 freight=${deduped[0]?.freightRefundAmountCent}，期望 3600`)
+  const metrics = calculateBusinessMetrics(deduped)
+  const rowsSumCent = deduped.reduce((s, v) => s + (v.freightRefundAmountCent ?? 0), 0)
+  if (Math.abs(metrics.freightRefundAmount - rowsSumCent / 100) < 0.02) {
+    ok('去重后 rows 运费合计 === 卡片 freightRefundAmount')
+  } else {
+    fail(`rows合计=${rowsSumCent / 100} 卡片=${metrics.freightRefundAmount}`)
+  }
+}
+
+async function checkFreightQualityOverlapScan(): Promise<void> {
+  console.log('\n=== 生产数据：纯运费 + 品退命中扫描 ===')
+  const scanStart = process.env.FREIGHT_SCAN_START?.trim() || '2023-01-01'
+  const scanEnd =
+    process.env.FREIGHT_SCAN_END?.trim() || formatDateKeyShanghai(new Date())
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: scanStart,
+    endDate: scanEnd,
+  })
+  await bootstrapQualityBadCaseCache()
+  const overlap = scoped.views.filter(
+    (v) => v.isFreightRefundOnly && (v.isQualityReturn || viewCountsAsQualityRefund(v)),
+  )
+  console.log(`  isFreightRefundOnly + 品退命中: ${overlap.length} 笔`)
+  if (overlap.length === 0) {
+    ok('未发现纯运费与品退同时命中样本')
+    return
+  }
+  console.log('  ⚠ 以下样本需人工复核（warning，不 fail）：')
+  for (const v of overlap.slice(0, 10)) {
+    const no = resolveMetricOrderNo(v) || v.packageId
+    console.log(
+      `    ${no} | 店铺=${v.liveAccountName ?? '-'} | afterSale=${v.afterSaleStatusText} | reason=${v.reasonText} | official=${v.officialReasonText ?? '-'} | qualitySource=${v.qualitySource ?? '-'} | freight=${v.freightRefundAmountCent} | product=${v.productRefundAmountCent} | isFreightRefundOnly=${v.isFreightRefundOnly}`,
+    )
+  }
 }
 
 async function checkFreightRefundDbScan(): Promise<void> {
@@ -1419,11 +1579,14 @@ async function main(): Promise<void> {
   checkOperationalAfterSaleRuntime()
   checkRefundOrderVsAfterSaleSignalRuntime()
   checkFreightRefundOnlyRuntime()
+  checkOperationsRefundDedupeRuntime()
+  checkFreightDrawerDedupeRuntime()
   checkOperationsAfterSaleRuntime()
   checkValidRevenueNoAfterSaleRuntime()
 
   await bootstrapQualityBadCaseCache()
   await checkFreightRefundDbScan()
+  await checkFreightQualityOverlapScan()
   await checkOverviewSignedDrawers()
   checkAnchorDrillStatic()
   checkMetricDetailUnsignedStatic()

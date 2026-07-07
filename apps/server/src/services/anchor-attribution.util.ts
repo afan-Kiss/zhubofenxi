@@ -112,6 +112,18 @@ export function anchorGroupKey(v: AnalyzedOrderView): string {
   return `name:${name}`
 }
 
+/** 将主播名标准化为配置中的标准名（仅用于精确匹配，禁止 includes） */
+function normalizeAnchorNameForMatch(name: string | undefined | null): string {
+  const trimmed = String(name ?? '').trim()
+  if (!trimmed || trimmed === '未归属') return '未归属'
+  if (isShopOrInvalidAnchorLabel(trimmed)) return trimmed
+  const mapped = mapLiveNickToKnownAnchor(trimmed)
+  if (mapped) return mapped
+  const config = getAnchorConfigSync()
+  const found = findAnchorByName(config, trimmed)
+  return found?.name ?? trimmed
+}
+
 /** 筛选属于某主播（或「未归属」）的订单视图 */
 export function viewBelongsToAnchor(
   v: AnalyzedOrderView,
@@ -126,22 +138,26 @@ export function viewBelongsToAnchor(
     anchorId === '未归属' ||
     (!anchorId && anchorName === '未归属')
 
+  const viewName = normalizeAnchorNameForMatch(v.anchorName)
+  const viewId = v.anchorId?.trim() ?? ''
+
   if (isUnassignedQuery) {
-    const n = v.anchorName?.trim() || '未归属'
-    return n === '未归属' || !v.anchorId?.trim()
+    return viewName === '未归属' || !viewId
   }
 
   const config = getAnchorConfigSync()
-  const anchor = anchorId
-    ? config.anchors.find((a) => a.id === anchorId)
-    : config.anchors.find((a) => a.name === anchorName)
-  const name = anchor?.name ?? anchorName
-  const id = anchor?.id ?? anchorId
 
-  if (id && v.anchorId === id) return true
-  if (name && v.anchorName === name) return true
-  if (name && v.anchorName?.includes(name)) return true
-  return false
+  if (anchorId) {
+    const byId = config.anchors.find((a) => a.id === anchorId)
+    if (viewId && viewId === anchorId) return true
+    if (byId && viewName === byId.name) return true
+    if (!byId && anchorName && viewName === normalizeAnchorNameForMatch(anchorName)) return true
+    return false
+  }
+
+  const queryName = normalizeAnchorNameForMatch(anchorName)
+  if (queryName === '未归属') return viewName === '未归属'
+  return viewName === queryName
 }
 
 export function anchorLeaderboardRowMatches(

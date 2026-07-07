@@ -480,14 +480,7 @@ export async function buildAnchorQualityRefundDrill(params: {
   })
 
   const coreViews = filterViewsForCoreMetrics(scoped.views)
-  const performanceViews = filterViewsForAnchorPerformance(
-    attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
-  )
-
-  const { ensureManualAnchorOverrideCache } = await import(
-    './order-anchor-manual-override.service'
-  )
-  await ensureManualAnchorOverrideCache()
+  const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
 
   const range = resolveDateRange(
     (params.preset ?? 'custom') as DateRangePreset,

@@ -438,7 +438,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
             <p className="mt-0.5 text-[10px] text-slate-400">
               {includeZeroPerformance
                 ? '单日展示全部固定主播，无成交显示平线；可手动隐藏不想看的主播'
-                : '默认展示有成交的主播，可手动隐藏不想看的主播'}
+                : '默认展示全部有走势的主播，可手动隐藏不想看的主播'}
             </p>
           ) : null}
         </div>

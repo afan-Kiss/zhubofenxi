@@ -19,6 +19,7 @@ import {
   fetchMetricDetailBundle,
 } from './lib/metric-detail-attribution-verify.util'
 import { buildAnchorDrill } from '../src/services/board-drill.service'
+import { buildAndSetBusinessBoardCache } from '../src/services/business-cache.service'
 import { executeBoardLocalQuery } from '../src/services/board-local-query.service'
 
 config({ path: path.resolve(__dirname, '../.env') })
@@ -117,11 +118,72 @@ async function main(): Promise<void> {
 
   const allFails = [...fails, ...focusPoolFails]
 
+  const localAll = await executeBoardLocalQuery({
+    preset: 'custom',
+    startDate,
+    endDate,
+    role: 'super_admin',
+    username: 'verify-script',
+  })
+
+  console.log('\n=== 5. 经营缓存 anchorLeaderboard vs 在线重算 ===')
+  const cacheFails: string[] = []
+  const localRows = (localAll.anchorLeaderboard ?? []) as Array<Record<string, unknown>>
+  const hasPaidOrders = localRows.some(
+    (r) => Number(r.orderCount ?? r.paidOrderCount ?? 0) > 0,
+  )
+  if (!hasPaidOrders) {
+    console.log('⚠ 跳过：验收范围内无支付订单，请在生产环境复验缓存一致性')
+  } else {
+    await buildAndSetBusinessBoardCache({
+      preset: 'custom',
+      startDate,
+      endDate,
+    })
+    const cached = await buildAndSetBusinessBoardCache({
+      preset: 'custom',
+      startDate,
+      endDate,
+    })
+    for (const localRow of localRows) {
+      const name = String(localRow.anchorName ?? '')
+      const cacheRow = (cached.anchorLeaderboard ?? []).find((r) => String(r.anchorName) === name)
+      if (!cacheRow) {
+        if (Number(localRow.orderCount ?? localRow.paidOrderCount ?? 0) > 0) {
+          cacheFails.push(`缓存缺少主播行 ${name}`)
+        }
+        continue
+      }
+      const localGmv = Number(localRow.gmv ?? localRow.totalGmv ?? 0)
+      const cacheGmv = Number(cacheRow.gmv ?? cacheRow.totalGmv ?? 0)
+      const localCnt = Number(localRow.orderCount ?? localRow.paidOrderCount ?? 0)
+      const cacheCnt = Number(cacheRow.orderCount ?? cacheRow.paidOrderCount ?? 0)
+      const localQr = Number(localRow.qualityReturnCount ?? 0)
+      const cacheQr = Number(cacheRow.qualityReturnCount ?? 0)
+      if (Math.abs(localGmv - cacheGmv) > 0.01) {
+        cacheFails.push(`${name} gmv 缓存=${cacheGmv} 在线=${localGmv}`)
+      }
+      if (localCnt !== cacheCnt) {
+        cacheFails.push(`${name} orderCount 缓存=${cacheCnt} 在线=${localCnt}`)
+      }
+      if (localQr !== cacheQr) {
+        cacheFails.push(`${name} qualityReturnCount 缓存=${cacheQr} 在线=${localQr}`)
+      }
+    }
+    if (cacheFails.length === 0) {
+      console.log('✓ PASS: 缓存 anchorLeaderboard 与在线重算一致')
+    } else {
+      for (const f of cacheFails) console.log(`✗ FAIL: ${f}`)
+    }
+  }
+
+  const finalFails = [...allFails, ...cacheFails]
+
   console.log('\n=== 验收 ===')
-  if (allFails.length > 0) {
-    console.log(`✗ FAIL: ${allFails.length} 项`)
-    for (const f of allFails.slice(0, 40)) console.log(`  - ${f}`)
-    if (allFails.length > 40) console.log(`  ... 另有 ${allFails.length - 40} 项`)
+  if (finalFails.length > 0) {
+    console.log(`✗ FAIL: ${finalFails.length} 项`)
+    for (const f of finalFails.slice(0, 40)) console.log(`  - ${f}`)
+    if (finalFails.length > 40) console.log(`  ... 另有 ${finalFails.length - 40} 项`)
     process.exit(1)
   }
   console.log('✓ PASS: remap 入口一致，无 remap 前主播过滤风险')

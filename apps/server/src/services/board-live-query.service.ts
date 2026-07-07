@@ -33,7 +33,8 @@ import {
   ensureOfficialQualityBadCaseFreshForPageView,
 } from './quality-badcase-auto-sync.service'
 import type { QualityFeedbackPublicStatus } from './quality-badcase-auto-sync.service'
-import { attachRawByMatchToViews, filterViewsForAnchorPerformance } from './low-price-brush-order.service'
+import { buildAnchorPerformanceViewsFromScopedViews } from './anchor-performance-views.service'
+import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
@@ -174,6 +175,10 @@ function mapOrderRow(
   ) as unknown as Record<string, unknown>
 }
 
+/**
+ * 实时拉单查询（live_api）。主播业绩主页面已走 /api/board/local-data；
+ * 本路径仍用于经营总览补数、系统 acceptance、导出对账等，主播 leaderboard 须与 remap 口径一致。
+ */
 export async function executeBoardLiveQuery(
   params: BoardLiveQueryParams,
   existingRequestId?: string,
@@ -224,18 +229,29 @@ export async function executeBoardLiveQuery(
 
     const viewsWithRaw = attachRawByMatchToViews(allViews, rawByMatch)
     const coreViews = filterViewsForCoreMetrics(viewsWithRaw)
-    const performanceViews = filterViewsForAnchorPerformance(viewsWithRaw)
+    const performanceViews = await buildAnchorPerformanceViewsFromScopedViews(allViews, rawByMatch)
     const scopedCoreViews = filterViewsByAnchor(coreViews, params.anchorId, params.anchorName)
-    const scopedPerformanceViews = filterViewsByAnchor(performanceViews, params.anchorId, params.anchorName)
+    const scopedPerformanceViews = filterViewsByAnchor(
+      performanceViews,
+      params.anchorId,
+      params.anchorName,
+    )
     const debugCtx = {
       scope: 'live-query',
       dateRange: { startDate, endDate, preset: params.preset },
     }
     logBoardMetricsDebug(scopedCoreViews, { ...debugCtx, fetchMeta: bundle.fetchMeta })
     const summary = buildSummaryFromViews(scopedCoreViews)
+    const anchorPerformanceSummary = buildSummaryFromViews(
+      params.anchorId || params.anchorName ? scopedPerformanceViews : performanceViews,
+    )
     const anchorLeaderboardRaw = aggregateAnchorLeaderboard(
       params.anchorId || params.anchorName ? scopedPerformanceViews : performanceViews,
       debugCtx,
+      {
+        liveSessions: bundle?.liveSessions ?? [],
+        qualityRefundViews: params.anchorId || params.anchorName ? scopedCoreViews : coreViews,
+      },
     )
     const anchorLeaderboardWithLate = await enrichAnchorLeaderboardWithLateStatus(
       anchorLeaderboardRaw as unknown as Array<Record<string, unknown>>,
@@ -296,6 +312,7 @@ export async function executeBoardLiveQuery(
         message: '数据刷新完成',
       },
       summary,
+      anchorPerformanceSummary,
       anchorLeaderboard: anchorLeaderboard as unknown as Array<Record<string, unknown>>,
       orders,
       allOrders: orderRows,

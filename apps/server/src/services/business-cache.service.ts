@@ -10,10 +10,7 @@ import {
   normalizeBoardPreset,
 } from './board-metrics.service'
 import { buildBlacklistedBuyerIds, calculateBusinessMetrics } from './business-metrics.service'
-import {
-  attachRawByMatchToViews,
-  filterViewsForAnchorPerformance,
-} from './low-price-brush-order.service'
+import { buildAnchorPerformanceViewsFromScopedViews } from './anchor-performance-views.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { prisma } from '../lib/prisma'
 import { getLatestWorkbenchCacheUpdatedAt } from './xhs-after-sales-workbench.service'
@@ -194,9 +191,7 @@ export async function buildAndSetBusinessBoardCache(params: {
     )
 
     const coreViews = filterViewsForCoreMetrics(views)
-    const performanceViews = filterViewsForAnchorPerformance(
-      attachRawByMatchToViews(coreViews, rawByMatch),
-    )
+    const performanceViews = await buildAnchorPerformanceViewsFromScopedViews(views, rawByMatch)
 
     const summary = buildSummaryFromViews(coreViews)
     const abnormalOrderCount = artifacts?.abnormalOrderCount ?? 0
@@ -207,6 +202,7 @@ export async function buildAndSetBusinessBoardCache(params: {
 
     const anchorLeaderboard = aggregateAnchorLeaderboard(performanceViews, undefined, {
       liveSessions,
+      qualityRefundViews: coreViews,
     })
     if (
       Number(summary.qualityReturnCount ?? 0) > 0 &&

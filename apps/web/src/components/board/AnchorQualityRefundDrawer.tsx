@@ -136,7 +136,7 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
             </p>
             <p className="mt-2 leading-relaxed">
               {data.attributionNote ??
-                '品退按订单下单时间匹配主播开播场次归属，不按售后发生时间。官方品退命中后仍计入品退；售后单仅补充展示最终处理情况。'}
+                '品退按下单时所在直播场次归属，方便追当场讲品和售后问题；与支付归属可能不同。官方品退命中后仍计入品退；售后单仅补充展示最终处理情况。'}
             </p>
           </div>
           {data.rows.length === 0 ? (

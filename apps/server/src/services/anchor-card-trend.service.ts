@@ -17,6 +17,7 @@ import {
 } from '../utils/business-timezone'
 import { eachDayInShanghaiRange } from '../utils/each-day-shanghai'
 import { centToYuan } from '../utils/money'
+import { dedupeCoreMetricViewsByOrderNoBestValue } from './calc-refund-rate.service'
 
 export type AnchorTrendMode = 'intraday' | 'daily'
 
@@ -227,7 +228,8 @@ function expandRangeToCoverOrders(
   let startMs = range.startMs
   let endMs = range.endMs
 
-  for (const v of anchorViews) {
+  const dedupedViews = dedupeTrendViews(anchorViews)
+  for (const v of dedupedViews) {
     const payMs = parseOrderPaymentMs(v.orderTimeText)
     if (payMs == null || payMs < dayStart || payMs > dayEnd) continue
     if (payMs < startMs) startMs = payMs
@@ -235,6 +237,10 @@ function expandRangeToCoverOrders(
   }
 
   return { startMs, endMs }
+}
+
+function dedupeTrendViews(views: AnalyzedOrderView[]): AnalyzedOrderView[] {
+  return dedupeCoreMetricViewsByOrderNoBestValue(views)
 }
 
 function buildIntradayTrend(
@@ -255,7 +261,8 @@ function buildIntradayTrend(
     bucketMap.set(t, { cent: 0, orders: 0 })
   }
 
-  for (const v of anchorViews) {
+  const dedupedViews = dedupeTrendViews(anchorViews)
+  for (const v of dedupedViews) {
     const payMs = parseOrderPaymentMs(v.orderTimeText)
     if (payMs == null) continue
     const bucket = floorToBucketMs(payMs, INTRADAY_BUCKET_MINUTES)
@@ -352,7 +359,8 @@ function buildDailyTrendFromViews(
   const byDate = new Map<string, { cent: number; orders: number }>()
   for (const day of days) byDate.set(day, { cent: 0, orders: 0 })
 
-  for (const v of anchorViews) {
+  const dedupedViews = dedupeTrendViews(anchorViews)
+  for (const v of dedupedViews) {
     const payMs = parseOrderPaymentMs(v.orderTimeText)
     if (payMs == null) continue
     const dayKey = formatDateKeyShanghai(new Date(payMs))

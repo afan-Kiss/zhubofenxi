@@ -439,6 +439,7 @@ export async function executeBoardLocalQuery(params: {
   const anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
 
   const cacheLiveSessions = boardCache.liveSessions ?? []
+  const coreViewsForQuality = filterViewsForCoreMetrics(scopedAllViews)
   const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
     aggregateAnchorLeaderboard(
       performanceViews,
@@ -446,7 +447,7 @@ export async function executeBoardLocalQuery(params: {
         scope: 'local-query-anchor-performance',
         dateRange: { startDate, endDate, preset: params.preset },
       },
-      { liveSessions: cacheLiveSessions },
+      { liveSessions: cacheLiveSessions, qualityRefundViews: coreViewsForQuality },
     ) as import('./board-metrics.service').BoardAnchorMetrics[],
     endDate,
   ) as unknown as Array<Record<string, unknown>>

@@ -143,10 +143,16 @@ function applyQualityRefundAnchorCountsToLeaderboard(
 export function aggregateAnchorLeaderboard(
   views: AnalyzedOrderView[],
   debugCtx?: import('./board-metrics-debug.service').BoardMetricsDebugContext,
-  options?: { liveSessions?: LiveSession[]; config?: AnchorConfig },
+  options?: {
+    liveSessions?: LiveSession[]
+    config?: AnchorConfig
+    /** 品退按下单场次归属，默认与 views 相同；主播业绩应传 coreViews */
+    qualityRefundViews?: AnalyzedOrderView[]
+  },
 ): BoardAnchorMetrics[] {
   const config = options?.config ?? getAnchorConfigSync()
   const liveSessions = options?.liveSessions ?? getLiveSessionsForQualityRefundAttribution()
+  const qualityRefundViews = options?.qualityRefundViews ?? views
   const byKey = new Map<string, AnalyzedOrderView[]>()
 
   for (const v of views) {
@@ -187,7 +193,7 @@ export function aggregateAnchorLeaderboard(
       }
     })
 
-  applyQualityRefundAnchorCountsToLeaderboard(rows, views, liveSessions, config)
+  applyQualityRefundAnchorCountsToLeaderboard(rows, qualityRefundViews, liveSessions, config)
 
   return rows.sort((a, b) => {
     const orderA = config.anchors.findIndex((x) => x.name === a.anchorName)

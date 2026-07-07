@@ -2,15 +2,9 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import type { DateRangeResolved } from '../utils/date-range'
 import type { UserRole } from '../types/roles'
 import { viewBelongsToAnchor } from './anchor-attribution.util'
+import { buildAnchorPerformanceViewsFromScopedViews } from './anchor-performance-views.service'
 import { getOrBuildBusinessBoardCache } from './business-cache.service'
-import {
-  attachRawByMatchToViews,
-  filterViewsForAnchorPerformance,
-} from './low-price-brush-order.service'
-import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
-import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { filterViewsForStaffScope } from './staff-anchor-scope.service'
-import { ensureManualAnchorOverrideCache } from './order-anchor-manual-override.service'
 import { isRealtimeBoardPreset } from '../utils/board-realtime-refresh.util'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 
@@ -95,14 +89,10 @@ export async function getAnchorPerformanceViews(
   anchorId?: string,
   anchorName?: string,
 ): Promise<AnalyzedOrderView[]> {
-  const normalized = normalizeAnchorDrillQuery({ anchorId, anchorName })
-  await ensureManualAnchorOverrideCache()
-  const withRaw = attachRawByMatchToViews(scopedViews, rawByMatch)
-  const remapped = await remapViewsWithScheduleOverlay(withRaw)
-  const base =
-    normalized.anchorId || normalized.anchorName
-      ? filterViewsByAnchorSpec(remapped, normalized.anchorId, normalized.anchorName)
-      : remapped
-  const coreBase = filterViewsForCoreMetrics(base)
-  return filterViewsForAnchorPerformance(coreBase)
+  return buildAnchorPerformanceViewsFromScopedViews(
+    scopedViews,
+    rawByMatch,
+    anchorId,
+    anchorName,
+  )
 }

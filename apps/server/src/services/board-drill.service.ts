@@ -495,6 +495,22 @@ export async function buildAnchorQualityRefundDrill(params: {
     qualityAttributionMatchesAnchor(attr, anchorQuery),
   )
 
+  const resolveQualityCountForAnchor = (): number => {
+    if (anchorQuery.anchorName === '未归属') {
+      return agg.unassigned.length
+    }
+    const name = anchorQuery.anchorName?.trim()
+    if (name) {
+      let total = 0
+      for (const bucket of agg.byAnchorKey.values()) {
+        if (bucket.anchorName === name) total += bucket.count
+      }
+      return total
+    }
+    return matched.length
+  }
+  const qualityReturnCountForAnchor = resolveQualityCountForAnchor()
+
   const orderQueries = buildLiveAccountOrderQueries(
     matched.map((attr) => ({
       liveAccountId: attr.view.liveAccountId,
@@ -520,16 +536,27 @@ export async function buildAnchorQualityRefundDrill(params: {
     }),
   )
 
-  const leaderboard = aggregateAnchorLeaderboard(performanceViews, undefined, { liveSessions })
+  const leaderboard = aggregateAnchorLeaderboard(performanceViews, undefined, {
+    liveSessions,
+    qualityRefundViews: coreViews,
+  })
+  const leaderboardRow = leaderboard.find((a) => anchorLeaderboardRowMatches(a, anchorQuery))
   const stats =
-    leaderboard.find((a) => anchorLeaderboardRowMatches(a, anchorQuery)) ??
-    (matched.length > 0
-      ? {
-          anchorId: anchorQuery.anchorId ?? matched[0]?.anchorId ?? '',
-          anchorName: anchorQuery.anchorName ?? matched[0]?.anchorName ?? '',
-          qualityReturnCount: matched.length,
-        }
-      : null)
+    leaderboardRow != null
+      ? { ...leaderboardRow, qualityReturnCount: qualityReturnCountForAnchor }
+      : matched.length > 0
+        ? {
+            anchorId: anchorQuery.anchorId ?? matched[0]?.anchorId ?? '',
+            anchorName: anchorQuery.anchorName ?? matched[0]?.anchorName ?? '',
+            qualityReturnCount: qualityReturnCountForAnchor,
+          }
+        : qualityReturnCountForAnchor > 0
+          ? {
+              anchorId: anchorQuery.anchorId ?? '',
+              anchorName: anchorQuery.anchorName ?? '',
+              qualityReturnCount: qualityReturnCountForAnchor,
+            }
+          : null
 
   const allRows = matched
     .map((attr) => {
@@ -598,7 +625,8 @@ export async function buildAnchorQualityRefundDrill(params: {
     anchorId: stats && 'anchorId' in stats ? stats.anchorId : anchorQuery.anchorId ?? '',
     anchorName:
       stats && 'anchorName' in stats ? stats.anchorName : anchorQuery.anchorName ?? '',
-    attributionNote: '品退按订单下单时间匹配主播开播场次归属，不按售后发生时间。',
+    attributionNote:
+      '品退按下单时所在直播场次归属，方便追当场讲品和售后问题；与支付归属可能不同。',
     stats: stats as BoardAnchorMetrics | Record<string, unknown> | null,
     pagination: {
       page,

@@ -691,6 +691,43 @@ async function auditDate(dateKey: string): Promise<Record<string, unknown>> {
     } else if (!amountClose(num(drawerVal), expectedFromTotals)) {
       fail(`${pair.metric} 抽屉 valueRaw ¥${drawerVal} ≠ pickMetricValue ¥${expectedFromTotals}`)
     }
+
+    const dupes = countDuplicateOrderNos(detail.rows ?? [])
+    if (dupes.length === 0) ok(`${pair.metric} 抽屉无重复 P 单`)
+    else fail(`${pair.metric} 抽屉重复 P 单: ${dupes.slice(0, 5).join(', ')}`)
+
+    if (pair.metric === 'gmv') {
+      const rowsSum = (detail.rows ?? []).reduce((s, r) => s + num(r.payAmount), 0)
+      if (amountClose(rowsSum, num(drawerVal))) {
+        ok(`gmv 抽屉 rows 合计 ¥${rowsSum.toFixed(2)} === valueRaw`)
+      } else {
+        fail(`gmv 抽屉 rows 合计 ¥${rowsSum.toFixed(2)} ≠ valueRaw ¥${drawerVal}`)
+      }
+      const matched = num(detail.summary?.matchedOrders)
+      if (countEq(matched, metricsOut.orderCount)) {
+        ok(`gmv matchedOrders ${matched} === orderCount`)
+      } else {
+        fail(`gmv matchedOrders ${matched} !== orderCount ${metricsOut.orderCount}`)
+      }
+    }
+
+    if (pair.metric === 'orderCount') {
+      const matched = num(detail.summary?.matchedOrders)
+      if (countEq(matched, metricsOut.orderCount)) {
+        ok(`orderCount matchedOrders ${matched} === orderCount`)
+      } else {
+        fail(`orderCount matchedOrders ${matched} !== orderCount ${metricsOut.orderCount}`)
+      }
+    }
+
+    if (pair.metric === 'actualSignedAmount') {
+      const rowsSum = (detail.rows ?? []).reduce((s, r) => s + num(r.signedAmount), 0)
+      if (amountClose(rowsSum, num(drawerVal))) {
+        ok(`actualSignedAmount 抽屉 rows 合计 ¥${rowsSum.toFixed(2)} === valueRaw`)
+      } else {
+        fail(`actualSignedAmount 抽屉 rows 合计 ¥${rowsSum.toFixed(2)} ≠ valueRaw ¥${drawerVal}`)
+      }
+    }
   }
 
   section(`有效成交额抽屉订单池 ${dateKey}`)
@@ -785,7 +822,47 @@ function paidOnDateHasData(orderCount: number): boolean {
   return orderCount > 0
 }
 
+function countDuplicateOrderNos(rows: Array<{ orderNo?: string; packageId?: string; orderId?: string }>): string[] {
+  const seen = new Map<string, number>()
+  const dupes: string[] = []
+  for (const row of rows) {
+    const key = (row.orderNo || row.packageId || row.orderId || '').trim()
+    if (!key) continue
+    const count = (seen.get(key) ?? 0) + 1
+    seen.set(key, count)
+    if (count === 2) dupes.push(key)
+  }
+  return dupes
+}
+
 async function main(): Promise<void> {
+  section('静态：核心去重策略')
+  const metricDetailSrc = fs.readFileSync(
+    path.resolve(__dirname, '../src/services/board-metric-detail.service.ts'),
+    'utf-8',
+  )
+  const businessMetricsSrc = fs.readFileSync(
+    path.resolve(__dirname, '../src/services/business-metrics.service.ts'),
+    'utf-8',
+  )
+  if (
+    metricDetailSrc.includes('dedupeCoreMetricViewsByOrderNoBestValue') &&
+    metricDetailSrc.includes("'gmv'") &&
+    metricDetailSrc.includes("'orderCount'")
+  ) {
+    ok('board-metric-detail 含 gmv/orderCount bestValue 去重')
+  } else {
+    fail('board-metric-detail 缺少 gmv/orderCount bestValue 去重')
+  }
+  if (
+    businessMetricsSrc.includes('dedupeCoreMetricViewsByOrderNoBestValue') &&
+    businessMetricsSrc.includes('isEffectiveSignedView(v)')
+  ) {
+    ok('business-metrics 使用 bestValue 去重与 isEffectiveSignedView')
+  } else {
+    fail('business-metrics 未使用 bestValue 去重或 isEffectiveSignedView')
+  }
+
   console.log('[verify:overview-full-integrity] 只读体检，不改数据库')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(DATE_ENV)) {
     fail(`DATE 格式无效: ${DATE_ENV}`)

@@ -19,6 +19,8 @@ import {
   verifyAnchorMetricDrawer,
   verifyMetricDrawerAttribution,
 } from './lib/metric-detail-attribution-verify.util'
+import { buildAnchorMetricDetail } from '../src/services/anchor-metric-detail.service'
+import type { BoardDrillOrderRow } from '../src/services/order-row-mapper.service'
 
 config({ path: path.resolve(__dirname, '../.env') })
 
@@ -36,6 +38,19 @@ const FOCUS_ORDERS = [
 function orderKeys(orderNo: string): string[] {
   const bare = orderNo.replace(/^P/, '')
   return [orderNo, bare]
+}
+
+function countDuplicateOrderNos(rows: BoardDrillOrderRow[]): string[] {
+  const seen = new Map<string, number>()
+  const dupes: string[] = []
+  for (const row of rows) {
+    const key = (row.orderNo || row.packageId || row.orderId || '').trim()
+    if (!key) continue
+    const count = (seen.get(key) ?? 0) + 1
+    seen.set(key, count)
+    if (count === 2) dupes.push(key)
+  }
+  return dupes
 }
 
 async function main(): Promise<void> {
@@ -56,10 +71,32 @@ async function main(): Promise<void> {
       endDate: END_DATE,
     })
     const mismatches = compareDrawerRowsToRemap(bundle.rows, expectedMap, metric)
-    const status = mismatches.length === 0 ? '✓' : '✗'
+    const dupes = countDuplicateOrderNos(bundle.rows)
+    const status = mismatches.length === 0 && dupes.length === 0 ? '✓' : '✗'
     console.log(
-      `${status} ${metric}: rows=${bundle.rows.length} valueRaw=${bundle.summary.valueRaw} mismatches=${mismatches.length}`,
+      `${status} ${metric}: rows=${bundle.rows.length} valueRaw=${bundle.summary.valueRaw} matchedOrders=${bundle.summary.matchedOrders} mismatches=${mismatches.length} dupes=${dupes.length}`,
     )
+    if (dupes.length > 0) {
+      allMismatches.push({
+        metric,
+        orderNo: dupes[0],
+        rowAnchor: '—',
+        expectedAnchor: '—',
+        liveAccountName: `重复P单:${dupes.slice(0, 3).join(',')}`,
+      })
+    }
+    if (metric === 'gmv') {
+      const rowSum = sumDrawerRowMetricValue(bundle.rows, 'gmv')
+      if (Math.abs(rowSum - bundle.summary.valueRaw) > 0.02) {
+        allMismatches.push({
+          metric,
+          orderNo: '—',
+          rowAnchor: String(rowSum),
+          expectedAnchor: String(bundle.summary.valueRaw),
+          liveAccountName: 'gmv rows sum mismatch',
+        })
+      }
+    }
     allMismatches.push(...mismatches)
   }
 
@@ -112,6 +149,7 @@ async function main(): Promise<void> {
           metric === 'effectiveGmv'
             ? ANCHOR_MUST_EXCLUDE[anchorName as keyof typeof ANCHOR_MUST_EXCLUDE]
             : undefined,
+        remappedAnchorMap: expectedMap,
       })
       const bundle = await fetchMetricDetailBundle({
         metric,
@@ -128,6 +166,47 @@ async function main(): Promise<void> {
         for (const f of fails.slice(0, 5)) console.log(`  - ${f}`)
         anchorFails.push(...fails)
       }
+    }
+  }
+
+  console.log('\n=== 4. 主播签收率详情 Tab 去重 ===')
+  for (const anchorName of ANCHOR_DRAWER_NAMES) {
+    const detail = await buildAnchorMetricDetail({
+      anchorId: anchorName,
+      metric: 'signRate',
+      startDate: START_DATE,
+      endDate: END_DATE,
+      tab: 'signed',
+      page: 1,
+      pageSize: 100,
+      role: 'super_admin',
+      username: 'verify-script',
+    })
+    const signedTab = detail.tabs?.find((t) => t.key === 'signed')
+    const unsignedTab = detail.tabs?.find((t) => t.key === 'unsigned')
+    if (signedTab && signedTab.count === detail.summary.matchedOrders) {
+      console.log(`✓ ${anchorName} signRate signed tab ${signedTab.count} === matchedOrders`)
+    } else {
+      anchorFails.push(
+        `${anchorName} signRate signed tab ${signedTab?.count ?? '—'} !== matchedOrders ${detail.summary.matchedOrders}`,
+      )
+    }
+    if (
+      signedTab &&
+      unsignedTab &&
+      signedTab.count + unsignedTab.count === detail.summary.totalOrders
+    ) {
+      console.log(`✓ ${anchorName} signRate tabs 合计 === totalOrders ${detail.summary.totalOrders}`)
+    } else {
+      anchorFails.push(
+        `${anchorName} signRate tabs 合计 !== totalOrders ${detail.summary.totalOrders}`,
+      )
+    }
+    const dupes = countDuplicateOrderNos(detail.rows)
+    if (dupes.length === 0) {
+      console.log(`✓ ${anchorName} signRate signed rows 无重复 P 单`)
+    } else {
+      anchorFails.push(`${anchorName} signRate 重复 P 单: ${dupes.slice(0, 3).join(', ')}`)
     }
   }
 

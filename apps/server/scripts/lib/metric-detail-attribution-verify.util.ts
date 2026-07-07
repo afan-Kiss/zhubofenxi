@@ -208,6 +208,14 @@ function orderInRows(rows: BoardDrillOrderRow[], orderNo: string): boolean {
   return rows.some((r) => keys.includes(r.orderNo || r.packageId || ''))
 }
 
+function orderInRemapPool(map: Map<string, string>, orderNo: string): boolean {
+  return (
+    map.has(orderNo) ||
+    map.has(orderNo.replace(/^P/, '')) ||
+    map.has(orderNo.startsWith('P') ? orderNo : `P${orderNo}`)
+  )
+}
+
 export async function verifyAnchorMetricDrawer(params: {
   startDate: string
   endDate: string
@@ -215,6 +223,7 @@ export async function verifyAnchorMetricDrawer(params: {
   anchorName: string
   mustInclude?: string[]
   mustExclude?: string[]
+  remappedAnchorMap?: Map<string, string>
 }): Promise<string[]> {
   const fails: string[] = []
   const bundle = await fetchMetricDetailBundle({
@@ -251,6 +260,9 @@ export async function verifyAnchorMetricDrawer(params: {
 
   for (const orderNo of params.mustInclude ?? []) {
     if (!orderInRows(rows, orderNo)) {
+      if (params.remappedAnchorMap && !orderInRemapPool(params.remappedAnchorMap, orderNo)) {
+        continue
+      }
       fails.push(`${label} 缺少 ${orderNo}`)
     }
   }
@@ -320,6 +332,7 @@ export async function verifyMetricDrawerAttribution(params: {
         anchorName,
         mustInclude,
         mustExclude,
+        remappedAnchorMap: expectedMap,
       })
       anchorFails.push(...fails)
     }

@@ -9,6 +9,7 @@ import {
   resolveQualityRefundInfo,
   viewCountsAsQualityRefund,
 } from './quality-refund-resolution.service'
+import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
 import { resolveViewRefundAmountCent } from './order-refund-metrics.service'
 import { centToYuan } from '../utils/money'
 import {
@@ -287,7 +288,7 @@ export function mapViewToBoardOrderRow(
   const refundAmountDisplay = refundPending ? '售后金额待同步' : undefined
   const actualDealAmount = centToYuan(v.effectiveGmvCent)
   const signedAmount = centToYuan(
-    v.isEffectiveSigned ? (v.actualSignAmountCent ?? v.actualSignedAmountCent) : 0,
+    isEffectiveSignedView(v) ? (v.actualSignAmountCent ?? v.actualSignedAmountCent ?? 0) : 0,
   )
   const payAmount = paymentBaseAmount || userPayableAmount || merchantReceivableAmount
 
@@ -362,7 +363,7 @@ export function mapViewToBoardOrderRow(
     actualAmount: actualDealAmount,
     afterSaleDisplayType: afterSaleStatus,
     statusText,
-    isActualSigned: v.isEffectiveSigned === true,
+    isActualSigned: isEffectiveSignedView(v),
     officialQualityBadCase: v.officialQualityBadCase === true,
     officialQualityReason: (v.officialQualityReasons ?? []).join('、') || undefined,
     officialQualityFeedbackContent: v.officialQualityFeedbackContent,

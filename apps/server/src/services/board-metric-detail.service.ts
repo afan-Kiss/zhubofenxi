@@ -3,7 +3,7 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { mapViewToBoardDrillRow, type BoardDrillOrderRow } from './order-row-mapper.service'
 import { normalizeBoardPreset } from './board-metrics.service'
 import { formatCount, formatRate, formatYuan } from '../utils/money'
-import { dedupeViewsByMetricOrderNo, dedupeRefundMetricViewsByOrderNoMaxRefund } from './calc-refund-rate.service'
+import { dedupeViewsByMetricOrderNo, dedupeRefundMetricViewsByOrderNoMaxRefund, dedupeCoreMetricViewsByOrderNoBestValue } from './calc-refund-rate.service'
 import {
   calculateBusinessMetrics,
   pickMetricValue,
@@ -168,6 +168,8 @@ function matchMetricViews(views: AnalyzedOrderView[], metric: BoardMetricKey, ta
 }
 
 const METRICS_ORDER_DEDUPE: BoardMetricKey[] = [
+  'gmv',
+  'orderCount',
   'actualSignedAmount',
   'signedCount',
   'signRate',
@@ -178,6 +180,16 @@ const METRICS_ORDER_DEDUPE: BoardMetricKey[] = [
   'qualityReturnCount',
   'qualityReturnRate',
 ]
+
+function usesCoreMetricBestValueDedupe(metric: BoardMetricKey): boolean {
+  return (
+    metric === 'gmv' ||
+    metric === 'orderCount' ||
+    metric === 'actualSignedAmount' ||
+    metric === 'signedCount' ||
+    metric === 'signRate'
+  )
+}
 
 function needsMetricOrderDedupe(metric: BoardMetricKey): boolean {
   return METRICS_ORDER_DEDUPE.includes(metric)
@@ -320,6 +332,8 @@ export async function buildBoardMetricDetail(params: {
       params.metric === 'returnRate'
     ) {
       sourceViews = dedupeRefundMetricViewsByOrderNoMaxRefund(sourceViews)
+    } else if (usesCoreMetricBestValueDedupe(params.metric)) {
+      sourceViews = dedupeCoreMetricViewsByOrderNoBestValue(sourceViews)
     } else {
       sourceViews = dedupeViewsByMetricOrderNo(sourceViews)
     }
@@ -345,7 +359,7 @@ export async function buildBoardMetricDetail(params: {
       })
       .filter((row) => {
         if (params.metric !== 'actualSignedAmount') return true
-        return row.isActualSigned === true && Number(row.signedAmount ?? 0) > 0
+        return Number(row.signedAmount ?? 0) > 0
       }),
     sortMode,
   )
@@ -378,6 +392,9 @@ export async function buildBoardMetricDetail(params: {
         : totals.signedOrderCount
     }
     if (params.metric === 'actualSignedAmount') return totals.signedOrderCount
+    if (params.metric === 'gmv' || params.metric === 'orderCount') {
+      return totals.orderCount
+    }
     if (
       params.metric === 'returnAmount' ||
       params.metric === 'returnCount' ||

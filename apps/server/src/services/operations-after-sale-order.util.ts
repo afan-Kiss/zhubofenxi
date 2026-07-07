@@ -1,7 +1,7 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import {
   isNoAfterSaleText,
-  isPositiveAfterSaleText,
+  isActualRefundAfterSaleText,
 } from './after-sale-status-signal.service'
 import { normalizeAfterSalesReason } from './after-sales-reason-normalize.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo, calcRefundRate } from './calc-refund-rate.service'
@@ -51,11 +51,11 @@ function resolveAfterSaleStatusText(view: AnalyzedOrderView): string {
   return String(view.afterSaleStatusText || view.afterSaleStatusLabel || '').trim()
 }
 
-function statusTextSignalsAfterSale(text: string): boolean | null {
+function statusTextSignalsActualRefund(text: string): boolean | null {
   const trimmed = text.trim()
   if (!trimmed) return null
   if (isNoAfterSaleText(trimmed)) return false
-  if (isPositiveAfterSaleText(trimmed)) return true
+  if (isActualRefundAfterSaleText(trimmed)) return true
   return null
 }
 
@@ -70,10 +70,10 @@ export function isActualAfterSaleOrder(view: AnalyzedOrderView): boolean {
   if (view.isReturnRefund || view.isReturnRefundOrder || view.isRealProductRefund) return true
   if (view.isReturned) return true
 
-  const refundSignal = statusTextSignalsAfterSale(resolveRefundStatusText(view))
+  const refundSignal = statusTextSignalsActualRefund(resolveRefundStatusText(view))
   if (refundSignal === true) return true
 
-  const afterSaleSignal = statusTextSignalsAfterSale(resolveAfterSaleStatusText(view))
+  const afterSaleSignal = statusTextSignalsActualRefund(resolveAfterSaleStatusText(view))
   if (afterSaleSignal === true) return true
   if (afterSaleSignal === false) return false
   if (refundSignal === false) return false

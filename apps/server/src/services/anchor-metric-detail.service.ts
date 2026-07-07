@@ -2,7 +2,7 @@ import type { UserRole } from '../types/roles'
 import { normalizeBoardPreset } from './board-metrics.service'
 import type { DateRangePreset } from '../utils/date-range'
 import { getAnchorConfigSync } from './anchor.service'
-import { dedupeViewsByMetricOrderNo } from './calc-refund-rate.service'
+import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { buildOrderMetricSets } from './order-metric-sets.service'
 import { mapViewToBoardOrderRow, type BoardOrderRow } from './order-row-mapper.service'
 import type { AnalyzedOrderView } from '../types/analysis'
@@ -100,8 +100,19 @@ export async function buildAnchorMetricDetail(params: {
   const paidOrderCount = metricSets.paidOrderCount
 
   const qualityViews = dedupeViewsByMetricOrderNo(paidViews.filter((v) => isQualityRefundOrder(v)))
-  const signedViews = paidViews.filter((v) => isEffectiveSignedView(v))
-  const unsignedViews = paidViews.filter((v) => !isEffectiveSignedView(v))
+  const signedViews = dedupeViewsByMetricOrderNo(paidViews.filter((v) => isEffectiveSignedView(v)))
+  const signedOrderNos = new Set(
+    signedViews.map((v) => resolveMetricOrderNo(v)).filter(Boolean),
+  )
+  const unsignedViews = dedupeViewsByMetricOrderNo(
+    paidViews.filter((v) => {
+      const no = resolveMetricOrderNo(v)
+      if (no && signedOrderNos.has(no)) return false
+      return !isEffectiveSignedView(v)
+    }),
+  )
+  const signedTabCount = signedViews.length
+  const unsignedTabCount = Math.max(0, paidOrderCount - signedTabCount)
 
   const isSign = params.metric === 'signRate'
   const matchedCount = isSign ? metricSets.signedOrderCount : metricSets.qualityRefundOrderCount
@@ -138,8 +149,8 @@ export async function buildAnchorMetricDetail(params: {
 
   const tabs = isSign
     ? [
-        { key: 'signed', label: '已签收订单', count: signedViews.length },
-        { key: 'unsigned', label: '未签收 / 售后订单', count: unsignedViews.length },
+        { key: 'signed', label: '已签收订单', count: signedTabCount },
+        { key: 'unsigned', label: '未签收 / 售后订单', count: unsignedTabCount },
       ]
     : [{ key: 'qualityRefund', label: '品退订单', count: qualityViews.length }]
 

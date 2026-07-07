@@ -10,8 +10,9 @@ import { viewCountsAsQualityRefund } from './quality-refund-resolution.service'
 import { getOfficialQualityPackageIdSet, getQualityBadCasesSync } from './quality-badcase-store.service'
 import { aggregateRefundAmountCentByOrderNo } from './order-refund-metrics.service'
 import { dedupeOrderCountByOrderNo } from './order-master-match.service'
-import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
+import { dedupeViewsByMetricOrderNo, dedupeCoreMetricViewsByOrderNoBestValue, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { sumValidRevenueFromViews } from './valid-revenue-order.service'
+import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
 import {
   isNoAfterSaleText,
   viewHasAfterSaleStatusSignal,
@@ -148,7 +149,7 @@ export function calculateBusinessMetrics(
   warnCtx?: import('./calc-refund-rate.service').RefundRateWarnContext,
 ): BusinessMetrics {
 
-  const dedupedViews = dedupeViewsByMetricOrderNo(views)
+  const dedupedViews = dedupeCoreMetricViewsByOrderNoBestValue(views)
 
   let totalGmvCent = 0
 
@@ -162,8 +163,8 @@ export function calculateBusinessMetrics(
       totalGmvCent += v.paymentBaseCent
     }
 
-    if (v.isEffectiveSigned) {
-      actualSignedCent += v.actualSignAmountCent ?? v.actualSignedAmountCent
+    if (isEffectiveSignedView(v)) {
+      actualSignedCent += v.actualSignAmountCent ?? v.actualSignedAmountCent ?? 0
     }
 
     freightRefundCent += v.freightRefundAmountCent

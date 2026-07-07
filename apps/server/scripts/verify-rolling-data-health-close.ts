@@ -148,7 +148,8 @@ async function main(): Promise<void> {
 
   if (
     operationsAfterSale.includes('isNoAfterSaleText') &&
-    operationsAfterSale.includes('isPositiveAfterSaleText') &&
+    operationsAfterSale.includes('isActualRefundAfterSaleText') &&
+    !operationsAfterSale.includes('isPositiveAfterSaleText') &&
     !operationsAfterSale.includes('/售后|退款|退货/')
   ) {
     ok('operations-after-sale 复用公共工具且无裸匹配')

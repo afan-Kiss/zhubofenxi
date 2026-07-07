@@ -44,6 +44,32 @@ const POSITIVE_AFTER_SALE_KEYWORDS = [
   '申请退款',
 ] as const
 
+/** 0 元关闭类文案：不算实际退款售后 */
+const ACTUAL_REFUND_EXCLUDE_SUBSTRINGS = [
+  '售后关闭',
+  '退款关闭',
+  '关闭无退款',
+] as const
+
+/** 真实退款/退货/售后完成类关键词（不含宽泛「售后」二字） */
+const ACTUAL_REFUND_KEYWORDS = [
+  '退款成功',
+  '退款中',
+  '退款完成',
+  '退货退款成功',
+  '退货退款完成',
+  '退货退款',
+  '仅退款',
+  '已退款',
+  '售后完成',
+  '售后成功',
+  '售后申请',
+  '售后处理中',
+  '售后中',
+  '平台已退款',
+  '商家已退款',
+] as const
+
 const AFTER_SALE_STATUS_PART_SPLIT_RE = /[\s,，、;；|｜/\\]+/
 
 /** 按分隔符拆分售后状态组合文案（不按冒号拆） */
@@ -94,6 +120,24 @@ export function isPositiveAfterSaleText(text: string): boolean {
     return parts.some((part) => isSinglePositiveAfterSaleText(part))
   }
   return isSinglePositiveAfterSaleText(raw)
+}
+
+function isSingleActualRefundAfterSaleText(text: string): boolean {
+  const raw = text.trim()
+  if (!raw || isSingleNoAfterSaleText(raw)) return false
+  if (ACTUAL_REFUND_EXCLUDE_SUBSTRINGS.some((ex) => raw.includes(ex))) return false
+  return ACTUAL_REFUND_KEYWORDS.some((keyword) => raw.includes(keyword))
+}
+
+/** 文案表示实际退款/退货/售后完成（不含 0 元关闭类） */
+export function isActualRefundAfterSaleText(text: string): boolean {
+  const raw = text.trim()
+  if (!raw || isNoAfterSaleText(raw)) return false
+  const parts = splitAfterSaleStatusParts(raw)
+  if (parts.length > 1) {
+    return parts.some((part) => isSingleActualRefundAfterSaleText(part))
+  }
+  return isSingleActualRefundAfterSaleText(raw)
 }
 
 export function resolveAfterSaleStatusCombinedText(view: AnalyzedOrderView): string {

@@ -23,10 +23,14 @@ import type { BoardDrillOrderRow } from '../src/services/order-row-mapper.servic
 import {
   isNoAfterSaleText,
   isPositiveAfterSaleText,
+  isActualRefundAfterSaleText,
   viewHasAfterSaleStatusSignal,
 } from '../src/services/after-sale-status-signal.service'
 import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
-import { explainValidRevenueOrder } from '../src/services/valid-revenue-order.service'
+import { explainValidRevenueOrder, sumValidRevenueFromViews } from '../src/services/valid-revenue-order.service'
+import { buildAnchorMetricDetail } from '../src/services/anchor-metric-detail.service'
+import { dedupeCoreMetricViewsByOrderNoBestValue } from '../src/services/calc-refund-rate.service'
+import { filterViewsForCoreMetrics } from '../src/services/metrics-exclusion.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
 config({ path: path.resolve(__dirname, '../.env') })
@@ -94,8 +98,53 @@ async function checkOverviewSignedDrawers(): Promise<void> {
     endDate: END_DATE,
   })
   const summary = (local.summary ?? {}) as Record<string, unknown>
+  const cardGmv = num(summary.totalGmv ?? summary.gmv ?? summary.productGmv)
+  const cardOrderCount = num(summary.orderCount)
   const cardSignedAmount = num(summary.actualSignedAmount)
   const cardSignedCount = num(summary.signedOrderCount ?? summary.actualSignedCount)
+
+  const gmvBundle = await fetchMetricDetailBundle({
+    metric: 'gmv',
+    startDate: START_DATE,
+    endDate: END_DATE,
+  })
+  const gmvRowsSum = gmvBundle.rows.reduce((sum, row) => sum + num(row.payAmount), 0)
+  if (moneyClose(gmvRowsSum, gmvBundle.summary.valueRaw)) {
+    ok(`gmv 抽屉 rows 合计 ${gmvRowsSum.toFixed(2)} === valueRaw`)
+  } else {
+    fail(`gmv 抽屉 rows 合计 ${gmvRowsSum.toFixed(2)} !== valueRaw ${gmvBundle.summary.valueRaw}`)
+  }
+  if (moneyClose(gmvBundle.summary.valueRaw, cardGmv)) {
+    ok(`gmv 卡片 ${cardGmv} === 抽屉 valueRaw`)
+  } else if (cardGmv > 0 || gmvBundle.summary.valueRaw > 0) {
+    fail(`gmv 卡片 ${cardGmv} !== 抽屉 valueRaw ${gmvBundle.summary.valueRaw}`)
+  }
+  if (gmvBundle.summary.matchedOrders === cardOrderCount) {
+    ok(`gmv matchedOrders ${gmvBundle.summary.matchedOrders} === orderCount ${cardOrderCount}`)
+  } else {
+    fail(
+      `gmv matchedOrders ${gmvBundle.summary.matchedOrders} !== orderCount ${cardOrderCount}`,
+    )
+  }
+  const dupesGmv = countDuplicateOrderNos(gmvBundle.rows)
+  if (dupesGmv.length === 0) ok('gmv 抽屉无重复 P 单')
+  else fail(`gmv 抽屉重复 P 单: ${dupesGmv.slice(0, 5).join(', ')}`)
+
+  const orderCountBundle = await fetchMetricDetailBundle({
+    metric: 'orderCount',
+    startDate: START_DATE,
+    endDate: END_DATE,
+  })
+  if (orderCountBundle.summary.matchedOrders === cardOrderCount) {
+    ok(`orderCount matchedOrders ${orderCountBundle.summary.matchedOrders} === orderCount ${cardOrderCount}`)
+  } else {
+    fail(
+      `orderCount matchedOrders ${orderCountBundle.summary.matchedOrders} !== orderCount ${cardOrderCount}`,
+    )
+  }
+  const dupesOrderCount = countDuplicateOrderNos(orderCountBundle.rows)
+  if (dupesOrderCount.length === 0) ok('orderCount 抽屉无重复 P 单')
+  else fail(`orderCount 抽屉重复 P 单: ${dupesOrderCount.slice(0, 5).join(', ')}`)
 
   const signedAmountBundle = await fetchMetricDetailBundle({
     metric: 'actualSignedAmount',
@@ -229,7 +278,7 @@ async function checkOverviewSignedDrawers(): Promise<void> {
   if (dupesReturnAmount.length === 0) ok('returnAmount 抽屉无重复 P 单')
   else fail(`returnAmount 抽屉重复 P 单: ${dupesReturnAmount.slice(0, 5).join(', ')}`)
 
-  for (const metric of SIGNED_METRICS) {
+  for (const metric of ['gmv', 'orderCount', ...SIGNED_METRICS] as const) {
     const src = fs.readFileSync(
       path.resolve(ROOT, 'server/src/services/board-metric-detail.service.ts'),
       'utf-8',
@@ -239,6 +288,79 @@ async function checkOverviewSignedDrawers(): Promise<void> {
     } else if (metric === 'actualSignedAmount' || metric === 'signedCount' || metric === 'signRate') {
       fail(`${metric} 未纳入 METRICS_ORDER_DEDUPE`)
     }
+  }
+}
+
+async function checkAnchorSignRateDetail(): Promise<void> {
+  console.log('\n=== 1f. 主播签收率详情 Tab 去重 ===')
+  const config = await import('../src/services/anchor.service').then((m) => m.getAnchorConfigSync())
+  const anchor = config.anchors.find((a) => a.name === '子杰') ?? config.anchors[0]
+  if (!anchor) {
+    ok('无主播配置，跳过')
+    return
+  }
+  const detail = await buildAnchorMetricDetail({
+    anchorId: anchor.id,
+    metric: 'signRate',
+    startDate: START_DATE,
+    endDate: END_DATE,
+    tab: 'signed',
+    page: 1,
+    pageSize: 100,
+    role: 'super_admin',
+    username: 'verify-script',
+  })
+  const signedTab = detail.tabs?.find((t) => t.key === 'signed')
+  const unsignedTab = detail.tabs?.find((t) => t.key === 'unsigned')
+  if (signedTab && signedTab.count === detail.summary.matchedOrders) {
+    ok(`主播 ${anchor.name} signed tab count ${signedTab.count} === matchedOrders`)
+  } else {
+    fail(
+      `主播 ${anchor.name} signed tab ${signedTab?.count ?? '—'} !== matchedOrders ${detail.summary.matchedOrders}`,
+    )
+  }
+  if (
+    unsignedTab &&
+    signedTab &&
+    signedTab.count + unsignedTab.count === detail.summary.totalOrders
+  ) {
+    ok(`主播 ${anchor.name} signed+unsigned tab ${signedTab.count + unsignedTab.count} === totalOrders`)
+  } else {
+    fail(
+      `主播 ${anchor.name} tab 合计 ${(signedTab?.count ?? 0) + (unsignedTab?.count ?? 0)} !== totalOrders ${detail.summary.totalOrders}`,
+    )
+  }
+  const dupes = countDuplicateOrderNos(detail.rows)
+  if (dupes.length === 0) ok(`主播 ${anchor.name} signed rows 无重复 P 单`)
+  else fail(`主播 ${anchor.name} signed rows 重复 P 单: ${dupes.slice(0, 5).join(', ')}`)
+}
+
+async function checkValidRevenueDedupeWarning(): Promise<void> {
+  console.log('\n=== 1g. 有效成交 dedupe 首条 vs bestValue 对比 ===')
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: START_DATE,
+    endDate: END_DATE,
+    role: 'super_admin',
+    username: 'verify-script',
+  })
+  const views = filterViewsForCoreMetrics(scoped.views)
+  const firstDedupe = sumValidRevenueFromViews(views)
+  let bestCent = 0
+  let bestCount = 0
+  for (const v of dedupeCoreMetricViewsByOrderNoBestValue(views)) {
+    const explain = explainValidRevenueOrder(v)
+    if (!explain.valid) continue
+    bestCent += v.effectiveGmvCent
+    bestCount += 1
+  }
+  const bestYuan = bestCent / 100
+  if (Math.abs(firstDedupe.validAmountYuan - bestYuan) > 0.02) {
+    console.log(
+      `  ⚠ validRevenue 首条去重 ${firstDedupe.validAmountYuan.toFixed(2)} vs bestValue ${bestYuan.toFixed(2)} (${firstDedupe.soldOrderCount} vs ${bestCount} 单)`,
+    )
+  } else {
+    ok('validRevenue 首条去重与 bestValue 无显著差异')
   }
 }
 
@@ -715,8 +837,8 @@ function checkAfterSaleAndHealthTailStatic(): void {
   }
 
   if (
+    operationsAfterSale.includes('isActualRefundAfterSaleText') &&
     operationsAfterSale.includes('isNoAfterSaleText') &&
-    operationsAfterSale.includes('isPositiveAfterSaleText') &&
     !operationsAfterSale.includes('/售后|退款|退货/')
   ) {
     ok('operations-after-sale 复用公共工具且无裸 /售后|退款|退货/')
@@ -777,6 +899,61 @@ function checkAfterSaleAndHealthTailStatic(): void {
     ok('calc-refund-rate 导出 dedupeRefundMetricViewsByOrderNoMaxRefund')
   } else {
     fail('calc-refund-rate 缺少 dedupeRefundMetricViewsByOrderNoMaxRefund')
+  }
+
+  if (calcRefundRate.includes('dedupeCoreMetricViewsByOrderNoBestValue')) {
+    ok('calc-refund-rate 含 dedupeCoreMetricViewsByOrderNoBestValue')
+  } else {
+    fail('calc-refund-rate 缺少 dedupeCoreMetricViewsByOrderNoBestValue')
+  }
+
+  const dedupeBlock = metricDetail.slice(
+    metricDetail.indexOf('METRICS_ORDER_DEDUPE'),
+    metricDetail.indexOf('METRICS_ORDER_DEDUPE') + 500,
+  )
+  if (dedupeBlock.includes("'gmv'") && dedupeBlock.includes("'orderCount'")) {
+    ok('METRICS_ORDER_DEDUPE 含 gmv / orderCount')
+  } else {
+    fail('METRICS_ORDER_DEDUPE 未含 gmv / orderCount')
+  }
+
+  const coreDedupeBlock = metricDetail.slice(
+    metricDetail.indexOf('function usesCoreMetricBestValueDedupe'),
+    metricDetail.indexOf('function usesCoreMetricBestValueDedupe') + 400,
+  )
+  if (
+    coreDedupeBlock.includes("'gmv'") &&
+    coreDedupeBlock.includes("'orderCount'") &&
+    metricDetail.includes('dedupeCoreMetricViewsByOrderNoBestValue(sourceViews)')
+  ) {
+    ok('gmv / orderCount 走 dedupeCoreMetricViewsByOrderNoBestValue')
+  } else {
+    fail('gmv / orderCount 未走 dedupeCoreMetricViewsByOrderNoBestValue')
+  }
+
+  if (
+    businessMetrics.includes('dedupeCoreMetricViewsByOrderNoBestValue') &&
+    businessMetrics.includes('isEffectiveSignedView(v)') &&
+    !businessMetrics.includes('if (v.isEffectiveSigned)')
+  ) {
+    ok('business-metrics 使用 bestValue 去重与 isEffectiveSignedView')
+  } else {
+    fail('business-metrics 未使用 bestValue 去重或仍直接判断 v.isEffectiveSigned')
+  }
+
+  if (
+    operationsAfterSale.includes('isActualRefundAfterSaleText') &&
+    !operationsAfterSale.includes('isPositiveAfterSaleText')
+  ) {
+    ok('operations-after-sale 使用 isActualRefundAfterSaleText 判断实际退款售后')
+  } else {
+    fail('operations-after-sale 未改用 isActualRefundAfterSaleText')
+  }
+
+  if (signalService.includes('isActualRefundAfterSaleText')) {
+    ok('after-sale-status-signal 含 isActualRefundAfterSaleText')
+  } else {
+    fail('after-sale-status-signal 缺少 isActualRefundAfterSaleText')
   }
 
   if (
@@ -908,6 +1085,35 @@ function checkNoAfterSaleTextRuntime(): void {
   }
 }
 
+function checkActualRefundAfterSaleRuntime(): void {
+  console.log('\n=== 0e. 实际退款售后 vs 售后信号 ===')
+  if (isPositiveAfterSaleText('售后关闭')) ok('isPositiveAfterSaleText「售后关闭」仍为售后信号')
+  else fail('isPositiveAfterSaleText 未识别「售后关闭」')
+  if (!isActualRefundAfterSaleText('售后关闭')) ok('isActualRefundAfterSaleText「售后关闭」= false')
+  else fail('isActualRefundAfterSaleText 误伤「售后关闭」')
+  if (!isActualRefundAfterSaleText('关闭无退款')) ok('isActualRefundAfterSaleText「关闭无退款」= false')
+  else fail('isActualRefundAfterSaleText 误伤「关闭无退款」')
+  if (isActualRefundAfterSaleText('退款成功')) ok('isActualRefundAfterSaleText「退款成功」= true')
+  else fail('isActualRefundAfterSaleText 未识别「退款成功」')
+  if (isActualRefundAfterSaleText('退货退款')) ok('isActualRefundAfterSaleText「退货退款」= true')
+  else fail('isActualRefundAfterSaleText 未识别「退货退款」')
+  if (!isActualAfterSaleOrder(mockAfterSaleView('售后关闭'))) {
+    ok('运营「售后关闭」不算实际退款售后')
+  } else {
+    fail('运营「售后关闭」被误判为实际退款售后')
+  }
+  if (!isActualAfterSaleOrder(mockAfterSaleView('关闭无退款'))) {
+    ok('运营「关闭无退款」不算实际退款售后')
+  } else {
+    fail('运营「关闭无退款」被误判为实际退款售后')
+  }
+  if (isActualAfterSaleOrder(mockAfterSaleView('退款成功'))) {
+    ok('运营「退款成功」仍算实际退款售后')
+  } else {
+    fail('运营「退款成功」未识别为实际退款售后')
+  }
+}
+
 function mockAfterSaleView(afterSaleStatusText: string): AnalyzedOrderView {
   return { afterSaleStatusText } as AnalyzedOrderView
 }
@@ -926,7 +1132,7 @@ function mockValidRevenueView(afterSaleStatusText: string): AnalyzedOrderView {
 
 function checkOperationsAfterSaleRuntime(): void {
   console.log('\n=== 0c. 运营报表售后运行时断言 ===')
-  const negatives = ['暂无售后', '未申请售后', '未发起售后', '售后状态：无']
+  const negatives = ['暂无售后', '未申请售后', '未发起售后', '售后状态：无', '售后关闭', '关闭无退款']
   for (const text of negatives) {
     if (!isActualAfterSaleOrder(mockAfterSaleView(text))) ok(`运营负例「${text}」不算售后`)
     else fail(`运营负例「${text}」被误判为售后`)
@@ -968,6 +1174,7 @@ async function main(): Promise<void> {
 
   checkAfterSaleAndHealthTailStatic()
   checkNoAfterSaleTextRuntime()
+  checkActualRefundAfterSaleRuntime()
   checkOperationsAfterSaleRuntime()
   checkValidRevenueNoAfterSaleRuntime()
 
@@ -977,6 +1184,8 @@ async function main(): Promise<void> {
   checkMetricDetailUnsignedStatic()
   await checkAnchorDrillRuntime()
   await checkSignRatePaidTabsRuntime()
+  await checkAnchorSignRateDetail()
+  await checkValidRevenueDedupeWarning()
   await checkDailyReport()
   checkOperationsReportRemap()
   checkOperationsReportStatic()

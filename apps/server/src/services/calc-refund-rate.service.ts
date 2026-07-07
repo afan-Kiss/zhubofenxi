@@ -1,6 +1,7 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { resolveDisplayOrderNoForView } from './order-display-no.service'
 import { resolveViewRefundAmountCent } from './order-refund-metrics.service'
+import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
 
 export interface OrderRateResult {
   numeratorOrderCount: number
@@ -39,6 +40,54 @@ export function dedupeViewsByMetricOrderNo(views: AnalyzedOrderView[]): Analyzed
     if (seen.has(no)) continue
     seen.add(no)
     out.push(v)
+  }
+  return out
+}
+
+function resolveSignedAmountCent(v: AnalyzedOrderView): number {
+  return v.actualSignAmountCent ?? v.actualSignedAmountCent ?? 0
+}
+
+/** 同 P 单内选择更适合 GMV / 签收等核心指标的视图 */
+function compareCoreMetricViewPriority(a: AnalyzedOrderView, b: AnalyzedOrderView): number {
+  const aGmv = a.includedInGmv === true ? 1 : 0
+  const bGmv = b.includedInGmv === true ? 1 : 0
+  if (aGmv !== bGmv) return aGmv - bGmv
+
+  const payDiff = (a.paymentBaseCent ?? 0) - (b.paymentBaseCent ?? 0)
+  if (payDiff !== 0) return payDiff
+
+  const aSigned = isEffectiveSignedView(a) ? 1 : 0
+  const bSigned = isEffectiveSignedView(b) ? 1 : 0
+  if (aSigned !== bSigned) return aSigned - bSigned
+
+  return resolveSignedAmountCent(a) - resolveSignedAmountCent(b)
+}
+
+/** 核心指标按 P 单去重，保留 payment/签收信息更完整的视图 */
+export function dedupeCoreMetricViewsByOrderNoBestValue(
+  views: AnalyzedOrderView[],
+): AnalyzedOrderView[] {
+  const bestByOrderNo = new Map<string, AnalyzedOrderView>()
+  for (const v of views) {
+    const no = resolveMetricOrderNo(v)
+    if (!no) continue
+    const prev = bestByOrderNo.get(no)
+    if (!prev || compareCoreMetricViewPriority(v, prev) > 0) {
+      bestByOrderNo.set(no, v)
+    }
+  }
+  const seen = new Set<string>()
+  const out: AnalyzedOrderView[] = []
+  for (const v of views) {
+    const no = resolveMetricOrderNo(v)
+    if (!no) {
+      out.push(v)
+      continue
+    }
+    if (seen.has(no)) continue
+    seen.add(no)
+    out.push(bestByOrderNo.get(no)!)
   }
   return out
 }

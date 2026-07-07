@@ -44,10 +44,18 @@ const DATE_ENV = process.env.DATE?.trim() || '2026-07-03'
 const HAR_DIR_ENV = process.env.HAR_DIR?.trim()
 const POST_STREAM_GRACE_MS = 30 * 60 * 1000
 
+/**
+ * 2026-07-03 有效成交黄金值（2026-07-07 更新）
+ *
+ * 旧黄金值 ¥2017 来自 P798605049367374181（当时已签收且未进售后）。
+ * 生产审计确认该单现为「售后处理中: 待商家收货」→ isValidRevenueOrder=false。
+ * 当前有效成交 ¥2268 来自另一笔已签收且未在售后中的子杰订单（全店仍 1 单有效成交）。
+ * 详见 npm run audit:anchor-valid-order-20260703
+ */
 const FIXED_20260703_TOTAL = {
   totalGmv: 13180.9,
   orderCount: 9,
-  validSalesAmount: 2017,
+  validSalesAmount: 2268,
   validOrderCount: 1,
   postStreamUnassigned: 0,
 } as const
@@ -56,7 +64,7 @@ const FIXED_20260703_ANCHORS: Record<
   string,
   { gmv: number; valid: number; orderCount: number; allDrawer?: number; signedDrawer?: number }
 > = {
-  子杰: { gmv: 7130.9, valid: 2017, orderCount: 5, allDrawer: 5, signedDrawer: 1 },
+  子杰: { gmv: 7130.9, valid: 2268, orderCount: 5, allDrawer: 5, signedDrawer: 1 },
   飞云: { gmv: 5834, valid: 0, orderCount: 3, allDrawer: 3 },
   小艺: { gmv: 216, valid: 0, orderCount: 1, allDrawer: 1 },
   小红: { gmv: 0, valid: 0, orderCount: 0 },
@@ -690,10 +698,19 @@ async function auditDate(dateKey: string): Promise<void> {
     const focusValid = dedupeViewsByMetricOrderNo(performanceViews).find(
       (v) => (resolveMetricOrderNo(v) || v.orderId) === 'P798605049367374181',
     )
-    if (focusValid?.anchorName === '子杰' && explainValidRevenueOrder(focusValid).valid) {
-      ok('P798605049367374181 在子杰有效成交池')
+    if (focusValid?.anchorName === '子杰') {
+      const explain = explainValidRevenueOrder(focusValid)
+      if (!explain.valid && /售后/.test(explain.reason)) {
+        ok('P798605049367374181 归子杰但因售后处理中不计入有效成交')
+      } else if (explain.valid) {
+        ok('P798605049367374181 在子杰有效成交池')
+      } else {
+        fail(`P798605049367374181 应归子杰，valid=false（${explain.reason}）`)
+      }
     } else if (focusValid) {
-      fail('P798605049367374181 应归子杰且 valid=true')
+      fail(`P798605049367374181 应归子杰，实际 ${focusValid.anchorName}`)
+    } else {
+      warn('P798605049367374181 不在 performanceViews（本地库可能无此单）')
     }
 
     const focusExcluded = dedupeViewsByMetricOrderNo(performanceViews).find(

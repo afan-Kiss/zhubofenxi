@@ -2,8 +2,8 @@ import type { AnchorTrendPoint } from './anchor-leaderboard-row'
 
 export const INTRADAY_BUCKET_MINUTES = 30
 export const INTRADAY_BUCKET_MS = INTRADAY_BUCKET_MINUTES * 60_000
-/** 单日对比/卡片：单场直播约 4 小时 */
-export const INTRADAY_COMPARE_MAX_LIVE_MINUTES = 240
+/** 单日对比/卡片：单场直播约 6 小时（覆盖 4h+ 晚场） */
+export const INTRADAY_COMPARE_MAX_LIVE_MINUTES = 360
 export const INTRADAY_COMPARE_MAX_BUCKET_INDEX =
   Math.ceil(INTRADAY_COMPARE_MAX_LIVE_MINUTES / INTRADAY_BUCKET_MINUTES) - 1
 
@@ -49,10 +49,12 @@ export function buildRelativeIntradayTrendPoints(
   let maxBucketFromRange = -1
 
   points.forEach((point, index) => {
-    const bucketIndex = useTimestamp
+    let bucketIndex = useTimestamp
       ? Math.max(0, Math.round((Number(point.key) - firstMs) / INTRADAY_BUCKET_MS))
       : index
-    if (bucketIndex > maxBucketIndex) return
+    if (bucketIndex > maxBucketIndex) {
+      bucketIndex = maxBucketIndex
+    }
 
     maxBucketFromRange = Math.max(maxBucketFromRange, bucketIndex)
     const prev = bucketValues.get(bucketIndex)

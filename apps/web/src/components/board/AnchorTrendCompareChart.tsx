@@ -403,10 +403,10 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
   const title = isRelativeIntraday ? '主播开播后支付金额节奏对比' : '主播每日支付金额走势对比'
   const subtitle = isRelativeIntraday
     ? isReport
-      ? '按开播后分钟对齐（单场约 4 小时）'
-      : compact
-        ? '按开播后分钟对齐，单场最多 240 分钟'
-        : '按「开播后第几分钟」对齐（单场约 4 小时），不按自然时间'
+        ? '按开播后分钟对齐，单场最多 360 分钟'
+        : compact
+          ? '按开播后分钟对齐，单场最多 360 分钟'
+          : '按「开播后第几分钟」对齐（单场约 6 小时），不按自然时间'
     : '按日期对比每日支付金额，不是已签收金额'
 
   const xAxisKey = compact ? 'tickLabel' : 'label'

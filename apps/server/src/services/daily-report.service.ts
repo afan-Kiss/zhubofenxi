@@ -484,12 +484,6 @@ export async function buildDailyReport(params: {
     row.amountRatio = safeRatioPercent(row.shippedAmountYuan, totalShippedAmountYuan)
   }
 
-  anchorRows.sort((a, b) => {
-    const nameCmp = a.anchorName.localeCompare(b.anchorName, 'zh-CN')
-    if (nameCmp !== 0) return nameCmp
-    return (a.sessionLabel ?? '').localeCompare(b.sessionLabel ?? '', 'zh-CN')
-  })
-
   const totalSoldOrderCount = storeWideShipped.soldOrderCount
   const totalInvalidOrderCount = storeWideInvalid
   let leaderboardRows = ensureAnchorPerformanceLeaderboardSlots(
@@ -552,6 +546,16 @@ export async function buildDailyReport(params: {
       row.trend = (lb?.trend as AnchorTrend | undefined) ?? row.trend
     }
   }
+
+  anchorRows.sort((a, b) => {
+    const gmvDiff = Number(b.gmvYuan ?? 0) - Number(a.gmvYuan ?? 0)
+    if (gmvDiff !== 0) return gmvDiff
+    const shippedDiff = Number(b.shippedAmountYuan ?? 0) - Number(a.shippedAmountYuan ?? 0)
+    if (shippedDiff !== 0) return shippedDiff
+    const nameCmp = a.anchorName.localeCompare(b.anchorName, 'zh-CN')
+    if (nameCmp !== 0) return nameCmp
+    return (a.sessionLabel ?? '').localeCompare(b.sessionLabel ?? '', 'zh-CN')
+  })
 
   const totalLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(
     liveAssignment.allSessions,

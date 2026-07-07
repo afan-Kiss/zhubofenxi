@@ -267,18 +267,28 @@ async function main(): Promise<void> {
   }
 
   if (
-    scheduler.includes('runRollingDataHealthClose') &&
-    scheduler.includes("triggeredBy: 'buyer-ranking-scheduler'")
+    scheduler.includes('function scheduleRollingDataHealthClose') &&
+    scheduler.includes("triggeredBy: 'rolling-health-scheduler'")
   ) {
-    ok('买家排行榜 03:00 任务会触发 runRollingDataHealthClose')
+    ok('独立 cron 03:10 触发 runRollingDataHealthClose')
   } else {
-    fail('scheduler 未触发 runRollingDataHealthClose')
+    fail('scheduler 缺少独立 rolling-health-scheduler cron')
   }
 
-  if (scheduler.includes('finally') && scheduler.includes('runRollingDataHealthClose')) {
-    ok('买家排行榜失败时 rolling close 仍在 finally 尝试执行')
+  const buyerCron = scheduler.slice(
+    scheduler.indexOf('function scheduleBuyerRankingCache'),
+    scheduler.indexOf('function scheduleBuyerRankingCache') + 900,
+  )
+  if (!buyerCron.includes('runRollingDataHealthClose')) {
+    ok('买家排行 cron 不再触发 runRollingDataHealthClose')
   } else {
-    fail('scheduler 未在 finally 中执行 rolling close')
+    fail('买家排行 cron 仍触发 runRollingDataHealthClose')
+  }
+
+  if (scheduler.includes('scheduleRollingDataHealthCloseStartupCatchup')) {
+    ok('启动时滚动数据健康补跑')
+  } else {
+    fail('scheduler 缺少启动补跑')
   }
 
   if (syncMeta.includes('rollingDataHealthClose')) {

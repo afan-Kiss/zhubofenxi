@@ -19,6 +19,7 @@ const GLOBAL = globalThis as {
 }
 
 let buyerRankingCronTask: cron.ScheduledTask | null = null
+let rollingDataHealthCloseCronTask: cron.ScheduledTask | null = null
 let workbenchQueueCronTask: cron.ScheduledTask | null = null
 let schedulerInitialized = false
 let periodicSyncRunning = false
@@ -26,6 +27,10 @@ let periodicSyncRunning = false
 /** 买家全量画像每日更新时间（与经营 API 同步独立，仅本地缓存重建） */
 export const BUYER_RANKING_DAILY_TIME = '03:00'
 export const BUYER_RANKING_TIMEZONE = 'Asia/Shanghai'
+
+/** 滚动 30 天数据健康结账：独立于买家排行 cron */
+export const ROLLING_DATA_HEALTH_CLOSE_DAILY_TIME = '03:10'
+export const ROLLING_DATA_HEALTH_CLOSE_STARTUP_STALE_MS = 30 * 60 * 60 * 1000
 
 export async function getSchedulerStatus(): Promise<{
   enabled: boolean
@@ -199,17 +204,6 @@ function scheduleBuyerRankingCache(): void {
             `定时重建失败：${err instanceof Error ? err.message : String(err)}`,
             err,
           )
-        } finally {
-          try {
-            const { runRollingDataHealthClose } = await import('./rolling-data-health-close.service')
-            await runRollingDataHealthClose({ triggeredBy: 'buyer-ranking-scheduler' })
-          } catch (err) {
-            logError(
-              '滚动30天数据健康结账',
-              `滚动30天数据健康结账失败：${err instanceof Error ? err.message : String(err)}`,
-              err,
-            )
-          }
         }
       })()
     },
@@ -219,6 +213,77 @@ function scheduleBuyerRankingCache(): void {
     '定时任务',
     `买家排行自动重建已开启：每日 ${BUYER_RANKING_DAILY_TIME}（${BUYER_RANKING_TIMEZONE}）`,
   )
+}
+
+function scheduleRollingDataHealthClose(): void {
+  if (rollingDataHealthCloseCronTask) {
+    rollingDataHealthCloseCronTask.stop()
+    rollingDataHealthCloseCronTask = null
+  }
+  const [h, m] = ROLLING_DATA_HEALTH_CLOSE_DAILY_TIME.split(':').map(Number)
+  const expr = `${m} ${h} * * *`
+  rollingDataHealthCloseCronTask = cron.schedule(
+    expr,
+    () => {
+      void (async () => {
+        logInfo('滚动30天数据健康结账', '开始定时结账')
+        try {
+          const { runRollingDataHealthClose } = await import('./rolling-data-health-close.service')
+          await runRollingDataHealthClose({ triggeredBy: 'rolling-health-scheduler' })
+        } catch (err) {
+          logError(
+            '滚动30天数据健康结账',
+            `定时结账失败：${err instanceof Error ? err.message : String(err)}`,
+            err,
+          )
+        }
+      })()
+    },
+    { timezone: BUYER_RANKING_TIMEZONE },
+  )
+  logInfo(
+    '定时任务',
+    `滚动30天数据健康结账已开启：每日 ${ROLLING_DATA_HEALTH_CLOSE_DAILY_TIME}（${BUYER_RANKING_TIMEZONE}）`,
+  )
+}
+
+function scheduleRollingDataHealthCloseStartupCatchup(): void {
+  const delayMs = 20_000 + Math.floor(Math.random() * 10_000)
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const { readLatestRollingDataHealthCloseReport } = await import(
+          './rolling-data-health-close-store.service'
+        )
+        const latest = await readLatestRollingDataHealthCloseReport()
+        const generatedMs = latest?.generatedAt ? Date.parse(latest.generatedAt) : NaN
+        const stale =
+          !latest ||
+          !Number.isFinite(generatedMs) ||
+          Date.now() - generatedMs > ROLLING_DATA_HEALTH_CLOSE_STARTUP_STALE_MS
+        if (!stale) {
+          logInfo(
+            '滚动30天数据健康结账',
+            `启动跳过补跑：latest.json 生成于 ${latest!.generatedAt}`,
+          )
+          return
+        }
+        logInfo(
+          '滚动30天数据健康结账',
+          latest
+            ? `启动补跑：latest.json 已超过 30 小时（${latest.generatedAt}）`
+            : '启动补跑：缺少 latest.json',
+        )
+        const { runRollingDataHealthClose } = await import('./rolling-data-health-close.service')
+        await runRollingDataHealthClose({ triggeredBy: 'startup-catchup' })
+      } catch (err) {
+        logWarn(
+          '滚动30天数据健康结账',
+          `启动补跑失败：${err instanceof Error ? err.message : String(err)}`,
+        )
+      }
+    })()
+  }, delayMs)
 }
 
 function scheduleWorkbenchQueueProcessor(): void {
@@ -253,6 +318,8 @@ export async function initScheduler(): Promise<void> {
   registerApiSyncRescheduleHook(rescheduleFromSettings)
   scheduleBusinessPeriodicSync()
   scheduleBuyerRankingCache()
+  scheduleRollingDataHealthClose()
+  scheduleRollingDataHealthCloseStartupCatchup()
   scheduleWorkbenchQueueProcessor()
   try {
     const { initMonthlyCloseScheduler } = await import('./monthly-close-scheduler.service')

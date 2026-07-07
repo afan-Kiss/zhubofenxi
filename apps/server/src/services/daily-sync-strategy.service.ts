@@ -48,6 +48,26 @@ import { invalidateAndRebuildBusinessBoardCache } from './business-cache.service
 export const BUSINESS_SYNC_SETTLEMENT_SKIPPED_NOTE =
   '经营BI同步已跳过待结算/已结算账单（settlementSkippedForBusinessBI）'
 
+/**
+ * 经营同步任务模式（职责分离）：
+ * - business_core：interval/startup/catchup 默认；仅订单+直播+本地分析+经营缓存
+ * - business_with_quality：在 core 基础上额外跑官方品退同步
+ * - quality_only / after_sale_only / full_maintenance：维护任务专用
+ */
+export type BusinessSyncMode =
+  | 'business_core'
+  | 'business_with_quality'
+  | 'quality_only'
+  | 'after_sale_only'
+  | 'full_maintenance'
+
+export const DEFAULT_BUSINESS_SYNC_MODE: BusinessSyncMode = 'business_core'
+
+/** business_core 允许的外部平台 API：订单列表、直播场次（主播归属需要直播场次） */
+export const BUSINESS_CORE_PLATFORM_APIS = ['syncOrderList', 'syncLiveSessionList'] as const
+
+/** business_core 禁止：官方品退、售后工作台、售后时间范围查询、买家排行重建 */
+
 const RANGE_PRESETS: DateRangePreset[] = ['today', 'thisMonth', 'lastMonth']
 
 type AuditCtx = { requestId?: string; ip?: string; userAgent?: string }
@@ -101,6 +121,7 @@ async function syncDataForPreset(
 export async function runDailyStrategySyncJob(params: {
   triggeredBy?: string | null
   audit?: AuditCtx
+  mode?: BusinessSyncMode
 }): Promise<{ jobId: string; alreadyRunning: boolean }> {
   await clearStaleBusinessSyncJobs()
 
@@ -130,7 +151,7 @@ export async function runDailyStrategySyncJob(params: {
   })
 
   setImmediate(() => {
-    void executeDailyStrategySync(job.id, params.audit)
+    void executeDailyStrategySync(job.id, params.audit, params.mode ?? DEFAULT_BUSINESS_SYNC_MODE)
   })
 
   return { jobId: job.id, alreadyRunning: false }
@@ -139,6 +160,7 @@ export async function runDailyStrategySyncJob(params: {
 export async function executeDailyStrategySync(
   jobId: string,
   audit?: AuditCtx,
+  mode: BusinessSyncMode = DEFAULT_BUSINESS_SYNC_MODE,
 ): Promise<void> {
   const job = await prisma.xhsSyncJob.findUnique({ where: { id: jobId } })
   if (!job || job.status !== 'pending') return
@@ -363,34 +385,44 @@ export async function executeDailyStrategySync(
     }
 
     let qualityCaseCount = 0
-    await progress.setStep('syncing_quality_badcase', 62, '正在同步官方品质反馈')
-    const qualityResult = await (
-      await import('./quality-badcase-auto-sync.service')
-    ).runOfficialQualityBadCaseSyncStep({
-      trigger: 'scheduled',
-      failSoft: true,
-      liveAccountIds: accounts.map((a) => a.id),
-      windowDays: BUSINESS_SYNC_LOOKBACK_DAYS,
-    })
-    await progress.touchHeartbeat('官方品质反馈同步完成，正在更新追踪池')
-    if (qualityResult.ok) {
-      const qualityMeta = await prisma.qualityBadCaseSyncMeta.findUnique({
-        where: { id: 'default' },
-        select: { caseCount: true },
+    const shouldSyncQuality =
+      mode === 'business_with_quality' ||
+      mode === 'quality_only' ||
+      mode === 'full_maintenance'
+    if (shouldSyncQuality) {
+      await progress.setStep('syncing_quality_badcase', 62, '正在同步官方品质反馈')
+      const qualityResult = await (
+        await import('./quality-badcase-auto-sync.service')
+      ).runOfficialQualityBadCaseSyncStep({
+        trigger: 'scheduled',
+        failSoft: true,
+        liveAccountIds: accounts.map((a) => a.id),
+        windowDays: BUSINESS_SYNC_LOOKBACK_DAYS,
       })
-      qualityCaseCount = qualityMeta?.caseCount ?? 0
-      const perAccount = qualityResult.perAccount ?? []
-      for (const row of perAccount) {
-        qualityByAccount.set(row.liveAccountId, row.caseCount)
-      }
-      for (const summary of accountSummaries) {
-        if (summary.liveAccountId && qualityByAccount.has(summary.liveAccountId)) {
-          summary.qualityCases = qualityByAccount.get(summary.liveAccountId) ?? 0
+      await progress.touchHeartbeat('官方品质反馈同步完成，正在更新追踪池')
+      if (qualityResult.ok) {
+        const qualityMeta = await prisma.qualityBadCaseSyncMeta.findUnique({
+          where: { id: 'default' },
+          select: { caseCount: true },
+        })
+        qualityCaseCount = qualityMeta?.caseCount ?? 0
+        const perAccount = qualityResult.perAccount ?? []
+        for (const row of perAccount) {
+          qualityByAccount.set(row.liveAccountId, row.caseCount)
+        }
+        for (const summary of accountSummaries) {
+          if (summary.liveAccountId && qualityByAccount.has(summary.liveAccountId)) {
+            summary.qualityCases = qualityByAccount.get(summary.liveAccountId) ?? 0
+          }
         }
       }
-    }
-    if (!qualityResult.ok && qualityResult.error) {
-      warnings.push(`官方品质反馈：${qualityResult.error}`)
+      if (!qualityResult.ok && qualityResult.error) {
+        warnings.push(`官方品质反馈：${qualityResult.error}`)
+      }
+    } else {
+      warnings.push(
+        `经营同步模式=${mode}：已跳过官方品退平台同步（由独立品退任务或 manual 触发）`,
+      )
     }
 
     await progress.setStep('normalizing_data', 65, '更新未完结订单追踪池')

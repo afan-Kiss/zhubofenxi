@@ -43,6 +43,7 @@
     "verify:good-reviews-page-static": "tsx apps/server/scripts/verify-good-reviews-page-static.ts",
     "verify:good-reviews-ui-real": "tsx apps/server/scripts/verify-good-reviews-ui-real.ts",
     "verify:system-logic-sweep": "tsx apps/server/scripts/verify-system-logic-sweep.ts",
+    "verify:request-boundary": "tsx apps/server/scripts/verify-request-boundary.ts",
     "verify:data-truth-sweep": "tsx apps/server/scripts/verify-data-truth-sweep.ts",
     "verify:data-health-panel": "tsx apps/server/scripts/verify-data-health-panel.ts",
     "verify:rolling-data-health-close": "tsx apps/server/scripts/verify-rolling-data-health-close.ts",

@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma'
 
-import { runDailyStrategySyncJob } from './daily-sync-strategy.service'
+import { runDailyStrategySyncJob, DEFAULT_BUSINESS_SYNC_MODE } from './daily-sync-strategy.service'
 
 import { waitForSyncJobComplete } from './scheduled-sync-queue.service'
 
@@ -986,6 +986,8 @@ export async function runNormalBusinessSyncJob(trigger = 'interval'): Promise<vo
     const { jobId, alreadyRunning } = await runDailyStrategySyncJob({
 
       triggeredBy: `business-sync:${reason}`,
+
+      mode: DEFAULT_BUSINESS_SYNC_MODE,
 
     })
 

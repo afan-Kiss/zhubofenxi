@@ -1,8 +1,6 @@
 import { prisma } from '../lib/prisma'
 import { logInfo, logWarn } from '../utils/server-log'
 import { prepareAnalysisArtifactsFromRaw } from './business-analysis.service'
-import { warmWorkbenchCacheForOrders } from './workbench-cache-warm.service'
-import { processWorkbenchQueueBatch } from './xhs-after-sales-workbench.service'
 import { buildBlacklistedBuyerIds } from './business-metrics.service'
 import {
   buildBuyerRankingSummaryFromViews,
@@ -25,6 +23,10 @@ import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { buildBuyerShopMapFromViews } from './buyer-shop-aggregate.service'
 
 const CACHE_ID = 'default'
+
+/** 买家排行状态 API 固定提示：只读本地缓存，不主动请求平台售后接口 */
+export const BUYER_RANKING_LOCAL_CACHE_ONLY_HINT =
+  '买家画像只读取本地缓存，不会主动请求平台售后接口。'
 
 /** building 超过此时间自动判定 stale 并释放锁 */
 export const BUYER_RANKING_BUILDING_STALE_MS = 30 * 60 * 1000
@@ -238,8 +240,8 @@ export function buildBuyerProfileStatusForApi(
       lastError: null,
       isStaleRunning: false,
       message: hasStaleCache
-        ? '买家画像正在更新，当前展示最近一次画像结果。'
-        : '买家画像正在更新，请稍候…',
+        ? `买家画像正在更新，当前展示最近一次画像结果。${BUYER_RANKING_LOCAL_CACHE_ONLY_HINT}`
+        : `买家画像正在更新，请稍候… ${BUYER_RANKING_LOCAL_CACHE_ONLY_HINT}`,
     }
   }
 
@@ -263,8 +265,8 @@ export function buildBuyerProfileStatusForApi(
       cacheCompatible: false,
       rebuildScheduled: false,
       message: failed
-        ? '买家画像更新失败，请检查订单和售后数据是否已同步，或稍后重试。'
-        : '',
+        ? `买家画像更新失败，请检查订单和售后数据是否已同步，或稍后重试。${BUYER_RANKING_LOCAL_CACHE_ONLY_HINT}`
+        : BUYER_RANKING_LOCAL_CACHE_ONLY_HINT,
     }
   }
 
@@ -288,7 +290,7 @@ export function buildBuyerProfileStatusForApi(
       cacheCompatible: false,
       hasStaleCache: true,
       isStaleRunning: false,
-      message: '买家画像正在更新，当前展示最近一次画像结果。',
+      message: `买家画像正在更新，当前展示最近一次画像结果。${BUYER_RANKING_LOCAL_CACHE_ONLY_HINT}`,
     }
   }
 
@@ -301,7 +303,7 @@ export function buildBuyerProfileStatusForApi(
     lastError: null,
     runningSeconds: null,
     isStaleRunning: false,
-    message: '',
+    message: BUYER_RANKING_LOCAL_CACHE_ONLY_HINT,
   }
 }
 
@@ -388,12 +390,6 @@ async function executeRebuildBuyerRankingCache(
     throw new Error('本地无订单数据，请先同步订单后再更新买家排行')
   }
 
-  const warmResult = await warmWorkbenchCacheForOrders(bundle.orders, {
-    maxImmediateSync: 0,
-  })
-  if (warmResult.pending.length > 0) {
-    await processWorkbenchQueueBatch(Math.min(200, warmResult.pending.length))
-  }
   const artifacts = prepareAnalysisArtifactsFromRaw(bundle)
   const rawByMatch = new Map<string, Record<string, unknown>>()
   for (const o of artifacts?.dedupe.uniqueOrders ?? []) {

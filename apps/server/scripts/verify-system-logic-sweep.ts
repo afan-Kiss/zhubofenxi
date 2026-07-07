@@ -187,6 +187,70 @@ function main(): void {
   if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
   else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
 
+  console.log('\n=== 请求职责边界（静态） ===')
+  const buyerRanking = read('server/src/services/buyer-ranking-cache.service.ts')
+  const scheduler = read('server/src/services/scheduler.service.ts')
+  const dailySync = read('server/src/services/daily-sync-strategy.service.ts')
+  const rawAnalysis = read('server/src/services/xhs-api-sync/xhs-analysis-from-raw.service.ts')
+
+  const forbiddenInGet = [
+    'requestXhsJsonWithSyncAudit',
+    'enqueueXhsRequest',
+    'syncOrderList',
+    'fetchAfterSalesWorkbenchByOrderNo',
+    'processWorkbenchQueueBatch',
+    'runOfficialQualityBadCaseSyncStep',
+  ]
+  for (const p of forbiddenInGet) {
+    if (!boardLocal.includes(p)) ok(`board-local-query 无 ${p}`)
+    else fail(`board-local-query 含 ${p}`)
+  }
+
+  for (const p of [
+    'processWorkbenchQueueBatch',
+    'warmWorkbenchCacheForOrders',
+    'fetchAfterSalesWorkbenchByOrderNo',
+    'requestXhsJsonWithSyncAudit',
+  ]) {
+    if (!buyerRanking.includes(p)) ok(`buyer-ranking-cache 无 ${p}`)
+    else fail(`buyer-ranking-cache 含 ${p}`)
+  }
+
+  if (
+    !rawAnalysis.includes('syncAfterSalesTimeSearchForRange') &&
+    !rawAnalysis.includes('fetchAfterSalesWorkbenchByOrderNo')
+  ) {
+    ok('xhs-analysis-from-raw 读路径无 sync/fetch 售后平台 API')
+  } else {
+    fail('xhs-analysis-from-raw 读路径仍含售后平台 API')
+  }
+
+  const buyerCron = scheduler.slice(
+    scheduler.indexOf('function scheduleBuyerRankingCache'),
+    scheduler.indexOf('function scheduleBuyerRankingCache') + 900,
+  )
+  if (!buyerCron.includes('runRollingDataHealthClose')) {
+    ok('买家排行 cron 未挂 runRollingDataHealthClose')
+  } else {
+    fail('买家排行 cron 仍挂 runRollingDataHealthClose')
+  }
+  if (scheduler.includes('scheduleRollingDataHealthClose')) {
+    ok('scheduler 含独立 scheduleRollingDataHealthClose')
+  } else {
+    fail('scheduler 缺少 scheduleRollingDataHealthClose')
+  }
+
+  if (dailySync.includes("DEFAULT_BUSINESS_SYNC_MODE: BusinessSyncMode = 'business_core'")) {
+    ok('daily-sync 默认 business_core')
+  } else {
+    fail('daily-sync 默认模式非 business_core')
+  }
+  if (dailySync.includes('shouldSyncQuality') && !dailySync.includes('processWorkbenchQueueBatch')) {
+    ok('daily-sync 品退受 mode 控制且无工作台 queue')
+  } else {
+    fail('daily-sync 职责边界未清晰')
+  }
+
   console.log('\n=== 结果 ===')
   if (issues.length > 0) {
     console.log(`FAIL (${issues.length})`)

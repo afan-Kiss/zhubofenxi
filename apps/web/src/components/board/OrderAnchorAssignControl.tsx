@@ -63,7 +63,7 @@ export const OrderAnchorAssignControl: React.FC<Props> = ({
         value={selected}
         disabled={busy}
         onChange={(e) => setSelected(e.target.value)}
-        className="max-w-[120px] rounded-lg border border-rose-200 bg-white px-2 py-1 text-[11px] text-slate-700 disabled:opacity-50"
+        className="max-w-[140px] rounded-lg border border-rose-200 bg-white px-2 py-1 text-[11px] text-slate-700 disabled:opacity-50"
         aria-label={`为订单 ${orderNo} 指定主播`}
       >
         {mergedOptions.map((a) => (

@@ -1,10 +1,11 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { prisma } from '../lib/prisma'
 import { findAnchorByName } from './anchor-rules.service'
-import { getAnchorConfigSync } from './anchor.service'
+import { getAnchorConfigSync, refreshAnchorConfigCache } from './anchor.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
 import { invalidateAndRebuildBusinessBoardCache } from './business-cache.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
+import { ANCHOR_SESSION_DISPLAY_FROM_0613 } from './anchor-performance-attribution.service'
 import { logInfo } from '../utils/server-log'
 
 export interface ManualAnchorOverrideEntry {
@@ -52,9 +53,56 @@ export async function loadManualAnchorOverrideMap(
 }
 
 function resolveAnchorIdByName(anchorName: string): string {
+  return resolveManualAssignAnchorIdentity(anchorName).anchorId
+}
+
+export function resolveManualAssignAnchorIdentity(anchorName: string): {
+  anchorId: string
+  anchorName: string
+} {
+  const name = anchorName.trim()
+  if (!name || name === '未归属') throw new Error('请选择有效主播')
   const config = getAnchorConfigSync()
-  const found = findAnchorByName(config, anchorName)
-  return found?.id ?? `extra-${anchorName}`
+  const found = findAnchorByName(config, name)
+  if (found) return { anchorId: found.id, anchorName: found.name }
+  if (Object.prototype.hasOwnProperty.call(ANCHOR_SESSION_DISPLAY_FROM_0613, name)) {
+    return { anchorId: `extra-${name}`, anchorName: name }
+  }
+  throw new Error(`主播「${name}」不存在`)
+}
+
+/** 抽屉手动指定：固定场次主播 + 后台启用主播（与业绩页一致） */
+export async function listOrderAnchorAssignOptions(): Promise<
+  Array<{ id: string; name: string }>
+> {
+  await refreshAnchorConfigCache()
+  const config = getAnchorConfigSync()
+  const fixedNames = Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613)
+  const byName = new Map<string, { id: string; name: string }>()
+
+  for (const name of fixedNames) {
+    const found = findAnchorByName(config, name)
+    byName.set(name, { id: found?.id ?? `extra-${name}`, name })
+  }
+  for (const anchor of config.anchors) {
+    if (!anchor.enabled || !anchor.name.trim()) continue
+    byName.set(anchor.name, { id: anchor.id, name: anchor.name })
+  }
+
+  const result: Array<{ id: string; name: string }> = []
+  const seen = new Set<string>()
+  for (const name of fixedNames) {
+    const hit = byName.get(name)
+    if (!hit || seen.has(name)) continue
+    seen.add(name)
+    result.push(hit)
+  }
+  for (const anchor of config.anchors) {
+    if (!anchor.enabled || seen.has(anchor.name)) continue
+    seen.add(anchor.name)
+    result.push({ id: anchor.id, name: anchor.name })
+  }
+  return result
 }
 
 export function resolveManualAnchorOverrideForView(
@@ -92,21 +140,17 @@ export async function assignOrderAnchorManualOverride(params: {
   if (!orderKey) throw new Error('请提供订单号')
   if (!anchorName || anchorName === '未归属') throw new Error('请选择有效主播')
 
-  const config = getAnchorConfigSync()
-  const found = findAnchorByName(config, anchorName)
-  if (!found) throw new Error(`主播「${anchorName}」不存在`)
-
-  const anchorId = found.id
+  const { anchorId, anchorName: resolvedName } = resolveManualAssignAnchorIdentity(anchorName)
   await prisma.orderAnchorManualOverride.upsert({
     where: { orderKey },
     create: {
       orderKey,
-      anchorName,
+      anchorName: resolvedName,
       anchorId,
       assignedBy: params.assignedBy ?? null,
     },
     update: {
-      anchorName,
+      anchorName: resolvedName,
       anchorId,
       assignedBy: params.assignedBy ?? null,
     },
@@ -114,10 +158,10 @@ export async function assignOrderAnchorManualOverride(params: {
 
   clearManualAnchorOverrideCache()
   clearScheduleAttributionCache()
-  logInfo('订单归属', `手动指定 ${orderKey} → ${anchorName}`)
+  logInfo('订单归属', `手动指定 ${orderKey} → ${resolvedName}`)
   await invalidateAndRebuildBusinessBoardCache(`order-anchor-manual:${orderKey}`)
 
-  return { anchorId, anchorName }
+  return { anchorId, anchorName: resolvedName }
 }
 
 export async function removeOrderAnchorManualOverride(orderKey: string): Promise<void> {

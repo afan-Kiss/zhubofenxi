@@ -27,7 +27,7 @@ export function useManualOrderAnchorAssign(params: {
     void (async () => {
       try {
         const res = await apiRequest<{ anchors: Array<{ id: string; name: string }> }>(
-          '/api/anchors/options',
+          '/api/board/order-anchor-assign-options',
           { signal: controller.signal },
         )
         if (controller.signal.aborted) return

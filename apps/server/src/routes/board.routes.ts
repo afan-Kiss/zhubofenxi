@@ -239,6 +239,17 @@ boardRouter.post('/anchor-pocket-summary/recalculate', async (req, res) => {
   }
 })
 
+boardRouter.get('/order-anchor-assign-options', async (_req, res) => {
+  try {
+    const { listOrderAnchorAssignOptions } = await import(
+      '../services/order-anchor-manual-override.service'
+    )
+    sendOk(res, { anchors: await listOrderAnchorAssignOptions() })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取主播选项失败', 500)
+  }
+})
+
 boardRouter.post('/order-anchor-manual-assign', async (req, res) => {
   try {
     const orderNo = String(req.body?.orderNo ?? req.body?.orderKey ?? '').trim()

@@ -3,7 +3,7 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { mapViewToBoardDrillRow, type BoardDrillOrderRow } from './order-row-mapper.service'
 import { normalizeBoardPreset } from './board-metrics.service'
 import { formatCount, formatRate, formatYuan } from '../utils/money'
-import { dedupeViewsByMetricOrderNo } from './calc-refund-rate.service'
+import { dedupeViewsByMetricOrderNo, dedupeRefundMetricViewsByOrderNoMaxRefund } from './calc-refund-rate.service'
 import {
   calculateBusinessMetrics,
   pickMetricValue,
@@ -314,7 +314,15 @@ export async function buildBoardMetricDetail(params: {
     params.metric === 'qualityReturnCount' || params.metric === 'qualityReturnRate'
   let sourceViews = matchMetricViews(displayViews, params.metric, params.tab)
   if (needsMetricOrderDedupe(params.metric)) {
-    sourceViews = dedupeViewsByMetricOrderNo(sourceViews)
+    if (
+      params.metric === 'returnAmount' ||
+      params.metric === 'returnCount' ||
+      params.metric === 'returnRate'
+    ) {
+      sourceViews = dedupeRefundMetricViewsByOrderNoMaxRefund(sourceViews)
+    } else {
+      sourceViews = dedupeViewsByMetricOrderNo(sourceViews)
+    }
   }
   const signedTabCount = countDedupedSignedViews(viewsForTotals)
   const unsignedTabCount = countDedupedUnsignedViews(viewsForTotals)

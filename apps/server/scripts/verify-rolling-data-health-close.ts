@@ -367,6 +367,23 @@ async function main(): Promise<void> {
     fail('isPositiveAfterSaleText 未识别「售后完成未退款」')
   }
 
+  console.log('\n=== 组合无售后文案运行时断言 ===')
+  for (const text of [
+    '无售后 无退款',
+    '售后：无 退款状态：无',
+    '售后状态：无 退货状态：无',
+    '暂无售后 / 无退款',
+  ]) {
+    if (isNoAfterSaleText(text)) ok(`组合负例 isNoAfterSaleText「${text}」`)
+    else fail(`组合负例 isNoAfterSaleText 未识别「${text}」`)
+    if (!isPositiveAfterSaleText(text)) ok(`组合负例 isPositiveAfterSaleText false「${text}」`)
+    else fail(`组合负例 isPositiveAfterSaleText 误判「${text}」`)
+  }
+  for (const text of ['无售后 退款成功', '售后：无 退货退款', '售后完成未退款']) {
+    if (isPositiveAfterSaleText(text)) ok(`组合正例 isPositiveAfterSaleText「${text}」`)
+    else fail(`组合正例 isPositiveAfterSaleText 未识别「${text}」`)
+  }
+
   console.log('\n=== 运行时冒烟 ===')
   try {
     const report = await buildRollingDataHealthCloseReport({ triggeredBy: 'verify-script' })

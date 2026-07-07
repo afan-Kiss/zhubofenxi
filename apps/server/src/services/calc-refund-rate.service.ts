@@ -1,5 +1,6 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { resolveDisplayOrderNoForView } from './order-display-no.service'
+import { resolveViewRefundAmountCent } from './order-refund-metrics.service'
 
 export interface OrderRateResult {
   numeratorOrderCount: number
@@ -38,6 +39,34 @@ export function dedupeViewsByMetricOrderNo(views: AnalyzedOrderView[]): Analyzed
     if (seen.has(no)) continue
     seen.add(no)
     out.push(v)
+  }
+  return out
+}
+
+/** 退款类抽屉按 P 单去重，保留 resolveViewRefundAmountCent 最大的视图 */
+export function dedupeRefundMetricViewsByOrderNoMaxRefund(
+  views: AnalyzedOrderView[],
+): AnalyzedOrderView[] {
+  const bestByOrderNo = new Map<string, AnalyzedOrderView>()
+  for (const v of views) {
+    const no = resolveMetricOrderNo(v)
+    if (!no) continue
+    const prev = bestByOrderNo.get(no)
+    if (!prev || resolveViewRefundAmountCent(v) > resolveViewRefundAmountCent(prev)) {
+      bestByOrderNo.set(no, v)
+    }
+  }
+  const seen = new Set<string>()
+  const out: AnalyzedOrderView[] = []
+  for (const v of views) {
+    const no = resolveMetricOrderNo(v)
+    if (!no) {
+      out.push(v)
+      continue
+    }
+    if (seen.has(no)) continue
+    seen.add(no)
+    out.push(bestByOrderNo.get(no)!)
   }
   return out
 }

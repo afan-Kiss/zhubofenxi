@@ -197,6 +197,34 @@ async function checkOverviewSignedDrawers(): Promise<void> {
     startDate: START_DATE,
     endDate: END_DATE,
   })
+  const cardReturnAmount = num(summary.returnAmount ?? summary.refundAmount ?? summary.productRefundAmount)
+  const returnRowsSum = returnAmountBundle.rows.reduce(
+    (sum, row) => sum + num(row.productRefundAmount ?? row.refundAmount ?? 0),
+    0,
+  )
+  if (moneyClose(returnRowsSum, returnAmountBundle.summary.valueRaw)) {
+    ok(`returnAmount 抽屉 rows 合计 ${returnRowsSum.toFixed(2)} === valueRaw`)
+  } else {
+    fail(
+      `returnAmount 抽屉 rows 合计 ${returnRowsSum.toFixed(2)} !== valueRaw ${returnAmountBundle.summary.valueRaw}`,
+    )
+  }
+  if (moneyClose(returnAmountBundle.summary.valueRaw, cardReturnAmount)) {
+    ok(`returnAmount 卡片 ${cardReturnAmount} === 抽屉 valueRaw`)
+  } else if (cardReturnAmount > 0 || returnAmountBundle.summary.valueRaw > 0) {
+    fail(
+      `returnAmount 卡片 ${cardReturnAmount} !== 抽屉 valueRaw ${returnAmountBundle.summary.valueRaw}`,
+    )
+  }
+  if (returnAmountBundle.summary.matchedOrders === cardReturnCount) {
+    ok(
+      `returnAmount matchedOrders ${returnAmountBundle.summary.matchedOrders} === 卡片 returnCount/refundOrderCount ${cardReturnCount}`,
+    )
+  } else {
+    fail(
+      `returnAmount matchedOrders ${returnAmountBundle.summary.matchedOrders} !== 卡片 returnCount/refundOrderCount ${cardReturnCount}`,
+    )
+  }
   const dupesReturnAmount = countDuplicateOrderNos(returnAmountBundle.rows)
   if (dupesReturnAmount.length === 0) ok('returnAmount 抽屉无重复 P 单')
   else fail(`returnAmount 抽屉重复 P 单: ${dupesReturnAmount.slice(0, 5).join(', ')}`)
@@ -667,6 +695,7 @@ function checkAfterSaleAndHealthTailStatic(): void {
   const operationsAfterSale = readRepo('server/src/services/operations-after-sale-order.util.ts')
   const validRevenue = readRepo('server/src/services/valid-revenue-order.service.ts')
   const metricDetail = readRepo('server/src/services/board-metric-detail.service.ts')
+  const calcRefundRate = readRepo('server/src/services/calc-refund-rate.service.ts')
   const orderMetricSets = readRepo('server/src/services/order-metric-sets.service.ts')
   const rollingStore = readRepo('server/src/services/rolling-data-health-close-store.service.ts')
   const rollingService = readRepo('server/src/services/rolling-data-health-close.service.ts')
@@ -722,6 +751,32 @@ function checkAfterSaleAndHealthTailStatic(): void {
     }
   } else {
     fail('board-metric-detail 缺少退款类去重配置')
+  }
+
+  if (metricDetail.includes('dedupeRefundMetricViewsByOrderNoMaxRefund')) {
+    ok('board-metric-detail 含 dedupeRefundMetricViewsByOrderNoMaxRefund')
+  } else {
+    fail('board-metric-detail 未使用 dedupeRefundMetricViewsByOrderNoMaxRefund')
+  }
+
+  const refundDedupeBlock = metricDetail.slice(
+    metricDetail.indexOf("params.metric === 'returnAmount'"),
+    metricDetail.indexOf("params.metric === 'returnAmount'") + 600,
+  )
+  if (
+    refundDedupeBlock.includes('dedupeRefundMetricViewsByOrderNoMaxRefund') &&
+    refundDedupeBlock.includes("params.metric === 'returnCount'") &&
+    refundDedupeBlock.includes("params.metric === 'returnRate'")
+  ) {
+    ok('returnAmount / returnCount / returnRate 走 max-refund 去重')
+  } else {
+    fail('退款类指标未走 dedupeRefundMetricViewsByOrderNoMaxRefund')
+  }
+
+  if (calcRefundRate.includes('dedupeRefundMetricViewsByOrderNoMaxRefund')) {
+    ok('calc-refund-rate 导出 dedupeRefundMetricViewsByOrderNoMaxRefund')
+  } else {
+    fail('calc-refund-rate 缺少 dedupeRefundMetricViewsByOrderNoMaxRefund')
   }
 
   if (
@@ -820,6 +875,36 @@ function checkNoAfterSaleTextRuntime(): void {
     ok('isPositiveAfterSaleText「售后完成未退款」')
   } else {
     fail('isPositiveAfterSaleText 未识别「售后完成未退款」')
+  }
+
+  console.log('\n=== 0b2. 组合无售后文案运行时断言 ===')
+  const combinedNegatives = [
+    '无售后 无退款',
+    '售后：无 退款状态：无',
+    '售后状态：无 退货状态：无',
+    '暂无售后 / 无退款',
+  ]
+  for (const text of combinedNegatives) {
+    if (isNoAfterSaleText(text)) ok(`组合负例「${text}」不算售后`)
+    else fail(`组合负例「${text}」未被识别为无售后`)
+    if (!isPositiveAfterSaleText(text)) ok(`组合负例「${text}」isPositive=false`)
+    else fail(`组合负例「${text}」被误判为正向售后`)
+    const view = { afterSaleStatusText: text } as AnalyzedOrderView
+    if (!viewHasAfterSaleStatusSignal(view)) ok(`组合负例「${text}」无售后信号`)
+    else fail(`组合负例「${text}」被误判为售后信号`)
+  }
+
+  const combinedPositives = [
+    { text: '无售后 退款成功', label: '无售后+退款成功' },
+    { text: '售后：无 退货退款', label: '售后无+退货退款' },
+    { text: '售后完成未退款', label: '售后完成未退款' },
+  ]
+  for (const { text, label } of combinedPositives) {
+    if (isPositiveAfterSaleText(text)) ok(`组合正例「${label}」算售后`)
+    else fail(`组合正例「${label}」未识别为正向售后`)
+    const view = { afterSaleStatusText: text } as AnalyzedOrderView
+    if (viewHasAfterSaleStatusSignal(view)) ok(`组合正例「${label}」有售后信号`)
+    else fail(`组合正例「${label}」未识别为售后信号`)
   }
 }
 

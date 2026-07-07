@@ -1089,14 +1089,36 @@ function checkActualRefundAfterSaleRuntime(): void {
   console.log('\n=== 0e. 实际退款售后 vs 售后信号 ===')
   if (isPositiveAfterSaleText('售后关闭')) ok('isPositiveAfterSaleText「售后关闭」仍为售后信号')
   else fail('isPositiveAfterSaleText 未识别「售后关闭」')
+  if (isPositiveAfterSaleText('售后中')) ok('isPositiveAfterSaleText「售后中」仍为售后信号')
+  else fail('isPositiveAfterSaleText 未识别「售后中」')
+  if (isPositiveAfterSaleText('售后申请未处理')) ok('isPositiveAfterSaleText「售后申请未处理」仍为售后信号')
+  else fail('isPositiveAfterSaleText 未识别「售后申请未处理」')
   if (!isActualRefundAfterSaleText('售后关闭')) ok('isActualRefundAfterSaleText「售后关闭」= false')
   else fail('isActualRefundAfterSaleText 误伤「售后关闭」')
   if (!isActualRefundAfterSaleText('关闭无退款')) ok('isActualRefundAfterSaleText「关闭无退款」= false')
   else fail('isActualRefundAfterSaleText 误伤「关闭无退款」')
-  if (isActualRefundAfterSaleText('退款成功')) ok('isActualRefundAfterSaleText「退款成功」= true')
-  else fail('isActualRefundAfterSaleText 未识别「退款成功」')
-  if (isActualRefundAfterSaleText('退货退款')) ok('isActualRefundAfterSaleText「退货退款」= true')
-  else fail('isActualRefundAfterSaleText 未识别「退货退款」')
+  const pendingActualNegatives = [
+    '售后申请',
+    '售后中',
+    '售后处理中',
+    '售后申请未处理',
+    '售后处理中未退款',
+  ]
+  for (const text of pendingActualNegatives) {
+    if (!isActualRefundAfterSaleText(text)) ok(`isActualRefundAfterSaleText「${text}」= false`)
+    else fail(`isActualRefundAfterSaleText 误伤进行中/申请类「${text}」`)
+  }
+  const actualPositives = [
+    '退款成功',
+    '退款中',
+    '退货退款',
+    '仅退款',
+    '售后完成',
+  ]
+  for (const text of actualPositives) {
+    if (isActualRefundAfterSaleText(text)) ok(`isActualRefundAfterSaleText「${text}」= true`)
+    else fail(`isActualRefundAfterSaleText 未识别「${text}」`)
+  }
   if (!isActualAfterSaleOrder(mockAfterSaleView('售后关闭'))) {
     ok('运营「售后关闭」不算实际退款售后')
   } else {
@@ -1106,6 +1128,13 @@ function checkActualRefundAfterSaleRuntime(): void {
     ok('运营「关闭无退款」不算实际退款售后')
   } else {
     fail('运营「关闭无退款」被误判为实际退款售后')
+  }
+  for (const text of pendingActualNegatives) {
+    if (!isActualAfterSaleOrder(mockAfterSaleView(text))) {
+      ok(`运营「${text}」不算实际退款售后`)
+    } else {
+      fail(`运营「${text}」被误判为实际退款售后`)
+    }
   }
   if (isActualAfterSaleOrder(mockAfterSaleView('退款成功'))) {
     ok('运营「退款成功」仍算实际退款售后')
@@ -1132,12 +1161,24 @@ function mockValidRevenueView(afterSaleStatusText: string): AnalyzedOrderView {
 
 function checkOperationsAfterSaleRuntime(): void {
   console.log('\n=== 0c. 运营报表售后运行时断言 ===')
-  const negatives = ['暂无售后', '未申请售后', '未发起售后', '售后状态：无', '售后关闭', '关闭无退款']
+  const negatives = [
+    '暂无售后',
+    '未申请售后',
+    '未发起售后',
+    '售后状态：无',
+    '售后关闭',
+    '关闭无退款',
+    '售后申请',
+    '售后中',
+    '售后处理中',
+    '售后申请未处理',
+    '售后处理中未退款',
+  ]
   for (const text of negatives) {
     if (!isActualAfterSaleOrder(mockAfterSaleView(text))) ok(`运营负例「${text}」不算售后`)
     else fail(`运营负例「${text}」被误判为售后`)
   }
-  const positives = ['售后完成未退款', '售后申请未处理', '退款成功', '退货退款']
+  const positives = ['售后完成未退款', '退款成功', '退货退款']
   for (const text of positives) {
     if (isActualAfterSaleOrder(mockAfterSaleView(text))) ok(`运营正例「${text}」算售后`)
     else fail(`运营正例「${text}」未识别为售后`)

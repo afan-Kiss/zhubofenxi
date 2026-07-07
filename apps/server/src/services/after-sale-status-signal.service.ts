@@ -51,7 +51,7 @@ const ACTUAL_REFUND_EXCLUDE_SUBSTRINGS = [
   '关闭无退款',
 ] as const
 
-/** 真实退款/退货/售后完成类关键词（不含宽泛「售后」二字） */
+/** 真实退款/退货/售后完成类关键词（不含进行中/申请类） */
 const ACTUAL_REFUND_KEYWORDS = [
   '退款成功',
   '退款中',
@@ -63,9 +63,6 @@ const ACTUAL_REFUND_KEYWORDS = [
   '已退款',
   '售后完成',
   '售后成功',
-  '售后申请',
-  '售后处理中',
-  '售后中',
   '平台已退款',
   '商家已退款',
 ] as const

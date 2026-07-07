@@ -1,6 +1,6 @@
 import { prisma } from '../lib/prisma'
 
-export type OpsReviewReportType = 'daily' | 'weekly'
+export type OpsReviewReportType = 'daily' | 'weekly' | 'monthly'
 
 export interface OpsReviewNotePayload {
   reportDate: string

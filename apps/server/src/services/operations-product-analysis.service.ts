@@ -22,6 +22,8 @@ import {
 import { isValidRevenueOrder, dedupeValidRevenueViewsByOrderNoBestValue } from './valid-revenue-order.service'
 import { viewCountsAsPaidOrder } from './business-metrics.service'
 import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
+import { centToYuan } from '../utils/money'
+import { roundMoneyYuan } from './daily-report-order.util'
 
 export interface OperationsProductRow {
   productKey: string
@@ -175,7 +177,7 @@ export async function buildOperationsProductAnalysis(
       soldCount: bucket.soldCount,
       soldOrderCount,
       paidOrderCount,
-      soldAmountYuan: Math.round(bucket.soldAmountCent / 100),
+      soldAmountYuan: roundMoneyYuan(centToYuan(bucket.soldAmountCent)),
       buyerCount: bucket.buyers.size,
       returnOrderCount,
       returnRate,

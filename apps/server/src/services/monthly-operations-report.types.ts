@@ -5,12 +5,15 @@ import type {
 } from './operations-business-insight-action.service'
 import type { RankingListPayload, AnchorRankItem, ProductRankListItem, PriceBandRankItem, AfterSalesRankItem } from './operations-rankings.types'
 
+export type MonthlyCompareMode = 'full_month' | 'same_day_count'
+
 export interface MonthlyOperationsReportRange {
   month: string
   startDate: string
   endDate: string
   prevStartDate?: string
   prevEndDate?: string
+  compareMode?: MonthlyCompareMode
 }
 
 export interface MonthlyOperationsReportSummary {

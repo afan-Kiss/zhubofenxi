@@ -9,6 +9,7 @@ import type { UserRole } from '../types/roles'
 import {
   endOfMonthKeyShanghai,
   formatDateKeyShanghai,
+  parseDateKeyShanghai,
   startOfMonthKeyShanghai,
 } from '../utils/business-timezone'
 import { eachDayInShanghaiRange } from '../utils/each-day-shanghai'
@@ -34,6 +35,7 @@ import { mergeAnchorRowsForRange } from './operations-anchor-ranking.service'
 import { getOpsReviewNote } from './ops-review-note.service'
 import { prisma } from '../lib/prisma'
 import type {
+  MonthlyCompareMode,
   MonthlyCompareWithPreviousMonth,
   MonthlyDailyTrendRow,
   MonthlyNextMonthAction,
@@ -55,6 +57,7 @@ import { buildPriceBandsForDateRange } from './operations-price-band.service'
 const MONTH_KEY_RE = /^\d{4}-\d{2}$/
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
 const MAX_RANGE_DAYS = 31
+const SAME_DAY_COMPARE_HINT = '本月还没结束，先按同天数和上月比较，月底后再看整月。'
 
 export class MonthlyOperationsReportValidationError extends Error {
   constructor(message: string) {
@@ -83,6 +86,36 @@ function parseMonthKey(month: string): { year: number; month: number } {
 function previousMonthKey(month: string): { year: number; month: number } {
   const { year, month: m } = parseMonthKey(month)
   return m === 1 ? { year: year - 1, month: 12 } : { year, month: m - 1 }
+}
+
+/** 月报环比：本月未结束时按同天数对比上月，完整历史月则整月对比 */
+export function resolveMonthlyCompareRange(params: {
+  month: string
+  rangeEndDate: string
+  resolvedEndDate: string
+  todayKey: string
+}): {
+  prevStartDate: string
+  prevEndDate: string
+  compareMode: MonthlyCompareMode
+} {
+  const prev = previousMonthKey(params.month)
+  const prevStartDate = startOfMonthKeyShanghai(prev.year, prev.month)
+  const monthNotFinished = params.resolvedEndDate > params.todayKey
+  if (monthNotFinished) {
+    const { day } = parseDateKeyShanghai(params.rangeEndDate)
+    const prevMonthLastDay = parseDateKeyShanghai(
+      endOfMonthKeyShanghai(prev.year, prev.month),
+    ).day
+    const targetDay = Math.min(day, prevMonthLastDay)
+    const prevEndDate = `${prev.year}-${String(prev.month).padStart(2, '0')}-${String(targetDay).padStart(2, '0')}`
+    return { prevStartDate, prevEndDate, compareMode: 'same_day_count' }
+  }
+  return {
+    prevStartDate,
+    prevEndDate: endOfMonthKeyShanghai(prev.year, prev.month),
+    compareMode: 'full_month',
+  }
 }
 
 export function resolveMonthlyReportRange(params: {
@@ -178,17 +211,15 @@ function buildMonthlySummary(
 }
 
 async function buildPreviousMonthSummary(params: {
-  month: string
+  prevStartDate: string
+  prevEndDate: string
   preset?: string
   role?: UserRole
   username?: string
 }): Promise<MonthlyOperationsReportSummary | null> {
-  const prev = previousMonthKey(params.month)
-  const prevStart = startOfMonthKeyShanghai(prev.year, prev.month)
-  const prevEnd = endOfMonthKeyShanghai(prev.year, prev.month)
   const prevSnapshots = await loadDailySnapshots({
-    startDate: prevStart,
-    endDate: prevEnd,
+    startDate: params.prevStartDate,
+    endDate: params.prevEndDate,
     preset: params.preset,
     role: params.role,
     username: params.username,
@@ -197,8 +228,8 @@ async function buildPreviousMonthSummary(params: {
     return null
   }
   const prevProducts = await buildProductsForDateRange({
-    startDate: prevStart,
-    endDate: prevEnd,
+    startDate: params.prevStartDate,
+    endDate: params.prevEndDate,
     role: params.role,
     username: params.username,
   })
@@ -254,6 +285,7 @@ function buildPlainLanguageSummary(params: {
   month: string
   summary: MonthlyOperationsReportSummary
   compare: MonthlyCompareWithPreviousMonth
+  compareMode: MonthlyCompareMode
 }): MonthlyOperationsReportPayload['plainLanguageSummary'] {
   const items: MonthlyPlainLanguageItem[] = [
     {
@@ -281,6 +313,14 @@ function buildPlainLanguageSummary(params: {
       level: params.summary.dealConversionRate == null ? 'warning' : 'info',
     },
   ]
+
+  if (params.compareMode === 'same_day_count') {
+    items.push({
+      label: '环比说明',
+      text: SAME_DAY_COMPARE_HINT,
+      level: 'info',
+    })
+  }
 
   if (params.compare.warnings.length > 0) {
     items.push({
@@ -373,9 +413,12 @@ export async function getMonthlyOperationsReport(params: {
     throw new MonthlyOperationsReportValidationError('所选月份尚无经营数据')
   }
   const range = { ...resolved, endDate }
-  const prev = previousMonthKey(range.month)
-  const prevStartDate = startOfMonthKeyShanghai(prev.year, prev.month)
-  const prevEndDate = endOfMonthKeyShanghai(prev.year, prev.month)
+  const compareRange = resolveMonthlyCompareRange({
+    month: range.month,
+    rangeEndDate: range.endDate,
+    resolvedEndDate: resolved.endDate,
+    todayKey,
+  })
 
   const snapshots = await loadDailySnapshots({
     startDate: range.startDate,
@@ -393,7 +436,8 @@ export async function getMonthlyOperationsReport(params: {
   })
   const summary = buildMonthlySummary(snapshots, products)
   const previousSummary = await buildPreviousMonthSummary({
-    month: range.month,
+    prevStartDate: compareRange.prevStartDate,
+    prevEndDate: compareRange.prevEndDate,
     preset: params.preset,
     role: params.role,
     username: params.username,
@@ -424,7 +468,7 @@ export async function getMonthlyOperationsReport(params: {
   const dimensions = await prisma.productDimension.findMany()
   const reviewNote = await getOpsReviewNote({
     reportDate: range.startDate,
-    reportType: 'weekly',
+    reportType: 'monthly',
   })
 
   const dataQualityWarnings: string[] = [...(rankingsPayload.dataQuality?.warnings ?? [])]
@@ -510,6 +554,7 @@ export async function getMonthlyOperationsReport(params: {
     month: range.month,
     summary,
     compare: compareWithPreviousMonth,
+    compareMode: compareRange.compareMode,
   })
 
   const riskReminders = buildRiskReminders({
@@ -529,14 +574,18 @@ export async function getMonthlyOperationsReport(params: {
   if (resolved.endDate > todayKey) {
     allWarnings.push(`本月尚未结束，月报统计截至 ${endDate}`)
   }
+  if (compareRange.compareMode === 'same_day_count') {
+    allWarnings.push(SAME_DAY_COMPARE_HINT)
+  }
 
   return {
     range: {
       month: range.month,
       startDate: range.startDate,
       endDate: range.endDate,
-      prevStartDate,
-      prevEndDate,
+      prevStartDate: compareRange.prevStartDate,
+      prevEndDate: compareRange.prevEndDate,
+      compareMode: compareRange.compareMode,
     },
     title: `${range.month} 运营月报`,
     summary,

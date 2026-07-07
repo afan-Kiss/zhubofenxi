@@ -11,7 +11,7 @@ import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
 import { dedupeValidRevenueViewsByOrderNoBestValue, isValidRevenueOrder, resolveValidRevenueAmountCent } from './valid-revenue-order.service'
 import type { UserRole } from '../types/roles'
 import { getAnchorPerformanceViews, getBoardScopedViewsForRange } from './board-scoped-views.service'
-import { safeDivide, safeRatioPercent } from './daily-report-order.util'
+import { roundMoneyYuan, safeDivide, safeRatioPercent } from './daily-report-order.util'
 import { computeReturnOrderRateRatio } from './operations-after-sale-order.util'
 
 export interface OperationsPriceBandRow {
@@ -76,7 +76,7 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
     const bucket = buckets.get(band.label)!
     const orderCount = bucket.validRevenueOrderKeys.size
     const paidOrderCount = bucket.paidOrderKeys.size
-    const amountYuan = Math.round(centToYuan(bucket.amountCent))
+    const amountYuan = roundMoneyYuan(centToYuan(bucket.amountCent))
     const returnOrderCount = [...bucket.returnOrderKeys].filter((key) =>
       bucket.paidOrderKeys.has(key),
     ).length
@@ -87,7 +87,10 @@ export function buildOperationsPriceBandAnalysis(views: AnalyzedOrderView[]): Op
       amountYuan,
       buyerCount: bucket.buyers.size,
       amountSharePercent: safeRatioPercent(bucket.amountCent, totalAmountCent),
-      avgOrderAmountYuan: Math.round(safeDivide(amountYuan, orderCount) ?? 0) || null,
+      avgOrderAmountYuan:
+        orderCount > 0
+          ? roundMoneyYuan(centToYuan(bucket.amountCent) / orderCount)
+          : null,
       returnOrderCount,
       returnRate: computeReturnOrderRateRatio(paidOrderCount, returnOrderCount),
     }

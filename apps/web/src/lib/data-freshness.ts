@@ -37,6 +37,29 @@ export function formatDataFreshnessTime(iso: string | null | undefined): string 
   }
 }
 
+/** 经营看板统一「数据更新」时刻：取范围内最新订单、最近同步、页面拉取三者中最晚时间 */
+export function resolveBoardDataUpdatedAt(params: {
+  latestOrderTime?: string | null
+  lastSyncAt?: string | null
+  fetchedAt?: string | null
+}): string | null {
+  const candidates = [params.latestOrderTime, params.lastSyncAt, params.fetchedAt]
+    .map((iso) => {
+      if (!iso) return null
+      const ms = Date.parse(iso)
+      return Number.isFinite(ms) ? { iso, ms } : null
+    })
+    .filter((x): x is { iso: string; ms: number } => x != null)
+  if (candidates.length === 0) return null
+  candidates.sort((a, b) => b.ms - a.ms)
+  return candidates[0]!.iso
+}
+
+export function formatBoardDataUpdatedLine(updatedAt: string | null | undefined): string | null {
+  if (!updatedAt) return null
+  return `数据更新 ${formatDataFreshnessTime(updatedAt)}`
+}
+
 export function resolveOperationsReportDateRange(input: {
   tab: 'daily' | 'weekly' | 'monthly' | 'rankings'
   dailyDate: string

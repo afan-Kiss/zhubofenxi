@@ -1,25 +1,11 @@
 import React from 'react'
 import { CalendarRange } from 'lucide-react'
 import { formatBoardStatRangeLabel } from '../../lib/board-stat-range-label'
-import { useDataFreshness } from '../../hooks/useDataFreshness'
-import { formatDataFreshnessTime } from '../../lib/data-freshness'
 
 interface Props {
   startDate: string
   endDate: string
   className?: string
-}
-
-function buildWindowTextWithFreshness(
-  windowText: string,
-  includesTodayRealtime: boolean,
-  latestOrderTime: string | null | undefined,
-  lastSyncAt: string | null | undefined,
-): string {
-  if (!includesTodayRealtime) return windowText
-  const updatedAt = latestOrderTime ?? lastSyncAt
-  if (!updatedAt) return windowText
-  return `${windowText} · 数据更新 ${formatDataFreshnessTime(updatedAt)}`
 }
 
 export const BoardStatRangeNote: React.FC<Props> = ({
@@ -29,19 +15,10 @@ export const BoardStatRangeNote: React.FC<Props> = ({
 }) => {
   const meta =
     startDate && endDate ? formatBoardStatRangeLabel(startDate, endDate) : null
-  const { data: freshness } = useDataFreshness(
-    meta?.includesTodayRealtime ? startDate : undefined,
-    meta?.includesTodayRealtime ? endDate : undefined,
-  )
 
   if (!startDate || !endDate || !meta) return null
 
-  const windowText = buildWindowTextWithFreshness(
-    meta.windowText,
-    meta.includesTodayRealtime,
-    freshness?.latestOrderTime,
-    freshness?.lastQianfanSyncAt,
-  )
+  const windowText = meta.windowText
   const mobileWindowText = windowText.replace(/ 00:00:00| 23:59:59/g, '')
   return (
     <div

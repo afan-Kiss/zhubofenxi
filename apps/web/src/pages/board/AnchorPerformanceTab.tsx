@@ -38,7 +38,10 @@ import {
   type BoardMetricKey,
 } from '../../components/board/BoardMetricDrawer'
 import { useDataFreshness } from '../../hooks/useDataFreshness'
-import { formatDataFreshnessTime, type DataFreshnessInfo } from '../../lib/data-freshness'
+import {
+  formatBoardDataUpdatedLine,
+  resolveBoardDataUpdatedAt,
+} from '../../lib/data-freshness'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
 
 type AnchorSummaryCardType = 'money' | 'count' | 'rate'
@@ -129,21 +132,6 @@ function anchorCardRawValue(cards: Record<string, unknown>, key: AnchorSummaryCa
   return Number(cards.returnRate ?? 0)
 }
 
-function formatFreshnessLine(
-  freshness: DataFreshnessInfo | null | undefined,
-  syncSuccessAt: string | null | undefined,
-): string | null {
-  const parts: string[] = []
-  if (freshness?.latestOrderTime) {
-    parts.push(`数据更新 ${formatDataFreshnessTime(freshness.latestOrderTime)}`)
-  }
-  const syncAt = syncSuccessAt ?? freshness?.lastQianfanSyncAt
-  if (syncAt) {
-    parts.push(`同步 ${formatDataFreshnessTime(syncAt)}`)
-  }
-  return parts.length > 0 ? parts.join(' · ') : null
-}
-
 export const AnchorPerformanceTab: React.FC = () => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const {
@@ -207,11 +195,6 @@ export const AnchorPerformanceTab: React.FC = () => {
     const syncing = isBusinessSyncActive(syncMeta?.businessSync?.status)
     if (syncing || activeSyncJob || triggerSyncBusy) return
 
-    setRealtimeSyncHint(
-      preset === 'today'
-        ? '正在更新今日数据，完成后会自动刷新。'
-        : '正在更新昨日数据，完成后会自动刷新。',
-    )
     void triggerBusinessSync()
       .then(() => {
         autoSyncFailedRef.current = false
@@ -300,10 +283,28 @@ export const AnchorPerformanceTab: React.FC = () => {
   const showInitialSkeleton = isLoading && !hasPerformanceData && !data
   const showMetrics = hasPerformanceData && boardDataVisible
 
-  const freshnessLine = formatFreshnessLine(
-    dataFreshness,
-    syncMeta?.businessSync?.lastSuccessAt ?? null,
-  )
+  const isRealtimePreset = preset === 'today' || preset === 'yesterday'
+  const isSyncingNow =
+    isRealtimePreset &&
+    (isBusinessSyncActive(syncMeta?.businessSync?.status) || Boolean(activeSyncJob) || triggerSyncBusy)
+
+  const dataUpdatedLine = useMemo(() => {
+    if (isSyncingNow) return null
+    const updatedAt = resolveBoardDataUpdatedAt({
+      latestOrderTime: dataFreshness?.latestOrderTime,
+      lastSyncAt: syncMeta?.businessSync?.lastSuccessAt ?? dataFreshness?.lastQianfanSyncAt,
+      fetchedAt: data?.fetchedAt,
+    })
+    return formatBoardDataUpdatedLine(updatedAt)
+  }, [
+    isSyncingNow,
+    dataFreshness?.latestOrderTime,
+    dataFreshness?.lastQianfanSyncAt,
+    syncMeta?.businessSync?.lastSuccessAt,
+    data?.fetchedAt,
+  ])
+
+  const freshnessLine = dataUpdatedLine
 
   const summaryTransitionKey = [
     'anchor-summary',
@@ -404,10 +405,14 @@ export const AnchorPerformanceTab: React.FC = () => {
         <div>
           <h2 className="text-xl font-semibold text-slate-900">主播业绩</h2>
           <p className="mt-0.5 text-sm text-slate-500">按归属时段汇总各主播经营表现</p>
-          {!dataFreshnessLoading && freshnessLine ? (
+          {!dataFreshnessLoading && !isSyncingNow && freshnessLine ? (
             <p className="mt-1 text-xs text-slate-400">{freshnessLine}</p>
           ) : null}
-          {realtimeSyncHint ? (
+          {isSyncingNow ? (
+            <p className="mt-1 text-xs text-rose-600">
+              {preset === 'today' ? '正在更新今日数据…' : '正在更新昨日数据…'}
+            </p>
+          ) : realtimeSyncHint ? (
             <p className="mt-1 text-xs text-rose-600">{realtimeSyncHint}</p>
           ) : null}
         </div>

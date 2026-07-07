@@ -87,6 +87,32 @@ async function main(): Promise<void> {
     } else if (cardCount > 0 || anchorName === '未归属') {
       ok(`${anchorName}: 品退 ${cardCount} 单（卡片=detail=抽屉）`)
     }
+
+    const paidOrderCount = Number(row?.orderCount ?? detail.summary?.paidOrderCount ?? 0)
+    if (paidOrderCount === 0) {
+      const rateDetail = await buildBoardMetricDetail({
+        metric: 'qualityReturnRate',
+        preset: 'custom',
+        startDate: START,
+        endDate: END,
+        anchorName,
+        page: 1,
+        pageSize: 20,
+        role: 'super_admin',
+        username: 'verify-script',
+      })
+      const rateRaw = rateDetail.summary?.valueRaw ?? rateDetail.summary?.value
+      const rateText = rateDetail.summary?.valueText ?? ''
+      if (rateRaw != null && rateRaw !== 0) {
+        fail(`${anchorName}: 0 支付单主播品退率应为 null，实际 valueRaw=${rateRaw}`)
+        failures++
+      } else if (rateText !== '—') {
+        fail(`${anchorName}: 0 支付单主播品退率展示应为 —，实际 ${rateText}`)
+        failures++
+      } else {
+        ok(`${anchorName}: 0 支付单品退率 = —`)
+      }
+    }
   }
 
   if (failures > 0) {

@@ -259,7 +259,8 @@ function sortRows(rows: BoardDrillOrderRow[], sort: string): BoardDrillOrderRow[
   return list
 }
 
-function formatValueText(metric: BoardMetricKey, value: number): string {
+function formatValueText(metric: BoardMetricKey, value: number | null): string {
+  if (value == null) return '—'
   if (metric.includes('Rate') || metric === 'signRate' || metric === 'qualityReturnRate') {
     return formatRate(value)
   }
@@ -363,14 +364,14 @@ export async function buildBoardMetricDetail(params: {
   }
 
   const totals = calculateBusinessMetrics(viewsForTotals)
-  let valueRaw = pickMetricValue(totals, def.valueKey)
+  let valueRaw: number | null = pickMetricValue(totals, def.valueKey)
 
   if (isQualityMetric && qualityMatchedCount != null) {
     valueRaw =
       params.metric === 'qualityReturnRate'
-        ? viewsForTotals.length > 0
-          ? qualityMatchedCount / Math.max(1, totals.orderCount)
-          : 0
+        ? totals.orderCount > 0
+          ? qualityMatchedCount / totals.orderCount
+          : null
         : qualityMatchedCount
   }
 
@@ -472,7 +473,7 @@ export async function buildBoardMetricDetail(params: {
     preset: normalizedPreset,
     startDate: range.startDate,
     valueKey: def.valueKey,
-    latestValueRaw: valueRaw,
+    latestValueRaw: valueRaw ?? 0,
     overviewStableSnapshot: params.overviewStableSnapshot,
   })
 

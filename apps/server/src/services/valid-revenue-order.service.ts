@@ -237,8 +237,47 @@ export function resolveValidRevenueAmountCent(view: AnalyzedOrderView): number {
   return isValidRevenueOrder(view) ? view.effectiveGmvCent : 0
 }
 
-/** 同 P 单内选择更适合有效成交判定的视图：优先 valid=true，其次支付更完整 */
+/**
+ * 同 P 单去重用的「排除型售后/退款/退货」信号。
+ * 售后关闭且无退款、售后取消且无退款、纯运费补偿不算 blocking。
+ */
+export function hasBlockingValidRevenueSignal(view: AnalyzedOrderView): boolean {
+  if (view.isFreightRefundOnly) return false
+
+  const refundCent = resolveValidRevenueRefundAmountCent(view)
+  const afterSaleStatus = resolveAfterSaleStatusText(view)
+  const refundStatus = resolveRefundStatusText(view)
+
+  if (afterSaleStatus && AFTER_SALE_CANCEL_RE.test(afterSaleStatus)) {
+    return refundCent > 0
+  }
+  if (refundStatus && AFTER_SALE_CANCEL_RE.test(refundStatus)) {
+    return refundCent > 0
+  }
+
+  if (afterSaleStatus && AFTER_SALE_PROCESSING_RE.test(afterSaleStatus)) return true
+  if (refundStatus && AFTER_SALE_PROCESSING_RE.test(refundStatus)) return true
+
+  if (afterSaleStatus && EXCLUDED_AFTER_SALE_RE.test(afterSaleStatus)) return true
+  if (refundStatus && EXCLUDED_AFTER_SALE_RE.test(refundStatus)) return true
+
+  if (afterSaleStatus && AFTER_SALE_CLOSED_RE.test(afterSaleStatus)) {
+    return refundCent > 0
+  }
+  if (refundStatus && AFTER_SALE_CLOSED_RE.test(refundStatus)) {
+    return refundCent > 0
+  }
+
+  if (refundCent > 0) return true
+  return hasRefundActivityFlags(view)
+}
+
+/** 同 P 单内选择视图：任一 view 有 blocking 则整单选 invalid 视图；否则 valid=true 且金额更完整 */
 function compareValidRevenueViewPriority(a: AnalyzedOrderView, b: AnalyzedOrderView): number {
+  const aBlock = hasBlockingValidRevenueSignal(a) ? 1 : 0
+  const bBlock = hasBlockingValidRevenueSignal(b) ? 1 : 0
+  if (aBlock !== bBlock) return aBlock - bBlock
+
   const aValid = isValidRevenueOrder(a) ? 1 : 0
   const bValid = isValidRevenueOrder(b) ? 1 : 0
   if (aValid !== bValid) return aValid - bValid

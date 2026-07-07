@@ -16,6 +16,7 @@ import {
 import {
   dedupeValidRevenueViewsByOrderNoBestValue,
   explainValidRevenueOrder,
+  hasBlockingValidRevenueSignal,
   isValidRevenueOrder,
   resolveValidRevenueRefundAmountCent,
   sumValidRevenueFromViews,
@@ -79,6 +80,64 @@ function groupByOrderNo(views: AnalyzedOrderView[]): Map<string, AnalyzedOrderVi
   return groups
 }
 
+/** 构造样例：同 P 单 blocking invalid 不应被 clean valid 覆盖 */
+function buildBlockingOverrideFixture(): AnalyzedOrderView[] {
+  const base = {
+    matchOrderId: 'fixture-blocking-001',
+    orderId: 'fixture-blocking-001',
+    packageId: 'P799999999999999901',
+    includedInGmv: true,
+    effectiveGmvCent: 100_00,
+    paymentBaseCent: 100_00,
+    orderStatusText: '已签收',
+    orderTimeText: '2026-06-15 12:00:00',
+    anchorName: '验收样例',
+  } satisfies Partial<AnalyzedOrderView>
+
+  const cleanValid: AnalyzedOrderView = {
+    ...(base as AnalyzedOrderView),
+    afterSaleStatusText: '',
+    productRefundAmountCent: 0,
+    returnAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    isReturnRefund: false,
+    isReturnRefundOrder: false,
+    isRealProductRefund: false,
+    isReturned: false,
+  }
+
+  const blockingInvalid: AnalyzedOrderView = {
+    ...(base as AnalyzedOrderView),
+    afterSaleStatusText: '退款成功',
+    productRefundAmountCent: 100_00,
+    returnAmountCent: 100_00,
+    realAfterSaleAmountCent: 100_00,
+    isReturnRefund: true,
+    isRealProductRefund: true,
+  }
+
+  return [cleanValid, blockingInvalid]
+}
+
+function verifyBlockingOverrideFixture(): boolean {
+  const fixture = buildBlockingOverrideFixture()
+  const best = dedupeValidRevenueViewsByOrderNoBestValue(fixture)[0]
+  if (!best) {
+    fail('blocking 样例未选出视图')
+    return false
+  }
+  if (isValidRevenueOrder(best)) {
+    fail('blocking 样例：valid=false blocking 被 valid=true 覆盖')
+    return false
+  }
+  if (!hasBlockingValidRevenueSignal(best)) {
+    fail('blocking 样例：选中视图应带 blocking 信号')
+    return false
+  }
+  ok('blocking 样例：同 P 单有退款成功 view 时整单不计入有效成交')
+  return true
+}
+
 async function loadViews(): Promise<AnalyzedOrderView[]> {
   try {
     const scoped = await getBoardScopedViewsForRange({
@@ -107,9 +166,14 @@ async function main(): Promise<void> {
   console.log('verify-anchor-valid-revenue-dedupe')
   console.log(`范围: ${START_DATE} ~ ${END_DATE}`)
 
+  if (!verifyBlockingOverrideFixture()) {
+    process.exit(1)
+  }
+
   const views = await loadViews()
   if (views.length === 0) {
-    console.log('⚠ 当前范围无视图，跳过')
+    console.log('⚠ 当前范围无视图，跳过生产扫描（blocking 样例已通过）')
+    console.log('\nPASS（预防性修复，生产 0 组同 P 多 view 待复验）')
     process.exit(0)
   }
 
@@ -145,6 +209,21 @@ async function main(): Promise<void> {
     const firstView = dedupeViewsByMetricOrderNo(list)[0]
     const bestView = dedupeValidRevenueViewsByOrderNoBestValue(list)[0]
     if (!firstView || !bestView) continue
+
+    const hasAnyBlocking = list.some(hasBlockingValidRevenueSignal)
+    const hasAnyValid = list.some(isValidRevenueOrder)
+    if (hasAnyBlocking && hasAnyValid && isValidRevenueOrder(bestView)) {
+      fail(`${orderNo}: 存在 blocking view 但 best 仍为 valid=true`)
+      mismatches.push({
+        orderNo,
+        firstCent: validCentForView(firstView),
+        bestCent: validCentForView(bestView),
+        first: snapshotView(firstView),
+        best: snapshotView(bestView),
+        all: list.map(snapshotView),
+      })
+      continue
+    }
 
     const firstCent = validCentForView(firstView)
     const bestCent = validCentForView(bestView)
@@ -186,6 +265,9 @@ async function main(): Promise<void> {
   }
 
   ok(`同 P 单 ${multiGroups.length} 组多 view，首条与 bestValidRevenue 有效成交无差异`)
+  if (multiGroups.length === 0) {
+    ok('当前生产 0 组同 P 多 view，本次为预防性修复，金额不应变化')
+  }
   ok(
     `全量 validSalesAmount 一致: ¥${firstDedupeTotal.validAmountYuan.toFixed(2)} (${firstDedupeTotal.soldOrderCount} 单)`,
   )

@@ -10,14 +10,18 @@ import { bootstrapQualityBadCaseCache } from '../src/services/quality-badcase-st
 import {
   ANCHOR_DRAWER_NAMES,
   ANCHOR_MUST_EXCLUDE,
-  ANCHOR_MUST_INCLUDE,
   DRAWER_VERIFY_METRICS,
   buildRemappedAnchorMap,
+  buildRemappedViews,
   compareDrawerRowsToRemap,
   fetchMetricDetailBundle,
+  findRemappedViewByOrderNo,
+  isOrderEligibleForEffectiveGmvMustInclude,
+  orderInDrawerRows,
+  orderKeys,
+  resolveEffectiveGmvMustIncludeForAnchor,
   sumDrawerRowMetricValue,
   verifyAnchorMetricDrawer,
-  verifyMetricDrawerAttribution,
 } from './lib/metric-detail-attribution-verify.util'
 import { buildAnchorMetricDetail } from '../src/services/anchor-metric-detail.service'
 import type { BoardDrillOrderRow } from '../src/services/order-row-mapper.service'
@@ -35,10 +39,8 @@ const FOCUS_ORDERS = [
   'P798515495684105931',
 ]
 
-function orderKeys(orderNo: string): string[] {
-  const bare = orderNo.replace(/^P/, '')
-  return [orderNo, bare]
-}
+const ORDER_P798524 = 'P798524075193091331'
+const ORDER_P798440 = 'P798440490066093751'
 
 function countDuplicateOrderNos(rows: BoardDrillOrderRow[]): string[] {
   const seen = new Map<string, number>()
@@ -61,6 +63,7 @@ async function main(): Promise<void> {
   console.log(`metrics: ${DRAWER_VERIFY_METRICS.join(', ')}`)
 
   const expectedMap = await buildRemappedAnchorMap({ startDate: START_DATE, endDate: END_DATE })
+  const remappedViews = await buildRemappedViews({ startDate: START_DATE, endDate: END_DATE })
   const allMismatches: ReturnType<typeof compareDrawerRowsToRemap> = []
 
   console.log('\n=== 2. 全店各 metric drawer 归属 ===')
@@ -121,35 +124,117 @@ async function main(): Promise<void> {
     )
     const expected = expectedMap.get(orderNo) ?? expectedMap.get(orderNo.replace(/^P/, '')) ?? '—'
     const rowAnchor = row?.anchorName?.trim() || '（未出现在 drawer）'
+    const view = findRemappedViewByOrderNo(remappedViews, orderNo)
+    const eligibility = isOrderEligibleForEffectiveGmvMustInclude({
+      orderNo,
+      remappedViews,
+      storeEffectiveGmvRows: effectiveBundle.rows,
+    })
     const wrongZiJie = rowAnchor === '子杰' && expected !== '子杰'
     const mismatch = row != null && rowAnchor !== expected && rowAnchor !== '（未出现在 drawer）'
+    const invalidButAbsent =
+      !eligibility.eligible && row == null && expected !== '—' ? '（非有效成交，drawer 正确不展示）' : ''
     const status = wrongZiJie || mismatch ? '✗' : '✓'
     console.log(
-      `${status} ${orderNo}: drawer=${rowAnchor} expected=${expected} shop=${row?.liveAccountName ?? '—'}`,
+      `${status} ${orderNo}: drawer=${rowAnchor} expected=${expected} valid=${eligibility.valid} ${invalidButAbsent} shop=${row?.liveAccountName ?? view?.liveAccountName ?? '—'}`,
     )
     if (wrongZiJie) focusFails.push(`${orderNo}: 不应显示子杰（期望 ${expected}）`)
     else if (mismatch) focusFails.push(`${orderNo}: drawer=${rowAnchor} expected=${expected}`)
   }
 
+  console.log('\n=== 3b. P798524075193091331 / P798440490066093751 有效成交池 ===')
+  for (const orderNo of [ORDER_P798524, ORDER_P798440]) {
+    const expected =
+      expectedMap.get(orderNo) ?? expectedMap.get(orderNo.replace(/^P/, '')) ?? '—'
+    if (expected === '—') {
+      console.log(`\n${orderNo}: 本地验收范围无 remap 数据，跳过显式断言（请在生产环境复验）`)
+      continue
+    }
+    const eligibility = isOrderEligibleForEffectiveGmvMustInclude({
+      orderNo,
+      remappedViews,
+      storeEffectiveGmvRows: effectiveBundle.rows,
+    })
+    const inStore = orderInDrawerRows(effectiveBundle.rows, orderNo)
+    const xiaoyiDrawer = await fetchMetricDetailBundle({
+      metric: 'effectiveGmv',
+      startDate: START_DATE,
+      endDate: END_DATE,
+      anchorName: '小艺',
+    })
+    const inXiaoyi = orderInDrawerRows(xiaoyiDrawer.rows, orderNo)
+    const zijieDrawer = await fetchMetricDetailBundle({
+      metric: 'effectiveGmv',
+      startDate: START_DATE,
+      endDate: END_DATE,
+      anchorName: '子杰',
+    })
+    const inZijie = orderInDrawerRows(zijieDrawer.rows, orderNo)
+
+    console.log(`\n${orderNo}:`)
+    console.log(`  remap 归属: ${expected}`)
+    console.log(`  isValidRevenueOrder: ${eligibility.valid}`)
+    console.log(`  全店 effectiveGmv drawer: ${inStore ? '包含' : '不包含'}`)
+    console.log(`  小艺 effectiveGmv drawer: ${inXiaoyi ? '包含' : '不包含'}`)
+
+    if (expected !== '小艺') {
+      focusFails.push(`${orderNo}: remap 期望小艺，实际 ${expected}`)
+      continue
+    }
+    if (orderNo === ORDER_P798524) {
+      if (inStore) focusFails.push(`${orderNo}: 非有效成交不应出现在全店 effectiveGmv drawer`)
+      if (inXiaoyi) focusFails.push(`${orderNo}: 非有效成交不应出现在小艺 effectiveGmv drawer`)
+      if (!eligibility.eligible) {
+        console.log(`  ✓ ${eligibility.reason}`)
+      }
+    } else if (eligibility.eligible) {
+      if (!inXiaoyi) {
+        focusFails.push(`${orderNo}: valid=true 或全店 drawer 有，但小艺 drawer 缺失`)
+      } else {
+        console.log(`  ✓ valid 订单，小艺 drawer 应包含且已包含`)
+      }
+    } else {
+      console.log(`  ✓ ${eligibility.reason}`)
+      if (inXiaoyi) focusFails.push(`${orderNo}: 非有效成交不应出现在小艺 effectiveGmv drawer`)
+    }
+    if (inZijie) focusFails.push(`${orderNo}: 不应出现在子杰 effectiveGmv drawer`)
+  }
+
   console.log('\n=== 4. 主播维度各 metric drawer（同池） ===')
   const anchorFails: string[] = []
+  const effectiveGmvEligibility = (orderNo: string) =>
+    isOrderEligibleForEffectiveGmvMustInclude({
+      orderNo,
+      remappedViews,
+      storeEffectiveGmvRows: effectiveBundle.rows,
+    })
   for (const anchorName of ANCHOR_DRAWER_NAMES) {
     console.log(`\n--- ${anchorName} ---`)
     for (const metric of DRAWER_VERIFY_METRICS) {
+      let mustInclude: string[] | undefined
+      if (metric === 'effectiveGmv') {
+        const resolved = resolveEffectiveGmvMustIncludeForAnchor({
+          anchorName,
+          remappedViews,
+          storeEffectiveGmvRows: effectiveBundle.rows,
+        })
+        mustInclude = resolved.mustInclude
+        for (const skip of resolved.skipped) {
+          console.log(`  ○ effectiveGmv mustInclude 跳过 ${skip.orderNo}: ${skip.reason}`)
+        }
+      }
       const fails = await verifyAnchorMetricDrawer({
         startDate: START_DATE,
         endDate: END_DATE,
         metric,
         anchorName,
-        mustInclude:
-          metric === 'effectiveGmv'
-            ? ANCHOR_MUST_INCLUDE[anchorName as keyof typeof ANCHOR_MUST_INCLUDE]
-            : undefined,
+        mustInclude,
         mustExclude:
           metric === 'effectiveGmv'
             ? ANCHOR_MUST_EXCLUDE[anchorName as keyof typeof ANCHOR_MUST_EXCLUDE]
             : undefined,
         remappedAnchorMap: expectedMap,
+        effectiveGmvEligibility: metric === 'effectiveGmv' ? effectiveGmvEligibility : undefined,
       })
       const bundle = await fetchMetricDetailBundle({
         metric,
@@ -169,7 +254,7 @@ async function main(): Promise<void> {
     }
   }
 
-  console.log('\n=== 4. 主播签收率详情 Tab 去重 ===')
+  console.log('\n=== 5. 主播签收率详情 Tab 去重 ===')
   for (const anchorName of ANCHOR_DRAWER_NAMES) {
     const detail = await buildAnchorMetricDetail({
       anchorId: anchorName,

@@ -3,11 +3,13 @@
  */
 import { buildBoardMetricDetail } from '../../src/services/board-metric-detail.service'
 import type { BoardMetricKey } from '../../src/services/board-metric-detail.service'
+import type { AnalyzedOrderView } from '../../src/types/analysis'
 import { getBoardScopedViewsForRange } from '../../src/services/board-scoped-views.service'
 import { attachRawByMatchToViews } from '../../src/services/low-price-brush-order.service'
 import { remapViewsWithScheduleOverlay } from '../../src/services/anchor-schedule-attribution.service'
 import { filterViewsForCoreMetrics } from '../../src/services/metrics-exclusion.service'
 import { resolveMetricOrderNo } from '../../src/services/calc-refund-rate.service'
+import { isValidRevenueOrder } from '../../src/services/valid-revenue-order.service'
 import type { BoardDrillOrderRow } from '../../src/services/order-row-mapper.service'
 
 /** 经营总览 metric drawer 全量验收指标 */
@@ -80,6 +82,102 @@ function registerOrderKey(
   map.set(orderNo, anchorName)
   if (orderNo.startsWith('P')) map.set(orderNo.slice(1), anchorName)
   else map.set(`P${orderNo}`, anchorName)
+}
+
+export async function buildRemappedViews(params: {
+  startDate: string
+  endDate: string
+}): Promise<AnalyzedOrderView[]> {
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: params.startDate,
+    endDate: params.endDate,
+    role: 'super_admin',
+    username: 'verify-script',
+  })
+  const coreViews = filterViewsForCoreMetrics(scoped.views)
+  return remapViewsWithScheduleOverlay(attachRawByMatchToViews(coreViews, scoped.rawByMatch))
+}
+
+export function orderKeys(orderNo: string): string[] {
+  const bare = orderNo.replace(/^P/, '')
+  return [orderNo, bare, `P${bare}`]
+}
+
+export function findRemappedViewByOrderNo(
+  views: AnalyzedOrderView[],
+  orderNo: string,
+): AnalyzedOrderView | undefined {
+  const keys = new Set(orderKeys(orderNo))
+  return views.find((v) =>
+    [v.orderId, v.packageId, v.matchOrderId, resolveMetricOrderNo(v)]
+      .filter(Boolean)
+      .some((k) => keys.has(String(k))),
+  )
+}
+
+export function orderInDrawerRows(rows: BoardDrillOrderRow[], orderNo: string): boolean {
+  const keys = orderKeys(orderNo)
+  return rows.some((r) => keys.includes(r.orderNo || r.packageId || ''))
+}
+
+/** effectiveGmv drawer 仅展示 valid 订单；mustInclude 需先过有效成交池 */
+export function isOrderEligibleForEffectiveGmvMustInclude(params: {
+  orderNo: string
+  remappedViews: AnalyzedOrderView[]
+  storeEffectiveGmvRows: BoardDrillOrderRow[]
+}): {
+  eligible: boolean
+  valid: boolean
+  inStoreDrawer: boolean
+  reason: string
+} {
+  const view = findRemappedViewByOrderNo(params.remappedViews, params.orderNo)
+  const valid = view != null && isValidRevenueOrder(view)
+  const inStoreDrawer = orderInDrawerRows(params.storeEffectiveGmvRows, params.orderNo)
+  if (valid) {
+    return { eligible: true, valid: true, inStoreDrawer, reason: 'isValidRevenueOrder=true' }
+  }
+  if (inStoreDrawer) {
+    return {
+      eligible: true,
+      valid: false,
+      inStoreDrawer: true,
+      reason: '出现在全店 effectiveGmv drawer',
+    }
+  }
+  return {
+    eligible: false,
+    valid: false,
+    inStoreDrawer: false,
+    reason: '归属正确，但非有效成交，跳过 mustInclude',
+  }
+}
+
+export function resolveEffectiveGmvMustIncludeForAnchor(params: {
+  anchorName: string
+  remappedViews: AnalyzedOrderView[]
+  storeEffectiveGmvRows: BoardDrillOrderRow[]
+}): {
+  mustInclude: string[]
+  skipped: Array<{ orderNo: string; reason: string }>
+} {
+  const candidates = ANCHOR_MUST_INCLUDE[params.anchorName as keyof typeof ANCHOR_MUST_INCLUDE] ?? []
+  const mustInclude: string[] = []
+  const skipped: Array<{ orderNo: string; reason: string }> = []
+  for (const orderNo of candidates) {
+    const eligibility = isOrderEligibleForEffectiveGmvMustInclude({
+      orderNo,
+      remappedViews: params.remappedViews,
+      storeEffectiveGmvRows: params.storeEffectiveGmvRows,
+    })
+    if (eligibility.eligible) {
+      mustInclude.push(orderNo)
+    } else {
+      skipped.push({ orderNo, reason: eligibility.reason })
+    }
+  }
+  return { mustInclude, skipped }
 }
 
 export async function buildRemappedAnchorMap(params: {
@@ -224,6 +322,12 @@ export async function verifyAnchorMetricDrawer(params: {
   mustInclude?: string[]
   mustExclude?: string[]
   remappedAnchorMap?: Map<string, string>
+  effectiveGmvEligibility?: (orderNo: string) => {
+    eligible: boolean
+    valid: boolean
+    inStoreDrawer: boolean
+    reason: string
+  }
 }): Promise<string[]> {
   const fails: string[] = []
   const bundle = await fetchMetricDetailBundle({
@@ -263,6 +367,13 @@ export async function verifyAnchorMetricDrawer(params: {
       if (params.remappedAnchorMap && !orderInRemapPool(params.remappedAnchorMap, orderNo)) {
         continue
       }
+      if (
+        params.metric === 'effectiveGmv' &&
+        params.effectiveGmvEligibility &&
+        !params.effectiveGmvEligibility(orderNo).eligible
+      ) {
+        continue
+      }
       fails.push(`${label} 缺少 ${orderNo}`)
     }
   }
@@ -293,6 +404,12 @@ export async function verifyMetricDrawerAttribution(params: {
 }> {
   const metrics = params.metrics ?? DRAWER_VERIFY_METRICS
   const expectedMap = await buildRemappedAnchorMap(params)
+  const remappedViews = await buildRemappedViews(params)
+  const storeEffectiveBundle = await fetchMetricDetailBundle({
+    metric: 'effectiveGmv',
+    startDate: params.startDate,
+    endDate: params.endDate,
+  })
   const allMismatches: Array<{
     metric: string
     orderNo: string
@@ -321,8 +438,15 @@ export async function verifyMetricDrawerAttribution(params: {
   const anchorNames = params.anchorNames ?? [...ANCHOR_DRAWER_NAMES]
   for (const anchorName of anchorNames) {
     for (const metric of metrics) {
-      const mustInclude =
-        metric === 'effectiveGmv' ? ANCHOR_MUST_INCLUDE[anchorName as keyof typeof ANCHOR_MUST_INCLUDE] : undefined
+      let mustInclude: string[] | undefined
+      if (metric === 'effectiveGmv') {
+        const resolved = resolveEffectiveGmvMustIncludeForAnchor({
+          anchorName,
+          remappedViews,
+          storeEffectiveGmvRows: storeEffectiveBundle.rows,
+        })
+        mustInclude = resolved.mustInclude
+      }
       const mustExclude =
         metric === 'effectiveGmv' ? ANCHOR_MUST_EXCLUDE[anchorName as keyof typeof ANCHOR_MUST_EXCLUDE] : undefined
       const fails = await verifyAnchorMetricDrawer({
@@ -333,6 +457,15 @@ export async function verifyMetricDrawerAttribution(params: {
         mustInclude,
         mustExclude,
         remappedAnchorMap: expectedMap,
+        effectiveGmvEligibility:
+          metric === 'effectiveGmv'
+            ? (orderNo) =>
+                isOrderEligibleForEffectiveGmvMustInclude({
+                  orderNo,
+                  remappedViews,
+                  storeEffectiveGmvRows: storeEffectiveBundle.rows,
+                })
+            : undefined,
       })
       anchorFails.push(...fails)
     }

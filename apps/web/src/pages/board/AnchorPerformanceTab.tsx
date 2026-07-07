@@ -181,31 +181,78 @@ export const AnchorPerformanceTab: React.FC = () => {
   const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
   const [reportPhotosStale, setReportPhotosStale] = useState(false)
   const [realtimeSyncHint, setRealtimeSyncHint] = useState<string | null>(null)
+  const [realtimeSyncPending, setRealtimeSyncPending] = useState(false)
   const autoSyncFailedRef = useRef(false)
+  const autoSyncTriggeredKeyRef = useRef<string | null>(null)
+  const triggerBusinessSyncRef = useRef(triggerBusinessSync)
+  triggerBusinessSyncRef.current = triggerBusinessSync
   const REALTIME_SYNC_FAIL_HINT = '自动更新失败，当前先展示本地已有数据。可以稍后刷新。'
+  const REALTIME_SYNC_PENDING_TIMEOUT_MS = 5 * 60 * 1000
 
   useEffect(() => {
     autoSyncFailedRef.current = false
     setRealtimeSyncHint(null)
+    setRealtimeSyncPending(false)
+    autoSyncTriggeredKeyRef.current = null
   }, [preset, startDate, endDate])
 
   useEffect(() => {
     if (preset !== 'today' && preset !== 'yesterday') return
 
-    const syncing = isBusinessSyncActive(syncMeta?.businessSync?.status)
-    if (syncing || activeSyncJob || triggerSyncBusy) return
+    const rangeKey = `${preset}:${startDate}:${endDate}`
+    if (autoSyncTriggeredKeyRef.current === rangeKey) return
 
-    void triggerBusinessSync()
+    autoSyncTriggeredKeyRef.current = rangeKey
+
+    const syncing = isBusinessSyncActive(syncMeta?.businessSync?.status)
+    if (syncing || activeSyncJob || triggerSyncBusy) {
+      setRealtimeSyncPending(true)
+      return
+    }
+
+    setRealtimeSyncPending(true)
+    void triggerBusinessSyncRef
+      .current()
       .then(() => {
         autoSyncFailedRef.current = false
       })
       .catch(() => {
         autoSyncFailedRef.current = true
+        setRealtimeSyncPending(false)
         setRealtimeSyncHint(REALTIME_SYNC_FAIL_HINT)
       })
-    // 仅在切换今日/昨日范围时触发；同步状态变化不重复拉单
+    // 仅在切换今日/昨日范围时触发一次；同步状态变化不重复拉单
     // eslint-disable-next-line react-hooks/exhaustive-deps -- syncMeta/activeSyncJob 仅用于运行中守卫
-  }, [preset, startDate, endDate, triggerBusinessSync])
+  }, [preset, startDate, endDate])
+
+  useEffect(() => {
+    if (!realtimeSyncPending) return
+    if (preset !== 'today' && preset !== 'yesterday') {
+      setRealtimeSyncPending(false)
+      return
+    }
+    const stillBusy =
+      triggerSyncBusy ||
+      isBusinessSyncActive(syncMeta?.businessSync?.status) ||
+      Boolean(activeSyncJob)
+    if (!stillBusy) {
+      setRealtimeSyncPending(false)
+    }
+  }, [
+    realtimeSyncPending,
+    preset,
+    triggerSyncBusy,
+    syncMeta?.businessSync?.status,
+    activeSyncJob,
+  ])
+
+  useEffect(() => {
+    if (!realtimeSyncPending) return
+    const timer = window.setTimeout(() => {
+      setRealtimeSyncPending(false)
+    }, REALTIME_SYNC_PENDING_TIMEOUT_MS)
+    return () => window.clearTimeout(timer)
+  }, [realtimeSyncPending, preset, startDate, endDate])
 
   useEffect(() => {
     if (preset !== 'today' && preset !== 'yesterday') return
@@ -284,9 +331,7 @@ export const AnchorPerformanceTab: React.FC = () => {
   const showMetrics = hasPerformanceData && boardDataVisible
 
   const isRealtimePreset = preset === 'today' || preset === 'yesterday'
-  const isSyncingNow =
-    isRealtimePreset &&
-    (isBusinessSyncActive(syncMeta?.businessSync?.status) || Boolean(activeSyncJob) || triggerSyncBusy)
+  const isSyncingNow = isRealtimePreset && realtimeSyncPending
 
   const dataUpdatedLine = useMemo(() => {
     if (isSyncingNow) return null

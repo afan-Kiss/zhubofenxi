@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { apiRequest } from '../lib/api'
+import { mergeAnchorAssignOptions } from '../lib/anchor-session-assign-options'
 import { invalidateBoardLiveQueryCache } from '../lib/board-live-query-cache'
 
 function normalizeAnchorName(name: string | undefined | null): string {
@@ -32,10 +33,12 @@ export function useManualOrderAnchorAssign(params: {
         )
         if (controller.signal.aborted) return
         setAnchorOptions(
-          (res.anchors ?? []).filter((a) => a.name.trim() && a.name !== '未归属'),
+          mergeAnchorAssignOptions(
+            (res.anchors ?? []).filter((a) => a.name.trim() && a.name !== '未归属'),
+          ),
         )
       } catch {
-        if (!controller.signal.aborted) setAnchorOptions([])
+        if (!controller.signal.aborted) setAnchorOptions(mergeAnchorAssignOptions([]))
       }
     })()
     return () => controller.abort()

@@ -410,17 +410,13 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
             emptyText={
               orderTab === 'signed' ? '当前范围暂无实际签收订单' : '当前范围暂无该主播订单'
             }
-            manualAnchorAssign={
-              anchorOptions.length > 0
-                ? {
-                    anchorOptions,
-                    assigningOrderNo,
-                    onAssign: (orderNo, targetAnchorName) => {
-                      void handleManualAssign(orderNo, targetAnchorName)
-                    },
-                  }
-                : undefined
-            }
+            manualAnchorAssign={{
+              anchorOptions,
+              assigningOrderNo,
+              onAssign: (orderNo, targetAnchorName) => {
+                void handleManualAssign(orderNo, targetAnchorName)
+              },
+            }}
           />
           {assignError ? <p className="mt-2 text-xs text-red-600">{assignError}</p> : null}
           {summaryText ? (

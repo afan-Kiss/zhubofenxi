@@ -342,17 +342,13 @@ export const BoardMetricDrawer: React.FC<Props> = ({
             loading={loading && !!data}
             emptyText="该指标下暂无匹配订单"
             amountMode={metric === 'actualSignedAmount' ? 'signed' : 'default'}
-            manualAnchorAssign={
-              anchorOptions.length > 0
-                ? {
-                    anchorOptions,
-                    assigningOrderNo,
-                    onAssign: (orderNo, targetAnchorName) => {
-                      void handleManualAssign(orderNo, targetAnchorName)
-                    },
-                  }
-                : undefined
-            }
+            manualAnchorAssign={{
+              anchorOptions,
+              assigningOrderNo,
+              onAssign: (orderNo, targetAnchorName) => {
+                void handleManualAssign(orderNo, targetAnchorName)
+              },
+            }}
           />
           {assignError ? <p className="text-xs text-red-600">{assignError}</p> : null}
         </div>

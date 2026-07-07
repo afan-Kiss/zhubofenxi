@@ -17,6 +17,15 @@ import {
   viewHasAfterSaleStatusSignal,
 } from '../src/services/after-sale-status-signal.service'
 import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
+import {
+  calculateBusinessMetrics,
+  viewInvolvesRefundAfterSale,
+} from '../src/services/business-metrics.service'
+import {
+  resolveViewRefundAmountCent,
+  viewCountsAsRefundOrder,
+} from '../src/services/order-refund-metrics.service'
+import { isEffectiveSignedView } from '../src/services/strict-after-sale-metrics.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
 config({ path: path.resolve(__dirname, '../.env') })
@@ -181,6 +190,16 @@ async function main(): Promise<void> {
     ok('order-metric-sets 存在 afterSaleRelatedOrderCount 且按 P 单号去重')
   } else {
     fail('order-metric-sets 缺少 afterSaleRelatedOrderCount 去重')
+  }
+
+  const viewInvolvesBlock = businessMetrics.slice(
+    businessMetrics.indexOf('function viewInvolvesRefundAfterSale'),
+    businessMetrics.indexOf('function viewInvolvesRefundAfterSale') + 220,
+  )
+  if (viewInvolvesBlock.includes('isFreightRefundOnly')) {
+    ok('viewInvolvesRefundAfterSale 排除 isFreightRefundOnly')
+  } else {
+    fail('viewInvolvesRefundAfterSale 未排除 isFreightRefundOnly')
   }
 
   if (
@@ -395,6 +414,61 @@ async function main(): Promise<void> {
     if (isPositiveAfterSaleText(text)) ok(`组合正例 isPositiveAfterSaleText「${text}」`)
     else fail(`组合正例 isPositiveAfterSaleText 未识别「${text}」`)
   }
+
+  console.log('\n=== 纯运费补偿(18元)运行时断言 ===')
+  const freightView = {
+    packageId: 'PKG-FREIGHT-ROLLING-VERIFY',
+    includedInGmv: true,
+    paymentBaseCent: 50000,
+    isFreightRefundOnly: true,
+    freightRefundAmountCent: 1800,
+    productRefundAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    returnAmountCent: 1800,
+    afterSaleStatusText: '退款成功',
+    afterSaleDisplayType: '运费补偿',
+    orderStatusText: '已完成',
+    statusSigned: true,
+    actualSignAmountCent: 50000,
+  } as AnalyzedOrderView
+  const realView = {
+    packageId: 'PKG-REAL-AFTERSALE-ROLLING-VERIFY',
+    includedInGmv: true,
+    isFreightRefundOnly: false,
+    productRefundAmountCent: 1800,
+    realAfterSaleAmountCent: 1800,
+    afterSaleStatusText: '退款成功',
+  } as AnalyzedOrderView
+
+  if (!viewInvolvesRefundAfterSale(freightView)) ok('纯运费 viewInvolvesRefundAfterSale=false')
+  else fail('纯运费 viewInvolvesRefundAfterSale 误判')
+  if (!viewCountsAsRefundOrder(freightView)) ok('纯运费 viewCountsAsRefundOrder=false')
+  else fail('纯运费 viewCountsAsRefundOrder 误判')
+  if (resolveViewRefundAmountCent(freightView) === 0) ok('纯运费 resolveViewRefundAmountCent=0')
+  else fail('纯运费 resolveViewRefundAmountCent 非 0')
+  if (!isActualAfterSaleOrder(freightView)) ok('纯运费 isActualAfterSaleOrder=false')
+  else fail('纯运费 isActualAfterSaleOrder 误判')
+  if (isEffectiveSignedView(freightView)) ok('纯运费 isEffectiveSignedView=true')
+  else fail('纯运费 isEffectiveSignedView 误判')
+  const freightMetrics = calculateBusinessMetrics([freightView])
+  if (freightMetrics.refundAmount === 0 && freightMetrics.refundOrderCount === 0) {
+    ok('纯运费 refundAmount/refundOrderCount=0')
+  } else {
+    fail(`纯运费 refundAmount=${freightMetrics.refundAmount} refundOrderCount=${freightMetrics.refundOrderCount}`)
+  }
+  if (freightMetrics.afterSaleRelatedOrderCount === 0) ok('纯运费 afterSaleRelatedOrderCount=0')
+  else fail(`纯运费 afterSaleRelatedOrderCount=${freightMetrics.afterSaleRelatedOrderCount}`)
+  if (freightMetrics.freightRefundAmount === 18) ok('纯运费 freightRefundAmount=18')
+  else fail(`纯运费 freightRefundAmount=${freightMetrics.freightRefundAmount}`)
+  if (freightMetrics.actualSignedAmount === 500) ok('纯运费 actualSignedAmount=500')
+  else fail(`纯运费 actualSignedAmount=${freightMetrics.actualSignedAmount}`)
+
+  if (viewInvolvesRefundAfterSale(realView)) ok('真实售后 viewInvolvesRefundAfterSale=true')
+  else fail('真实售后 viewInvolvesRefundAfterSale 未识别')
+  if (viewCountsAsRefundOrder(realView)) ok('真实售后 viewCountsAsRefundOrder=true')
+  else fail('真实售后 viewCountsAsRefundOrder 未识别')
+  if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
+  else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
 
   console.log('\n=== 运行时冒烟 ===')
   try {

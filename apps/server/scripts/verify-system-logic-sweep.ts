@@ -5,6 +5,17 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import {
+  calculateBusinessMetrics,
+  viewInvolvesRefundAfterSale,
+} from '../src/services/business-metrics.service'
+import {
+  resolveViewRefundAmountCent,
+  viewCountsAsRefundOrder,
+} from '../src/services/order-refund-metrics.service'
+import { isActualAfterSaleOrder } from '../src/services/operations-after-sale-order.util'
+import { isEffectiveSignedView } from '../src/services/strict-after-sale-metrics.service'
+import type { AnalyzedOrderView } from '../src/types/analysis'
 
 const ROOT = path.resolve(__dirname, '../..')
 const REPO_ROOT = path.resolve(__dirname, '../../..')
@@ -109,6 +120,72 @@ function main(): void {
   } else {
     fail('BoardMetricDrawer actualSignedAmount 未 amountMode=signed')
   }
+
+  const businessMetrics = read('server/src/services/business-metrics.service.ts')
+  const viewInvolvesBlock = businessMetrics.slice(
+    businessMetrics.indexOf('function viewInvolvesRefundAfterSale'),
+    businessMetrics.indexOf('function viewInvolvesRefundAfterSale') + 220,
+  )
+  if (viewInvolvesBlock.includes('isFreightRefundOnly')) {
+    ok('viewInvolvesRefundAfterSale 排除 isFreightRefundOnly')
+  } else {
+    fail('viewInvolvesRefundAfterSale 未排除 isFreightRefundOnly')
+  }
+
+  console.log('\n=== 纯运费补偿(18元)运行时断言 ===')
+  const freightView = {
+    packageId: 'PKG-FREIGHT-SYSTEM-VERIFY',
+    includedInGmv: true,
+    paymentBaseCent: 50000,
+    isFreightRefundOnly: true,
+    freightRefundAmountCent: 1800,
+    productRefundAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    returnAmountCent: 1800,
+    afterSaleStatusText: '退款成功',
+    afterSaleDisplayType: '运费补偿',
+    orderStatusText: '已完成',
+    statusSigned: true,
+    actualSignAmountCent: 50000,
+  } as AnalyzedOrderView
+  const realView = {
+    packageId: 'PKG-REAL-AFTERSALE-SYSTEM-VERIFY',
+    includedInGmv: true,
+    isFreightRefundOnly: false,
+    productRefundAmountCent: 1800,
+    realAfterSaleAmountCent: 1800,
+    afterSaleStatusText: '退款成功',
+  } as AnalyzedOrderView
+
+  if (!viewInvolvesRefundAfterSale(freightView)) ok('纯运费 viewInvolvesRefundAfterSale=false')
+  else fail('纯运费 viewInvolvesRefundAfterSale 误判')
+  if (!viewCountsAsRefundOrder(freightView)) ok('纯运费 viewCountsAsRefundOrder=false')
+  else fail('纯运费 viewCountsAsRefundOrder 误判')
+  if (resolveViewRefundAmountCent(freightView) === 0) ok('纯运费 resolveViewRefundAmountCent=0')
+  else fail('纯运费 resolveViewRefundAmountCent 非 0')
+  if (!isActualAfterSaleOrder(freightView)) ok('纯运费 isActualAfterSaleOrder=false')
+  else fail('纯运费 isActualAfterSaleOrder 误判')
+  if (isEffectiveSignedView(freightView)) ok('纯运费 isEffectiveSignedView=true')
+  else fail('纯运费 isEffectiveSignedView 误判')
+  const freightMetrics = calculateBusinessMetrics([freightView])
+  if (
+    freightMetrics.refundAmount === 0 &&
+    freightMetrics.refundOrderCount === 0 &&
+    freightMetrics.afterSaleRelatedOrderCount === 0 &&
+    freightMetrics.freightRefundAmount === 18 &&
+    freightMetrics.actualSignedAmount === 500
+  ) {
+    ok('纯运费 calculateBusinessMetrics 口径正确')
+  } else {
+    fail('纯运费 calculateBusinessMetrics 口径异常')
+  }
+  if (viewInvolvesRefundAfterSale(realView) && viewCountsAsRefundOrder(realView)) {
+    ok('真实售后 viewInvolvesRefundAfterSale/viewCountsAsRefundOrder=true')
+  } else {
+    fail('真实售后未识别')
+  }
+  if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
+  else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
 
   console.log('\n=== 结果 ===')
   if (issues.length > 0) {

@@ -14,6 +14,7 @@ function viewIsPaid(v: AnalyzedOrderView): boolean {
  * 买家侧 buyerProductRefundAmountCent 仅作补充，不用有效销售额差额推算。
  */
 export function resolveViewRefundAmountCent(v: AnalyzedOrderView): number {
+  if (v.isFreightRefundOnly) return 0
   const board = v.productRefundAmountCent ?? 0
   const buyer = v.buyerProductRefundAmountCent ?? 0
   const workbench = v.afterSalesWorkbenchRefundAmountCent ?? 0

@@ -31,6 +31,13 @@ import {
   resolveViewRefundAmountCent,
   viewCountsAsRefundOrder,
 } from '../src/services/order-refund-metrics.service'
+import {
+  calculateBusinessMetrics,
+  viewInvolvesRefundAfterSale,
+} from '../src/services/business-metrics.service'
+import { isEffectiveSignedView } from '../src/services/strict-after-sale-metrics.service'
+import { buildOrderMetricSets } from '../src/services/order-metric-sets.service'
+import { resolveMetricOrderNo } from '../src/services/calc-refund-rate.service'
 import { explainValidRevenueOrder, sumValidRevenueFromViews } from '../src/services/valid-revenue-order.service'
 import { buildAnchorMetricDetail } from '../src/services/anchor-metric-detail.service'
 import { dedupeCoreMetricViewsByOrderNoBestValue } from '../src/services/calc-refund-rate.service'
@@ -981,6 +988,27 @@ function checkAfterSaleAndHealthTailStatic(): void {
     fail('order-metric-sets 缺少 afterSaleRelatedOrderCount')
   }
 
+  const viewInvolvesBlock = businessMetrics.slice(
+    businessMetrics.indexOf('function viewInvolvesRefundAfterSale'),
+    businessMetrics.indexOf('function viewInvolvesRefundAfterSale') + 220,
+  )
+  if (viewInvolvesBlock.includes('isFreightRefundOnly')) {
+    ok('viewInvolvesRefundAfterSale 排除 isFreightRefundOnly')
+  } else {
+    fail('viewInvolvesRefundAfterSale 未排除 isFreightRefundOnly')
+  }
+
+  const orderRefundMetrics = readRepo('server/src/services/order-refund-metrics.service.ts')
+  const resolveRefundBlock = orderRefundMetrics.slice(
+    orderRefundMetrics.indexOf('function resolveViewRefundAmountCent'),
+    orderRefundMetrics.indexOf('function resolveViewRefundAmountCent') + 180,
+  )
+  if (resolveRefundBlock.includes('isFreightRefundOnly')) {
+    ok('resolveViewRefundAmountCent 排除 isFreightRefundOnly')
+  } else {
+    fail('resolveViewRefundAmountCent 未排除 isFreightRefundOnly')
+  }
+
   if (
     rollingStore.includes('afterSaleSignalRecordCount') &&
     rollingService.includes('afterSaleRelatedOrderCount')
@@ -1218,6 +1246,146 @@ function checkOperationsAfterSaleRuntime(): void {
   }
 }
 
+function mockFreightOnlyView(): AnalyzedOrderView {
+  return {
+    packageId: 'PKG-FREIGHT-VERIFY',
+    includedInGmv: true,
+    paymentBaseCent: 50000,
+    isFreightRefundOnly: true,
+    freightRefundAmountCent: 1800,
+    productRefundAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    returnAmountCent: 1800,
+    afterSaleStatusText: '退款成功',
+    afterSaleDisplayType: '运费补偿',
+    orderStatusText: '已完成',
+    statusSigned: true,
+    actualSignAmountCent: 50000,
+  } as AnalyzedOrderView
+}
+
+function mockRealAfterSale18View(): AnalyzedOrderView {
+  return {
+    packageId: 'PKG-REAL-AFTERSALE-VERIFY',
+    includedInGmv: true,
+    isFreightRefundOnly: false,
+    productRefundAmountCent: 1800,
+    realAfterSaleAmountCent: 1800,
+    afterSaleStatusText: '退款成功',
+  } as AnalyzedOrderView
+}
+
+function checkFreightRefundOnlyRuntime(): void {
+  console.log('\n=== 0g. 纯运费补偿(18元)运行时断言 ===')
+  const freightView = mockFreightOnlyView()
+  const realView = mockRealAfterSale18View()
+
+  if (!viewInvolvesRefundAfterSale(freightView)) ok('纯运费 viewInvolvesRefundAfterSale=false')
+  else fail('纯运费 viewInvolvesRefundAfterSale 误判为 true')
+
+  if (!viewCountsAsRefundOrder(freightView)) ok('纯运费 viewCountsAsRefundOrder=false')
+  else fail('纯运费 viewCountsAsRefundOrder 误判为 true')
+
+  if (resolveViewRefundAmountCent(freightView) === 0) ok('纯运费 resolveViewRefundAmountCent=0')
+  else fail(`纯运费 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(freightView)}`)
+
+  if (!isActualAfterSaleOrder(freightView)) ok('纯运费 isActualAfterSaleOrder=false')
+  else fail('纯运费 isActualAfterSaleOrder 误判为 true')
+
+  if (isEffectiveSignedView(freightView)) ok('纯运费 isEffectiveSignedView=true')
+  else fail('纯运费 isEffectiveSignedView 误判为 false')
+
+  const freightMetrics = calculateBusinessMetrics([freightView])
+  if (freightMetrics.refundAmount === 0) ok('纯运费 calculateBusinessMetrics.refundAmount=0')
+  else fail(`纯运费 refundAmount=${freightMetrics.refundAmount}`)
+  if (freightMetrics.refundOrderCount === 0) ok('纯运费 refundOrderCount=0')
+  else fail(`纯运费 refundOrderCount=${freightMetrics.refundOrderCount}`)
+  if (freightMetrics.afterSaleRelatedOrderCount === 0) ok('纯运费 afterSaleRelatedOrderCount=0')
+  else fail(`纯运费 afterSaleRelatedOrderCount=${freightMetrics.afterSaleRelatedOrderCount}`)
+  if (freightMetrics.freightRefundAmount === 18) ok('纯运费 freightRefundAmount=18')
+  else fail(`纯运费 freightRefundAmount=${freightMetrics.freightRefundAmount}`)
+  if (freightMetrics.actualSignedAmount === 500) ok('纯运费 actualSignedAmount=500')
+  else fail(`纯运费 actualSignedAmount=${freightMetrics.actualSignedAmount}`)
+
+  if (viewInvolvesRefundAfterSale(realView)) ok('真实售后 viewInvolvesRefundAfterSale=true')
+  else fail('真实售后 viewInvolvesRefundAfterSale 未识别')
+  if (viewCountsAsRefundOrder(realView)) ok('真实售后 viewCountsAsRefundOrder=true')
+  else fail('真实售后 viewCountsAsRefundOrder 未识别')
+  if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
+  else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
+}
+
+async function checkFreightRefundDbScan(): Promise<void> {
+  console.log('\n=== 生产数据：18元运费补偿扫描 ===')
+  const scanStart = process.env.FREIGHT_SCAN_START?.trim() || '2023-01-01'
+  const scanEnd =
+    process.env.FREIGHT_SCAN_END?.trim() || formatDateKeyShanghai(new Date())
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: scanStart,
+    endDate: scanEnd,
+  })
+  const views = scoped.views
+  const freightOnly18 = views.filter(
+    (v) =>
+      v.isFreightRefundOnly &&
+      v.freightRefundAmountCent === 1800 &&
+      v.productRefundAmountCent === 0,
+  )
+  console.log(`  纯运费补偿(18元) 订单数: ${freightOnly18.length}`)
+
+  const metricSets = buildOrderMetricSets(views)
+  const refundSet = new Set(metricSets.refundOrderNos)
+  const afterSaleSet = new Set(metricSets.afterSaleRelatedOrderNos)
+  const qualitySet = new Set(metricSets.qualityRefundOrderNos)
+  const signedSet = new Set(metricSets.signedOrderNos)
+
+  let violationCount = 0
+  for (const v of freightOnly18) {
+    const no = resolveMetricOrderNo(v)
+    if (!no) continue
+    if (refundSet.has(no)) {
+      fail(`纯运费 ${no} 误入 refundOrderNos`)
+      violationCount += 1
+    }
+    if (afterSaleSet.has(no)) {
+      fail(`纯运费 ${no} 误入 afterSaleRelatedOrderNos`)
+      violationCount += 1
+    }
+    if (qualitySet.has(no)) {
+      fail(`纯运费 ${no} 误入 qualityRefundOrderNos`)
+      violationCount += 1
+    }
+    if (!signedSet.has(no) && isEffectiveSignedView(v) && v.includedInGmv) {
+      fail(`纯运费 ${no} 未计入 signedOrderNos（应不影响签收）`)
+      violationCount += 1
+    }
+  }
+  if (violationCount === 0 && freightOnly18.length > 0) {
+    ok(`全部 ${freightOnly18.length} 笔纯运费补偿未误入退款/售后/品退集合`)
+  } else if (freightOnly18.length === 0) {
+    ok('当前库内无 isFreightRefundOnly+1800 样本（跳过集合断言）')
+  }
+
+  const suspected = views.filter((v) => {
+    if (v.isFreightRefundOnly) return false
+    if (v.productRefundAmountCent !== 0) return false
+    const has18 =
+      v.freightRefundAmountCent === 1800 ||
+      v.returnAmountCent === 1800 ||
+      v.realAfterSaleAmountCent === 1800
+    return has18
+  })
+  console.log(`  疑似18元但未识别为纯运费补偿: ${suspected.length} 笔`)
+  for (const v of suspected.slice(0, 10)) {
+    const no = resolveMetricOrderNo(v) || v.packageId
+    console.log(
+      `    样本 ${no} | 店铺=${v.liveAccountName ?? '-'} | afterSale=${v.afterSaleStatusText} | reason=${v.reasonText} | productRefund=${v.productRefundAmountCent} | freightRefund=${v.freightRefundAmountCent} | isFreightRefundOnly=${v.isFreightRefundOnly} | refundSource=${v.buyerProductRefundSource ?? '-'}`,
+    )
+  }
+  if (suspected.length === 0) ok('未发现疑似漏识别的18元运费补偿')
+}
+
 function checkValidRevenueNoAfterSaleRuntime(): void {
   console.log('\n=== 0d. 有效成交无售后运行时断言 ===')
   const noAfterSaleTexts = [
@@ -1250,10 +1418,12 @@ async function main(): Promise<void> {
   checkNoAfterSaleTextRuntime()
   checkOperationalAfterSaleRuntime()
   checkRefundOrderVsAfterSaleSignalRuntime()
+  checkFreightRefundOnlyRuntime()
   checkOperationsAfterSaleRuntime()
   checkValidRevenueNoAfterSaleRuntime()
 
   await bootstrapQualityBadCaseCache()
+  await checkFreightRefundDbScan()
   await checkOverviewSignedDrawers()
   checkAnchorDrillStatic()
   checkMetricDetailUnsignedStatic()

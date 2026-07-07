@@ -124,6 +124,7 @@ export function viewHasRefundAfterSaleSignal(v: AnalyzedOrderView): boolean {
 
 /** Drawer / 退款单数卡片：涉及退款、退货退款、售后关闭、已支付后取消等 */
 export function viewInvolvesRefundAfterSale(v: AnalyzedOrderView): boolean {
+  if (v.isFreightRefundOnly) return false
   const unpaid = viewIsUnpaid(v)
   const paid = v.includedInGmv
   const cancelled = viewIsCancelled(v)

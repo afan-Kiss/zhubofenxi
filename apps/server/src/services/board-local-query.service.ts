@@ -69,8 +69,11 @@ import {
 import { buildBoardSyncMetaForApi } from './board-sync-meta.service'
 import { logWarn } from '../utils/server-log'
 import { getAllShopCookieHealth } from './shop-cookie-health.service'
+import { isRealtimeBoardPreset } from '../utils/board-realtime-refresh.util'
+import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 
 const AUTO_SYNC_ON_VIEW_MISSING = process.env.AUTO_SYNC_ON_VIEW_MISSING === 'true'
+/** GET /api/board/local-data 默认不自动触发同步；仅当 AUTO_SYNC_ON_VIEW_MISSING=true 时排队经营同步任务（不直接请求平台 API） */
 
 function resolveLocalQueryRange(params: {
   preset: BoardLiveQueryPreset
@@ -350,10 +353,16 @@ export async function executeBoardLocalQuery(params: {
 
   const qualityFeedback = await buildQualityFeedbackPublicStatus()
 
+  const forceRefresh = isRealtimeBoardPreset(params.preset)
+  if (forceRefresh) {
+    clearScheduleAttributionCache()
+  }
+
   const boardCache = await getOrBuildBusinessBoardCache({
     preset: params.preset,
     startDate,
     endDate,
+    forceRebuild: forceRefresh,
   })
 
   const allViews = boardCache.views

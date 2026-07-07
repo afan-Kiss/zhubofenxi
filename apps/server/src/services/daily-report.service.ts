@@ -47,6 +47,10 @@ import { aggregateAnchorLeaderboard } from './board-metrics.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend, buildLeaderboardRowIntradayTrend, resolveAnchorTrendMode, type AnchorTrend } from './anchor-card-trend.service'
 import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
+import {
+  isRealtimeBoardPreset,
+  resolveBoardPresetForSingleDay,
+} from '../utils/board-realtime-refresh.util'
 
 const NO_LIVE_SESSION_TEXT = '未读取到直播场次'
 
@@ -354,9 +358,11 @@ export async function buildDailyReport(params: {
   role?: UserRole
   username?: string
 }): Promise<DailyReportPayload> {
+  const effectivePreset = resolveBoardPresetForSingleDay(params)
   const scoped = await getBoardScopedViewsForRange({
     ...params,
-    preset: 'custom',
+    preset: effectivePreset,
+    forceRefresh: isRealtimeBoardPreset(effectivePreset),
   })
   await ensureManualAnchorOverrideCache()
   const config = getAnchorConfigSync()
@@ -493,22 +499,16 @@ export async function buildDailyReport(params: {
   leaderboardRows = await enrichAnchorLeaderboardWithLateStatus(leaderboardRows, {
     startDate: params.startDate,
     endDate: params.endDate,
-    preset: 'custom',
+    preset: isRealtimeBoardPreset(effectivePreset) ? effectivePreset : 'custom',
   })
   leaderboardRows = await enrichAnchorLeaderboardWithTrend(leaderboardRows, allPerformanceViews, {
-    preset:
-      params.preset === 'today' || params.preset === 'yesterday'
-        ? params.preset
-        : 'custom',
+    preset: isRealtimeBoardPreset(effectivePreset) ? effectivePreset : 'custom',
     startDate: params.startDate,
     endDate: params.endDate,
   })
   const trendByAnchor = new Map(leaderboardRows.map((r) => [String(r.anchorName ?? ''), r]))
   const trendMode = resolveAnchorTrendMode({
-    preset:
-      params.preset === 'today' || params.preset === 'yesterday'
-        ? params.preset
-        : 'custom',
+    preset: isRealtimeBoardPreset(effectivePreset) ? effectivePreset : 'custom',
     startDate: params.startDate,
     endDate: params.endDate,
   })

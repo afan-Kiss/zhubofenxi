@@ -11,6 +11,8 @@ import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.ser
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { filterViewsForStaffScope } from './staff-anchor-scope.service'
 import { ensureManualAnchorOverrideCache } from './order-anchor-manual-override.service'
+import { isRealtimeBoardPreset } from '../utils/board-realtime-refresh.util'
+import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 
 export interface BoardScopedViewsBundle {
   views: AnalyzedOrderView[]
@@ -30,12 +32,19 @@ export async function getBoardScopedViewsForRange(params: {
   endDate: string
   role?: UserRole
   username?: string
+  /** 今日/昨日每次打开强制重读订单；也可显式传入 */
+  forceRefresh?: boolean
 }): Promise<BoardScopedViewsBundle> {
   const preset = params.preset ?? 'custom'
+  const forceRefresh = params.forceRefresh ?? isRealtimeBoardPreset(preset)
+  if (forceRefresh) {
+    clearScheduleAttributionCache()
+  }
   const boardCache = await getOrBuildBusinessBoardCache({
     preset,
     startDate: params.startDate,
     endDate: params.endDate,
+    forceRebuild: forceRefresh,
   })
   const views =
     params.role && params.username

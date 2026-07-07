@@ -5,6 +5,7 @@ import { Pagination } from '../ui/Pagination'
 import { UNMATCHED_OFFICIAL_QUALITY_HINT } from './OfficialQualitySyncNote'
 import { BoardDrawerShell } from './BoardDrawerShell'
 import { BoardDrillOrderTable, type BoardDrillOrderRow } from './BoardDrillOrderTable'
+import { useManualOrderAnchorAssign } from '../../hooks/useManualOrderAnchorAssign'
 
 export type BoardMetricKey =
   | 'gmv'
@@ -64,6 +65,7 @@ interface Props {
   cardValueRaw?: number
   blacklistedBuyerIds?: string[]
   overviewStableSnapshot?: boolean
+  onOrderAnchorAssigned?: () => void
 }
 
 export const BoardMetricDrawer: React.FC<Props> = ({
@@ -78,6 +80,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
   cardValueRaw,
   blacklistedBuyerIds = [],
   overviewStableSnapshot = false,
+  onOrderAnchorAssigned,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [loading, setLoading] = useState(false)
@@ -88,6 +91,22 @@ export const BoardMetricDrawer: React.FC<Props> = ({
   const pageSize = 20
   const [reloadNonce, setReloadNonce] = useState(0)
   const [liveBlacklist, setLiveBlacklist] = useState<string[]>(blacklistedBuyerIds)
+
+  const bumpReload = () => setReloadNonce((n) => n + 1)
+
+  const {
+    anchorOptions,
+    assigningOrderNo,
+    assignError,
+    handleManualAssign,
+    clearAssignError,
+  } = useManualOrderAnchorAssign({
+    enabled: open,
+    onAssigned: () => {
+      bumpReload()
+      onOrderAnchorAssigned?.()
+    },
+  })
 
   useEffect(() => {
     if (!open || !startDate || !endDate) return
@@ -137,7 +156,8 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     setTab('')
     setData(null)
     setError(null)
-  }, [metric, startDate, endDate, open, anchorId, anchorName, preset, overviewStableSnapshot])
+    clearAssignError()
+  }, [metric, startDate, endDate, open, anchorId, anchorName, preset, overviewStableSnapshot, clearAssignError])
 
   const isRefundMetric = metric === 'returnAmount' || metric === 'returnCount'
   const isQualityMetric = metric === 'qualityReturnCount' || metric === 'qualityReturnRate'
@@ -253,9 +273,9 @@ export const BoardMetricDrawer: React.FC<Props> = ({
             ) : null}
             {isRefundMetric ? (
               <div className="mt-2 space-y-1.5 text-sm font-semibold text-slate-900">
-                <p>实际退款金额：{formatMoney(refundAmountDisplay)}</p>
-                <p>涉及退款/售后订单数：{formatCount(refundRelatedCount)}</p>
-                <p>实际产生退款订单数：{formatCount(refundWithAmountCount)}</p>
+                <p>退款金额：{formatMoney(refundAmountDisplay)}</p>
+                <p>售后相关订单数：{formatCount(refundRelatedCount)}</p>
+                <p>已退款订单数：{formatCount(refundWithAmountCount)}</p>
               </div>
             ) : isQualityMetric ? (
               <div className="mt-2 space-y-1.5 text-sm font-semibold text-slate-900">
@@ -322,7 +342,19 @@ export const BoardMetricDrawer: React.FC<Props> = ({
             loading={loading && !!data}
             emptyText="该指标下暂无匹配订单"
             amountMode={metric === 'actualSignedAmount' ? 'signed' : 'default'}
+            manualAnchorAssign={
+              anchorOptions.length > 0
+                ? {
+                    anchorOptions,
+                    assigningOrderNo,
+                    onAssign: (orderNo, targetAnchorName) => {
+                      void handleManualAssign(orderNo, targetAnchorName)
+                    },
+                  }
+                : undefined
+            }
           />
+          {assignError ? <p className="text-xs text-red-600">{assignError}</p> : null}
         </div>
       ) : null}
     </BoardDrawerShell>

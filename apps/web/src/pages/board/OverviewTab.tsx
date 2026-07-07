@@ -541,6 +541,7 @@ export const OverviewTab: React.FC = () => {
           overviewStableSnapshot={
             preset === 'lastMonth' && Boolean(overviewMeta?.stableVsLatest?.needsManualUpdate)
           }
+          onOrderAnchorAssigned={() => void reload()}
         />
       ) : null}
     </div>

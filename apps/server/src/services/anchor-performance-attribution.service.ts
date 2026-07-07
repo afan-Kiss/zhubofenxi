@@ -358,6 +358,13 @@ export function ensureAnchorPerformanceLeaderboardSlots(
   }
 
   return merged.sort((a, b) => {
+    const gmvDiff = Number(b.gmv ?? b.totalGmv ?? 0) - Number(a.gmv ?? a.totalGmv ?? 0)
+    if (gmvDiff !== 0) return gmvDiff
+    const signedDiff =
+      Number(b.actualSignedAmount ?? 0) - Number(a.actualSignedAmount ?? 0)
+    if (signedDiff !== 0) return signedDiff
+    if (a.anchorName === '未归属' && b.anchorName !== '未归属') return 1
+    if (b.anchorName === '未归属' && a.anchorName !== '未归属') return -1
     const orderA = config.anchors.findIndex((x) => x.name === a.anchorName)
     const orderB = config.anchors.findIndex((x) => x.name === b.anchorName)
     const ia = orderA >= 0 ? orderA : fixedNames.indexOf(a.anchorName)

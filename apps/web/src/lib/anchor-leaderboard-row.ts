@@ -241,3 +241,20 @@ export function aggregateSummaryFromAnchorRows(
 export function isHighRefundRate(rate: number | null): boolean {
   return rate != null && rate >= 0.5
 }
+
+/** 主播业绩卡片：支付金额降序，相同时按已签收金额、姓名 */
+export function sortAnchorLeaderboardByPerformance(
+  rows: AnchorLeaderboardRow[],
+): AnchorLeaderboardRow[] {
+  return [...rows].sort((a, b) => {
+    const gmvDiff = anchorRowGmv(b) - anchorRowGmv(a)
+    if (gmvDiff !== 0) return gmvDiff
+    const signedDiff = anchorRowActualSignedAmount(b) - anchorRowActualSignedAmount(a)
+    if (signedDiff !== 0) return signedDiff
+    const nameA = String(a.anchorName ?? '')
+    const nameB = String(b.anchorName ?? '')
+    if (nameA === '未归属' && nameB !== '未归属') return 1
+    if (nameB === '未归属' && nameA !== '未归属') return -1
+    return nameA.localeCompare(nameB, 'zh-CN')
+  })
+}

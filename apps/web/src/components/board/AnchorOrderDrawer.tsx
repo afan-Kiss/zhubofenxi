@@ -8,7 +8,8 @@ import { Pagination } from '../ui/Pagination'
 import { showAnchorDrillSignedTab } from '../../lib/board-rate-display'
 import { BoardDrawerShell } from './BoardDrawerShell'
 import { BoardDrillOrderTable, type BoardDrillOrderRow } from './BoardDrillOrderTable'
-import { anchorRowLivePeriodText } from '../../lib/anchor-leaderboard-row'
+import { anchorRowLivePeriodText, sortAnchorLeaderboardByPerformance } from '../../lib/anchor-leaderboard-row'
+import { useManualOrderAnchorAssign } from '../../hooks/useManualOrderAnchorAssign'
 
 function formatSessionClock(time: string): string {
   const t = time.trim()
@@ -86,6 +87,7 @@ interface Props {
   startDate: string
   endDate: string
   rowSnapshot?: Record<string, unknown>
+  onOrderAnchorAssigned?: () => void
 }
 
 function statNum(stats: Record<string, unknown> | undefined, key: string): number {
@@ -101,6 +103,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
   startDate,
   endDate,
   rowSnapshot,
+  onOrderAnchorAssigned,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [page, setPage] = useState(1)
@@ -111,12 +114,24 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
   const [copyDone, setCopyDone] = useState(false)
   const [liveSessionsOpen, setLiveSessionsOpen] = useState(false)
   const [orderTab, setOrderTab] = useState<'signed' | 'all'>('all')
-  const [anchorOptions, setAnchorOptions] = useState<Array<{ id: string; name: string }>>([])
-  const [assigningOrderNo, setAssigningOrderNo] = useState<string | null>(null)
-  const [assignError, setAssignError] = useState<string | null>(null)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pageSize = 20
-  const isUnassignedDrawer = anchorName?.trim() === '未归属' || anchorId?.trim() === '未归属'
+
+  const bumpReload = useCallback(() => setReloadNonce((n) => n + 1), [])
+
+  const {
+    anchorOptions,
+    assigningOrderNo,
+    assignError,
+    handleManualAssign,
+    clearAssignError,
+  } = useManualOrderAnchorAssign({
+    enabled: open,
+    onAssigned: () => {
+      bumpReload()
+      onOrderAnchorAssigned?.()
+    },
+  })
 
   useEffect(() => {
     if (!open) {
@@ -131,30 +146,8 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
     setCopyDone(false)
     setLiveSessionsOpen(false)
     setOrderTab('all')
-    setAssignError(null)
-    setAssigningOrderNo(null)
-  }, [open, anchorName, anchorId, startDate, endDate, preset])
-
-  useEffect(() => {
-    if (!open || !isUnassignedDrawer) {
-      setAnchorOptions([])
-      return
-    }
-    const controller = new AbortController()
-    void (async () => {
-      try {
-        const res = await apiRequest<{ anchors: Array<{ id: string; name: string }> }>(
-          '/api/anchors/options',
-          { signal: controller.signal },
-        )
-        if (controller.signal.aborted) return
-        setAnchorOptions(res.anchors ?? [])
-      } catch {
-        if (!controller.signal.aborted) setAnchorOptions([])
-      }
-    })()
-    return () => controller.abort()
-  }, [open, isUnassignedDrawer])
+    clearAssignError()
+  }, [open, anchorName, anchorId, startDate, endDate, preset, clearAssignError])
 
   useEffect(() => {
     return () => {
@@ -267,26 +260,6 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
       copyTimerRef.current = setTimeout(() => setCopyDone(false), 2000)
     })
   }
-
-  const handleManualAssign = useCallback(
-    async (orderNo: string, targetAnchorName: string) => {
-      if (!orderNo || !targetAnchorName) return
-      setAssignError(null)
-      setAssigningOrderNo(orderNo)
-      try {
-        await apiRequest('/api/board/order-anchor-manual-assign', {
-          method: 'POST',
-          body: JSON.stringify({ orderNo, anchorName: targetAnchorName }),
-        })
-        setReloadNonce((n) => n + 1)
-      } catch (e) {
-        setAssignError(e instanceof Error ? e.message : '指定主播失败')
-      } finally {
-        setAssigningOrderNo(null)
-      }
-    },
-    [],
-  )
 
   useEffect(() => {
     if (!data?.liveSessions?.length) return
@@ -438,7 +411,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
               orderTab === 'signed' ? '当前范围暂无实际签收订单' : '当前范围暂无该主播订单'
             }
             manualAnchorAssign={
-              isUnassignedDrawer && anchorOptions.length > 0
+              anchorOptions.length > 0
                 ? {
                     anchorOptions,
                     assigningOrderNo,

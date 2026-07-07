@@ -326,8 +326,9 @@ boardRouter.get('/daily-report', async (req, res) => {
       return
     }
     const { buildDailyReport } = await import('../services/daily-report.service')
+    const queryPreset = req.query.preset ? String(req.query.preset) : 'custom'
     const data = await buildDailyReport({
-      preset: 'custom',
+      preset: queryPreset,
       startDate,
       endDate,
       role: req.user!.role as import('../types/roles').UserRole,

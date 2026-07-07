@@ -19,6 +19,7 @@ import { prisma } from '../lib/prisma'
 import { getLatestWorkbenchCacheUpdatedAt } from './xhs-after-sales-workbench.service'
 import { logInfo, logWarn, presetLabel } from '../utils/server-log'
 import { printStartupSummary } from './startup-summary.service'
+import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 
 export const BUSINESS_CACHE_PRESETS: BusinessRangePreset[] = [
   'today',
@@ -303,18 +304,26 @@ export async function getOrBuildBusinessBoardCache(params: {
 
   const hit = cache.get(key)
   if (hit && !params.forceRebuild) {
-    const latestWorkbenchAt = await getLatestWorkbenchCacheUpdatedAt()
-    const cachedWorkbenchAt = hit.workbenchCacheMaxUpdatedAt
-      ? Date.parse(hit.workbenchCacheMaxUpdatedAt)
-      : 0
-    const latestMs = latestWorkbenchAt?.getTime() ?? 0
-    if (latestMs <= cachedWorkbenchAt) {
-      return hit
+    const latestSourceMax = await resolveSourceDataMaxTime()
+    if (hit.sourceDataMaxTime !== latestSourceMax) {
+      logInfo(
+        '经营缓存',
+        `${presetLabel(params.preset)} 订单库有更新（${hit.sourceDataMaxTime ?? '—'} → ${latestSourceMax ?? '—'}），重建经营缓存`,
+      )
+    } else {
+      const latestWorkbenchAt = await getLatestWorkbenchCacheUpdatedAt()
+      const cachedWorkbenchAt = hit.workbenchCacheMaxUpdatedAt
+        ? Date.parse(hit.workbenchCacheMaxUpdatedAt)
+        : 0
+      const latestMs = latestWorkbenchAt?.getTime() ?? 0
+      if (latestMs <= cachedWorkbenchAt) {
+        return hit
+      }
+      logInfo(
+        '经营缓存',
+        `${presetLabel(params.preset)} 售后工作台已更新，重建经营缓存`,
+      )
     }
-    logInfo(
-      '经营缓存',
-      `${presetLabel(params.preset)} 售后工作台已更新，重建经营缓存`,
-    )
   }
   const pending = pendingBuilds.get(key)
   if (pending) return pending
@@ -461,6 +470,7 @@ export function getBusinessCacheDebugInfo(
 export function invalidateBusinessBoardCache(): void {
   cache.clear()
   pendingBuilds.clear()
+  clearScheduleAttributionCache()
   logInfo('经营缓存', '已清空全部缓存条目')
 }
 

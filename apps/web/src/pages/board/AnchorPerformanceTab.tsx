@@ -19,6 +19,7 @@ import {
   anchorRowRate,
   isSingleDayPreset,
   aggregateSummaryFromAnchorRows,
+  sortAnchorLeaderboardByPerformance,
 } from '../../lib/anchor-leaderboard-row'
 import {
   BoardLiveQueryAutoRefresh,
@@ -192,9 +193,7 @@ export const AnchorPerformanceTab: React.FC = () => {
   const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
   const [reportPhotosStale, setReportPhotosStale] = useState(false)
   const [realtimeSyncHint, setRealtimeSyncHint] = useState<string | null>(null)
-  const autoSyncCooldownRef = useRef<Map<string, number>>(new Map())
   const autoSyncFailedRef = useRef(false)
-  const AUTO_SYNC_COOLDOWN_MS = 3 * 60 * 1000
   const REALTIME_SYNC_FAIL_HINT = '自动更新失败，当前先展示本地已有数据。可以稍后刷新。'
 
   useEffect(() => {
@@ -205,15 +204,9 @@ export const AnchorPerformanceTab: React.FC = () => {
   useEffect(() => {
     if (preset !== 'today' && preset !== 'yesterday') return
 
-    const rangeKey = `${preset}:${startDate}:${endDate}`
-    const now = Date.now()
-    const lastTriggered = autoSyncCooldownRef.current.get(rangeKey) ?? 0
-    if (now - lastTriggered < AUTO_SYNC_COOLDOWN_MS) return
-
     const syncing = isBusinessSyncActive(syncMeta?.businessSync?.status)
     if (syncing || activeSyncJob || triggerSyncBusy) return
 
-    autoSyncCooldownRef.current.set(rangeKey, now)
     setRealtimeSyncHint(
       preset === 'today'
         ? '正在更新今日数据，完成后会自动刷新。'
@@ -227,15 +220,9 @@ export const AnchorPerformanceTab: React.FC = () => {
         autoSyncFailedRef.current = true
         setRealtimeSyncHint(REALTIME_SYNC_FAIL_HINT)
       })
-  }, [
-    preset,
-    startDate,
-    endDate,
-    syncMeta?.businessSync?.status,
-    activeSyncJob,
-    triggerSyncBusy,
-    triggerBusinessSync,
-  ])
+    // 仅在切换今日/昨日范围时触发；同步状态变化不重复拉单
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- syncMeta/activeSyncJob 仅用于运行中守卫
+  }, [preset, startDate, endDate, triggerBusinessSync])
 
   useEffect(() => {
     if (preset !== 'today' && preset !== 'yesterday') return
@@ -253,7 +240,14 @@ export const AnchorPerformanceTab: React.FC = () => {
     void prefetchShipmentPhotoDataUrls(images).then(setShipmentPhotoDataUrls)
   }, [])
 
-  const allAnchors = (data?.anchorLeaderboard as Array<Record<string, unknown>>) ?? []
+  const allAnchors = useMemo(
+    () => sortAnchorLeaderboardByPerformance((data?.anchorLeaderboard as Array<Record<string, unknown>>) ?? []),
+    [data?.anchorLeaderboard],
+  )
+
+  const handleOrderAnchorAssigned = useCallback(() => {
+    void reload()
+  }, [reload])
 
   const options = allAnchors.map((a) => ({
     id: String(a.anchorId ?? a.anchorName),
@@ -626,6 +620,7 @@ export const AnchorPerformanceTab: React.FC = () => {
         startDate={startDate}
         endDate={endDate}
         rowSnapshot={anchorDrawer?.rowSnapshot}
+        onOrderAnchorAssigned={handleOrderAnchorAssigned}
       />
 
       <AnchorQualityRefundDrawer
@@ -650,6 +645,7 @@ export const AnchorPerformanceTab: React.FC = () => {
           anchorName={selectedAnchorMeta?.anchorName}
           cardValueRaw={anchorSummaryMetricValue(filteredPerformanceSummary, metricDrawer)}
           blacklistedBuyerIds={blacklistedBuyerIds}
+          onOrderAnchorAssigned={handleOrderAnchorAssigned}
         />
       ) : null}
     </div>

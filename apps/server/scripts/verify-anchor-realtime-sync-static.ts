@@ -37,8 +37,21 @@ function main(): void {
     fail('AnchorPerformanceTab 缺少 today/yesterday 自动 triggerBusinessSync')
   }
 
-  if (anchor.includes('AUTO_SYNC_COOLDOWN_MS')) ok('AnchorPerformanceTab 有 3 分钟冷却')
-  else fail('AnchorPerformanceTab 缺少 3 分钟冷却')
+  if (anchor.includes('AUTO_SYNC_COOLDOWN_MS')) {
+    fail('AnchorPerformanceTab 仍保留 3 分钟冷却，应每次打开今日/昨日都触发同步')
+  } else {
+    ok('AnchorPerformanceTab 已移除 3 分钟冷却')
+  }
+
+  if (
+    anchor.includes('仅在切换今日/昨日范围时触发') ||
+    (anchor.match(/useEffect\([\s\S]*triggerBusinessSync[\s\S]*\[preset, startDate, endDate/) &&
+      !anchor.match(/syncMeta\?\.businessSync\?\.status[\s\S]*triggerBusinessSync/))
+  ) {
+    ok('切换 today/yesterday 时触发同步，同步完成不重复触发')
+  } else {
+    fail('自动同步 effect 依赖不正确，可能在同步完成后重复拉单')
+  }
 
   if (anchor.includes('.catch(') && anchor.includes('triggerBusinessSync')) {
     ok('triggerBusinessSync 有 catch')

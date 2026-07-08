@@ -292,7 +292,14 @@ export const GoodReviewsPage: React.FC = () => {
       abortRef.current?.abort()
       const controller = new AbortController()
       abortRef.current = controller
-      if (!opts?.silent) setInitialLoading(true)
+      loadingMoreRef.current = false
+      inFlightCursorRef.current = null
+      if (!opts?.silent) {
+        setReviews([])
+        setNextCursor(null)
+        setHasMore(false)
+        setInitialLoading(true)
+      }
       setError('')
       try {
         await fetchPage({ shop: shopKey, signal: controller.signal })
@@ -393,16 +400,32 @@ export const GoodReviewsPage: React.FC = () => {
     const el = loadMoreRef.current
     if (!el || !hasMore || initialLoading) return
 
+    let disposed = false
+    const triggerLoad = () => {
+      if (disposed) return
+      void loadMorePage()
+    }
+
     const observer = new IntersectionObserver(
       (entries) => {
-        if (!entries.some((e) => e.isIntersecting)) return
-        void loadMorePage()
+        if (entries.some((entry) => entry.isIntersecting)) triggerLoad()
       },
-      { rootMargin: '120px' },
+      { rootMargin: '240px' },
     )
     observer.observe(el)
-    return () => observer.disconnect()
-  }, [hasMore, initialLoading, loadMorePage])
+
+    const probeVisible = () => {
+      if (disposed || loadingMoreRef.current) return
+      const rect = el.getBoundingClientRect()
+      if (rect.top <= window.innerHeight + 240) triggerLoad()
+    }
+    requestAnimationFrame(probeVisible)
+
+    return () => {
+      disposed = true
+      observer.disconnect()
+    }
+  }, [hasMore, initialLoading, loadMorePage, reviews.length])
 
   const activeShopView = useMemo<GoodReviewShopView | null>(() => {
     return shops.find((s) => s.shopKey === activeShop) ?? shops[0] ?? null

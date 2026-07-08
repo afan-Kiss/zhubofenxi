@@ -45,6 +45,11 @@ function main(): void {
   } else {
     fail('GoodReviewsPage 缺少 loadingMoreRef 或 inFlightCursorRef')
   }
+  if (page.includes('requestAnimationFrame(probeVisible)')) {
+    ok('GoodReviewsPage 列表懒加载含首屏探测')
+  } else {
+    fail('GoodReviewsPage 列表懒加载缺少首屏探测')
+  }
   if (
     page.includes('自动更新失败') &&
     page.includes('当前先展示本地已有好评')
@@ -62,6 +67,8 @@ function main(): void {
   const image = read('web/src/components/good-reviews/GoodReviewImage.tsx')
   if (image.includes('try') && image.includes('sessionStorage')) ok('GoodReviewImage try/catch sessionStorage')
   else fail('GoodReviewImage 缺少 try/catch')
+  if (image.includes('IntersectionObserver')) ok('GoodReviewImage 视口懒加载')
+  else fail('GoodReviewImage 缺少 IntersectionObserver 懒加载')
 
   const drawer = read('web/src/components/good-reviews/GoodReviewDetailDrawer.tsx')
   if (drawer.includes('buildGoodReviewImageProxyUrl')) ok('DetailDrawer 图片用 buildGoodReviewImageProxyUrl')

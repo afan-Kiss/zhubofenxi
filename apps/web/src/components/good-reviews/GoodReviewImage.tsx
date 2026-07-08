@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { randomUuid } from '../../lib/random-id'
 
 const PLACEHOLDER =
@@ -50,14 +50,63 @@ export const GoodReviewImage: React.FC<Props> = ({
   debugUrl = import.meta.env.DEV,
 }) => {
   const [failed, setFailed] = useState(false)
-  const proxyUrl = useMemo(() => buildGoodReviewImageProxyUrl(rawUrl), [rawUrl])
-  const src = !rawUrl || failed ? PLACEHOLDER : proxyUrl
+  const [visible, setVisible] = useState(false)
+  const holderRef = useRef<HTMLDivElement | null>(null)
+  const proxyUrl = useMemo(
+    () => (visible && rawUrl ? buildGoodReviewImageProxyUrl(rawUrl) : null),
+    [rawUrl, visible],
+  )
   const title =
-    debugUrl && rawUrl ? `代理：${proxyUrl}\n原始：${rawUrl}` : failed ? '图片加载失败' : undefined
+    debugUrl && rawUrl ? `代理：${proxyUrl ?? '—'}\n原始：${rawUrl}` : failed ? '图片加载失败' : undefined
+
+  useEffect(() => {
+    setFailed(false)
+    setVisible(false)
+  }, [rawUrl])
+
+  useEffect(() => {
+    const el = holderRef.current
+    if (!el || !rawUrl) return
+
+    const reveal = () => setVisible(true)
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          reveal()
+          io.disconnect()
+        }
+      },
+      { rootMargin: '180px' },
+    )
+    io.observe(el)
+
+    const probe = () => {
+      const rect = el.getBoundingClientRect()
+      if (rect.top <= window.innerHeight + 180 && rect.bottom >= -180) {
+        reveal()
+        io.disconnect()
+      }
+    }
+    requestAnimationFrame(probe)
+
+    return () => io.disconnect()
+  }, [rawUrl])
+
+  if (!rawUrl) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-slate-100 text-center text-[10px] leading-tight text-slate-400 ${className ?? ''}`}
+        title={title}
+      >
+        无图
+      </div>
+    )
+  }
 
   if (failed) {
     return (
       <div
+        ref={holderRef}
         className={`flex items-center justify-center bg-slate-100 text-center text-[10px] leading-tight text-slate-400 ${className ?? ''}`}
         title={title}
         onClick={onClick}
@@ -69,15 +118,27 @@ export const GoodReviewImage: React.FC<Props> = ({
   }
 
   return (
-    <img
-      src={src}
-      alt={alt}
-      title={title}
-      className={className}
-      loading="lazy"
-      onClick={onClick}
-      onError={() => setFailed(true)}
-    />
+    <div ref={holderRef} className={`relative overflow-hidden ${className ?? ''}`}>
+      {visible ? (
+        <img
+          src={proxyUrl ?? PLACEHOLDER}
+          alt={alt}
+          title={title}
+          className={`h-full w-full object-cover ${onClick ? 'cursor-pointer' : ''}`}
+          loading="lazy"
+          decoding="async"
+          onClick={onClick}
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <div
+          className="flex h-full w-full items-center justify-center bg-slate-100 text-[10px] text-slate-400"
+          aria-hidden
+        >
+          ···
+        </div>
+      )}
+    </div>
   )
 }
 

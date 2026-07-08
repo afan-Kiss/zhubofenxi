@@ -54,6 +54,11 @@ function createWebRouter(dist: string, indexHtml: string): Router {
       next()
       return
     }
+    // 缺失的前端静态资源必须 404，不能回退 index.html（否则浏览器会把 HTML 当 JS 执行 → 白屏）
+    if (req.path.startsWith('/assets/')) {
+      res.status(404).type('text/plain').send('Not Found')
+      return
+    }
     sendSpa(req, res)
   })
 
@@ -121,6 +126,10 @@ export function mountWebStatic(app: Express): boolean {
     }
     if (req.path.startsWith('/api')) {
       next()
+      return
+    }
+    if (req.path.startsWith('/assets/')) {
+      res.status(404).type('text/plain').send('Not Found')
       return
     }
     sendSpa(req, res)

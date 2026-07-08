@@ -105,13 +105,43 @@ function toCompareLeaderboardRows(anchors: DailyReportAnchorRow[]): AnchorLeader
   }))
 }
 
+/** 日报截图用淡金色表格线，便于多卡片字段对齐阅读 */
+const GOLDEN_TABLE_BORDER = 'border-[#E5D9BC]'
+const GOLDEN_TABLE_LINE = 'border-[#F0E8D6]'
+
+function MetricTable({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div
+      className={`overflow-hidden rounded-lg border bg-white/60 ${GOLDEN_TABLE_BORDER} ${className}`}
+    >
+      {children}
+    </div>
+  )
+}
+
 function MetricLine({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-3 text-[13px] leading-6">
-      <span className="text-slate-500">{label}</span>
-      <span className={strong ? 'text-[15px] font-semibold text-slate-900' : 'text-slate-800'}>
+    <div className={`grid grid-cols-[minmax(0,1fr)_auto] border-b ${GOLDEN_TABLE_LINE} last:border-b-0`}>
+      <div
+        className={`border-r px-3 py-1.5 text-[13px] leading-6 text-slate-500 ${GOLDEN_TABLE_LINE}`}
+      >
+        {label}
+      </div>
+      <div
+        className={`px-3 py-1.5 text-right text-[13px] leading-6 tabular-nums ${
+          strong ? 'text-[15px] font-semibold text-slate-900' : 'text-slate-800'
+        }`}
+      >
         {value}
-      </span>
+      </div>
+    </div>
+  )
+}
+
+function MetricTableNote({ children }: { children: React.ReactNode }) {
+  return (
+    <div className={`border-b px-3 py-1.5 text-[10px] leading-snug text-slate-400 ${GOLDEN_TABLE_LINE}`}>
+      {children}
     </div>
   )
 }
@@ -144,14 +174,18 @@ function LiveRoomFollowerLine({
   newFollowerCount: number
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 text-[13px] leading-6">
-      <span className="flex min-w-0 flex-wrap items-center gap-1.5 text-slate-500">
+    <div className={`grid grid-cols-[minmax(0,1fr)_auto] border-b ${GOLDEN_TABLE_LINE} last:border-b-0`}>
+      <div
+        className={`flex min-w-0 flex-wrap items-center gap-1.5 border-r px-3 py-1.5 text-[13px] leading-6 ${GOLDEN_TABLE_LINE}`}
+      >
         <span className="text-slate-600">{liveAccountName}</span>
         {(anchorNames ?? []).map((name) => (
           <AnchorNameBadge key={`${liveAccountName}-${name}`} name={name} />
         ))}
+      </div>
+      <span className="shrink-0 px-3 py-1.5 text-right text-[13px] leading-6 tabular-nums text-slate-800">
+        {formatPeopleCount(newFollowerCount)}
       </span>
-      <span className="shrink-0 text-slate-800">{formatPeopleCount(newFollowerCount)}</span>
     </div>
   )
 }
@@ -183,20 +217,30 @@ function ShippedOrdersBlock({
     )
   }
   return (
-    <div className="mt-1 space-y-0.5">
-      <p className={`${compact ? 'text-[10px]' : 'text-[11px]'} text-slate-500`}>
+    <div>
+      <div
+        className={`border-b px-3 py-1.5 ${compact ? 'text-[10px]' : 'text-[11px]'} text-slate-500 ${GOLDEN_TABLE_LINE}`}
+      >
         真实发货订单（{list.length} 单，已剔除售后/关闭/取消）
-      </p>
+      </div>
       {list.map((order) => (
         <div
           key={order.orderNo}
-          className={`flex flex-wrap items-center gap-1.5 ${compact ? 'text-[10px]' : 'text-[11px]'} leading-5`}
+          className={`grid grid-cols-[minmax(0,1fr)_auto] border-b ${GOLDEN_TABLE_LINE} last:border-b-0`}
         >
-          {showAnchorName && order.anchorName ? (
-            <AnchorNameBadge name={order.anchorName} compact={compact} />
-          ) : null}
-          <span className="min-w-0 flex-1 text-slate-700">{order.productTitle || '商品名称未同步'}</span>
-          <span className="tabular-nums text-slate-700">{formatMoney(order.amountYuan)}</span>
+          <div
+            className={`flex min-w-0 flex-wrap items-center gap-1.5 border-r px-3 py-1 ${compact ? 'text-[10px]' : 'text-[11px]'} leading-5 ${GOLDEN_TABLE_LINE}`}
+          >
+            {showAnchorName && order.anchorName ? (
+              <AnchorNameBadge name={order.anchorName} compact={compact} />
+            ) : null}
+            <span className="min-w-0 text-slate-700">{order.productTitle || '商品名称未同步'}</span>
+          </div>
+          <span
+            className={`shrink-0 px-3 py-1 text-right tabular-nums text-slate-700 ${compact ? 'text-[10px]' : 'text-[11px]'} leading-5`}
+          >
+            {formatMoney(order.amountYuan)}
+          </span>
         </div>
       ))}
     </div>
@@ -246,17 +290,13 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
           formatCount={(n) => formatOrderCount(n)}
         />
       </div>
-      <div className="mt-3 space-y-1">
+      <MetricTable className="mt-3">
         <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} strong />
-        <ShippedOrdersBlock orders={row.shippedOrders} showAnchorName={false} />
-        <MetricLine
-          label="归属支付金额"
-          value={formatMoney(row.gmvYuan)}
-          strong={false}
-        />
-        <p className="text-[10px] leading-snug text-slate-400">
-          归属支付按主播时段统计；真实发货已剔除售后、关闭与取消单
-        </p>
+        {(row.shippedOrders?.length ?? 0) > 0 ? (
+          <ShippedOrdersBlock orders={row.shippedOrders} showAnchorName={false} />
+        ) : null}
+        <MetricLine label="归属支付金额" value={formatMoney(row.gmvYuan)} />
+        <MetricTableNote>归属支付按主播时段统计；真实发货已剔除售后、关闭与取消单</MetricTableNote>
         <MetricLine label="真实卖出" value={formatOrderCount(row.soldOrderCount)} />
         <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />
         <MetricLine label="场观人数" value={formatPeopleCount(row.viewSessionCount)} />
@@ -264,15 +304,10 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         <MetricLine
           label="平均在线"
           value={
-            row.avgOnlineUserCount != null
-              ? formatPeopleCount(row.avgOnlineUserCount)
-              : '--'
+            row.avgOnlineUserCount != null ? formatPeopleCount(row.avgOnlineUserCount) : '--'
           }
         />
-        <MetricLine
-          label="停留时长"
-          value={formatStayDurationSeconds(row.avgViewDurationSeconds)}
-        />
+        <MetricLine label="停留时长" value={formatStayDurationSeconds(row.avgViewDurationSeconds)} />
         <MetricLine label="新增粉丝" value={formatPeopleCount(row.newFollowerCount)} />
         <MetricLine label="成交率" value={formatRatePercent(row.dealConversionRate)} />
         <MetricLine label="新增粉丝率" value={formatRatePercent(row.newFollowerRate)} />
@@ -283,10 +318,8 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
           value={formatOrderCount(row.invalidOrderCount)}
           strong={row.invalidOrderCount > 0}
         />
-        <p className="text-[10px] leading-snug text-slate-400">
-          含本场关闭、取消、售后订单，不计入真实发货
-        </p>
-      </div>
+        <MetricTableNote>含本场关闭、取消、售后订单，不计入真实发货</MetricTableNote>
+      </MetricTable>
     </div>
   )
 }
@@ -317,26 +350,34 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
         <p className="mt-2 text-[28px] font-bold leading-none text-slate-900">
           真实发货 {formatMoney(data.summary.totalShippedAmountYuan)}
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2">
-          <MetricLine label="真实卖出" value={formatOrderCount(data.summary.totalSoldOrderCount)} />
-          <MetricLine
-            label="直播总时长"
-            value={formatDuration(data.summary.totalLiveDurationMinutes)}
-          />
-          <MetricLine
-            label="整体时均产出"
-            value={formatHourly(data.summary.overallHourlyAmountYuan)}
-          />
-          <MetricLine
-            label="本场关闭/退货单"
-            value={formatOrderCount(data.summary.totalInvalidOrderCount)}
-            strong={data.summary.totalInvalidOrderCount > 0}
-          />
-        </div>
-        <p className="mt-1 text-[10px] leading-snug text-slate-400">
-          关闭/退货单与真实发货同基础池，已剔除低价刷单；含关闭、取消、售后，不计入真实发货
-        </p>
-        <ShippedOrdersBlock orders={data.summary.shippedOrders} compact />
+        <MetricTable className="mt-4">
+          <div className="grid grid-cols-2">
+            <div className={`border-r ${GOLDEN_TABLE_LINE}`}>
+              <MetricLine label="真实卖出" value={formatOrderCount(data.summary.totalSoldOrderCount)} />
+              <MetricLine
+                label="整体时均产出"
+                value={formatHourly(data.summary.overallHourlyAmountYuan)}
+              />
+            </div>
+            <div>
+              <MetricLine
+                label="直播总时长"
+                value={formatDuration(data.summary.totalLiveDurationMinutes)}
+              />
+              <MetricLine
+                label="本场关闭/退货单"
+                value={formatOrderCount(data.summary.totalInvalidOrderCount)}
+                strong={data.summary.totalInvalidOrderCount > 0}
+              />
+            </div>
+          </div>
+          <MetricTableNote>
+            关闭/退货单与真实发货同基础池，已剔除低价刷单；含关闭、取消、售后，不计入真实发货
+          </MetricTableNote>
+          {(data.summary.shippedOrders?.length ?? 0) > 0 ? (
+            <ShippedOrdersBlock orders={data.summary.shippedOrders} compact />
+          ) : null}
+        </MetricTable>
         {data.summary.liveSessionAttributionNote ? (
           <p className="mt-3 border-t border-rose-100 pt-3 text-[12px] leading-relaxed text-amber-800">
             {data.summary.liveSessionAttributionNote}
@@ -348,23 +389,25 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
           </p>
         ) : null}
         {(data.summary.liveRoomNewFollowers?.length ?? 0) > 0 && (
-          <div className="mt-4 border-t border-rose-100 pt-3 space-y-1">
-            <p className="text-[12px] text-slate-500">各直播号新增粉丝</p>
-            {data.summary.liveRoomNewFollowers.map((row) => (
-              <LiveRoomFollowerLine
-                key={row.liveAccountName}
-                liveAccountName={row.liveAccountName}
-                anchorNames={row.anchorNames}
-                newFollowerCount={row.newFollowerCount}
-              />
-            ))}
-            {data.summary.liveRoomNewFollowers.length > 1 && (
-              <MetricLine
-                label="合计"
-                value={formatPeopleCount(data.summary.totalNewFollowerCount)}
-                strong
-              />
-            )}
+          <div className="mt-4 border-t border-rose-100 pt-3">
+            <p className="mb-2 text-[12px] text-slate-500">各直播号新增粉丝</p>
+            <MetricTable>
+              {data.summary.liveRoomNewFollowers.map((row) => (
+                <LiveRoomFollowerLine
+                  key={row.liveAccountName}
+                  liveAccountName={row.liveAccountName}
+                  anchorNames={row.anchorNames}
+                  newFollowerCount={row.newFollowerCount}
+                />
+              ))}
+              {data.summary.liveRoomNewFollowers.length > 1 && (
+                <MetricLine
+                  label="合计"
+                  value={formatPeopleCount(data.summary.totalNewFollowerCount)}
+                  strong
+                />
+              )}
+            </MetricTable>
           </div>
         )}
       </div>

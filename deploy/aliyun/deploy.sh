@@ -139,7 +139,7 @@ verify_web_build() {
   fi
   grep -q '同步全部店铺好评' "$DEPLOY_DIR/apps/web/dist/$good_review_js" || fail "dist JS 缺少「同步全部店铺好评」"
   grep -q '加载更多好评' "$DEPLOY_DIR/apps/web/dist/$good_review_js" || fail "dist JS 缺少「加载更多好评」"
-  grep -q 'good-review-material-v2' "$DEPLOY_DIR/apps/web/dist/$good_review_js" || fail "dist JS 缺少版本标记"
+  grep -q 'good-review-material-v3' "$DEPLOY_DIR/apps/web/dist/$good_review_js" || fail "dist JS 缺少版本标记"
   log "dist JS 文案验收通过"
 }
 

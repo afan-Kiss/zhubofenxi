@@ -26,12 +26,18 @@ function main(): void {
   console.log('verify-good-reviews-page-static')
 
   const page = read('web/src/pages/good-reviews/GoodReviewsPage.tsx')
-  if (page.includes('GOOD_REVIEWS_DEFAULT_DAYS') || page.includes('days: 2')) ok('GoodReviewsPage 使用 days=2')
-  else fail('GoodReviewsPage 未使用 days=2')
+  const lib = read('web/src/lib/good-reviews.ts')
+  if (lib.includes('GOOD_REVIEWS_DEFAULT_DAYS = 3')) ok('默认 days=3')
+  else fail('未设置 GOOD_REVIEWS_DEFAULT_DAYS = 3')
   if (page.includes('nextCursor') && page.includes('hasMore')) ok('GoodReviewsPage 使用 cursor/hasMore')
   else fail('GoodReviewsPage 缺少 cursor/hasMore')
   if (page.includes('IntersectionObserver')) ok('GoodReviewsPage 无限滚动')
   else fail('GoodReviewsPage 缺少 IntersectionObserver')
+  if (!page.includes('syncCurrentShop') && !page.includes('autoSyncStatusByShopRef')) {
+    ok('GoodReviewsPage 已移除打开页自动同步')
+  } else {
+    fail('GoodReviewsPage 仍含自动同步逻辑')
+  }
   if (page.includes('AbortController') && page.includes('requestSeqRef')) {
     ok('GoodReviewsPage AbortController + requestSeqRef')
   } else {
@@ -51,17 +57,25 @@ function main(): void {
     fail('GoodReviewsPage 列表懒加载缺少首屏探测')
   }
   if (
-    page.includes('自动更新失败') &&
-    page.includes('当前先展示本地已有好评')
+    page.includes('自动更新失败') ||
+    page.includes('打开页面会自动尝试更新')
+  ) {
+    fail('仍保留打开页自动更新提示')
+  } else {
+    ok('无打开页自动更新提示')
+  }
+  if (
+    page.includes('当前先展示本地已有好评') ||
+    page.includes('最后同步')
   ) {
     ok('背景自动同步失败有用户可见提示')
   } else {
-    fail('缺少背景自动同步失败提示')
+    fail('缺少本地列表说明')
   }
-  if (page.includes('累计评价总数') && page.includes('最近 2 天展示')) {
-    ok('统计卡片区分累计与最近 2 天')
+  if (page.includes('累计评价总数') && page.includes('最近 3 天')) {
+    ok('统计卡片区分累计与最近 3 天')
   } else {
-    fail('统计卡片未区分累计与最近 2 天')
+    fail('统计卡片未区分累计与最近 3 天')
   }
 
   const image = read('web/src/components/good-reviews/GoodReviewImage.tsx')

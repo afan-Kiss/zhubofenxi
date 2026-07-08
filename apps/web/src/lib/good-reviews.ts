@@ -87,11 +87,11 @@ export interface GoodReviewSyncResult {
   shops: GoodReviewSyncShopResult[]
 }
 
-export const GOOD_REVIEWS_DEFAULT_DAYS = 2
+export const GOOD_REVIEWS_DEFAULT_DAYS = 3
 export const GOOD_REVIEWS_PAGE_LIMIT = 30
 export const GOOD_REVIEWS_MAX_LIMIT = 50
 
-export const GOOD_REVIEW_UI_VERSION = 'good-review-material-v2'
+export const GOOD_REVIEW_UI_VERSION = 'good-review-material-v3'
 
 /** 列表/详情缩略图：商品图优先，否则买家晒图第一张 */
 export function resolveGoodReviewThumb(review: {
@@ -177,9 +177,12 @@ export function buildGoodReviewsListUrl(params: {
 }): string {
   const q = new URLSearchParams()
   q.set('shop', params.shop)
-  q.set('days', String(params.days ?? GOOD_REVIEWS_DEFAULT_DAYS))
   q.set('limit', String(params.limit ?? GOOD_REVIEWS_PAGE_LIMIT))
-  if (params.cursor) q.set('cursor', params.cursor)
+  if (params.cursor) {
+    q.set('cursor', params.cursor)
+  } else {
+    q.set('days', String(params.days ?? GOOD_REVIEWS_DEFAULT_DAYS))
+  }
   const f = params.filters ?? DEFAULT_GOOD_REVIEW_LIST_FILTERS
   if (f.content === 'hasImage' || f.content === 'both') q.set('hasImage', 'true')
   if (f.content === 'hasText' || f.content === 'both') q.set('hasText', 'true')
@@ -194,7 +197,7 @@ export function buildGoodReviewsListUrl(params: {
 }
 
 export function describeGoodReviewFilters(filters: GoodReviewListFilters): string[] {
-  const parts: string[] = ['最近 2 天']
+  const parts: string[] = ['首屏最近 3 天']
   if (filters.content === 'hasImage') parts.push('有图评价')
   else if (filters.content === 'hasText') parts.push('有文字评价')
   else if (filters.content === 'both') parts.push('有图有文字')

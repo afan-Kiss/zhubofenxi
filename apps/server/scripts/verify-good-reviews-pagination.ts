@@ -28,15 +28,15 @@ async function main(): Promise<void> {
   console.log('verify-good-reviews-pagination')
   const shop = GOOD_REVIEW_SHOPS[0]!.shopKey
   const now = Date.now()
-  const cutoff = now - 2 * 24 * 60 * 60 * 1000
+  const cutoff = now - 3 * 24 * 60 * 60 * 1000
 
-  const page1 = await queryGoodReviews({ shop, days: 2, limit: 5 })
+  const page1 = await queryGoodReviews({ shop, days: 3, limit: 5 })
   if (page1.reviews.length <= 5) ok(`第一页最多 5 条，实际 ${page1.reviews.length}`)
   else fail(`第一页超过 5 条：${page1.reviews.length}`)
 
   for (const r of page1.reviews) {
     if (!r.reviewTime) {
-      fail(`reviewTime 为空不应出现在最近两天列表：${r.id}`)
+      fail(`reviewTime 为空不应出现在最近三天列表：${r.id}`)
       continue
     }
     const t = new Date(r.reviewTime).getTime()
@@ -45,13 +45,12 @@ async function main(): Promise<void> {
     }
   }
   if (page1.reviews.every((r) => r.reviewTime && new Date(r.reviewTime).getTime() >= cutoff)) {
-    ok('第一页 reviews 均在最近两天内')
+    ok('第一页 reviews 均在最近三天内')
   }
 
   if (page1.hasMore && page1.nextCursor) {
     const page2 = await queryGoodReviews({
       shop,
-      days: 2,
       limit: 5,
       cursor: page1.nextCursor,
     })
@@ -73,7 +72,7 @@ async function main(): Promise<void> {
     ok('第一页 hasMore=false 或数据不足，跳过分页续查')
   }
 
-  const capped = await queryGoodReviews({ shop, days: 2, limit: 100 })
+  const capped = await queryGoodReviews({ shop, days: 3, limit: 100 })
   if (capped.reviews.length <= 50) ok(`limit 上限生效，100 请求返回 ${capped.reviews.length} 条`)
   else fail(`limit 未封顶：${capped.reviews.length}`)
 
@@ -83,6 +82,25 @@ async function main(): Promise<void> {
   else fail('缺少 returnedReviewCount')
   if (typeof page1.filteredReviewCount === 'number') ok('filteredReviewCount 存在')
   else fail('缺少 filteredReviewCount')
+
+  if (page1.totalReviewCount > page1.filteredReviewCount && page1.reviews.length > 0) {
+    const last = page1.reviews[page1.reviews.length - 1]!
+    const olderProbe = await queryGoodReviews({
+      shop,
+      limit: 5,
+      cursor: page1.nextCursor ?? undefined,
+    })
+    if (page1.hasMore || olderProbe.reviews.length > 0) {
+      ok('最近 3 天结束后仍可继续分页加载更早好评')
+    } else {
+      fail('店铺有更早好评但 hasMore/cursor 未开放继续加载')
+    }
+    if (last.reviewTime && olderProbe.reviews.every((r) => !r.reviewTime || r.reviewTime <= last.reviewTime)) {
+      ok('续页时间不晚于上一页最后一条')
+    }
+  } else {
+    ok('最近 3 天已覆盖全部或数据不足，跳过历史续页探测')
+  }
 
   const orderRow = fs.readFileSync(
     path.resolve(ROOT, 'web/src/components/good-reviews/GoodReviewOrderRow.tsx'),

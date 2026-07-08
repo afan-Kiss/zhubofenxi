@@ -15,7 +15,7 @@ import type {
   GoodReviewShopView,
 } from './good-review.types'
 
-const DEFAULT_DAYS = 2
+const DEFAULT_DAYS = 3
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 50
 
@@ -188,6 +188,17 @@ function buildMaterialFilters(filters?: GoodReviewListFilters): Prisma.GoodRevie
   return extra
 }
 
+function buildShopReviewBaseWhere(params: {
+  shopKey?: string
+  filters?: GoodReviewListFilters
+}): Prisma.GoodReviewWhereInput {
+  const andParts: Prisma.GoodReviewWhereInput[] = [{ reviewTime: { not: null } }]
+  const materialFilters = buildMaterialFilters(params.filters)
+  if (params.shopKey) andParts.unshift({ shopKey: params.shopKey })
+  andParts.push(...materialFilters)
+  return andParts.length === 1 ? andParts[0]! : { AND: andParts }
+}
+
 function buildFilteredWhere(params: {
   shopKey?: string
   rangeStart: Date
@@ -253,11 +264,6 @@ export async function queryGoodReviews(params?: {
 }): Promise<GoodReviewPagePayload> {
   const shopKey = params?.shop?.trim()
   const limit = Math.min(Math.max(params?.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT)
-  const { rangeStart, rangeEnd } = resolveReviewRange({
-    days: params?.days,
-    startDate: params?.startDate,
-    endDate: params?.endDate,
-  })
   const filters: GoodReviewListFilters = {
     hasImage: params?.hasImage,
     hasText: params?.hasText,
@@ -267,12 +273,19 @@ export async function queryGoodReviews(params?: {
     minProductScore: params?.minProductScore,
     materialTag: params?.materialTag,
   }
-  const filteredWhere = buildFilteredWhere({ shopKey, rangeStart, rangeEnd, filters })
   const decodedCursor = params?.cursor?.trim()
     ? decodeGoodReviewCursor(params.cursor.trim())
     : null
+  const { rangeStart, rangeEnd } = resolveReviewRange({
+    days: params?.days,
+    startDate: params?.startDate,
+    endDate: params?.endDate,
+  })
+  const recentFilteredWhere = buildFilteredWhere({ shopKey, rangeStart, rangeEnd, filters })
   const pageWhere =
-    decodedCursor != null ? buildCursorWhere(decodedCursor, filteredWhere) : filteredWhere
+    decodedCursor != null
+      ? buildCursorWhere(decodedCursor, buildShopReviewBaseWhere({ shopKey, filters }))
+      : recentFilteredWhere
 
   const reviewWhereAll = shopKey ? { shopKey } : undefined
 
@@ -286,12 +299,26 @@ export async function queryGoodReviews(params?: {
         take: limit + 1,
       }),
       prisma.goodReview.count({ where: reviewWhereAll }),
-      prisma.goodReview.count({ where: filteredWhere }),
+      prisma.goodReview.count({ where: recentFilteredWhere }),
     ])
 
-  const hasMore = reviewRows.length > limit
+  let hasMore = reviewRows.length > limit
   const pageRows = hasMore ? reviewRows.slice(0, limit) : reviewRows
   const lastRow = pageRows[pageRows.length - 1]
+
+  if (!hasMore && lastRow?.reviewTime) {
+    const olderWhere = buildCursorWhere(
+      {
+        reviewTime: lastRow.reviewTime.toISOString(),
+        syncedAt: lastRow.syncedAt.toISOString(),
+        id: lastRow.id,
+      },
+      buildShopReviewBaseWhere({ shopKey, filters }),
+    )
+    const olderCount = await prisma.goodReview.count({ where: olderWhere })
+    hasMore = olderCount > 0
+  }
+
   const nextCursor =
     hasMore && lastRow?.reviewTime
       ? encodeGoodReviewCursor({

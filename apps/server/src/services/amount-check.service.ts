@@ -9,6 +9,7 @@ import {
 import { aggregateViewsMetrics } from './board-metrics.service'
 import { mapViewToBoardOrderRow } from './order-row-mapper.service'
 import { computeGrossProfitBreakdown } from './gross-profit.service'
+import { buildOrderSettlementKeyIndex } from './settlement-order-key-match.util'
 import type { AnalyzedOrderView } from '../types/analysis'
 
 export interface AmountCheckRow {
@@ -124,11 +125,16 @@ export async function buildAmountCheckReport(
 
   let platformGrossProfitYuan: number | null = null
   if (artifacts?.settlement) {
-    const orderIds = new Set(
-      views.map((v) => v.matchOrderId || v.orderId).filter((id): id is string => Boolean(id)),
+    const orderAnchorByOrderId = new Map<string, string>()
+    for (const v of views) {
+      if (v.anchorId && v.matchOrderId) orderAnchorByOrderId.set(v.matchOrderId, v.anchorId)
+    }
+    const orderKeyIndex = buildOrderSettlementKeyIndex(
+      artifacts.dedupe.uniqueOrders,
+      orderAnchorByOrderId,
     )
     const gp = computeGrossProfitBreakdown(
-      orderIds,
+      orderKeyIndex,
       sumEffectiveGmvCent(views),
       artifacts.settlement,
     )

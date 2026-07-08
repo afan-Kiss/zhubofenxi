@@ -7,6 +7,7 @@ import {
   computeGrossProfitBreakdown,
   grossProfitToDisplay,
 } from '../services/gross-profit.service'
+import { buildOrderSettlementKeyIndex } from '../services/settlement-order-key-match.util'
 import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
 import {
   buildGmvDiagnostics,
@@ -87,9 +88,16 @@ diagnosticsRouter.get(
       }
 
       const artifacts = prepareAnalysisArtifactsFromRaw(bundle)
-      const orderIds = new Set(artifacts.views.map((v) => v.orderId).filter(Boolean))
+      const orderAnchorByOrderId = new Map<string, string>()
+      for (const v of artifacts.views) {
+        if (v.anchorId && v.matchOrderId) orderAnchorByOrderId.set(v.matchOrderId, v.anchorId)
+      }
+      const orderKeyIndex = buildOrderSettlementKeyIndex(
+        artifacts.dedupe.uniqueOrders,
+        orderAnchorByOrderId,
+      )
       const gmvCent = artifacts.views.reduce((s, v) => s + v.gmvCent, 0)
-      const breakdown = computeGrossProfitBreakdown(orderIds, gmvCent, artifacts.settlement)
+      const breakdown = computeGrossProfitBreakdown(orderKeyIndex, gmvCent, artifacts.settlement)
       const display = grossProfitToDisplay(breakdown)
 
       sendOk(res, {

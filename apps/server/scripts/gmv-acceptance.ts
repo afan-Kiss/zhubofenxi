@@ -23,6 +23,7 @@ import {
   runBusinessAnalysisFromRaw,
 } from '../src/services/business-analysis.service'
 import { computeGrossProfitBreakdown } from '../src/services/gross-profit.service'
+import { buildOrderSettlementKeyIndex } from '../src/services/settlement-order-key-match.util'
 import { centToYuan } from '../src/utils/money'
 import { formatDateKey } from '../src/utils/date-range'
 
@@ -351,14 +352,17 @@ async function main(): Promise<void> {
   const pipeline = bundle ? runBusinessAnalysisFromRaw(bundle) : null
   const overview = pipeline?.overview
 
-  const orderIds = new Set(
-    (artifacts?.dedupe.uniqueOrders ?? []).map((o) => o.matchOrderId),
-  )
-  const gp = computeGrossProfitBreakdown(
-    orderIds,
-    diag.sumOrderGmvCent,
-    artifacts?.settlement,
-  )
+  const orderAnchorByOrderId = new Map<string, string>()
+  for (const v of artifacts?.views ?? []) {
+    if (v.anchorId && v.matchOrderId) orderAnchorByOrderId.set(v.matchOrderId, v.anchorId)
+  }
+  const orderKeyIndex =
+    artifacts != null
+      ? buildOrderSettlementKeyIndex(artifacts.dedupe.uniqueOrders, orderAnchorByOrderId)
+      : null
+  const gp = orderKeyIndex
+    ? computeGrossProfitBreakdown(orderKeyIndex, diag.sumOrderGmvCent, artifacts?.settlement)
+    : null
 
   const homeGmvCent = Math.round(Number(live.summary.totalGmv ?? live.summary.gmv ?? 0) * 100)
   const diagGmvCent = diag.sumOrderGmvCent
@@ -389,10 +393,10 @@ async function main(): Promise<void> {
     actualSignedAmountCent: overview?.actualSignedAmountCent ?? null,
     returnAmount: overview ? centToYuan(overview.returnAmountCent) : null,
     returnAmountCent: overview?.returnAmountCent ?? null,
-    grossProfit: overview ? centToYuan(overview.grossProfitCent) : centToYuan(gp.grossProfitCent),
-    grossProfitCent: overview?.grossProfitCent ?? gp.grossProfitCent,
-    matchedSettlementCount: gp.matchedSettlementCount,
-    unmatchedSettlementCount: gp.unmatchedSettlementCount,
+    grossProfit: overview ? centToYuan(overview.grossProfitCent) : gp ? centToYuan(gp.grossProfitCent) : null,
+    grossProfitCent: overview?.grossProfitCent ?? gp?.grossProfitCent ?? null,
+    matchedSettlementCount: gp?.matchedSettlementCount ?? null,
+    unmatchedSettlementCount: gp?.unmatchedSettlementCount ?? null,
     targetGmvYuan: TARGET_GMV_YUAN,
     gmvMatchTarget: diagGmvCent === TARGET_GMV_CENT,
     threeWayConsistent: homeGmvCent === diagGmvCent && diagGmvCent === biGmvCent,

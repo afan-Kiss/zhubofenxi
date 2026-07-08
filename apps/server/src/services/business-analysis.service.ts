@@ -34,7 +34,7 @@ import {
   preprocessSettlementFromRecords,
   sumSettlementDirection,
 } from './reconcile.service'
-import { buildOrderSettlementKeyIndex } from './settlement-order-key-match.util'
+import { buildOrderSettlementKeyIndex, type OrderSettlementKeyIndex } from './settlement-order-key-match.util'
 import { sumCent } from '../utils/money'
 import {
   computeOrderAmountMetrics,
@@ -321,6 +321,8 @@ function buildViews(
 
 function computeGrossProfitForOverview(
   views: AnalyzedOrderView[],
+  orderKeyIndex: OrderSettlementKeyIndex,
+  gmvCent: number,
   settlement: ReturnType<typeof preprocessSettlement> | undefined,
   hasPending: boolean,
   hasSettled: boolean,
@@ -329,11 +331,8 @@ function computeGrossProfitForOverview(
   note: string
   breakdown: ReturnType<typeof computeGrossProfitBreakdown> | null
 } {
-  const orderIds = new Set(views.map((v) => v.orderId).filter(Boolean))
-  const gmvCent = sumEffectiveGmvCent(views)
-
   if (hasPending || hasSettled) {
-    const breakdown = computeGrossProfitBreakdown(orderIds, gmvCent, settlement)
+    const breakdown = computeGrossProfitBreakdown(orderKeyIndex, gmvCent, settlement)
     const display = grossProfitToDisplay(breakdown)
     const note =
       breakdown.warnings.length > 0
@@ -638,6 +637,8 @@ export function runBusinessAnalysis(input: AnalyzeInput): BusinessAnalysisResult
   const hasSettlement = input.hasPendingFile || input.hasSettledFile
   const gross = computeGrossProfitForOverview(
     views,
+    orderKeyIndex,
+    gmvCent,
     settlement,
     input.hasPendingFile,
     input.hasSettledFile,
@@ -871,6 +872,8 @@ export function runBusinessAnalysisFromRaw(bundle: RawAnalyzeBundle): BusinessAn
   const hasSettlement = bundle.hasPending || bundle.hasSettled
   const gross = computeGrossProfitForOverview(
     views,
+    orderKeyIndex,
+    gmvCent,
     settlement,
     bundle.hasPending,
     bundle.hasSettled,

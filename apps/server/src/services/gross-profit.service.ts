@@ -1,6 +1,10 @@
 import type { SettlementPreprocessResult, SettlementRecord } from '../types/analysis'
 import { parseMoneyToCent, pickBillFieldPair } from '../utils/amount-parse.service'
 import { centToYuan } from '../utils/money'
+import {
+  type OrderSettlementKeyIndex,
+  resolveSettlementRecordCanonicalOrderId,
+} from './settlement-order-key-match.util'
 
 const INCOME_CODES = new Set([
   'SELLER_INCOME',
@@ -183,7 +187,7 @@ export interface GrossProfitBreakdown {
 }
 
 export function computeGrossProfitBreakdown(
-  orderIds: Set<string>,
+  orderKeyIndex: OrderSettlementKeyIndex,
   gmvCent: number,
   settlement: SettlementPreprocessResult | undefined,
 ): GrossProfitBreakdown {
@@ -200,9 +204,10 @@ export function computeGrossProfitBreakdown(
   let unknownFieldCount = 0
   let matchedSettlementCount = 0
 
-  const settledByPackage = new Map<string, SettlementRecord>()
+  const settledByCanonical = new Map<string, SettlementRecord>()
   for (const r of settlement?.settledRecords ?? []) {
-    if (r.orderId) settledByPackage.set(r.orderId, r)
+    const canonical = resolveSettlementRecordCanonicalOrderId(r, orderKeyIndex)
+    if (canonical) settledByCanonical.set(canonical, r)
   }
 
   const seen = new Set<string>()
@@ -220,12 +225,16 @@ export function computeGrossProfitBreakdown(
     }
     seen.add(key)
 
-    if (!r.orderId || !orderIds.has(r.orderId)) {
-      if (r.orderId) nonCurrentSettlementCount += 1
+    const canonical = resolveSettlementRecordCanonicalOrderId(r, orderKeyIndex)
+    const matchedOrder =
+      canonical != null && orderKeyIndex.canonicalOrderIds.has(canonical)
+
+    if (!matchedOrder) {
+      if (r.orderId || canonical) nonCurrentSettlementCount += 1
       else unmatchedSettlementCount += 1
       if (samples.length < 20) {
         samples.push({
-          packageId: r.orderId || '—',
+          packageId: (canonical ?? r.orderId) || '—',
           settleNo: pickSettleNo(r),
           transType: pickTransType(r),
           amountCent: r.amountCent,
@@ -238,11 +247,11 @@ export function computeGrossProfitBreakdown(
       continue
     }
 
-    if (r.bill === 'pending' && settledByPackage.has(r.orderId)) {
+    if (r.bill === 'pending' && settledByCanonical.has(canonical)) {
       duplicateSettlementCount += 1
       if (samples.length < 20) {
         samples.push({
-          packageId: r.orderId,
+          packageId: canonical ?? r.orderId,
           settleNo: pickSettleNo(r),
           transType: pickTransType(r),
           amountCent: r.amountCent,
@@ -283,7 +292,7 @@ export function computeGrossProfitBreakdown(
 
     if (samples.length < 20) {
       samples.push({
-        packageId: r.orderId,
+        packageId: canonical ?? r.orderId,
         settleNo: pickSettleNo(r),
         transType: pickTransType(r),
         amountCent: r.amountCent,

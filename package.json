@@ -99,6 +99,7 @@
     "verify:monthly-review-note-type": "tsx apps/server/scripts/verify-monthly-review-note-type.ts",
     "verify:operations-amount-decimals": "tsx apps/server/scripts/verify-operations-amount-decimals.ts",
     "verify:settlement-order-key-match": "tsx apps/server/scripts/verify-settlement-order-key-match.ts",
+    "verify:gross-profit-settlement-key-match": "tsx apps/server/scripts/verify-gross-profit-settlement-key-match.ts",
     "verify:anchor-xiaobai-boundary": "tsx apps/server/scripts/verify-anchor-xiaobai-boundary.ts",
     "verify:anchor-multi-session-same-anchor": "tsx apps/server/scripts/verify-anchor-multi-session-same-anchor.ts",
     "verify:anchor-pocket-copy": "tsx apps/server/scripts/verify-anchor-pocket-copy.ts",

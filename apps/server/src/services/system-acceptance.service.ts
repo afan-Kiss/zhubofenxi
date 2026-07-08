@@ -8,6 +8,7 @@ import {
   runBusinessAnalysisFromRaw,
 } from './business-analysis.service'
 import { computeGrossProfitBreakdown } from './gross-profit.service'
+import { buildOrderSettlementKeyIndex } from './settlement-order-key-match.util'
 import { listSyncJobLogs } from './sync-job-log.service'
 
 export type AcceptanceStatus = 'pass' | 'fail' | 'unchecked'
@@ -150,10 +151,18 @@ export async function runSystemAcceptanceChecks(
     ),
   )
 
-  const orderIds = new Set(artifacts?.dedupe.uniqueOrders.map((o) => o.matchOrderId) ?? [])
-  const gp = bundle && artifacts
-    ? computeGrossProfitBreakdown(orderIds, biGmvCent, artifacts.settlement)
-    : null
+  const orderAnchorByOrderId = new Map<string, string>()
+  for (const v of artifacts?.views ?? []) {
+    if (v.anchorId && v.matchOrderId) orderAnchorByOrderId.set(v.matchOrderId, v.anchorId)
+  }
+  const orderKeyIndex =
+    artifacts != null
+      ? buildOrderSettlementKeyIndex(artifacts.dedupe.uniqueOrders, orderAnchorByOrderId)
+      : null
+  const gp =
+    bundle && artifacts && orderKeyIndex
+      ? computeGrossProfitBreakdown(orderKeyIndex, biGmvCent, artifacts.settlement)
+      : null
   items.push(
     item(
       'settlement_match',

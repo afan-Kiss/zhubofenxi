@@ -10,6 +10,14 @@ import {
   YAxis,
 } from 'recharts'
 import { centToDisplayYuan } from '../../lib/boss-dashboard-api'
+import { trimLeadingEmptyMonths } from '../../lib/boss-chart-months'
+import {
+  BOSS_CHART_LEGEND_STYLE,
+  bossLineChartMargin,
+  bossMoneyYAxisWidth,
+  formatBossMoneyAxisTick,
+  useBossChartCompact,
+} from './boss-chart-layout'
 
 const SHOP_COLORS: Record<string, string> = {
   total: '#0f172a',
@@ -41,6 +49,7 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
   shopKey,
   height = 240,
 }) => {
+  const compact = useBossChartCompact()
   const [visible, setVisible] = useState<Record<string, boolean>>({
     total: true,
     shiyuju: true,
@@ -49,17 +58,23 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
     xyxiangyu: true,
   })
 
+  const trimmedPoints = useMemo(
+    () => trimLeadingEmptyMonths(points, (p) => p.amountCent),
+    [points],
+  )
+
   const data = useMemo(
     () =>
-      points.map((p) => ({
+      trimmedPoints.map((p) => ({
         month: p.month.slice(5),
+        fullMonth: p.month,
         total: p.amountCent / 100,
         shiyuju: p.shiyuju / 100,
         hetianyayu: p.hetianyayu / 100,
         xiangyu: p.xiangyu / 100,
         xyxiangyu: p.xyxiangyu / 100,
       })),
-    [points],
+    [trimmedPoints],
   )
 
   const lines =
@@ -87,7 +102,7 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
     const value = row[key as keyof typeof row]
     return (
       <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
-        <div className="text-xs text-slate-500">{row.month} 月到账</div>
+        <div className="text-xs text-slate-500">{row.fullMonth} 月到账</div>
         <div className="mt-1 text-lg font-semibold text-slate-900">
           {centToDisplayYuan(Math.round(Number(value) * 100))}
         </div>
@@ -96,38 +111,44 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
   }
 
   return (
-    <div className="w-full min-w-0">
+    <div className="w-full min-w-0 overflow-hidden">
       <div className="w-full min-w-0" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart
-            data={data}
-            margin={{ top: 4, right: 12, left: 0, bottom: 0 }}
-          >
+          <LineChart data={data} margin={bossLineChartMargin(compact)}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis
               dataKey="month"
-              tick={{ fontSize: 11 }}
-              tickMargin={6}
+              tick={{ fontSize: compact ? 10 : 11 }}
+              tickMargin={4}
               axisLine={false}
               tickLine={false}
+              padding={{ left: 0, right: 0 }}
+              interval="preserveStartEnd"
+              minTickGap={compact ? 8 : 12}
             />
             <YAxis
-              tick={{ fontSize: 11 }}
-              width={44}
+              tick={{ fontSize: 10 }}
+              width={bossMoneyYAxisWidth(compact)}
               axisLine={false}
               tickLine={false}
+              tickFormatter={formatBossMoneyAxisTick}
             />
             <Tooltip
+              wrapperStyle={{ zIndex: 20, maxWidth: compact ? 220 : undefined }}
               formatter={(value: number, name: string) => [
                 centToDisplayYuan(Math.round(value * 100)),
                 name,
               ]}
+              labelFormatter={(label, payload) => {
+                const full = payload?.[0]?.payload?.fullMonth
+                return full ? `${full}（${label}）` : String(label)
+              }}
             />
             <Legend
               verticalAlign="top"
               align="right"
               iconSize={8}
-              wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
+              wrapperStyle={BOSS_CHART_LEGEND_STYLE}
               onClick={(e) => {
                 const key = String(e.dataKey ?? '')
                 setVisible((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -142,7 +163,7 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
                   name={line.label}
                   stroke={line.color}
                   strokeWidth={2}
-                  dot={false}
+                  dot={{ r: 2 }}
                   connectNulls={false}
                 />
               ) : null,

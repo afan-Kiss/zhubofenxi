@@ -9,6 +9,12 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import {
+  BOSS_CHART_LEGEND_STYLE,
+  bossLineChartMargin,
+  bossScoreYAxisWidth,
+  useBossChartCompact,
+} from './boss-chart-layout'
 
 interface SeriesPoint {
   date: string
@@ -40,6 +46,7 @@ export const BossScoreTrendChart: React.FC<Props> = ({
   service,
   height = 200,
 }) => {
+  const compact = useBossChartCompact()
   const data = useMemo(() => {
     const dates = new Set<string>()
     for (const row of [...quality, ...logistics, ...service]) dates.add(row.date)
@@ -90,35 +97,35 @@ export const BossScoreTrendChart: React.FC<Props> = ({
   }
 
   return (
-    <div className="w-full min-w-0">
+    <div className="w-full min-w-0 overflow-hidden">
       <div className="w-full min-w-0" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart
-            data={data}
-            margin={{ top: 4, right: 12, left: 0, bottom: 0 }}
-          >
+          <LineChart data={data} margin={bossLineChartMargin(compact)}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
             <XAxis
               dataKey="date"
-              tick={{ fontSize: 10 }}
-              tickMargin={6}
+              tick={{ fontSize: compact ? 9 : 10 }}
+              tickMargin={4}
               axisLine={false}
               tickLine={false}
+              padding={{ left: 0, right: 0 }}
+              interval="preserveStartEnd"
+              minTickGap={compact ? 6 : 10}
             />
             <YAxis
               domain={[0, 5]}
               tick={{ fontSize: 10 }}
-              width={28}
-              tickCount={6}
+              width={bossScoreYAxisWidth(compact)}
+              tickCount={5}
               axisLine={false}
               tickLine={false}
             />
-            <Tooltip />
+            <Tooltip wrapperStyle={{ zIndex: 20, maxWidth: compact ? 200 : undefined }} />
             <Legend
               verticalAlign="top"
               align="right"
               iconSize={8}
-              wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
+              wrapperStyle={BOSS_CHART_LEGEND_STYLE}
             />
             {SERIES_META.map((s) => (
               <Line

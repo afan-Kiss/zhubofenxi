@@ -62,6 +62,16 @@ def main() -> None:
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect(HOST, username="root", password=load_pass(), timeout=10, look_for_keys=False, allow_agent=False)
 
+    preview_local = ROOT / "apps/server/scripts/preview-boss-cooldown-hashes.ts"
+    preview_remote = f"{DEPLOY_DIR}/apps/server/scripts/preview-boss-cooldown-hashes.ts"
+    if preview_local.exists():
+        sftp = client.open_sftp()
+        try:
+            sftp.put(str(preview_local), preview_remote)
+            log("已上传 preview-boss-cooldown-hashes.ts")
+        finally:
+            sftp.close()
+
     _, health = run(client, f"curl -s --connect-timeout 5 --max-time 10 {API}/api/health", 15)
     log(f"health: {health[:120]}")
 
@@ -75,21 +85,10 @@ def main() -> None:
         log("仍有活跃任务，不触发新同步")
         sys.exit(3)
 
-    hash_script = r"""
-const { BOSS_DASHBOARD_SHOPS } = require('./apps/server/dist/config/boss-dashboard.constants.js');
-const { previewBossAggregateRequestHash } = require('./apps/server/dist/services/boss-dashboard/boss-dashboard-api.service.js');
-(async () => {
-  for (const shop of BOSS_DASHBOARD_SHOPS) {
-    const p = await previewBossAggregateRequestHash(shop);
-    if (!p) { console.log(shop.shopKey + ' NONE'); continue; }
-    console.log(p.shopKey + ' scope=' + p.scopeKey.slice(0,24) + ' hash=' + p.hash.slice(0,12));
-  }
-})().catch(e => { console.error(e); process.exit(1); });
-"""
     _, hash_out = run(
         client,
-        f"cd {DEPLOY_DIR} && node -e {json.dumps(hash_script)}",
-        45,
+        f"cd {DEPLOY_DIR} && npx tsx apps/server/scripts/preview-boss-cooldown-hashes.ts",
+        90,
     )
     print("\n=== v2 cooldown hash preview ===")
     print(hash_out)

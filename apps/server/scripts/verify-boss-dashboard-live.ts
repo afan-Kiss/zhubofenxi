@@ -59,14 +59,18 @@ async function login(username: string, password: string): Promise<string | null>
       body: JSON.stringify({ username, password }),
       signal: AbortSignal.timeout(LOGIN_TIMEOUT_MS),
     })
-    const setCookie = res.headers.get('set-cookie')
-    if (!res.ok || !setCookie) {
-      logStage(`登录失败 HTTP ${res.status} (${Date.now() - t0}ms)`)
+    const cookieParts =
+      typeof res.headers.getSetCookie === 'function'
+        ? res.headers.getSetCookie()
+        : [res.headers.get('set-cookie') ?? ''].filter(Boolean)
+    const joined = cookieParts.join(';')
+    const match = joined.match(/(?:connect\.sid|session_token)=[^;]+/)
+    if (!res.ok || !match) {
+      logStage(`登录失败 HTTP ${res.status} cookie=${joined ? 'present' : 'missing'} (${Date.now() - t0}ms)`)
       return null
     }
-    const match = setCookie.match(/connect\.sid=[^;]+/)
     logStage(`登录成功 (${Date.now() - t0}ms)`)
-    return match ? match[0] : null
+    return match[0]
   } catch (err) {
     logStage(`登录超时/异常: ${err instanceof Error ? err.message : String(err)}`)
     return null

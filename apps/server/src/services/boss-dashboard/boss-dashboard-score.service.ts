@@ -7,8 +7,8 @@ import {
 } from '../../config/boss-dashboard.constants'
 import { formatDateKeyShanghai } from '../../utils/business-timezone'
 import {
-  fetchBossShopScore,
-  fetchBossShopScoreTrend,
+  fetchBossShopScoreAudited,
+  fetchBossShopScoreTrendAudited,
 } from './boss-dashboard-api.service'
 import {
   parseBossScoreTrend,
@@ -19,7 +19,7 @@ import {
   clearBossShopScoreStale,
   markBossShopScoreStale,
 } from './boss-dashboard-score-cooldown.util'
-import { logInfo } from '../../utils/server-log'
+import { logInfo, logWarn } from '../../utils/server-log'
 
 function shanghaiHmNow(): string {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -41,16 +41,25 @@ export function shouldFetchShopScoreToday(): boolean {
 async function loadTrendScores(
   shop: GoodReviewShopDefinition,
   label: string,
-): Promise<Array<{ date: string; score: number }>> {
-  const payload = await fetchBossShopScoreTrend(shop, label, BOSS_SCORE_TREND_DAYS)
-  return parseBossScoreTrend(payload, label)
+): Promise<{ points: Array<{ date: string; score: number }>; error?: string }> {
+  const res = await fetchBossShopScoreTrendAudited(shop, label, BOSS_SCORE_TREND_DAYS)
+  if (!res.ok || res.data == null) {
+    return { points: [], error: res.errorMessage ?? '趋势请求失败' }
+  }
+  return { points: parseBossScoreTrend(res.data, label) }
 }
 
 export async function syncBossShopScoreForShop(params: {
   shop: GoodReviewShopDefinition
   liveAccountId: string
   forceFetch?: boolean
-}): Promise<{ skipped: boolean; saved: boolean; scoreDate: string | null; reason?: string }> {
+}): Promise<{
+  skipped: boolean
+  saved: boolean
+  partial?: boolean
+  scoreDate: string | null
+  reason?: string
+}> {
   const todayKey = formatDateKeyShanghai()
   if (!params.forceFetch && !shouldFetchShopScoreToday()) {
     return { skipped: true, saved: false, scoreDate: null, reason: '未到15:10，跳过店铺分请求' }
@@ -63,44 +72,81 @@ export async function syncBossShopScoreForShop(params: {
     return { skipped: true, saved: false, scoreDate: todayKey, reason: '今日快照已存在' }
   }
 
-  const scorePayload = await fetchBossShopScore(params.shop)
-  let parsed = parseBossShopScore(scorePayload)
+  const scoreRes = await fetchBossShopScoreAudited(params.shop)
+  if (!scoreRes.ok || scoreRes.data == null) {
+    return {
+      skipped: false,
+      saved: false,
+      scoreDate: null,
+      reason: scoreRes.errorMessage ?? '店铺分主接口失败',
+    }
+  }
+
+  let parsed = parseBossShopScore(scoreRes.data)
   const scoreDate = parsed.scoreDate ?? todayKey
 
   if (parsed.scoreDate && parsed.scoreDate < todayKey && !params.forceFetch) {
     markBossShopScoreStale(params.shop.shopKey, parsed.scoreDate)
-    logInfo('老板同步', `${params.shop.shopName} 店铺分仍为旧日期 ${parsed.scoreDate}，不写入今日快照`)
-    return { skipped: true, saved: false, scoreDate: parsed.scoreDate, reason: '平台评分日期未更新' }
+    logInfo('老板同步', `${params.shop.shopName} 店铺分仍为旧日期 ${parsed.scoreDate}（stale_score_date）`)
+    return { skipped: true, saved: false, scoreDate: parsed.scoreDate, reason: 'stale_score_date' }
   }
 
   clearBossShopScoreStale(params.shop.shopKey)
 
+  const errors: string[] = []
   if (parsed.qualityScore == null) {
     const qTrend = await loadTrendScores(params.shop, BOSS_SCORE_TREND_LABELS.quality)
-    const latest = qTrend[qTrend.length - 1]
+    const latest = qTrend.points[qTrend.points.length - 1]
     if (latest) parsed = { ...parsed, qualityScore: latest.score, scoreDate: latest.date }
+    else if (qTrend.error) errors.push(`品质趋势：${qTrend.error}`)
   }
   if (parsed.logisticsScore == null) {
     const lTrend = await loadTrendScores(params.shop, BOSS_SCORE_TREND_LABELS.logistics)
-    const latest = lTrend[lTrend.length - 1]
+    const latest = lTrend.points[lTrend.points.length - 1]
     if (latest) parsed = { ...parsed, logisticsScore: latest.score }
+    else if (lTrend.error) errors.push(`物流趋势：${lTrend.error}`)
   }
   if (parsed.serviceScore == null) {
     const sTrend = await loadTrendScores(params.shop, BOSS_SCORE_TREND_LABELS.service)
-    const latest = sTrend[sTrend.length - 1]
+    const latest = sTrend.points[sTrend.points.length - 1]
     if (latest) parsed = { ...parsed, serviceScore: latest.score }
+    else if (sTrend.error) errors.push(`服务趋势：${sTrend.error}`)
   }
 
   const finalDate = parsed.scoreDate ?? todayKey
+  const hasAnyScore =
+    parsed.qualityScore != null ||
+    parsed.logisticsScore != null ||
+    parsed.serviceScore != null ||
+    parsed.officialOverallScore != null
+
+  if (!hasAnyScore) {
+    return { skipped: false, saved: false, scoreDate: finalDate, reason: errors.join('；') || '无有效分项' }
+  }
+
   const duplicate = await prisma.bossShopScoreSnapshot.findUnique({
     where: { shopKey_scoreDate: { shopKey: params.shop.shopKey, scoreDate: finalDate } },
   })
+
+  const merged = {
+    qualityScore: parsed.qualityScore ?? duplicate?.qualityScore ?? null,
+    logisticsScore: parsed.logisticsScore ?? duplicate?.logisticsScore ?? null,
+    serviceScore: parsed.serviceScore ?? duplicate?.serviceScore ?? null,
+    officialOverallScore: parsed.officialOverallScore ?? duplicate?.officialOverallScore ?? null,
+  }
+
+  const allComplete =
+    merged.qualityScore != null &&
+    merged.logisticsScore != null &&
+    merged.serviceScore != null
+  const partial = !allComplete || errors.length > 0
+
   if (
     duplicate &&
-    duplicate.qualityScore === parsed.qualityScore &&
-    duplicate.logisticsScore === parsed.logisticsScore &&
-    duplicate.serviceScore === parsed.serviceScore &&
-    duplicate.officialOverallScore === parsed.officialOverallScore
+    duplicate.qualityScore === merged.qualityScore &&
+    duplicate.logisticsScore === merged.logisticsScore &&
+    duplicate.serviceScore === merged.serviceScore &&
+    duplicate.officialOverallScore === merged.officialOverallScore
   ) {
     return { skipped: true, saved: false, scoreDate: finalDate, reason: '评分未变化' }
   }
@@ -116,33 +162,51 @@ export async function syncBossShopScoreForShop(params: {
       shopKey: params.shop.shopKey,
       liveAccountId: params.liveAccountId,
       scoreDate: finalDate,
-      qualityScore: parsed.qualityScore,
-      logisticsScore: parsed.logisticsScore,
-      serviceScore: parsed.serviceScore,
-      officialOverallScore: parsed.officialOverallScore,
-      sourceApi: 'boss_shop_score',
+      qualityScore: merged.qualityScore,
+      logisticsScore: merged.logisticsScore,
+      serviceScore: merged.serviceScore,
+      officialOverallScore: merged.officialOverallScore,
+      sourceApi: partial ? 'boss_shop_score:partial' : 'boss_shop_score',
       rawJson: parsed.raw ? JSON.stringify(parsed.raw) : null,
       fetchedAt: new Date(),
     },
     update: {
       liveAccountId: params.liveAccountId,
-      qualityScore: parsed.qualityScore,
-      logisticsScore: parsed.logisticsScore,
-      serviceScore: parsed.serviceScore,
-      officialOverallScore: parsed.officialOverallScore,
+      qualityScore: merged.qualityScore,
+      logisticsScore: merged.logisticsScore,
+      serviceScore: merged.serviceScore,
+      officialOverallScore: merged.officialOverallScore,
+      sourceApi: partial ? 'boss_shop_score:partial' : 'boss_shop_score',
       rawJson: parsed.raw ? JSON.stringify(parsed.raw) : null,
       fetchedAt: new Date(),
     },
   })
 
-  await createScoreChangeAnnouncements({
-    shop: params.shop,
-    scoreDate: finalDate,
-    previous: prev,
-    current: parsed,
-  })
+  if (prev && allComplete) {
+    await createScoreChangeAnnouncements({
+      shop: params.shop,
+      scoreDate: finalDate,
+      previous: prev,
+      current: {
+        scoreDate: finalDate,
+        qualityScore: merged.qualityScore,
+        logisticsScore: merged.logisticsScore,
+        serviceScore: merged.serviceScore,
+        officialOverallScore: merged.officialOverallScore,
+        raw: parsed.raw ?? null,
+      },
+    })
+  } else if (partial) {
+    logWarn('老板同步', `${params.shop.shopName} 店铺分部分成功：${errors.join('；') || '分项未齐'}`)
+  }
 
-  return { skipped: false, saved: true, scoreDate: finalDate }
+  return {
+    skipped: false,
+    saved: true,
+    partial,
+    scoreDate: finalDate,
+    reason: partial ? errors.join('；') || 'partial_success' : undefined,
+  }
 }
 
 export async function loadBossScoreTrendSeries(

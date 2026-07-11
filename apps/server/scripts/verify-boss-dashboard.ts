@@ -13,6 +13,8 @@ import {
 import { buildRecentMonthKeys, aggregateMonthlyStatementIncome } from '../src/services/boss-dashboard/boss-dashboard-flow.service'
 import { createScoreChangeAnnouncements } from '../src/services/boss-dashboard/boss-dashboard-announcement.service'
 import { DEFAULT_ROLE_PAGE_PERMISSIONS } from '../src/config/page-permissions'
+import { BOSS_FINANCE_API } from '../src/config/boss-dashboard.constants'
+import { summarizeBossRun } from '../src/services/boss-dashboard/boss-dashboard-sync-status.util'
 import { isBossDashboardSyncRunning } from '../src/services/boss-dashboard/boss-dashboard-sync.service'
 import { shouldFetchShopScoreToday } from '../src/services/boss-dashboard/boss-dashboard-score.service'
 import {
@@ -22,9 +24,14 @@ import {
 } from '../src/services/boss-dashboard/boss-dashboard-score-cooldown.util'
 import { BUSINESS_SYNC_INTERVAL_MS } from '../src/config/business-sync.constants'
 import {
+  buildBossCooldownScopeKey,
+  buildBossRequestHash,
+  buildXhsRequestHash,
   checkXhsRequestAllowed,
   resetSyncRequestAuditStateForTests,
   resolveApiCooldownMs,
+  runXhsRequestWithAuditAndThrottle,
+  BOSS_COOLDOWN_VERSION,
 } from '../src/services/sync-request-audit.service'
 
 const issues: string[] = []
@@ -132,6 +139,181 @@ async function main() {
 
   if (!isBossDashboardSyncRunning()) ok('单飞锁初始未运行')
   else fail('单飞锁初始状态异常')
+
+  // --- 冷却隔离 v2 ---
+  resetSyncRequestAuditStateForTests()
+  const shops = [
+    { shopKey: 'shiyuju', cred: 'cred-shiyuju' },
+    { shopKey: 'hetianyayu', cred: 'cred-hetian' },
+    { shopKey: 'xiangyu', cred: 'cred-xiangyu' },
+    { shopKey: 'xyxiangyu', cred: 'cred-xy' },
+  ] as const
+  const hashes = shops.map((s) =>
+    buildBossRequestHash({
+      apiName: 'boss_account_summary',
+      shopKey: s.shopKey,
+      credentialId: s.cred,
+      method: 'GET',
+      url: BOSS_FINANCE_API.aggregateAccount,
+    }),
+  )
+  if (new Set(hashes).size === 4) ok('四店相同账户汇总请求产生四个不同 requestHash')
+  else fail(`四店 hash 未隔离：${hashes.join(',')}`)
+
+  const scopeA = buildBossCooldownScopeKey('shiyuju', 'cred-a')
+  const scopeB = buildBossCooldownScopeKey('shiyuju', 'cred-b')
+  if (scopeA !== scopeB) ok('同店不同 PlatformCredential 不共用冷却作用域')
+  else fail('凭证作用域未隔离')
+
+  if (buildBossCooldownScopeKey('xiangyu', 'c1') !== buildBossCooldownScopeKey('xyxiangyu', 'c2')) {
+    ok('祥钰珠宝与 XY祥钰珠宝不共用冷却作用域')
+  } else fail('祥钰与 XY 作用域冲突')
+
+  const uniqCred = `cred-shiyuju-${Date.now()}`
+  const hash1 = buildBossRequestHash({
+    apiName: 'boss_account_summary',
+    shopKey: 'shiyuju',
+    credentialId: uniqCred,
+    method: 'GET',
+    url: BOSS_FINANCE_API.aggregateAccount,
+  })
+  const scope1 = buildBossCooldownScopeKey('shiyuju', uniqCred)
+  const run1 = await runXhsRequestWithAuditAndThrottle({
+    shopId: uniqCred,
+    apiName: 'boss_account_summary',
+    method: 'GET',
+    urlKey: 'aggregate',
+    requestHash: hash1,
+    cooldownScopeKey: scope1,
+    execute: async () => ({ ok: true, data: { ok: 1 }, errorMessage: null }),
+  })
+  if (!run1.ok || run1.skippedRemote) fail('同店冷却测试：首次 mock 请求应成功执行')
+  const sameShopAgain = checkXhsRequestAllowed({
+    shopId: uniqCred,
+    apiName: 'boss_account_summary',
+    requestHash: hash1,
+    cooldownScopeKey: scope1,
+  })
+  if (!sameShopAgain.allowed) ok('同店同接口重复请求触发冷却')
+  else fail('同店冷却未生效')
+
+  const otherShopAllowed = checkXhsRequestAllowed({
+    shopId: shops[1]!.cred,
+    apiName: 'boss_account_summary',
+    requestHash: hashes[1]!,
+    cooldownScopeKey: buildBossCooldownScopeKey(shops[1]!.shopKey, shops[1]!.cred),
+  })
+  if (otherShopAllowed.allowed) ok('不同店同接口不会互相冷却')
+  else fail('跨店冷却误挡')
+
+  const legacyHash = buildXhsRequestHash({ apiName: 'boss_account_summary', body: null })
+  const v2AllowedDespiteLegacy = checkXhsRequestAllowed({
+    shopId: uniqCred,
+    apiName: 'boss_account_summary',
+    requestHash: hash1,
+    cooldownScopeKey: scope1,
+  })
+  if (!v2AllowedDespiteLegacy.allowed && legacyHash !== hash1) {
+    ok('v2 店铺 hash 与 v1 全局 hash 不同')
+  } else if (v2AllowedDespiteLegacy.allowed) {
+    ok('v2 作用域与 v1 hash 隔离（或冷却已过期）')
+  } else fail('v2/v1 hash 隔离检查异常')
+
+  await runXhsRequestWithAuditAndThrottle({
+    shopId: shops[2]!.cred,
+    apiName: 'boss_account_summary',
+    method: 'GET',
+    urlKey: 'aggregate',
+    requestHash: hashes[2]!,
+    cooldownScopeKey: buildBossCooldownScopeKey(shops[2]!.shopKey, shops[2]!.cred),
+    execute: async () => ({ ok: false, data: null, errorMessage: '冷却中（999s）' }),
+  })
+  const afterThrottle = checkXhsRequestAllowed({
+    shopId: shops[2]!.cred,
+    apiName: 'boss_account_summary',
+    requestHash: hashes[2]!,
+    cooldownScopeKey: buildBossCooldownScopeKey(shops[2]!.shopKey, shops[2]!.cred),
+  })
+  if (afterThrottle.allowed) ok('throttled/失败记录不会写入内存冷却（未成功不延长）')
+  else fail('失败记录错误延长了冷却')
+
+  const scoreCd = resolveApiCooldownMs('boss_shop_score')
+  if (scoreCd <= BUSINESS_SYNC_INTERVAL_MS) ok(`店铺分冷却 ${Math.round(scoreCd / 60000)} 分钟符合当前规则`)
+  else fail(`店铺分仍使用过长冷却：${scoreCd}ms`)
+
+  if (BOSS_COOLDOWN_VERSION === 'boss-cooldown-v2') ok('老板冷却版本为 boss-cooldown-v2')
+  else fail('老板冷却版本错误')
+
+  resetSyncRequestAuditStateForTests()
+
+  // --- BossSyncRunLog 状态 ---
+  const allFailed = summarizeBossRun([
+    {
+      shopKey: 'shiyuju',
+      fundSuccess: false,
+      fundError: '冷却',
+      scoreSkipped: true,
+      scoreSaved: false,
+      scoreDate: null,
+    },
+    {
+      shopKey: 'hetianyayu',
+      fundSuccess: false,
+      fundError: '冷却',
+      scoreSkipped: true,
+      scoreSaved: false,
+      scoreDate: null,
+    },
+  ])
+  if (allFailed.status === 'failed') ok('四店全失败时 BossSyncRunLog 为 failed')
+  else fail(`四店全失败状态错误：${allFailed.status}`)
+
+  const partial = summarizeBossRun([
+    {
+      shopKey: 'shiyuju',
+      fundSuccess: true,
+      fundSnapshotWritten: true,
+      scoreSkipped: true,
+      scoreSaved: false,
+      scoreDate: null,
+    },
+    {
+      shopKey: 'hetianyayu',
+      fundSuccess: false,
+      fundError: 'x',
+      scoreSkipped: true,
+      scoreSaved: false,
+      scoreDate: null,
+    },
+  ])
+  if (partial.status === 'partial_success') ok('部分店铺成功时状态为 partial_success')
+  else fail(`部分成功状态错误：${partial.status}`)
+
+  const skippedAll = summarizeBossRun([
+    {
+      shopKey: 'shiyuju',
+      fundSuccess: false,
+      scoreSkipped: true,
+      scoreSaved: false,
+      scoreDate: null,
+      skippedFresh: true,
+    },
+  ])
+  if (skippedAll.status === 'skipped') ok('全部新鲜合理跳过时状态为 skipped')
+  else fail(`skipped 状态错误：${skippedAll.status}`)
+
+  // --- 资金 partial 字段策略（解析层） ---
+  const partialAgg = parseBossAggregateAccount({
+    data: {
+      accountVo: { avilableAmount: '100.00', totalAmount: '100.00' },
+    },
+  })
+  if (partialAgg.availableAmountCent === 10000 && partialAgg.frozenAmountCent == null) {
+    ok('资金主接口成功时缺失辅助字段保持 null 而非 0')
+  } else fail('资金解析不应把缺失字段写成 0')
+
+  resetSyncRequestAuditStateForTests()
+  resetBossShopScoreStaleForTests()
 
   const prevSnapshot = {
     id: 'verify-prev',

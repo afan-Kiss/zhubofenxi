@@ -4,8 +4,11 @@ import { resolveOfficialShopAccountForStatus } from '../official-shop-account.se
 import { syncBossFundForShop } from './boss-dashboard-fund.service'
 import { syncBossShopScoreForShop } from './boss-dashboard-score.service'
 import { logInfo, logWarn } from '../../utils/server-log'
+import { summarizeBossRun, type ShopSyncResult } from './boss-dashboard-sync-status.util'
 
 let bossSyncRunning: Promise<void> | null = null
+
+type ShopSyncResultLocal = ShopSyncResult
 
 export async function runBossDashboardSync(trigger: string): Promise<void> {
   if (bossSyncRunning) {
@@ -17,48 +20,69 @@ export async function runBossDashboardSync(trigger: string): Promise<void> {
     const run = await prisma.bossSyncRunLog.create({
       data: { trigger, status: 'running' },
     })
-    const shopResults: Array<Record<string, unknown>> = []
+    const shopResults: ShopSyncResultLocal[] = []
     try {
       for (const shop of BOSS_DASHBOARD_SHOPS) {
         const account = await resolveOfficialShopAccountForStatus(shop.shopKey)
         if (!account?.id) {
-          shopResults.push({ shopKey: shop.shopKey, success: false, error: '未配置官方账号' })
+          shopResults.push({
+            shopKey: shop.shopKey,
+            fundSuccess: false,
+            fundError: '未配置官方账号',
+            scoreSkipped: true,
+            scoreSaved: false,
+            scoreDate: null,
+          })
           continue
         }
         const fund = await syncBossFundForShop(shop)
         let score: {
           skipped: boolean
           saved: boolean
+          partial?: boolean
           scoreDate: string | null
           reason?: string
         } = { skipped: true, saved: false, scoreDate: null, reason: 'skipped' }
         try {
           score = await syncBossShopScoreForShop({ shop, liveAccountId: account.id })
         } catch (err) {
-          logWarn(
-            '老板同步',
-            `${shop.shopName} 店铺分失败：${err instanceof Error ? err.message : String(err)}`,
-          )
+          const msg = err instanceof Error ? err.message : String(err)
+          logWarn('老板同步', `${shop.shopName} 店铺分失败：${msg}`)
+          score = { skipped: false, saved: false, scoreDate: null, reason: msg }
         }
         shopResults.push({
           shopKey: shop.shopKey,
           fundSuccess: fund.success,
+          fundPartial: fund.partial,
+          fundSnapshotWritten: fund.snapshotWritten,
           fundError: fund.error ?? null,
           scoreSkipped: score.skipped,
           scoreSaved: score.saved,
+          scorePartial: score.partial,
           scoreDate: score.scoreDate,
           scoreReason: score.reason ?? null,
+          skippedFresh:
+            !fund.snapshotWritten &&
+            !fund.success &&
+            score.skipped &&
+            !score.saved &&
+            !fund.error,
         })
       }
+      const summary = summarizeBossRun(shopResults)
       await prisma.bossSyncRunLog.update({
         where: { id: run.id },
         data: {
-          status: 'success',
+          status: summary.status,
           finishedAt: new Date(),
-          shopResults: JSON.stringify(shopResults),
+          errorMessage: summary.errorSummary,
+          shopResults: JSON.stringify({ shops: shopResults, summary }),
         },
       })
-      logInfo('老板同步', `完成，用时 ${Date.now() - startedAt.getTime()}ms`)
+      logInfo(
+        '老板同步',
+        `完成 status=${summary.status} 资金快照=${summary.snapshotWrittenCount} 店铺分=${summary.scoreSnapshotWrittenCount} 用时 ${Date.now() - startedAt.getTime()}ms`,
+      )
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       await prisma.bossSyncRunLog.update({

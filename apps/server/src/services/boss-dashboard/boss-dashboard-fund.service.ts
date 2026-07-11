@@ -2,9 +2,9 @@ import { prisma } from '../../lib/prisma'
 import type { GoodReviewShopDefinition } from '../../config/good-review-shops.constants'
 import { resolveOfficialShopAccountForStatus } from '../official-shop-account.service'
 import {
-  fetchBossAggregateAccount,
-  fetchBossAfterSaleFrozen,
-  fetchBossCanWithdraw,
+  fetchBossAggregateAccountAudited,
+  fetchBossAfterSaleFrozenAudited,
+  fetchBossCanWithdrawAudited,
 } from './boss-dashboard-api.service'
 import {
   parseBossAfterSaleFrozen,
@@ -18,8 +18,15 @@ import {
 } from './boss-dashboard-flow.service'
 import { logInfo, logWarn } from '../../utils/server-log'
 
+function mergeErrors(parts: Array<string | null | undefined>): string | null {
+  const msgs = parts.filter((p): p is string => Boolean(p?.trim()))
+  return msgs.length ? msgs.join('；') : null
+}
+
 export async function syncBossFundForShop(shop: GoodReviewShopDefinition): Promise<{
   success: boolean
+  partial?: boolean
+  snapshotWritten?: boolean
   error?: string
 }> {
   const account = await resolveOfficialShopAccountForStatus(shop.shopKey)
@@ -30,94 +37,127 @@ export async function syncBossFundForShop(shop: GoodReviewShopDefinition): Promi
     orderBy: { updatedAt: 'desc' },
   })
 
-  try {
-    const [aggregateRaw, afterSaleRaw, canWithdrawRaw] = await Promise.all([
-      fetchBossAggregateAccount(shop),
-      fetchBossAfterSaleFrozen(shop),
-      fetchBossCanWithdraw(shop),
+  const [aggregateRes, afterSaleRes, canWithdrawRes] = await Promise.all([
+    fetchBossAggregateAccountAudited(shop),
+    fetchBossAfterSaleFrozenAudited(shop),
+    fetchBossCanWithdrawAudited(shop),
+  ])
+
+  const aggregateOk = aggregateRes.ok && aggregateRes.data != null
+  const afterSaleOk = afterSaleRes.ok && afterSaleRes.data != null
+  const canWithdrawOk = canWithdrawRes.ok && canWithdrawRes.data != null
+
+  if (!aggregateOk && !previous) {
+    const message = mergeErrors([
+      aggregateRes.errorMessage,
+      afterSaleRes.errorMessage,
+      canWithdrawRes.errorMessage,
     ])
-    const aggregate = parseBossAggregateAccount(aggregateRaw)
-    const afterSaleFrozen = parseBossAfterSaleFrozen(afterSaleRaw)
-    const canWithdraw = parseBossCanWithdraw(canWithdrawRaw)
+    logWarn('老板同步', `${shop.shopName} 资金主接口失败：${message ?? '未知'}`)
+    return { success: false, error: message ?? '资金主接口失败' }
+  }
 
-    await syncBossAccountFlowsForShop({
-      shop,
-      liveAccountId: account.id,
-      firstSync: false,
-    })
+  let aggregate = previous
+    ? {
+        availableAmountCent: previous.availableAmountCent,
+        withdrawingAmountCent: previous.withdrawingAmountCent,
+        balanceAmountCent: previous.balanceAmountCent,
+        frozenAmountCent: previous.frozenAmountCent,
+        yesterdayIncomeCent: previous.yesterdayIncomeCent,
+        debtAmountCent: previous.debtAmountCent,
+        depositBalanceCent: previous.depositBalanceCent,
+        depositRequiredCent: previous.depositRequiredCent,
+        depositStandardCent: previous.depositStandardCent,
+        baseDueDepositCent: previous.baseDueDepositCent,
+        riskDepositCent: previous.riskDepositCent,
+        canWithdraw: previous.canWithdraw,
+        leftWithdrawTimesToday: previous.leftWithdrawTimesToday,
+        totalWithdrawTimesToday: previous.totalWithdrawTimesToday,
+        statementPeriodDays: previous.statementPeriodDays,
+      }
+    : parseBossAggregateAccount({})
 
-    const withdrawnAmountCent = await computeWithdrawnAmountCent(shop.shopKey)
-    const todayIncomeCent = await computeTodayIncomeCent(shop.shopKey)
+  if (aggregateOk) {
+    aggregate = parseBossAggregateAccount(aggregateRes.data)
+  }
 
-    await prisma.bossFundSnapshot.create({
-      data: {
-        shopKey: shop.shopKey,
+  const afterSaleFrozen = afterSaleOk
+    ? parseBossAfterSaleFrozen(afterSaleRes.data)
+    : (previous?.afterSaleFrozenAmountCent ?? null)
+
+  const canWithdraw = canWithdrawOk
+    ? parseBossCanWithdraw(canWithdrawRes.data)
+    : {
+        canWithdraw: previous?.canWithdraw ?? null,
+        cannotWithdrawReason: previous?.cannotWithdrawReason ?? null,
+      }
+
+  const partial = !aggregateOk || !afterSaleOk || !canWithdrawOk
+  const syncErrors = mergeErrors([
+    !aggregateOk ? aggregateRes.errorMessage ?? '账户汇总失败' : null,
+    !afterSaleOk ? afterSaleRes.errorMessage ?? '售后冻结失败' : null,
+    !canWithdrawOk ? canWithdrawRes.errorMessage ?? '可提现查询失败' : null,
+  ])
+
+  try {
+    if (aggregateOk) {
+      await syncBossAccountFlowsForShop({
+        shop,
         liveAccountId: account.id,
-        availableAmountCent: aggregate.availableAmountCent ?? previous?.availableAmountCent ?? null,
-        withdrawingAmountCent: aggregate.withdrawingAmountCent ?? previous?.withdrawingAmountCent ?? null,
-        withdrawnAmountCent,
-        balanceAmountCent: aggregate.balanceAmountCent ?? previous?.balanceAmountCent ?? null,
-        frozenAmountCent: aggregate.frozenAmountCent ?? previous?.frozenAmountCent ?? null,
-        afterSaleFrozenAmountCent: afterSaleFrozen ?? previous?.afterSaleFrozenAmountCent ?? null,
-        depositBalanceCent: aggregate.depositBalanceCent ?? previous?.depositBalanceCent ?? null,
-        depositRequiredCent: aggregate.depositRequiredCent ?? previous?.depositRequiredCent ?? null,
-        depositStandardCent: aggregate.depositStandardCent ?? previous?.depositStandardCent ?? null,
-        baseDueDepositCent: aggregate.baseDueDepositCent ?? previous?.baseDueDepositCent ?? null,
-        riskDepositCent: aggregate.riskDepositCent ?? previous?.riskDepositCent ?? null,
-        debtAmountCent: aggregate.debtAmountCent ?? previous?.debtAmountCent ?? null,
-        todayIncomeCent,
-        yesterdayIncomeCent: aggregate.yesterdayIncomeCent ?? previous?.yesterdayIncomeCent ?? null,
-        canWithdraw: canWithdraw.canWithdraw ?? aggregate.canWithdraw ?? previous?.canWithdraw ?? null,
-        cannotWithdrawReason:
-          canWithdraw.cannotWithdrawReason ?? previous?.cannotWithdrawReason ?? null,
-        leftWithdrawTimesToday:
-          aggregate.leftWithdrawTimesToday ?? previous?.leftWithdrawTimesToday ?? null,
-        totalWithdrawTimesToday:
-          aggregate.totalWithdrawTimesToday ?? previous?.totalWithdrawTimesToday ?? null,
-        statementPeriodDays: aggregate.statementPeriodDays ?? previous?.statementPeriodDays ?? null,
-        syncStatus: 'success',
-        syncError: null,
-        isStale: false,
-        fetchedAt: new Date(),
-      },
-    })
-
-    logInfo('老板同步', `${shop.shopName} 资金快照已更新`)
-    return { success: true }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    logWarn('老板同步', `${shop.shopName} 资金同步失败：${message}`)
-    if (previous) {
-      await prisma.bossFundSnapshot.create({
-        data: {
-          shopKey: shop.shopKey,
-          liveAccountId: previous.liveAccountId,
-          availableAmountCent: previous.availableAmountCent,
-          withdrawingAmountCent: previous.withdrawingAmountCent,
-          withdrawnAmountCent: previous.withdrawnAmountCent,
-          balanceAmountCent: previous.balanceAmountCent,
-          frozenAmountCent: previous.frozenAmountCent,
-          afterSaleFrozenAmountCent: previous.afterSaleFrozenAmountCent,
-          depositBalanceCent: previous.depositBalanceCent,
-          depositRequiredCent: previous.depositRequiredCent,
-          depositStandardCent: previous.depositStandardCent,
-          baseDueDepositCent: previous.baseDueDepositCent,
-          riskDepositCent: previous.riskDepositCent,
-          debtAmountCent: previous.debtAmountCent,
-          todayIncomeCent: previous.todayIncomeCent,
-          yesterdayIncomeCent: previous.yesterdayIncomeCent,
-          canWithdraw: previous.canWithdraw,
-          cannotWithdrawReason: previous.cannotWithdrawReason,
-          leftWithdrawTimesToday: previous.leftWithdrawTimesToday,
-          totalWithdrawTimesToday: previous.totalWithdrawTimesToday,
-          statementPeriodDays: previous.statementPeriodDays,
-          syncStatus: 'failed',
-          syncError: message,
-          isStale: true,
-          fetchedAt: previous.fetchedAt,
-        },
+        firstSync: false,
       })
     }
-    return { success: false, error: message }
+  } catch (err) {
+    const flowMsg = err instanceof Error ? err.message : String(err)
+    logWarn('老板同步', `${shop.shopName} 流水同步失败：${flowMsg}`)
+  }
+
+  const withdrawnAmountCent = await computeWithdrawnAmountCent(shop.shopKey)
+  const todayIncomeCent = await computeTodayIncomeCent(shop.shopKey)
+
+  const syncStatus = partial ? 'partial_success' : 'success'
+
+  await prisma.bossFundSnapshot.create({
+    data: {
+      shopKey: shop.shopKey,
+      liveAccountId: account.id,
+      availableAmountCent: aggregate.availableAmountCent ?? previous?.availableAmountCent ?? null,
+      withdrawingAmountCent: aggregate.withdrawingAmountCent ?? previous?.withdrawingAmountCent ?? null,
+      withdrawnAmountCent,
+      balanceAmountCent: aggregate.balanceAmountCent ?? previous?.balanceAmountCent ?? null,
+      frozenAmountCent: aggregate.frozenAmountCent ?? previous?.frozenAmountCent ?? null,
+      afterSaleFrozenAmountCent: afterSaleFrozen,
+      depositBalanceCent: aggregate.depositBalanceCent ?? previous?.depositBalanceCent ?? null,
+      depositRequiredCent: aggregate.depositRequiredCent ?? previous?.depositRequiredCent ?? null,
+      depositStandardCent: aggregate.depositStandardCent ?? previous?.depositStandardCent ?? null,
+      baseDueDepositCent: aggregate.baseDueDepositCent ?? previous?.baseDueDepositCent ?? null,
+      riskDepositCent: aggregate.riskDepositCent ?? previous?.riskDepositCent ?? null,
+      debtAmountCent: aggregate.debtAmountCent ?? previous?.debtAmountCent ?? null,
+      todayIncomeCent,
+      yesterdayIncomeCent: aggregate.yesterdayIncomeCent ?? previous?.yesterdayIncomeCent ?? null,
+      canWithdraw: canWithdraw.canWithdraw ?? aggregate.canWithdraw ?? previous?.canWithdraw ?? null,
+      cannotWithdrawReason:
+        canWithdraw.cannotWithdrawReason ?? previous?.cannotWithdrawReason ?? null,
+      leftWithdrawTimesToday:
+        aggregate.leftWithdrawTimesToday ?? previous?.leftWithdrawTimesToday ?? null,
+      totalWithdrawTimesToday:
+        aggregate.totalWithdrawTimesToday ?? previous?.totalWithdrawTimesToday ?? null,
+      statementPeriodDays: aggregate.statementPeriodDays ?? previous?.statementPeriodDays ?? null,
+      syncStatus,
+      syncError: syncErrors,
+      isStale: partial,
+      fetchedAt: aggregateOk ? new Date() : (previous?.fetchedAt ?? new Date()),
+    },
+  })
+
+  logInfo(
+    '老板同步',
+    `${shop.shopName} 资金快照已更新（${syncStatus}${syncErrors ? `：${syncErrors}` : ''}）`,
+  )
+  return {
+    success: aggregateOk,
+    partial,
+    snapshotWritten: true,
+    error: syncErrors ?? undefined,
   }
 }

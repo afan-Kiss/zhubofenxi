@@ -24,6 +24,8 @@ export interface SyncRequestAuditItem {
   method: string
   urlKey: string
   requestHash: string
+  /** 老板看板等按店铺+凭证隔离冷却；旧记录无此字段 */
+  cooldownScopeKey?: string
   startedAt: string
   finishedAt?: string
   durationMs?: number
@@ -34,6 +36,9 @@ export interface SyncRequestAuditItem {
   errorMessage?: string
   trigger: SyncRequestTrigger
 }
+
+/** 老板看板冷却键版本：与旧全局 requestHash 隔离 */
+export const BOSS_COOLDOWN_VERSION = 'boss-cooldown-v2'
 
 export interface SyncRiskStatus {
   status: 'pass' | 'warning' | 'danger'
@@ -63,6 +68,7 @@ const COOLDOWN_MS_BY_API: Record<string, number> = {
   settled_settlement_list: 30 * 60 * 1000,
   settlement_detail: 30 * 60 * 1000,
   boss_account_summary: 30 * 60 * 1000,
+  boss_after_sale_frozen: 30 * 60 * 1000,
   boss_account_flow: 30 * 60 * 1000,
   boss_withdraw_flow: 30 * 60 * 1000,
   boss_shop_score: BUSINESS_SYNC_INTERVAL_MS - 10 * 60 * 1000,
@@ -77,8 +83,14 @@ const lastRequestAt = new Map<string, number>()
 const failureState = new Map<string, { fails: number; lastFailAt: number; circuitOpenUntil?: number }>()
 const recentAuditBuffer: SyncRequestAuditItem[] = []
 
-function auditKey(shopId: string | undefined, apiName: string, requestHash: string): string {
-  return `${shopId ?? 'default'}::${apiName}::${requestHash}`
+function auditKey(
+  shopId: string | undefined,
+  apiName: string,
+  requestHash: string,
+  cooldownScopeKey?: string,
+): string {
+  const scope = cooldownScopeKey ?? (shopId ?? 'default')
+  return `${scope}::${apiName}::${requestHash}`
 }
 
 function failureKey(shopId: string | undefined, apiName: string): string {
@@ -93,6 +105,44 @@ export function buildXhsRequestHash(input: {
   return crypto
     .createHash('sha256')
     .update(JSON.stringify({ apiName: input.apiName, query: input.query ?? {}, body: input.body ?? null }))
+    .digest('hex')
+    .slice(0, 16)
+}
+
+export function buildBossCooldownScopeKey(shopKey: string, credentialId: string): string {
+  return `boss:${shopKey}:${credentialId}`
+}
+
+function normalizeBossUrlPath(url: string): string {
+  try {
+    return new URL(url).pathname
+  } catch {
+    return url.split('?')[0] ?? url
+  }
+}
+
+/** 老板接口冷却 hash：按店铺+凭证+方法+路径+请求体隔离 */
+export function buildBossRequestHash(input: {
+  apiName: string
+  shopKey: string
+  credentialId: string
+  method: string
+  url: string
+  body?: unknown
+}): string {
+  return crypto
+    .createHash('sha256')
+    .update(
+      JSON.stringify({
+        v: BOSS_COOLDOWN_VERSION,
+        apiName: input.apiName,
+        shopKey: input.shopKey,
+        credentialId: input.credentialId,
+        method: input.method.toUpperCase(),
+        path: normalizeBossUrlPath(input.url),
+        body: input.body ?? null,
+      }),
+    )
     .digest('hex')
     .slice(0, 16)
 }
@@ -112,6 +162,7 @@ export function checkXhsRequestAllowed(params: {
   requestHash: string
   trigger?: SyncRequestTrigger
   cooldownOverrideMs?: number
+  cooldownScopeKey?: string
 }): { allowed: boolean; status: SyncRequestStatus; decision: XhsRequestDecision; reason?: string } {
   if (params.trigger === 'page_open') {
     return {
@@ -134,7 +185,7 @@ export function checkXhsRequestAllowed(params: {
     }
   }
 
-  const key = auditKey(params.shopId, params.apiName, params.requestHash)
+  const key = auditKey(params.shopId, params.apiName, params.requestHash, params.cooldownScopeKey)
   const last = lastRequestAt.get(key)
   const cooldown = params.cooldownOverrideMs ?? resolveApiCooldownMs(params.apiName)
   if (last != null && now - last < cooldown) {
@@ -154,13 +205,23 @@ function findLastRemoteRequestAt(
   shopId: string | undefined,
   apiName: string,
   requestHash: string,
+  cooldownScopeKey?: string,
 ): number | null {
-  const shopKey = shopId ?? 'default'
+  const scope = cooldownScopeKey ?? (shopId ?? 'default')
+  const successOnly = cooldownScopeKey != null
   let latest = 0
   for (const item of items) {
     if (item.apiName !== apiName || item.requestHash !== requestHash) continue
-    if ((item.shopId ?? 'default') !== shopKey) continue
-    if (item.status !== 'success' && item.status !== 'failed') continue
+    if (cooldownScopeKey) {
+      if (item.cooldownScopeKey !== cooldownScopeKey) continue
+    } else if ((item.shopId ?? 'default') !== scope) {
+      continue
+    }
+    if (successOnly) {
+      if (item.status !== 'success') continue
+    } else if (item.status !== 'success' && item.status !== 'failed') {
+      continue
+    }
     const t = Date.parse(item.finishedAt ?? item.startedAt)
     if (Number.isFinite(t) && t > latest) latest = t
   }
@@ -189,6 +250,7 @@ export async function checkXhsRequestAllowedWithJsonlCooldown(params: {
   requestHash: string
   trigger?: SyncRequestTrigger
   cooldownOverrideMs?: number
+  cooldownScopeKey?: string
 }): Promise<{ allowed: boolean; status: SyncRequestStatus; decision: XhsRequestDecision; reason?: string }> {
   const memory = checkXhsRequestAllowed(params)
   if (!memory.allowed) return memory
@@ -200,6 +262,7 @@ export async function checkXhsRequestAllowedWithJsonlCooldown(params: {
     params.shopId,
     params.apiName,
     params.requestHash,
+    params.cooldownScopeKey,
   )
   if (lastRemote != null) {
     const elapsed = Date.now() - lastRemote
@@ -293,6 +356,7 @@ export async function requestXhsJsonWithSyncAudit<T>(params: {
   requestHash?: string
   pageNo?: number
   cooldownOverrideMs?: number
+  cooldownScopeKey?: string
   options: RequestXhsJsonOptions
 }): Promise<T> {
   const requestHash =
@@ -311,6 +375,7 @@ export async function requestXhsJsonWithSyncAudit<T>(params: {
     trigger: params.trigger ?? 'scheduled',
     pageNo: params.pageNo,
     cooldownOverrideMs: params.cooldownOverrideMs,
+    cooldownScopeKey: params.cooldownScopeKey,
     execute: async () => {
       try {
         const data = await requestXhsJson<T>(params.options)
@@ -375,6 +440,7 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
   trigger?: SyncRequestTrigger
   pageNo?: number
   cooldownOverrideMs?: number
+  cooldownScopeKey?: string
   execute: () => Promise<{
     ok: boolean
     data: T | null
@@ -391,6 +457,7 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
     requestHash: params.requestHash,
     trigger,
     cooldownOverrideMs: params.cooldownOverrideMs,
+    cooldownScopeKey: params.cooldownScopeKey,
   })
 
   if (!gate.allowed) {
@@ -402,6 +469,7 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
       method: params.method,
       urlKey: params.urlKey,
       requestHash: params.requestHash,
+      cooldownScopeKey: params.cooldownScopeKey,
       startedAt,
       finishedAt: new Date().toISOString(),
       durationMs: 0,
@@ -426,7 +494,10 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
     const status: SyncRequestStatus = result.ok ? 'success' : 'failed'
     if (result.ok) {
       recordSuccess(params.shopId, params.apiName)
-      lastRequestAt.set(auditKey(params.shopId, params.apiName, params.requestHash), Date.now())
+      lastRequestAt.set(
+        auditKey(params.shopId, params.apiName, params.requestHash, params.cooldownScopeKey),
+        Date.now(),
+      )
     } else {
       recordFailure(params.shopId, params.apiName)
     }
@@ -438,6 +509,7 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
       method: params.method,
       urlKey: params.urlKey,
       requestHash: params.requestHash,
+      cooldownScopeKey: params.cooldownScopeKey,
       startedAt,
       finishedAt,
       durationMs: Date.now() - t0,
@@ -466,6 +538,7 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
       method: params.method,
       urlKey: params.urlKey,
       requestHash: params.requestHash,
+      cooldownScopeKey: params.cooldownScopeKey,
       startedAt,
       finishedAt: new Date().toISOString(),
       durationMs: Date.now() - t0,

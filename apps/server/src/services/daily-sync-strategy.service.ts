@@ -125,11 +125,33 @@ export async function runDailyStrategySyncJob(params: {
 }): Promise<{ jobId: string; alreadyRunning: boolean }> {
   await clearStaleBusinessSyncJobs()
 
-  const running = await prisma.xhsSyncJob.findFirst({
-    where: { status: 'running', preset: 'daily_strategy' },
+  const active = await prisma.xhsSyncJob.findFirst({
+    where: {
+      preset: 'daily_strategy',
+      status: { in: ['running', 'pending'] },
+    },
+    orderBy: { createdAt: 'desc' },
   })
-  if (running) {
-    return { jobId: running.id, alreadyRunning: true }
+  if (active) {
+    return { jobId: active.id, alreadyRunning: true }
+  }
+
+  const triggeredBy = params.triggeredBy ?? null
+  if (triggeredBy?.startsWith('manual:')) {
+    const recentManual = await prisma.xhsSyncJob.findFirst({
+      where: {
+        preset: 'daily_strategy',
+        startedBy: triggeredBy,
+        createdAt: { gte: new Date(Date.now() - 90_000) },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    if (recentManual) {
+      return {
+        jobId: recentManual.id,
+        alreadyRunning: ['running', 'pending'].includes(recentManual.status),
+      }
+    }
   }
 
   const strategy = await getSyncStrategySettings()

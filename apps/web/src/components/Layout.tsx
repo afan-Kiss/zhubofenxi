@@ -1,6 +1,15 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Menu, Settings, Users, UserCircle, X, FileText, LogOut, ThumbsUp, Briefcase } from 'lucide-react'
+import {
+  LayoutDashboard,
+  Settings,
+  Users,
+  UserCircle,
+  FileText,
+  LogOut,
+  ThumbsUp,
+  Briefcase,
+} from 'lucide-react'
 import { PageRequestStatusBar } from './board/PageRequestStatusBar'
 import { CookieHealthWatcher } from './board/CookieHealthWatcher'
 import { BoardLiveQueryProvider } from '../providers/BoardLiveQueryProvider'
@@ -12,76 +21,91 @@ import { SettingsPasswordDialog } from './settings/SettingsPasswordDialog'
 import { isSettingsUnlocked, unlockSettings } from '../lib/settings-gate'
 import { useAuth } from '../providers/AuthProvider'
 import type { PagePermissionKey } from '../lib/page-permissions'
+import type { LucideIcon } from 'lucide-react'
 
 const ALL_NAV: Array<{
   to: string
   end?: boolean
-  label: React.ReactNode
+  label: string
+  icon: LucideIcon
   dataTestId: string
   permission: PagePermissionKey
-  requiresUnlock?: boolean
+  tone?: 'default' | 'muted'
 }> = [
   {
     to: '/',
     end: true,
-    label: (<><LayoutDashboard size={14} /> 经营总览</>),
+    label: '经营总览',
+    icon: LayoutDashboard,
     dataTestId: 'tab-overview',
     permission: 'overview',
   },
   {
     to: '/anchors',
-    label: (<><UserCircle size={14} /> 主播业绩</>),
+    label: '主播业绩',
+    icon: UserCircle,
     dataTestId: 'tab-anchors',
     permission: 'anchors',
   },
   {
     to: '/buyers',
-    label: (<><Users size={14} /> 买家榜单</>),
+    label: '买家榜单',
+    icon: Users,
     dataTestId: 'tab-buyers',
     permission: 'buyers',
   },
   {
     to: '/data-health',
-    label: (<><FileText size={14} /> 数据健康</>),
+    label: '数据健康',
+    icon: FileText,
     dataTestId: 'tab-data-health',
     permission: 'operations_report',
   },
   {
     to: '/operations-report',
-    label: (<><FileText size={14} /> 运营报表</>),
+    label: '运营报表',
+    icon: FileText,
     dataTestId: 'tab-operations-report',
     permission: 'operations_report',
   },
   {
     to: '/good-reviews',
-    label: (<><ThumbsUp size={14} /> 好评中心</>),
+    label: '好评中心',
+    icon: ThumbsUp,
     dataTestId: 'tab-good-reviews',
     permission: 'good_reviews',
   },
   {
     to: '/boss-dashboard',
-    label: (<><Briefcase size={14} /> 老板查看</>),
+    label: '老板查看',
+    icon: Briefcase,
     dataTestId: 'tab-boss-dashboard',
     permission: 'boss_dashboard',
   },
   {
     to: '/settings',
-    label: (<><Settings size={14} /> 系统设置</>),
+    label: '系统设置',
+    icon: Settings,
     dataTestId: 'tab-settings',
     permission: 'settings',
-    requiresUnlock: true,
+    tone: 'muted',
   },
 ]
 
+const headerActionBtn =
+  'relative inline-flex items-center justify-center rounded-lg border border-slate-200/70 bg-white/55 p-1.5 text-slate-600 transition-colors hover:border-slate-300/80 hover:bg-white hover:text-slate-800'
+
 export const Layout: React.FC = () => {
-  const [navOpen, setNavOpen] = useState(false)
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
   const { user, mode, canAccess, logout } = useAuth()
 
   const mainNav = useMemo(
-    () => ALL_NAV.filter((item) => canAccess(item.permission)),
+    () =>
+      ALL_NAV.filter((item) => canAccess(item.permission)).map(
+        ({ permission: _p, ...rest }) => rest,
+      ),
     [canAccess],
   )
 
@@ -100,7 +124,6 @@ export const Layout: React.FC = () => {
     unlockSettings()
     setSettingsDialogOpen(false)
     navigate('/settings')
-    setNavOpen(false)
   }, [navigate])
 
   const handleSettingsCancel = useCallback(() => {
@@ -119,68 +142,67 @@ export const Layout: React.FC = () => {
   return (
     <BossDashboardProvider>
       <div className="flex min-h-screen min-w-0 flex-col overflow-x-hidden">
-      <header className="sticky top-0 z-30 border-b border-white/60 bg-[var(--color-bg-warm)]/90 backdrop-blur-md transition-shadow duration-300">
-        <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-2 px-3 py-3 md:flex-row md:items-center md:justify-between md:gap-4 md:px-4">
-          <div className="flex min-w-0 items-start justify-between gap-2">
-            <div className="min-w-0">
-              <h1 className="truncate text-base font-semibold text-slate-900">直播经营看板</h1>
-              <p className="mt-0.5 text-[11px] text-slate-500">
-                {user ? `${user.username}${user.role === 'super_admin' ? ' · 管理员' : ''}` : '经营数据展示'}
-              </p>
+        <header className="sticky top-0 z-30 border-b border-slate-200/50 bg-[var(--color-bg-warm)]/88 shadow-[0_1px_0_rgba(255,255,255,0.65)_inset] backdrop-blur-md supports-[backdrop-filter]:bg-[var(--color-bg-warm)]/78">
+          <div className="mx-auto w-full max-w-6xl min-w-0 px-3 md:px-4">
+            {/* 第一层：品牌 + 操作 */}
+            <div className="flex min-w-0 items-center justify-between gap-3 py-2 md:py-2.5">
+              <div className="min-w-0">
+                <h1 className="truncate text-sm font-semibold tracking-tight text-slate-900 md:text-[15px]">
+                  直播经营看板
+                </h1>
+                <p className="truncate text-[10px] leading-tight text-slate-500 md:text-[11px]">
+                  {user
+                    ? `${user.username}${user.role === 'super_admin' ? ' · 管理员' : ''}`
+                    : '经营数据展示'}
+                </p>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1.5 md:gap-2">
+                <BossAnnouncementCenter buttonClassName={headerActionBtn} />
+                {mode === 'session' && user ? (
+                  <>
+                    <button
+                      type="button"
+                      className={`${headerActionBtn} md:gap-1.5 md:px-2.5 md:py-1.5`}
+                      onClick={() => void handleLogout()}
+                      aria-label="退出登录"
+                    >
+                      <LogOut size={15} strokeWidth={2} />
+                      <span className="hidden text-xs md:inline">退出</span>
+                    </button>
+                  </>
+                ) : null}
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <BossAnnouncementCenter />
-              {mode === 'session' && user ? (
-                <button
-                  type="button"
-                  className="hidden rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:bg-rose-50 md:inline-flex md:items-center md:gap-1"
-                  onClick={() => void handleLogout()}
-                >
-                  <LogOut size={14} /> 退出
-                </button>
-              ) : null}
-              <button
-                type="button"
-                className="rounded-full border border-slate-200 bg-white p-2 text-slate-600 transition hover:bg-rose-50 md:hidden"
-                onClick={() => setNavOpen((v) => !v)}
-                aria-label={navOpen ? '关闭菜单' : '打开菜单'}
-              >
-                {navOpen ? <X size={18} /> : <Menu size={18} />}
-              </button>
+
+            {/* 第二层：主导航 */}
+            <div className="pb-2 md:pb-2.5">
+              <MainNavTabs items={mainNav} onBeforeNavigate={handleNavAttempt} />
             </div>
           </div>
+        </header>
 
-          <nav
-            className={`min-w-0 overflow-hidden rounded-2xl bg-white/50 p-1.5 transition-all duration-300 ease-out md:block ${
-              navOpen
-                ? 'max-h-[320px] opacity-100'
-                : 'max-h-0 opacity-0 md:max-h-none md:opacity-100'
-            } ${navOpen ? 'block' : 'hidden md:block'}`}
-          >
-            <MainNavTabs
-              items={mainNav}
-              onNavigate={() => setNavOpen(false)}
-              onBeforeNavigate={handleNavAttempt}
-            />
-          </nav>
-        </div>
-      </header>
+        <main
+          className={`mx-auto w-full min-w-0 flex-1 overflow-x-hidden py-4 ${
+            location.pathname.startsWith('/boss-dashboard')
+              ? 'max-w-[1440px] px-3 md:px-6 xl:px-8'
+              : 'max-w-6xl px-3 md:px-4'
+          }`}
+        >
+          <BoardLiveQueryProvider>
+            <CookieHealthWatcher />
+            <PageRequestStatusBar />
+            <PageTransition>
+              <Outlet />
+            </PageTransition>
+          </BoardLiveQueryProvider>
+        </main>
 
-      <main className="mx-auto w-full max-w-6xl min-w-0 flex-1 overflow-x-hidden px-3 py-4 md:px-4">
-        <BoardLiveQueryProvider>
-          <CookieHealthWatcher />
-          <PageRequestStatusBar />
-          <PageTransition>
-            <Outlet />
-          </PageTransition>
-        </BoardLiveQueryProvider>
-      </main>
-
-      <SettingsPasswordDialog
-        open={settingsDialogOpen}
-        onVerified={handleSettingsVerified}
-        onCancel={handleSettingsCancel}
-      />
+        <SettingsPasswordDialog
+          open={settingsDialogOpen}
+          onVerified={handleSettingsVerified}
+          onCancel={handleSettingsCancel}
+        />
       </div>
     </BossDashboardProvider>
   )

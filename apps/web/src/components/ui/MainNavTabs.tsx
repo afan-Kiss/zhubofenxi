@@ -1,12 +1,15 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import type { LucideIcon } from 'lucide-react'
 
 export interface MainNavItem {
   to: string
   end?: boolean
-  label: React.ReactNode
+  label: string
+  icon?: LucideIcon
   dataTestId?: string
-  requiresUnlock?: boolean
+  /** 次级入口视觉弱化（如系统设置） */
+  tone?: 'default' | 'muted'
 }
 
 interface Props {
@@ -28,83 +31,92 @@ function resolveActiveKey(pathname: string, items: MainNavItem[]): string {
   return items[0]?.to ?? '/'
 }
 
+const tabBase =
+  'main-nav-tab relative z-[1] inline-flex shrink-0 items-center justify-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-medium transition-all duration-200 md:gap-2 md:px-3 md:py-1.5 md:text-sm'
+
+function tabClass(isActive: boolean, tone: MainNavItem['tone'] = 'default'): string {
+  if (isActive) {
+    return `${tabBase} main-nav-tab--active bg-white/95 font-semibold text-slate-900 shadow-[0_1px_4px_rgba(15,23,42,0.07)] ring-1 ring-slate-200/80 [&_svg]:opacity-100`
+  }
+  if (tone === 'muted') {
+    return `${tabBase} text-slate-500 hover:bg-white/50 hover:text-slate-700`
+  }
+  return `${tabBase} text-slate-600 hover:bg-white/45 hover:text-slate-900`
+}
+
 export const MainNavTabs: React.FC<Props> = ({ items, onNavigate, onBeforeNavigate, className = '' }) => {
   const { pathname } = useLocation()
   const activeKey = resolveActiveKey(pathname, items)
-  const trackRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
   const linkRefs = useRef<Map<string, HTMLAnchorElement>>(new Map())
-  const [pill, setPill] = useState({ left: 0, width: 0, ready: false })
 
-  const measure = useCallback(() => {
-    const track = trackRef.current
+  const scrollActiveIntoView = useCallback(() => {
+    const scroller = scrollRef.current
     const link = linkRefs.current.get(activeKey)
-    if (!track || !link) {
-      setPill((p) => ({ ...p, ready: false }))
-      return
-    }
-    const tr = track.getBoundingClientRect()
-    const br = link.getBoundingClientRect()
-    setPill({ left: br.left - tr.left, width: br.width, ready: true })
+    if (!scroller || !link) return
+    const scrollerRect = scroller.getBoundingClientRect()
+    const linkRect = link.getBoundingClientRect()
+    const linkCenter = linkRect.left + linkRect.width / 2
+    const scrollerCenter = scrollerRect.left + scrollerRect.width / 2
+    const delta = linkCenter - scrollerCenter
+    scroller.scrollBy({ left: delta, behavior: 'smooth' })
   }, [activeKey])
 
-  useLayoutEffect(() => {
-    measure()
-  }, [measure, pathname])
-
   useEffect(() => {
-    const track = trackRef.current
-    if (!track) return
-    const ro = new ResizeObserver(() => measure())
-    ro.observe(track)
-    window.addEventListener('resize', measure)
-    return () => {
-      ro.disconnect()
-      window.removeEventListener('resize', measure)
-    }
-  }, [measure])
+    scrollActiveIntoView()
+  }, [scrollActiveIntoView, pathname])
 
   return (
-    <div
-      ref={trackRef}
-      className={`board-tab-pill-track flex min-w-0 flex-col gap-1.5 md:flex-row md:flex-wrap md:items-center ${className}`}
-    >
-      <span
-        className="board-tab-pill board-tab-pill--nav hidden md:block"
-        style={{
-          transform: `translateX(${pill.left}px)`,
-          width: pill.ready ? pill.width : 0,
-          opacity: pill.ready ? 1 : 0,
-        }}
+    <div className={`main-nav-shell relative min-w-0 w-full ${className}`}>
+      <div
+        className="pointer-events-none absolute inset-y-0 left-0 z-10 w-5 bg-gradient-to-r from-[var(--color-bg-warm)]/95 to-transparent md:hidden"
         aria-hidden
       />
-      {items.map((item) => (
-        <NavLink
-          key={item.to}
-          to={item.to}
-          end={item.end}
-          data-testid={item.dataTestId}
-          ref={(el) => {
-            if (el) linkRefs.current.set(item.to, el)
-            else linkRefs.current.delete(item.to)
-          }}
-          onClick={(e) => {
-            if (onBeforeNavigate && !onBeforeNavigate(item.to)) {
-              e.preventDefault()
-              return
-            }
-            onNavigate?.()
-          }}
-          className={({ isActive }) =>
-            `board-tab-btn relative z-[1] inline-flex w-full items-center justify-center gap-2 rounded-full px-4 py-2.5 text-sm font-semibold transition-colors md:w-auto md:py-2 ${
-              isActive
-                ? 'board-tab-btn--nav-active bg-white text-slate-900 shadow-md ring-2 ring-rose-100 md:bg-transparent md:shadow-none md:ring-0'
-                : 'text-slate-600 hover:bg-white/70 hover:text-slate-900'
-            }`
-          }
-        >
-          {item.label}
-        </NavLink>
-      ))}
+      <div
+        className="pointer-events-none absolute inset-y-0 right-0 z-10 w-5 bg-gradient-to-r from-transparent to-[var(--color-bg-warm)]/95 md:hidden"
+        aria-hidden
+      />
+
+      <div
+        ref={scrollRef}
+        className="main-nav-scroll flex min-h-[42px] items-center gap-0.5 overflow-x-auto overscroll-x-contain rounded-xl border border-slate-200/40 bg-white/35 px-1 py-1 backdrop-blur-sm [-ms-overflow-style:none] [scrollbar-width:none] md:min-h-0 md:gap-1 md:overflow-x-auto md:px-1.5 md:py-1 [&::-webkit-scrollbar]:hidden"
+        role="navigation"
+        aria-label="主导航"
+      >
+        {items.map((item) => {
+          const Icon = item.icon
+          return (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              data-testid={item.dataTestId}
+              ref={(el) => {
+                if (el) linkRefs.current.set(item.to, el)
+                else linkRefs.current.delete(item.to)
+              }}
+              onClick={(e) => {
+                if (onBeforeNavigate && !onBeforeNavigate(item.to)) {
+                  e.preventDefault()
+                  return
+                }
+                onNavigate?.()
+              }}
+              className={({ isActive }) => tabClass(isActive, item.tone)}
+            >
+              {Icon ? (
+                <Icon
+                  size={15}
+                  className="shrink-0 opacity-[0.82]"
+                  strokeWidth={2}
+                  aria-hidden
+                />
+              ) : null}
+              <span className="whitespace-nowrap leading-none">{item.label}</span>
+            </NavLink>
+          )
+        })}
+      </div>
     </div>
   )
 }

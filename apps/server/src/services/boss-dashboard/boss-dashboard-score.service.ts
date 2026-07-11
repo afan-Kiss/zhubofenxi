@@ -38,6 +38,61 @@ export function shouldFetchShopScoreToday(): boolean {
   return hm >= BOSS_SCORE_SYNC_AFTER_HM
 }
 
+function isScoreSnapshotComplete(row: {
+  qualityScore: number | null
+  logisticsScore: number | null
+  serviceScore: number | null
+  sourceApi: string | null
+} | null): boolean {
+  if (!row) return false
+  return (
+    row.qualityScore != null &&
+    row.logisticsScore != null &&
+    row.serviceScore != null &&
+    row.sourceApi !== 'boss_shop_score:partial'
+  )
+}
+
+type ScoreField = 'qualityScore' | 'logisticsScore' | 'serviceScore'
+
+const TREND_LABEL_TO_FIELD: Record<string, ScoreField> = {
+  [BOSS_SCORE_TREND_LABELS.quality]: 'qualityScore',
+  [BOSS_SCORE_TREND_LABELS.logistics]: 'logisticsScore',
+  [BOSS_SCORE_TREND_LABELS.service]: 'serviceScore',
+}
+
+async function persistTrendScorePoints(params: {
+  shopKey: string
+  liveAccountId: string
+  field: ScoreField
+  points: Array<{ date: string; score: number }>
+}): Promise<void> {
+  const now = new Date()
+  for (const pt of params.points) {
+    await prisma.bossShopScoreSnapshot.upsert({
+      where: {
+        shopKey_scoreDate: { shopKey: params.shopKey, scoreDate: pt.date },
+      },
+      create: {
+        shopKey: params.shopKey,
+        liveAccountId: params.liveAccountId,
+        scoreDate: pt.date,
+        qualityScore: params.field === 'qualityScore' ? pt.score : null,
+        logisticsScore: params.field === 'logisticsScore' ? pt.score : null,
+        serviceScore: params.field === 'serviceScore' ? pt.score : null,
+        officialOverallScore: null,
+        sourceApi: 'boss_shop_score:trend',
+        fetchedAt: now,
+      },
+      update: {
+        liveAccountId: params.liveAccountId,
+        [params.field]: pt.score,
+        fetchedAt: now,
+      },
+    })
+  }
+}
+
 async function loadTrendScores(
   shop: GoodReviewShopDefinition,
   label: string,
@@ -68,8 +123,8 @@ export async function syncBossShopScoreForShop(params: {
   const existingToday = await prisma.bossShopScoreSnapshot.findUnique({
     where: { shopKey_scoreDate: { shopKey: params.shop.shopKey, scoreDate: todayKey } },
   })
-  if (!params.forceFetch && existingToday?.fetchedAt) {
-    return { skipped: true, saved: false, scoreDate: todayKey, reason: '今日快照已存在' }
+  if (!params.forceFetch && existingToday?.fetchedAt && isScoreSnapshotComplete(existingToday)) {
+    return { skipped: true, saved: false, scoreDate: todayKey, reason: '今日快照已完整' }
   }
 
   const scoreRes = await fetchBossShopScoreAudited(params.shop)
@@ -94,23 +149,35 @@ export async function syncBossShopScoreForShop(params: {
   clearBossShopScoreStale(params.shop.shopKey)
 
   const errors: string[] = []
-  if (parsed.qualityScore == null) {
-    const qTrend = await loadTrendScores(params.shop, BOSS_SCORE_TREND_LABELS.quality)
-    const latest = qTrend.points[qTrend.points.length - 1]
-    if (latest) parsed = { ...parsed, qualityScore: latest.score, scoreDate: latest.date }
-    else if (qTrend.error) errors.push(`品质趋势：${qTrend.error}`)
-  }
-  if (parsed.logisticsScore == null) {
-    const lTrend = await loadTrendScores(params.shop, BOSS_SCORE_TREND_LABELS.logistics)
-    const latest = lTrend.points[lTrend.points.length - 1]
-    if (latest) parsed = { ...parsed, logisticsScore: latest.score }
-    else if (lTrend.error) errors.push(`物流趋势：${lTrend.error}`)
-  }
-  if (parsed.serviceScore == null) {
-    const sTrend = await loadTrendScores(params.shop, BOSS_SCORE_TREND_LABELS.service)
-    const latest = sTrend.points[sTrend.points.length - 1]
-    if (latest) parsed = { ...parsed, serviceScore: latest.score }
-    else if (sTrend.error) errors.push(`服务趋势：${sTrend.error}`)
+  const trendLabels = [
+    BOSS_SCORE_TREND_LABELS.quality,
+    BOSS_SCORE_TREND_LABELS.logistics,
+    BOSS_SCORE_TREND_LABELS.service,
+  ] as const
+
+  for (const label of trendLabels) {
+    const field = TREND_LABEL_TO_FIELD[label]
+    const trend = await loadTrendScores(params.shop, label)
+    if (trend.points.length > 0) {
+      await persistTrendScorePoints({
+        shopKey: params.shop.shopKey,
+        liveAccountId: params.liveAccountId,
+        field,
+        points: trend.points,
+      })
+      const latest = trend.points[trend.points.length - 1]
+      if (latest && parsed[field] == null) {
+        parsed = { ...parsed, [field]: latest.score, scoreDate: latest.date }
+      }
+    } else if (trend.error) {
+      const labelName =
+        label === BOSS_SCORE_TREND_LABELS.quality
+          ? '品质'
+          : label === BOSS_SCORE_TREND_LABELS.logistics
+            ? '物流'
+            : '服务'
+      errors.push(`${labelName}趋势：${trend.error}`)
+    }
   }
 
   const finalDate = parsed.scoreDate ?? todayKey
@@ -218,12 +285,35 @@ export async function loadBossScoreTrendSeries(
 }> {
   const snapshots = await prisma.bossShopScoreSnapshot.findMany({
     where: { shopKey: shop.shopKey },
-    orderBy: { scoreDate: 'asc' },
-    take: BOSS_SCORE_TREND_DAYS * 2,
+    orderBy: { scoreDate: 'desc' },
+    take: BOSS_SCORE_TREND_DAYS * 3,
   })
-  const recent = snapshots.slice(-BOSS_SCORE_TREND_DAYS)
+  const byDate = new Map<
+    string,
+    { qualityScore: number | null; logisticsScore: number | null; serviceScore: number | null }
+  >()
+  for (const row of snapshots) {
+    const existing = byDate.get(row.scoreDate)
+    if (!existing) {
+      byDate.set(row.scoreDate, {
+        qualityScore: row.qualityScore,
+        logisticsScore: row.logisticsScore,
+        serviceScore: row.serviceScore,
+      })
+      continue
+    }
+    byDate.set(row.scoreDate, {
+      qualityScore: row.qualityScore ?? existing.qualityScore,
+      logisticsScore: row.logisticsScore ?? existing.logisticsScore,
+      serviceScore: row.serviceScore ?? existing.serviceScore,
+    })
+  }
+  const recentDates = [...byDate.keys()].sort().slice(-BOSS_SCORE_TREND_DAYS)
   const toSeries = (key: 'qualityScore' | 'logisticsScore' | 'serviceScore') =>
-    recent.map((s) => ({ date: s.scoreDate, score: s[key] }))
+    recentDates.map((date) => ({
+      date,
+      score: byDate.get(date)?.[key] ?? null,
+    }))
   return {
     quality: toSeries('qualityScore'),
     logistics: toSeries('logisticsScore'),

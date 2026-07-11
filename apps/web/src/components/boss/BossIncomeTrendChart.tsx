@@ -39,7 +39,7 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
   points,
   mode = 'combined',
   shopKey,
-  height = 260,
+  height = 240,
 }) => {
   const [visible, setVisible] = useState<Record<string, boolean>>({
     total: true,
@@ -74,21 +74,60 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
         ]
 
   if (data.length === 0) {
-    return <div className="rounded-2xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">暂无到账趋势数据</div>
+    return (
+      <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500">
+        暂无到账趋势数据
+      </div>
+    )
+  }
+
+  if (data.length === 1 && mode === 'shop') {
+    const row = data[0]
+    const key = shopKey ?? 'total'
+    const value = row[key as keyof typeof row]
+    return (
+      <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
+        <div className="text-xs text-slate-500">{row.month} 月到账</div>
+        <div className="mt-1 text-lg font-semibold text-slate-900">
+          {centToDisplayYuan(Math.round(Number(value) * 100))}
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="w-full overflow-x-auto">
-      <div className="min-w-[320px]" style={{ height }}>
+    <div className="w-full min-w-0">
+      <div className="w-full min-w-0" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-            <XAxis dataKey="month" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} width={56} />
+          <LineChart
+            data={data}
+            margin={{ top: 4, right: 12, left: 0, bottom: 0 }}
+          >
+            <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+            <XAxis
+              dataKey="month"
+              tick={{ fontSize: 11 }}
+              tickMargin={6}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              tick={{ fontSize: 11 }}
+              width={44}
+              axisLine={false}
+              tickLine={false}
+            />
             <Tooltip
-              formatter={(value: number, name: string) => [centToDisplayYuan(Math.round(value * 100)), name]}
+              formatter={(value: number, name: string) => [
+                centToDisplayYuan(Math.round(value * 100)),
+                name,
+              ]}
             />
             <Legend
+              verticalAlign="top"
+              align="right"
+              iconSize={8}
+              wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
               onClick={(e) => {
                 const key = String(e.dataKey ?? '')
                 setVisible((prev) => ({ ...prev, [key]: !prev[key] }))

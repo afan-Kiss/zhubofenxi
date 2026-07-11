@@ -33,10 +33,11 @@ export const BOSS_SCORE_API = {
 export const BOSS_FINANCE_REFERER = 'https://ark.xiaohongshu.com/app-merchant/finance/account'
 export const BOSS_SCORE_REFERER = 'https://ark.xiaohongshu.com/app-violation/shop-score'
 
+/** 趋势接口请求 labels 与 sellerScoreTrendMap 键（HAR 实测，非 sellerLogisticsScore） */
 export const BOSS_SCORE_TREND_LABELS = {
   quality: 'sellerQualityScore',
-  logistics: 'sellerLogisticsScore',
-  service: 'sellerServiceScore',
+  logistics: 'logisticsScore',
+  service: 'customerServiceScore',
 } as const
 
 export const BOSS_SCORE_SYNC_AFTER_HM = '15:10'

@@ -28,9 +28,21 @@ async function resolveShopScoreCooldownOverride(
   const todayKey = formatDateKeyShanghai()
   const existingToday = await prisma.bossShopScoreSnapshot.findUnique({
     where: { shopKey_scoreDate: { shopKey: shop.shopKey, scoreDate: todayKey } },
-    select: { fetchedAt: true },
+    select: {
+      fetchedAt: true,
+      qualityScore: true,
+      logisticsScore: true,
+      serviceScore: true,
+      sourceApi: true,
+    },
   })
-  if (existingToday?.fetchedAt) return undefined
+  const complete =
+    existingToday != null &&
+    existingToday.qualityScore != null &&
+    existingToday.logisticsScore != null &&
+    existingToday.serviceScore != null &&
+    existingToday.sourceApi !== 'boss_shop_score:partial'
+  if (existingToday?.fetchedAt && complete) return undefined
   if (!shouldBypassBossShopScoreCooldown(shop.shopKey)) return undefined
   return 0
 }

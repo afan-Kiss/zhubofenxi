@@ -214,11 +214,24 @@ export function parseBossShopScore(payload: unknown): ParsedBossShopScores {
   }
 }
 
+const BOSS_SCORE_TREND_RESPONSE_KEYS: Record<string, string[]> = {
+  sellerQualityScore: ['sellerQualityScore'],
+  logisticsScore: ['logisticsScore', 'sellerLogisticsScore'],
+  customerServiceScore: ['customerServiceScore', 'sellerServiceScore', 'serviceScore'],
+}
+
 export function parseBossScoreTrend(payload: unknown, label: string): Array<{ date: string; score: number }> {
   const root = asRecord(payload)
   const data = asRecord(root?.data) ?? root ?? {}
   const map = asRecord(data.sellerScoreTrendMap) ?? {}
-  const list = Array.isArray(map[label]) ? map[label] : []
+  const candidateKeys = BOSS_SCORE_TREND_RESPONSE_KEYS[label] ?? [label]
+  let list: unknown[] = []
+  for (const key of candidateKeys) {
+    if (Array.isArray(map[key])) {
+      list = map[key] as unknown[]
+      break
+    }
+  }
   const out: Array<{ date: string; score: number }> = []
   for (const item of list) {
     const rec = asRecord(item)

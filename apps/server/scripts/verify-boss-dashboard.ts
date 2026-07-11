@@ -8,12 +8,13 @@ import {
   isWithdrawSuccessRow,
   parseBossAggregateAccount,
   parseBossFlowRow,
+  parseBossScoreTrend,
   yuanStringToCent,
 } from '../src/services/boss-dashboard/boss-dashboard-normalize.service'
 import { buildRecentMonthKeys, aggregateMonthlyStatementIncome } from '../src/services/boss-dashboard/boss-dashboard-flow.service'
 import { createScoreChangeAnnouncements } from '../src/services/boss-dashboard/boss-dashboard-announcement.service'
 import { DEFAULT_ROLE_PAGE_PERMISSIONS } from '../src/config/page-permissions'
-import { BOSS_FINANCE_API } from '../src/config/boss-dashboard.constants'
+import { BOSS_FINANCE_API, BOSS_SCORE_TREND_LABELS } from '../src/config/boss-dashboard.constants'
 import { summarizeBossRun } from '../src/services/boss-dashboard/boss-dashboard-sync-status.util'
 import { isBossDashboardSyncRunning } from '../src/services/boss-dashboard/boss-dashboard-sync.service'
 import { shouldFetchShopScoreToday } from '../src/services/boss-dashboard/boss-dashboard-score.service'
@@ -114,6 +115,21 @@ async function main() {
 
   if (typeof shouldFetchShopScoreToday() === 'boolean') ok('店铺分时间判断函数可用')
   else fail('店铺分时间判断不可用')
+
+  const trendSample = {
+    data: {
+      sellerScoreTrendMap: {
+        logisticsScore: [{ date: '2026-07-01', current: 4.7 }],
+        customerServiceScore: [{ date: '2026-07-01', current: 4.8 }],
+      },
+    },
+  }
+  const logisticsTrend = parseBossScoreTrend(trendSample, BOSS_SCORE_TREND_LABELS.logistics)
+  const serviceTrend = parseBossScoreTrend(trendSample, BOSS_SCORE_TREND_LABELS.service)
+  if (logisticsTrend[0]?.score === 4.7) ok('物流趋势 labels=logisticsScore 解析正确')
+  else fail(`物流趋势解析错误：${JSON.stringify(logisticsTrend)}`)
+  if (serviceTrend[0]?.score === 4.8) ok('服务趋势 labels=customerServiceScore 解析正确')
+  else fail(`服务趋势解析错误：${JSON.stringify(serviceTrend)}`)
 
   const scoreCooldown = resolveApiCooldownMs('boss_shop_score')
   if (scoreCooldown <= BUSINESS_SYNC_INTERVAL_MS) {

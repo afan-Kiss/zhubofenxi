@@ -12,7 +12,7 @@ export const BOSS_LINE_CHART_MARGIN_WIDE = {
 export const BOSS_LINE_CHART_MARGIN_NARROW = {
   top: 28,
   right: 6,
-  left: -4,
+  left: 0,
   bottom: 2,
 } as const
 
@@ -41,11 +41,11 @@ export const BOSS_CHART_LEGEND_STYLE = {
 } as const
 
 export const BOSS_MONEY_Y_AXIS_WIDTH_WIDE = 40
-export const BOSS_MONEY_Y_AXIS_WIDTH_NARROW = 34
+export const BOSS_MONEY_Y_AXIS_WIDTH_NARROW = 36
 export const BOSS_MONEY_Y_AXIS_WIDTH = BOSS_MONEY_Y_AXIS_WIDTH_WIDE
 
 export const BOSS_SCORE_Y_AXIS_WIDTH_WIDE = 18
-export const BOSS_SCORE_Y_AXIS_WIDTH_NARROW = 24
+export const BOSS_SCORE_Y_AXIS_WIDTH_NARROW = 28
 export const BOSS_SCORE_Y_AXIS_WIDTH = BOSS_SCORE_Y_AXIS_WIDTH_WIDE
 
 const MOBILE_MAX_WIDTH = 640

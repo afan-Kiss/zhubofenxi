@@ -3,7 +3,6 @@ import type { GoodReviewShopDefinition } from '../../config/good-review-shops.co
 import {
   BOSS_FLOW_MAX_PAGES_FIRST_SYNC,
   BOSS_FLOW_PAGE_SIZE,
-  BOSS_FLOW_HALT_AFTER_KNOWN,
   BOSS_INCOME_MONTHS,
 } from '../../config/boss-dashboard.constants'
 import { fetchBossAccountRecordPage } from './boss-dashboard-api.service'
@@ -53,6 +52,25 @@ async function upsertFlowRows(
   return { inserted, knownHits }
 }
 
+async function getLatestLocalFlowTime(shopKey: string): Promise<Date | null> {
+  const latest = await prisma.bossAccountFlow.findFirst({
+    where: { shopKey },
+    orderBy: { occurredAt: 'desc' },
+    select: { occurredAt: true },
+  })
+  return latest?.occurredAt ?? null
+}
+
+function pageMaxOccurredAt(rows: ParsedBossFlowRow[]): Date | null {
+  if (rows.length === 0) return null
+  let max = rows[0]!.occurredAt.getTime()
+  for (const row of rows) {
+    const t = row.occurredAt.getTime()
+    if (t > max) max = t
+  }
+  return new Date(max)
+}
+
 export async function syncBossAccountFlowsForShop(params: {
   shop: GoodReviewShopDefinition
   liveAccountId: string
@@ -64,9 +82,9 @@ export async function syncBossAccountFlowsForShop(params: {
   const firstSync = params.firstSync || existingCount === 0
   let inserted = 0
   let pagesFetched = 0
-  let consecutiveKnown = 0
   let stoppedEarly = false
   const maxPages = firstSync ? BOSS_FLOW_MAX_PAGES_FIRST_SYNC : 20
+  const localLatest = firstSync ? null : await getLatestLocalFlowTime(params.shop.shopKey)
 
   for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
     const payload = await fetchBossAccountRecordPage(params.shop, pageNum, BOSS_FLOW_PAGE_SIZE)
@@ -78,14 +96,13 @@ export async function syncBossAccountFlowsForShop(params: {
     inserted += result.inserted
 
     if (!firstSync) {
-      consecutiveKnown += result.knownHits
-      if (result.knownHits > 0 && result.inserted === 0) {
-        if (consecutiveKnown >= BOSS_FLOW_HALT_AFTER_KNOWN) {
+      const pageAllKnown = parsed.rows.length > 0 && result.knownHits === parsed.rows.length
+      if (result.inserted === 0 && pageAllKnown && localLatest) {
+        const pageMax = pageMaxOccurredAt(parsed.rows)
+        if (pageMax && pageMax.getTime() <= localLatest.getTime()) {
           stoppedEarly = true
           break
         }
-      } else {
-        consecutiveKnown = 0
       }
     }
 

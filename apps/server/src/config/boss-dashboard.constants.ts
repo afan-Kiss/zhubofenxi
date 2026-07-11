@@ -44,7 +44,6 @@ export const BOSS_SCORE_TREND_DAYS = 14
 export const BOSS_INCOME_MONTHS = 12
 export const BOSS_FLOW_PAGE_SIZE = 50
 export const BOSS_FLOW_MAX_PAGES_FIRST_SYNC = 200
-export const BOSS_FLOW_HALT_AFTER_KNOWN = 3
 
 export const BOSS_FLOW_KIND = {
   statementIn: 'statement_in',

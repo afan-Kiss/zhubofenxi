@@ -48,6 +48,7 @@
     "verify:data-health-panel": "tsx apps/server/scripts/verify-data-health-panel.ts",
     "verify:rolling-data-health-close": "tsx apps/server/scripts/verify-rolling-data-health-close.ts",
     "verify:boss-dashboard": "tsx apps/server/scripts/verify-boss-dashboard.ts",
+    "verify:boss-dashboard:live": "python deploy/aliyun/verify-boss-dashboard-live-remote.py",
     "verify:anchor-realtime-sync-static": "tsx apps/server/scripts/verify-anchor-realtime-sync-static.ts",
     "verify:good-review-material-center": "tsx apps/server/scripts/verify-good-review-material-center.ts",
     "verify:order-pay-time-prefilter": "tsx apps/server/scripts/verify-order-pay-time-prefilter.ts",

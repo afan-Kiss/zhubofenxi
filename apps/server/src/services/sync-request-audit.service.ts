@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import crypto from 'node:crypto'
+import { BUSINESS_SYNC_INTERVAL_MS } from '../config/business-sync.constants'
 import { getDataDir } from '../config/env'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import type { RequestXhsJsonOptions } from './xhs-http.service'
@@ -64,8 +65,8 @@ const COOLDOWN_MS_BY_API: Record<string, number> = {
   boss_account_summary: 30 * 60 * 1000,
   boss_account_flow: 30 * 60 * 1000,
   boss_withdraw_flow: 30 * 60 * 1000,
-  boss_shop_score: 6 * 60 * 60 * 1000,
-  boss_score_rule: 6 * 60 * 60 * 1000,
+  boss_shop_score: BUSINESS_SYNC_INTERVAL_MS - 10 * 60 * 1000,
+  boss_score_rule: BUSINESS_SYNC_INTERVAL_MS - 10 * 60 * 1000,
 }
 
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000
@@ -110,6 +111,7 @@ export function checkXhsRequestAllowed(params: {
   apiName: string
   requestHash: string
   trigger?: SyncRequestTrigger
+  cooldownOverrideMs?: number
 }): { allowed: boolean; status: SyncRequestStatus; decision: XhsRequestDecision; reason?: string } {
   if (params.trigger === 'page_open') {
     return {
@@ -134,7 +136,7 @@ export function checkXhsRequestAllowed(params: {
 
   const key = auditKey(params.shopId, params.apiName, params.requestHash)
   const last = lastRequestAt.get(key)
-  const cooldown = resolveApiCooldownMs(params.apiName)
+  const cooldown = params.cooldownOverrideMs ?? resolveApiCooldownMs(params.apiName)
   if (last != null && now - last < cooldown) {
     return {
       allowed: false,
@@ -186,11 +188,12 @@ export async function checkXhsRequestAllowedWithJsonlCooldown(params: {
   apiName: string
   requestHash: string
   trigger?: SyncRequestTrigger
+  cooldownOverrideMs?: number
 }): Promise<{ allowed: boolean; status: SyncRequestStatus; decision: XhsRequestDecision; reason?: string }> {
   const memory = checkXhsRequestAllowed(params)
   if (!memory.allowed) return memory
 
-  const cooldown = resolveApiCooldownMs(params.apiName)
+  const cooldown = params.cooldownOverrideMs ?? resolveApiCooldownMs(params.apiName)
   const items = await loadJsonlItemsForCooldown()
   const lastRemote = findLastRemoteRequestAt(
     items,
@@ -289,6 +292,7 @@ export async function requestXhsJsonWithSyncAudit<T>(params: {
   trigger?: SyncRequestTrigger
   requestHash?: string
   pageNo?: number
+  cooldownOverrideMs?: number
   options: RequestXhsJsonOptions
 }): Promise<T> {
   const requestHash =
@@ -306,6 +310,7 @@ export async function requestXhsJsonWithSyncAudit<T>(params: {
     requestHash,
     trigger: params.trigger ?? 'scheduled',
     pageNo: params.pageNo,
+    cooldownOverrideMs: params.cooldownOverrideMs,
     execute: async () => {
       try {
         const data = await requestXhsJson<T>(params.options)
@@ -369,6 +374,7 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
   requestHash: string
   trigger?: SyncRequestTrigger
   pageNo?: number
+  cooldownOverrideMs?: number
   execute: () => Promise<{
     ok: boolean
     data: T | null
@@ -384,6 +390,7 @@ export async function runXhsRequestWithAuditAndThrottle<T>(params: {
     apiName: params.apiName,
     requestHash: params.requestHash,
     trigger,
+    cooldownOverrideMs: params.cooldownOverrideMs,
   })
 
   if (!gate.allowed) {

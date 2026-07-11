@@ -15,6 +15,17 @@ import { createScoreChangeAnnouncements } from '../src/services/boss-dashboard/b
 import { DEFAULT_ROLE_PAGE_PERMISSIONS } from '../src/config/page-permissions'
 import { isBossDashboardSyncRunning } from '../src/services/boss-dashboard/boss-dashboard-sync.service'
 import { shouldFetchShopScoreToday } from '../src/services/boss-dashboard/boss-dashboard-score.service'
+import {
+  markBossShopScoreStale,
+  resetBossShopScoreStaleForTests,
+  shouldBypassBossShopScoreCooldown,
+} from '../src/services/boss-dashboard/boss-dashboard-score-cooldown.util'
+import { BUSINESS_SYNC_INTERVAL_MS } from '../src/config/business-sync.constants'
+import {
+  checkXhsRequestAllowed,
+  resetSyncRequestAuditStateForTests,
+  resolveApiCooldownMs,
+} from '../src/services/sync-request-audit.service'
 
 const issues: string[] = []
 function ok(msg: string) {
@@ -96,6 +107,28 @@ async function main() {
 
   if (typeof shouldFetchShopScoreToday() === 'boolean') ok('店铺分时间判断函数可用')
   else fail('店铺分时间判断不可用')
+
+  const scoreCooldown = resolveApiCooldownMs('boss_shop_score')
+  if (scoreCooldown <= BUSINESS_SYNC_INTERVAL_MS) {
+    ok(`店铺分冷却 ${Math.round(scoreCooldown / 60000)} 分钟不超过经营同步 ${BUSINESS_SYNC_INTERVAL_MS / 60000} 分钟`)
+  } else fail(`店铺分冷却过长：${scoreCooldown}ms`)
+
+  resetSyncRequestAuditStateForTests()
+  resetBossShopScoreStaleForTests()
+  markBossShopScoreStale('shiyuju', '2099-01-01')
+  if (shouldBypassBossShopScoreCooldown('shiyuju')) ok('stale_score_date 标记可用于下一轮重试')
+  else fail('stale_score_date 标记缺失')
+  const staleBypass = checkXhsRequestAllowed({
+    shopId: 'verify-shop',
+    apiName: 'boss_shop_score',
+    requestHash: 'verify-hash',
+    trigger: 'scheduled',
+    cooldownOverrideMs: 0,
+  })
+  if (staleBypass.allowed) ok('旧评分日期受控重试可绕过冷却')
+  else fail('旧评分日期重试应允许绕过冷却')
+  resetSyncRequestAuditStateForTests()
+  resetBossShopScoreStaleForTests()
 
   if (!isBossDashboardSyncRunning()) ok('单飞锁初始未运行')
   else fail('单飞锁初始状态异常')

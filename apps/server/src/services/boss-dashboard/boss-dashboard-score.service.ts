@@ -15,6 +15,10 @@ import {
   parseBossShopScore,
 } from './boss-dashboard-normalize.service'
 import { createScoreChangeAnnouncements } from './boss-dashboard-announcement.service'
+import {
+  clearBossShopScoreStale,
+  markBossShopScoreStale,
+} from './boss-dashboard-score-cooldown.util'
 import { logInfo } from '../../utils/server-log'
 
 function shanghaiHmNow(): string {
@@ -64,9 +68,12 @@ export async function syncBossShopScoreForShop(params: {
   const scoreDate = parsed.scoreDate ?? todayKey
 
   if (parsed.scoreDate && parsed.scoreDate < todayKey && !params.forceFetch) {
+    markBossShopScoreStale(params.shop.shopKey, parsed.scoreDate)
     logInfo('老板同步', `${params.shop.shopName} 店铺分仍为旧日期 ${parsed.scoreDate}，不写入今日快照`)
     return { skipped: true, saved: false, scoreDate: parsed.scoreDate, reason: '平台评分日期未更新' }
   }
+
+  clearBossShopScoreStale(params.shop.shopKey)
 
   if (parsed.qualityScore == null) {
     const qTrend = await loadTrendScores(params.shop, BOSS_SCORE_TREND_LABELS.quality)

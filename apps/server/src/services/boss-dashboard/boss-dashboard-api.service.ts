@@ -9,11 +9,25 @@ import { resolveOfficialShopAccountForStatus } from '../official-shop-account.se
 import { resolveLiveAccountCookie } from '../qianfan-cookie-resolver.service'
 import { requestXhsJsonWithSyncAudit } from '../sync-request-audit.service'
 import { enqueueXhsRequest } from '../xhs-api-sync/xhs-rate-limiter.service'
+import {
+  shouldBypassBossShopScoreCooldown,
+} from './boss-dashboard-score-cooldown.util'
+import { prisma } from '../../lib/prisma'
+import { formatDateKeyShanghai } from '../../utils/business-timezone'
 
-async function resolveAccountId(shop: GoodReviewShopDefinition): Promise<string> {
-  const account = await resolveOfficialShopAccountForStatus(shop.shopKey)
-  if (!account?.id) throw new Error(`店铺 ${shop.shopName} 尚未配置官方账号`)
-  return account.id
+async function resolveShopScoreCooldownOverride(
+  shop: GoodReviewShopDefinition,
+  apiName: string,
+): Promise<number | undefined> {
+  if (apiName !== 'boss_shop_score') return undefined
+  const todayKey = formatDateKeyShanghai()
+  const existingToday = await prisma.bossShopScoreSnapshot.findUnique({
+    where: { shopKey_scoreDate: { shopKey: shop.shopKey, scoreDate: todayKey } },
+    select: { fetchedAt: true },
+  })
+  if (existingToday?.fetchedAt) return undefined
+  if (!shouldBypassBossShopScoreCooldown(shop.shopKey)) return undefined
+  return 0
 }
 
 async function bossRequest<T>(params: {
@@ -28,6 +42,7 @@ async function bossRequest<T>(params: {
     const accountId = await resolveAccountId(params.shop)
     const cookie = await resolveLiveAccountCookie(accountId, params.shop.shopName)
     if (!cookie) throw new Error(`店铺 ${params.shop.shopName} Cookie 不可用`)
+    const cooldownOverrideMs = await resolveShopScoreCooldownOverride(params.shop, params.apiName)
     return requestXhsJsonWithSyncAudit<T>({
       shopId: accountId,
       shopName: params.shop.shopName,
@@ -35,6 +50,7 @@ async function bossRequest<T>(params: {
       method: params.method,
       urlKey: params.url.split('?')[0]!.slice(-96),
       trigger: 'scheduled',
+      cooldownOverrideMs,
       options: {
         method: params.method,
         url: params.url,
@@ -55,6 +71,12 @@ async function bossRequest<T>(params: {
       },
     })
   })
+}
+
+async function resolveAccountId(shop: GoodReviewShopDefinition): Promise<string> {
+  const account = await resolveOfficialShopAccountForStatus(shop.shopKey)
+  if (!account?.id) throw new Error(`店铺 ${shop.shopName} 尚未配置官方账号`)
+  return account.id
 }
 
 export function fetchBossAggregateAccount(shop: GoodReviewShopDefinition) {

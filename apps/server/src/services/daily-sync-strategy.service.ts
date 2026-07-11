@@ -504,6 +504,15 @@ export async function executeDailyStrategySync(
             `同步后重建失败：${cacheErr instanceof Error ? cacheErr.message : String(cacheErr)}`,
           )
         }
+        try {
+          const { runBossDashboardSync } = await import('./boss-dashboard/boss-dashboard-sync.service')
+          await runBossDashboardSync(`business-sync:${job.startedBy ?? 'scheduled'}`)
+        } catch (bossErr) {
+          logWarn(
+            '老板同步',
+            `经营同步后老板数据步骤失败：${bossErr instanceof Error ? bossErr.message : String(bossErr)}`,
+          )
+        }
       }
     }
   } catch (err) {

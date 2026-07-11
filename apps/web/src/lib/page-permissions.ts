@@ -4,6 +4,7 @@ export const PAGE_PERMISSION_KEYS = [
   'buyers',
   'operations_report',
   'good_reviews',
+  'boss_dashboard',
   'settings',
 ] as const
 
@@ -15,6 +16,7 @@ export const PAGE_PERMISSION_LABELS: Record<PagePermissionKey, string> = {
   buyers: '买家排行',
   operations_report: '运营报表',
   good_reviews: '好评中心',
+  boss_dashboard: '老板查看',
   settings: '系统设置',
 }
 
@@ -24,6 +26,7 @@ export const PAGE_PERMISSION_ROUTES: Record<PagePermissionKey, string> = {
   buyers: '/buyers',
   operations_report: '/operations-report',
   good_reviews: '/good-reviews',
+  boss_dashboard: '/boss-dashboard',
   settings: '/settings',
 }
 

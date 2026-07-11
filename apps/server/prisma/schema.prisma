@@ -803,3 +803,139 @@ model OrderAnchorManualOverride {
 
   @@index([anchorName])
 }
+
+/// 老板看板：店铺资金快照（金额均为分）
+model BossFundSnapshot {
+  id                       String    @id @default(cuid())
+  shopKey                  String
+  liveAccountId            String
+  availableAmountCent      Int?
+  withdrawingAmountCent    Int?
+  withdrawnAmountCent      Int?
+  balanceAmountCent        Int?
+  frozenAmountCent         Int?
+  afterSaleFrozenAmountCent Int?
+  depositBalanceCent       Int?
+  depositRequiredCent      Int?
+  depositStandardCent      Int?
+  baseDueDepositCent       Int?
+  riskDepositCent          Int?
+  debtAmountCent           Int?
+  todayIncomeCent          Int?
+  yesterdayIncomeCent      Int?
+  canWithdraw              Boolean?
+  cannotWithdrawReason     String?
+  leftWithdrawTimesToday   Int?
+  totalWithdrawTimesToday  Int?
+  statementPeriodDays      Int?
+  syncStatus               String    @default("success")
+  syncError                String?
+  isStale                  Boolean   @default(false)
+  fetchedAt                DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@index([shopKey, updatedAt])
+  @@index([liveAccountId])
+}
+
+/// 老板看板：平台资金流水（金额均为分）
+model BossAccountFlow {
+  id               String   @id @default(cuid())
+  shopKey          String
+  liveAccountId    String
+  platformFlowId   String
+  flowKind         String
+  flowType         String?
+  flowTypeDesc     String?
+  occurredAt       DateTime
+  incomeAmountCent Int      @default(0)
+  outcomeAmountCent Int     @default(0)
+  businessNo       String?
+  balanceAfterCent Int?
+  rawJson          String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([shopKey, platformFlowId])
+  @@index([shopKey, occurredAt])
+  @@index([shopKey, flowKind, occurredAt])
+  @@index([liveAccountId])
+}
+
+/// 老板看板：店铺体验分每日快照
+model BossShopScoreSnapshot {
+  id                   String   @id @default(cuid())
+  shopKey              String
+  liveAccountId        String
+  scoreDate            String
+  qualityScore         Float?
+  logisticsScore       Float?
+  serviceScore         Float?
+  officialOverallScore Float?
+  sourceApi            String?
+  rawJson              String?
+  fetchedAt            DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([shopKey, scoreDate])
+  @@index([shopKey, scoreDate])
+  @@index([liveAccountId])
+}
+
+/// 老板看板：公告
+model BossAnnouncement {
+  id              String   @id @default(cuid())
+  kind            String
+  shopKey         String?
+  shopName        String?
+  title           String
+  content         String
+  scoreDate       String?
+  metricKey       String?
+  previousScore   Float?
+  currentScore    Float?
+  deltaScore      Float?
+  suggestion      String?
+  tone            String   @default("neutral")
+  startsAt        DateTime?
+  endsAt          DateTime?
+  enabled         Boolean  @default(true)
+  dedupeKey       String?  @unique
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([kind, enabled, createdAt])
+  @@index([shopKey, createdAt])
+}
+
+/// 老板看板：用户公告状态
+model BossAnnouncementUserState {
+  id             String   @id @default(cuid())
+  userId         String
+  announcementId String
+  readAt         DateTime?
+  popupShownAt   DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, announcementId])
+  @@index([userId])
+}
+
+/// 老板看板：同步运行记录
+model BossSyncRunLog {
+  id           String    @id @default(cuid())
+  trigger      String
+  status       String
+  startedAt    DateTime  @default(now())
+  finishedAt   DateTime?
+  shopResults  String?
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+
+  @@index([startedAt])
+  @@index([status])
+}

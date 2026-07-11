@@ -8,6 +8,7 @@ import { BuyerRankingTab } from './pages/board/BuyerRankingTab'
 import { SettingsTab } from './pages/board/SettingsTab'
 import { OperationsReportPage } from './pages/operations/OperationsReportPage'
 import { DataHealthPage } from './pages/board/DataHealthPage'
+import { BossDashboardPage } from './pages/boss/BossDashboardPage'
 import { DailyReportMobileUploadPage } from './pages/mobile/DailyReportMobileUploadPage'
 import { LoginPage } from './pages/auth/LoginPage'
 import { RegisterPage } from './pages/auth/RegisterPage'
@@ -60,6 +61,7 @@ const App: React.FC = () => {
                     </Suspense>
                   }
                 />
+                <Route path="boss-dashboard" element={<BossDashboardPage />} />
                 <Route path="orders" element={<Navigate to="/" replace />} />
                 <Route path="billing" element={<Navigate to="/" replace />} />
                 <Route path="settings" element={<SettingsTab />} />

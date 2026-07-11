@@ -9,6 +9,7 @@ function routePermission(pathname: string): PagePermissionKey | null {
   if (pathname.startsWith('/buyers')) return 'buyers'
   if (pathname.startsWith('/operations-report')) return 'operations_report'
   if (pathname.startsWith('/good-reviews')) return 'good_reviews'
+  if (pathname.startsWith('/boss-dashboard')) return 'boss_dashboard'
   if (pathname.startsWith('/settings')) return 'settings'
   return null
 }

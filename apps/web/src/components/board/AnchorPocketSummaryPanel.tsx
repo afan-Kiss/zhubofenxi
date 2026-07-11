@@ -117,7 +117,7 @@ export const AnchorPocketSummaryPanel: React.FC<Props> = ({ preset, startDate, e
         <h3 className="text-base font-semibold text-slate-900">订单侧预计留下金额</h3>
         <p className="mt-1 text-xs leading-relaxed text-slate-500">
           {caliber?.note ??
-            '这是订单侧预计留下金额，不是平台结算到账金额；平台佣金、服务费、账期差异未计入。'}
+            '这是订单侧预计留下金额，不是平台实际到账金额；平台佣金、服务费、账期差异未计入。'}
         </p>
         {caliber?.settlementNote ? (
           <p className="mt-1 text-xs text-slate-400">{caliber.settlementNote}</p>

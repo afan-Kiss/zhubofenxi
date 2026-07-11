@@ -7,6 +7,7 @@ export const PAGE_PERMISSION_KEYS = [
   'buyers',
   'operations_report',
   'good_reviews',
+  'boss_dashboard',
   'settings',
 ] as const
 
@@ -18,6 +19,7 @@ export const PAGE_PERMISSION_LABELS: Record<PagePermissionKey, string> = {
   buyers: '买家排行',
   operations_report: '运营报表',
   good_reviews: '好评中心',
+  boss_dashboard: '老板查看',
   settings: '系统设置',
 }
 
@@ -29,6 +31,7 @@ const ALL_TRUE: Record<PagePermissionKey, boolean> = {
   buyers: true,
   operations_report: true,
   good_reviews: true,
+  boss_dashboard: true,
   settings: true,
 }
 
@@ -40,6 +43,7 @@ export const DEFAULT_ROLE_PAGE_PERMISSIONS: RolePagePermissions = {
     buyers: true,
     operations_report: true,
     good_reviews: true,
+    boss_dashboard: true,
     settings: false,
   },
   staff: {
@@ -48,6 +52,7 @@ export const DEFAULT_ROLE_PAGE_PERMISSIONS: RolePagePermissions = {
     buyers: true,
     operations_report: false,
     good_reviews: true,
+    boss_dashboard: false,
     settings: false,
   },
   local_viewer: { ...ALL_TRUE },

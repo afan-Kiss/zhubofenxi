@@ -24,6 +24,11 @@ export function formatDateKeyShanghai(date: Date = new Date()): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
+export function shanghaiMonthKey(date: Date = new Date()): string {
+  const { year, month } = shanghaiDateParts(date)
+  return `${year}-${String(month).padStart(2, '0')}`
+}
+
 export function parseDateKeyShanghai(dateKey: string): { year: number; month: number; day: number } {
   if (!DATE_KEY_RE.test(dateKey)) {
     throw new Error(`无效日期键: ${dateKey}`)

@@ -1,9 +1,11 @@
 import React, { useCallback, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Menu, Settings, Users, UserCircle, X, FileText, LogOut, ThumbsUp } from 'lucide-react'
+import { LayoutDashboard, Menu, Settings, Users, UserCircle, X, FileText, LogOut, ThumbsUp, Briefcase } from 'lucide-react'
 import { PageRequestStatusBar } from './board/PageRequestStatusBar'
 import { CookieHealthWatcher } from './board/CookieHealthWatcher'
 import { BoardLiveQueryProvider } from '../providers/BoardLiveQueryProvider'
+import { BossDashboardProvider } from '../providers/BossDashboardProvider'
+import { BossAnnouncementCenter } from './boss/BossAnnouncementCenter'
 import { PageTransition } from './ui/PageTransition'
 import { MainNavTabs } from './ui/MainNavTabs'
 import { SettingsPasswordDialog } from './settings/SettingsPasswordDialog'
@@ -55,6 +57,12 @@ const ALL_NAV: Array<{
     label: (<><ThumbsUp size={14} /> 好评中心</>),
     dataTestId: 'tab-good-reviews',
     permission: 'good_reviews',
+  },
+  {
+    to: '/boss-dashboard',
+    label: (<><Briefcase size={14} /> 老板查看</>),
+    dataTestId: 'tab-boss-dashboard',
+    permission: 'boss_dashboard',
   },
   {
     to: '/settings',
@@ -109,7 +117,8 @@ export const Layout: React.FC = () => {
   }, [logout, mode, navigate])
 
   return (
-    <div className="flex min-h-screen min-w-0 flex-col overflow-x-hidden">
+    <BossDashboardProvider>
+      <div className="flex min-h-screen min-w-0 flex-col overflow-x-hidden">
       <header className="sticky top-0 z-30 border-b border-white/60 bg-[var(--color-bg-warm)]/90 backdrop-blur-md transition-shadow duration-300">
         <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-2 px-3 py-3 md:flex-row md:items-center md:justify-between md:gap-4 md:px-4">
           <div className="flex min-w-0 items-start justify-between gap-2">
@@ -120,6 +129,7 @@ export const Layout: React.FC = () => {
               </p>
             </div>
             <div className="flex items-center gap-2">
+              <BossAnnouncementCenter />
               {mode === 'session' && user ? (
                 <button
                   type="button"
@@ -171,6 +181,7 @@ export const Layout: React.FC = () => {
         onVerified={handleSettingsVerified}
         onCancel={handleSettingsCancel}
       />
-    </div>
+      </div>
+    </BossDashboardProvider>
   )
 }

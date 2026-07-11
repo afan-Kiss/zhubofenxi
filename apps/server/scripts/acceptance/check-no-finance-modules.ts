@@ -19,6 +19,7 @@ const ALLOWED_PRIMARY_ROUTES = new Set([
   '/operations-report',
   '/good-reviews',
   '/data-health',
+  '/boss-dashboard',
   '/settings',
 ])
 

@@ -61,6 +61,11 @@ const COOLDOWN_MS_BY_API: Record<string, number> = {
   pending_settlement_list: 30 * 60 * 1000,
   settled_settlement_list: 30 * 60 * 1000,
   settlement_detail: 30 * 60 * 1000,
+  boss_account_summary: 30 * 60 * 1000,
+  boss_account_flow: 30 * 60 * 1000,
+  boss_withdraw_flow: 30 * 60 * 1000,
+  boss_shop_score: 6 * 60 * 60 * 1000,
+  boss_score_rule: 6 * 60 * 60 * 1000,
 }
 
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000

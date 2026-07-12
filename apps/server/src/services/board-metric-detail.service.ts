@@ -345,7 +345,7 @@ export async function buildBoardMetricDetail(params: {
       resolveDateRange(normalizedPreset as DateRangePreset, range.startDate, range.endDate),
     )
     const liveSessions = liveBundle?.liveSessions ?? []
-    const agg = await aggregateQualityRefundByAnchor({ views: coreViews, liveSessions })
+    const agg = await aggregateQualityRefundByAnchor({ views: remappedViews, liveSessions })
     const anchorQuery = { anchorId, anchorName }
 
     if (anchorId || anchorName) {

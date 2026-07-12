@@ -52,6 +52,7 @@ import {
   filterViewsForAnchorPerformance,
   filterViewsForBuyerRanking,
 } from './low-price-brush-order.service'
+import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import {
   aggregateQualityRefundByAnchor,
@@ -480,6 +481,9 @@ export async function buildAnchorQualityRefundDrill(params: {
   })
 
   const coreViews = filterViewsForCoreMetrics(scoped.views)
+  const remappedCoreViews = await remapViewsWithScheduleOverlay(
+    attachRawByMatchToViews(coreViews, scoped.rawByMatch),
+  )
   const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
 
   const range = resolveDateRange(
@@ -490,7 +494,7 @@ export async function buildAnchorQualityRefundDrill(params: {
   const liveBundle = await buildRawAnalyzeBundle(range)
   const liveSessions = liveBundle?.liveSessions ?? []
 
-  const agg = await aggregateQualityRefundByAnchor({ views: coreViews, liveSessions })
+  const agg = await aggregateQualityRefundByAnchor({ views: remappedCoreViews, liveSessions })
   const matched = agg.attributions.filter((attr) =>
     qualityAttributionMatchesAnchor(attr, anchorQuery),
   )
@@ -538,7 +542,7 @@ export async function buildAnchorQualityRefundDrill(params: {
 
   const leaderboard = aggregateAnchorLeaderboard(performanceViews, undefined, {
     liveSessions,
-    qualityRefundViews: coreViews,
+    qualityRefundViews: remappedCoreViews,
   })
   const leaderboardRow = leaderboard.find((a) => anchorLeaderboardRowMatches(a, anchorQuery))
   const stats =

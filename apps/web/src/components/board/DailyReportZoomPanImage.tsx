@@ -5,12 +5,14 @@ interface Props {
   src: string
   alt?: string
   className?: string
+  imageTestId?: string
 }
 
 export const DailyReportZoomPanImage: React.FC<Props> = ({
   src,
   alt = '主播日报',
   className = '',
+  imageTestId,
 }) => {
   const viewportRef = useRef<HTMLDivElement>(null)
   const [scale, setScale] = useState(1)
@@ -115,6 +117,7 @@ export const DailyReportZoomPanImage: React.FC<Props> = ({
           <img
             src={src}
             alt={alt}
+            data-testid={imageTestId}
             draggable={false}
             className="w-full max-w-full select-none"
             style={{

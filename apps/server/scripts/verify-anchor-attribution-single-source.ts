@@ -50,6 +50,24 @@ function main(): void {
       assert.ok(text.includes('CANONICAL_ATTRIBUTION_VERSION'))
       assert.ok(text.includes('export async function resolveCanonicalOrderAttribution'))
     }
+    if (rel === 'services/board-metric-detail.service.ts') {
+      const text = fs.readFileSync(file, 'utf-8')
+      assert.ok(
+        /aggregateQualityRefundByAnchor\(\{[^}]*views:\s*remappedViews/.test(text),
+        '品退指标下钻必须用 remappedViews 聚合，禁止 coreViews',
+      )
+    }
+    if (rel === 'services/board-drill.service.ts') {
+      const text = fs.readFileSync(file, 'utf-8')
+      assert.ok(
+        text.includes('remappedCoreViews'),
+        '品退抽屉必须用 remappedCoreViews 聚合',
+      )
+      assert.ok(
+        !/aggregateQualityRefundByAnchor\(\{ views: coreViews/.test(text),
+        '品退抽屉禁止用未 remap 的 coreViews',
+      )
+    }
   }
 
   void forbiddenInProd

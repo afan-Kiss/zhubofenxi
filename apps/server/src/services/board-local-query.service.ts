@@ -18,6 +18,8 @@ import {
 } from './board-scoped-views.service'
 
 import { aggregateAnchorLeaderboard } from './board-metrics.service'
+import { attachRawByMatchToViews } from './low-price-brush-order.service'
+import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
@@ -445,7 +447,9 @@ export async function executeBoardLocalQuery(params: {
   const anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
 
   const cacheLiveSessions = boardCache.liveSessions ?? []
-  const coreViewsForQuality = filterViewsForCoreMetrics(scopedAllViews)
+  const remappedCoreViewsForQuality = await remapViewsWithScheduleOverlay(
+    attachRawByMatchToViews(scopedAllViews, rawByMatch),
+  )
   const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
     aggregateAnchorLeaderboard(
       performanceViews,
@@ -453,7 +457,7 @@ export async function executeBoardLocalQuery(params: {
         scope: 'local-query-anchor-performance',
         dateRange: { startDate, endDate, preset: params.preset },
       },
-      { liveSessions: cacheLiveSessions, qualityRefundViews: coreViewsForQuality },
+      { liveSessions: cacheLiveSessions, qualityRefundViews: remappedCoreViewsForQuality },
     ) as import('./board-metrics.service').BoardAnchorMetrics[],
     endDate,
   ) as unknown as Array<Record<string, unknown>>

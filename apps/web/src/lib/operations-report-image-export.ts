@@ -63,13 +63,14 @@ export class ReportImageCaptureError extends Error {
 }
 
 export const OPERATIONS_REPORT_EXPORT_HOST_ID = 'operations-report-export-host'
+export const ANCHOR_DAILY_REPORT_EXPORT_HOST_ID = 'anchor-daily-report-export-host'
 
-export function getOperationsReportExportHostStyle(): CSSProperties {
+export function getReportExportHostStyle(widthPx: number): CSSProperties {
   return {
     position: 'fixed',
     left: 0,
     top: 0,
-    width: REPORT_SHEET_WIDTH_PX,
+    width: widthPx,
     zIndex: -1,
     pointerEvents: 'none',
     display: 'block',
@@ -77,6 +78,10 @@ export function getOperationsReportExportHostStyle(): CSSProperties {
     opacity: 1,
     overflow: 'visible',
   }
+}
+
+export function getOperationsReportExportHostStyle(): CSSProperties {
+  return getReportExportHostStyle(REPORT_SHEET_WIDTH_PX)
 }
 
 export async function waitForNextPaint(): Promise<void> {

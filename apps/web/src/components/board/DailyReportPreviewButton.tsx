@@ -1,11 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { toPng } from 'html-to-image'
 import { apiRequest } from '../../lib/api'
 import { type DailyReportPayload, DailyReportImageSheet } from './DailyReportImageSheet'
 import type { DailyReportImageItem } from './DailyReportShipmentPhotos'
 import { DailyReportZoomPanImage } from './DailyReportZoomPanImage'
 import { resolveDailyReportImageFetchUrl } from '../../lib/daily-report-image-url'
+import {
+  ANCHOR_DAILY_REPORT_EXPORT_HOST_ID,
+  captureOperationsReportSheet,
+  formatReportCaptureError,
+  getReportExportHostStyle,
+  revokeReportImageUrl,
+} from '../../lib/operations-report-image-export'
 import { ViewportModal } from '../ui/ViewportModal'
 
 async function waitForNextPaint(): Promise<void> {
@@ -165,46 +171,13 @@ async function prepareExportPhotosForCapture(root: HTMLElement): Promise<() => v
   }
 }
 
-function withCaptureTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) => {
-      window.setTimeout(() => reject(new Error(message)), timeoutMs)
-    }),
-  ])
-}
-
-async function renderSheetToPng(node: HTMLElement): Promise<string> {
-  const baseOptions = {
-    cacheBust: true,
-    backgroundColor: '#ffffff',
-    skipFonts: true,
-    style: { transform: 'scale(1)' },
-  } as const
-  let lastError: unknown = null
-  // Long sheets with many charts can hang or OOM at pixelRatio 3; prefer 2 then 1.
-  for (const pixelRatio of [2, 1]) {
-    try {
-      return await withCaptureTimeout(
-        toPng(node, { ...baseOptions, pixelRatio }),
-        45_000,
-        '日报图片生成超时，请稍后重试',
-      )
-    } catch (err) {
-      lastError = err
-    }
-  }
-  if (lastError instanceof Error && lastError.message.includes('日报')) {
-    throw lastError
-  }
-  throw new Error('日报图片生成失败')
-}
-
-function downloadDataUrl(dataUrl: string, filename: string): void {
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
-  link.href = dataUrl
+  link.href = url
   link.download = filename
   link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
 }
 
 function buildReportDownloadName(startDate: string, title?: string | null): string {
@@ -241,12 +214,14 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
   onGenerated,
 }) => {
   const sheetRef = useRef<HTMLDivElement>(null)
+  const previewBlobRef = useRef<Blob | null>(null)
+  const previewUrlRef = useRef<string | null>(null)
   const captureTokenRef = useRef(0)
   const [loading, setLoading] = useState(false)
   const [capturing, setCapturing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<DailyReportPayload | null>(null)
-  const [imageDataUrl, setImageDataUrl] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [pendingCapture, setPendingCapture] = useState(false)
 
@@ -263,6 +238,19 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     setPreviewOpen(false)
   }, [])
 
+  const clearPreview = useCallback(() => {
+    revokeReportImageUrl(previewUrlRef.current)
+    previewUrlRef.current = null
+    setPreviewUrl(null)
+    previewBlobRef.current = null
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      revokeReportImageUrl(previewUrlRef.current)
+    }
+  }, [])
+
   const captureImage = useCallback(async () => {
     const node = await waitForSheetRef(sheetRef)
     await waitForImagesReady(node)
@@ -272,8 +260,11 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     try {
       await waitForNextPaint()
       await new Promise((resolve) => window.setTimeout(resolve, 200))
-      const dataUrl = await renderSheetToPng(node)
-      setImageDataUrl(dataUrl)
+      const result = await captureOperationsReportSheet(node)
+      revokeReportImageUrl(previewUrlRef.current)
+      previewBlobRef.current = result.blob
+      previewUrlRef.current = result.objectUrl
+      setPreviewUrl(result.objectUrl)
       onGenerated?.()
     } finally {
       restorePhotos()
@@ -295,8 +286,8 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
         if (!cancelled && token === captureTokenRef.current) setPreviewOpen(true)
       } catch (e) {
         if (!cancelled && token === captureTokenRef.current) {
-          const msg = e instanceof Error ? e.message : '日报图片生成失败，请重试'
-          setError(msg.includes('日报') ? msg : `日报图片生成失败：${msg}`)
+          const msg = formatReportCaptureError(e)
+          setError(msg.includes('长图') || msg.includes('日报') ? msg : `日报图片生成失败：${msg}`)
         }
       } finally {
         if (token === captureTokenRef.current) {
@@ -330,8 +321,8 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
         setLoading(false)
         return
       }
+      clearPreview()
       setReport(data)
-      setImageDataUrl(null)
       setPreviewOpen(false)
       setPendingCapture(true)
     } catch (e) {
@@ -348,9 +339,11 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
     report
       ? createPortal(
           <div
+            id={ANCHOR_DAILY_REPORT_EXPORT_HOST_ID}
+            data-testid="anchor-daily-report-export-host"
             aria-hidden
-            className="pointer-events-none fixed left-0 top-0 -z-50"
-            style={{ width: sheetWidthPx, visibility: 'hidden' }}
+            className="pointer-events-none"
+            style={getReportExportHostStyle(sheetWidthPx)}
           >
             <DailyReportImageSheet ref={sheetRef} data={report} shipmentPhotos={sheetPhotos} />
           </div>,
@@ -369,9 +362,9 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
           onClick={() => void loadAndCapture()}
           className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-medium text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {busy ? '生成中...' : imageDataUrl ? '重新生成日报' : '查看日报'}
+          {busy ? '生成中...' : previewUrl ? '重新生成日报' : '查看日报'}
         </button>
-        {imageDataUrl && !busy ? (
+        {previewUrl && !busy ? (
           <button
             type="button"
             onClick={() => setPreviewOpen(true)}
@@ -390,7 +383,7 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
 
       {sheetPortal}
 
-      {previewOpen && imageDataUrl ? (
+      {previewOpen && previewUrl ? (
         <ViewportModal
           open={previewOpen}
           onClose={closePreview}
@@ -406,12 +399,11 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                onClick={() =>
-                  downloadDataUrl(
-                    imageDataUrl,
-                    buildReportDownloadName(startDate, report?.title),
-                  )
-                }
+                onClick={() => {
+                  const blob = previewBlobRef.current
+                  if (!blob) return
+                  downloadBlob(blob, buildReportDownloadName(startDate, report?.title))
+                }}
                 className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-sm font-medium text-rose-700 hover:bg-rose-100"
               >
                 保存图片
@@ -427,8 +419,9 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
           </div>
 
           <DailyReportZoomPanImage
-            src={imageDataUrl}
+            src={previewUrl}
             alt="主播日报"
+            imageTestId="anchor-daily-report-preview-img"
             className={`min-h-0 flex-1 ${capturing ? 'opacity-40' : 'opacity-100'}`}
           />
           {capturing ? (

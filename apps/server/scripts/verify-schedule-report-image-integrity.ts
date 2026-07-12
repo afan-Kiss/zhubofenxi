@@ -304,6 +304,43 @@ function auditExportStatic(): void {
   }
 }
 
+function auditAnchorDailyReportExportStatic(): void {
+  section('主播业绩日报长图静态检查 DailyReportPreviewButton')
+  const content = readWeb('components/board/DailyReportPreviewButton.tsx')
+  if (!content) return
+
+  if (!content.includes('captureOperationsReportSheet')) {
+    fail('DailyReportPreviewButton 未使用 captureOperationsReportSheet')
+  } else {
+    ok('主播日报使用 captureOperationsReportSheet 导出')
+  }
+  if (!content.includes('ANCHOR_DAILY_REPORT_EXPORT_HOST_ID')) {
+    fail('DailyReportPreviewButton 缺少独立 export host')
+  } else {
+    ok('主播日报使用独立 export host')
+  }
+  if (!content.includes('getReportExportHostStyle')) {
+    fail('DailyReportPreviewButton 未使用 getReportExportHostStyle')
+  } else {
+    ok('主播日报使用可渲染 export host 样式')
+  }
+  if (/style=\{\{[^}]*visibility:\s*['"]hidden['"]/.test(content)) {
+    fail('DailyReportPreviewButton 导出宿主仍使用 visibility:hidden（会导致白屏）')
+  } else {
+    ok('主播日报导出宿主未使用 visibility:hidden')
+  }
+  if (content.includes('toPng(')) {
+    fail('DailyReportPreviewButton 仍使用 toPng 直出（应改用 captureOperationsReportSheet）')
+  } else {
+    ok('主播日报未使用 toPng 直出')
+  }
+  if (!content.includes('anchor-daily-report-preview-img')) {
+    fail('DailyReportPreviewButton 缺少预览图 testid')
+  } else {
+    ok('主播日报预览图有 testid')
+  }
+}
+
 function auditTrendCompareStatic(): void {
   section('曲线图静态检查')
   const compare = readWeb('components/board/AnchorTrendCompareChart.tsx')
@@ -386,6 +423,7 @@ async function main(): Promise<void> {
   auditTrendCompareStatic()
   auditImageSheetStatic()
   auditExportStatic()
+  auditAnchorDailyReportExportStatic()
   await auditSchedules()
   await auditDailyReports()
   await auditDefaultTrendAnchors()

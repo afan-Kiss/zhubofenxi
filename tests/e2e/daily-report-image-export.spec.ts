@@ -144,6 +144,105 @@ async function exportAndAssertPreview(
   return { sample, downloadBytes: bytes.length }
 }
 
+async function sampleAnchorPreviewImageNonWhite(page: import('@playwright/test').Page): Promise<ImageSampleResult> {
+  return page.evaluate(() => {
+    const img = document.querySelector(
+      '[data-testid="anchor-daily-report-preview-img"]',
+    ) as HTMLImageElement | null
+    if (!img) {
+      throw new Error('anchor preview img not found')
+    }
+
+    const naturalWidth = img.naturalWidth
+    const naturalHeight = img.naturalHeight
+    const canvas = document.createElement('canvas')
+    const w = Math.min(160, naturalWidth)
+    const h = Math.min(160, naturalHeight)
+    canvas.width = w
+    canvas.height = h
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('canvas unavailable')
+
+    const regions = [
+      { sx: 0, sy: 0 },
+      { sx: Math.max(0, naturalWidth * 0.3), sy: Math.max(0, naturalHeight * 0.2) },
+      { sx: Math.max(0, naturalWidth * 0.5), sy: Math.max(0, naturalHeight * 0.55) },
+    ]
+
+    let nonWhitePixels = 0
+    let sampledPixels = 0
+
+    for (const region of regions) {
+      ctx.clearRect(0, 0, w, h)
+      ctx.drawImage(img, region.sx, region.sy, w, h, 0, 0, w, h)
+      const data = ctx.getImageData(0, 0, w, h).data
+      const step = 5
+      for (let y = 0; y < h; y += step) {
+        for (let x = 0; x < w; x += step) {
+          const i = (y * w + x) * 4
+          const r = data[i] ?? 255
+          const g = data[i + 1] ?? 255
+          const b = data[i + 2] ?? 255
+          const a = data[i + 3] ?? 255
+          sampledPixels++
+          if (a > 20 && !(r > 248 && g > 248 && b > 248)) {
+            nonWhitePixels++
+          }
+        }
+      }
+    }
+
+    return {
+      naturalWidth,
+      naturalHeight,
+      nonWhitePixels,
+      sampledPixels,
+      srcPrefix: img.src.slice(0, 32),
+    }
+  })
+}
+
+async function gotoAnchorPerformanceYesterday(
+  page: import('@playwright/test').Page,
+): Promise<void> {
+  await gotoBoard(page)
+  await page.getByTestId('tab-anchors').click()
+  await waitForPageSettled(page)
+  await expect(page.getByTestId('anchor-performance-page')).toBeVisible({ timeout: 15_000 })
+  await page.getByTestId('range-preset-yesterday').click()
+  await page.waitForTimeout(800)
+  await expect(page.getByRole('button', { name: '查看日报' })).toBeVisible({ timeout: 20_000 })
+}
+
+async function exportAnchorDailyReportAndAssertPreview(
+  page: import('@playwright/test').Page,
+  label: string,
+): Promise<ImageSampleResult> {
+  await page.getByRole('button', { name: '查看日报' }).click()
+
+  const img = page.getByTestId('anchor-daily-report-preview-img')
+  await expect(img).toBeVisible({ timeout: 90_000 })
+
+  await page.waitForFunction(() => {
+    const el = document.querySelector(
+      '[data-testid="anchor-daily-report-preview-img"]',
+    ) as HTMLImageElement | null
+    return Boolean(el && el.complete && el.naturalWidth > 0 && el.naturalHeight > 0)
+  }, { timeout: 30_000 })
+
+  const sample = await sampleAnchorPreviewImageNonWhite(page)
+  expect(sample.naturalWidth, `${label} naturalWidth`).toBeGreaterThan(MIN_EXPORT_WIDTH)
+  expect(sample.naturalHeight, `${label} naturalHeight`).toBeGreaterThan(MIN_EXPORT_HEIGHT)
+  expect(sample.srcPrefix, `${label} src`).toMatch(/^blob:|^data:image\/png/)
+  expect(sample.nonWhitePixels, `${label} 非白像素`).toBeGreaterThan(20)
+  expect(sample.nonWhitePixels / Math.max(1, sample.sampledPixels), `${label} 白图比例`).toBeLessThan(
+    0.99,
+  )
+
+  await page.getByRole('button', { name: '关闭' }).click()
+  return sample
+}
+
 test.describe('运营日报长图导出', () => {
   const today = formatDateKeyShanghai(new Date())
   const yesterday = addDaysShanghai(today, -1)
@@ -161,6 +260,18 @@ test.describe('运营日报长图导出', () => {
     const yesterdayResult = await exportAndAssertPreview(page, `yesterday-${yesterday}`)
     console.log(
       `[daily-report-image-export] yesterday ${yesterday}: ${yesterdayResult.sample.naturalWidth}x${yesterdayResult.sample.naturalHeight}, ${yesterdayResult.downloadBytes} bytes, nonWhite=${yesterdayResult.sample.nonWhitePixels}`,
+    )
+  })
+})
+
+test.describe('主播业绩昨日日报长图', () => {
+  test('昨日日报预览非白图', async ({ page }) => {
+    test.setTimeout(180_000)
+
+    await gotoAnchorPerformanceYesterday(page)
+    const sample = await exportAnchorDailyReportAndAssertPreview(page, 'anchor-yesterday')
+    console.log(
+      `[anchor-daily-report-export] yesterday: ${sample.naturalWidth}x${sample.naturalHeight}, nonWhite=${sample.nonWhitePixels}`,
     )
   })
 })

@@ -13,6 +13,7 @@ import { attachRawByMatchToViews } from '../src/services/low-price-brush-order.s
 import { resolveAnchorWithScheduleOverlay } from '../src/services/anchor-schedule-attribution.service'
 import {
   ensureManualAnchorOverrideCache,
+  resolveManualAnchorOverrideForView,
   type ManualAnchorOverrideEntry,
 } from '../src/services/order-anchor-manual-override.service'
 import { resolveMetricOrderNo } from '../src/services/calc-refund-rate.service'
@@ -115,6 +116,22 @@ async function verifyManualOverrideAttribution(
   } else {
     ok('该订单非品退单，跳过品退归属校验')
   }
+
+  // 轻量：内存 map 模拟清除手动指定后恢复自动归属查找
+  const orderKey = resolveMetricOrderNo(view) || override.orderKey
+  const withOverride = new Map<string, ManualAnchorOverrideEntry>([
+    [orderKey, { anchorId: override.anchorId, anchorName: override.anchorName }],
+  ])
+  const hitWith = resolveManualAnchorOverrideForView(view, withOverride)
+  if (!hitWith || hitWith.anchorName !== override.anchorName) {
+    fail('内存 override map 应命中手动指定')
+  }
+  ok('内存 override map 命中手动指定')
+  const hitCleared = resolveManualAnchorOverrideForView(view, new Map())
+  if (hitCleared) {
+    fail('清除手动指定后 resolveManualAnchorOverrideForView 应返回 null')
+  }
+  ok('清除手动指定后恢复自动归属查找（override map 为空）')
 }
 
 async function verifyOperationsReportCacheInvalidation(): Promise<void> {

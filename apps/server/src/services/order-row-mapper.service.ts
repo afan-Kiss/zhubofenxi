@@ -158,6 +158,16 @@ export interface BoardOrderRow {
   unitPriceCentForBrushCheck?: number
   isLowPriceBrushOrder?: boolean
   lowPriceBrushReason?: string | null
+  /** 排班/场次归属来源（remap 后） */
+  attributionSource?: string | null
+  attributionExplain?: string | null
+  scheduleConfirmed?: boolean
+  /** 品退场次归属主播（若视图上有） */
+  qualityAttributionAnchorName?: string | null
+  /** 支付归属主播（= remap 后的 anchorName） */
+  paymentAnchorName?: string | null
+  /** 是否手动指定覆盖 */
+  manualOverride?: boolean
 }
 
 export type BoardDrillOrderRow = BoardOrderRow
@@ -308,6 +318,14 @@ export function mapViewToBoardOrderRow(
     v.liveAccountName,
     liveAccountCtx,
   )
+  const remapped = v as AnalyzedOrderView & {
+    scheduleAttributionSource?: string
+    scheduleAttributionExplain?: string
+    scheduleConfirmed?: boolean
+    qualityAttributionAnchorName?: string | null
+  }
+  const attributionSource = remapped.scheduleAttributionSource?.trim() || null
+  const paymentAnchorName = v.anchorName?.trim() || '未归属'
 
   return {
     orderNo: displayOrderNo,
@@ -391,6 +409,16 @@ export function mapViewToBoardOrderRow(
     qualityPackagePayTime: qualityInfo.qualityPackagePayTime || null,
     qualityItemName: qualityInfo.qualityItemName || undefined,
     ...resolveLowPriceBrushDebugFields(v),
+    attributionSource,
+    attributionExplain: remapped.scheduleAttributionExplain?.trim() || null,
+    scheduleConfirmed:
+      remapped.scheduleConfirmed != null ? Boolean(remapped.scheduleConfirmed) : undefined,
+    qualityAttributionAnchorName:
+      remapped.qualityAttributionAnchorName != null
+        ? String(remapped.qualityAttributionAnchorName).trim() || null
+        : null,
+    paymentAnchorName,
+    manualOverride: attributionSource === 'manual_override',
   }
 }
 

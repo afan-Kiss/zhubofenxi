@@ -272,6 +272,23 @@ boardRouter.post('/order-anchor-manual-assign', async (req, res) => {
   }
 })
 
+boardRouter.post('/order-anchor-manual-clear', async (req, res) => {
+  try {
+    const orderKey = String(req.body?.orderKey ?? req.body?.orderNo ?? '').trim()
+    if (!orderKey) {
+      sendFail(res, '请提供 orderKey', 400)
+      return
+    }
+    const { removeOrderAnchorManualOverride } = await import(
+      '../services/order-anchor-manual-override.service'
+    )
+    await removeOrderAnchorManualOverride(orderKey)
+    sendOk(res, { ok: true, orderKey })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '清除手动指定失败', 500)
+  }
+})
+
 boardRouter.get('/anchor-drill', async (req, res) => {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : ''

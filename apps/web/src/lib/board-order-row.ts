@@ -69,6 +69,42 @@ export interface BoardDrillOrderRow {
   isActualSigned?: boolean
   afterSaleNo?: string | null
   cardStatusLabel?: string
+  attributionSource?: string | null
+  attributionExplain?: string | null
+  scheduleConfirmed?: boolean
+  qualityAttributionAnchorName?: string | null
+  paymentAnchorName?: string | null
+  manualOverride?: boolean
+}
+
+/** 归属来源短标签（指定主播控件 / 明细行共用） */
+export function attributionSourceShortLabel(source: string | null | undefined): string {
+  switch (String(source ?? '').trim()) {
+    case 'manual_override':
+      return '手动指定'
+    case 'live_session':
+      return '真实场次归属'
+    case 'manual_schedule':
+    case 'default_schedule':
+    case 'template_virtual':
+      return '排班归属'
+    case 'unmatched':
+      return '未归属'
+    default:
+      return source ? '自动归属' : '自动归属'
+  }
+}
+
+export function formatAttributionBasis(
+  source: string | null | undefined,
+  explain: string | null | undefined,
+  maxExplainLen = 48,
+): string {
+  const label = attributionSourceShortLabel(source)
+  const text = String(explain ?? '').trim()
+  if (!text) return label
+  const truncated = text.length > maxExplainLen ? `${text.slice(0, maxExplainLen)}…` : text
+  return `${label} · ${truncated}`
 }
 
 export function displayCell(v: unknown): string {
@@ -205,6 +241,23 @@ export function normalizeBoardOrderRow(raw: Record<string, unknown>): BoardDrill
     isActualSigned: Boolean(raw.isActualSigned),
     afterSaleNo: raw.afterSaleNo != null ? displayCell(raw.afterSaleNo) : undefined,
     cardStatusLabel: raw.cardStatusLabel != null ? displayCell(raw.cardStatusLabel) : undefined,
+    attributionSource:
+      raw.attributionSource != null ? String(raw.attributionSource).trim() || null : null,
+    attributionExplain:
+      raw.attributionExplain != null ? String(raw.attributionExplain).trim() || null : null,
+    scheduleConfirmed:
+      raw.scheduleConfirmed != null ? Boolean(raw.scheduleConfirmed) : undefined,
+    qualityAttributionAnchorName:
+      raw.qualityAttributionAnchorName != null
+        ? String(raw.qualityAttributionAnchorName).trim() || null
+        : null,
+    paymentAnchorName:
+      raw.paymentAnchorName != null
+        ? String(raw.paymentAnchorName).trim() || null
+        : null,
+    manualOverride: Boolean(
+      raw.manualOverride ?? String(raw.attributionSource ?? '').trim() === 'manual_override',
+    ),
   }
 }
 

@@ -619,6 +619,50 @@ export async function buildAnchorQualityRefundDrill(params: {
   const page = Math.max(1, Math.floor(params.page ?? 1))
   const pageSize = Math.min(100, Math.max(1, Math.floor(params.pageSize ?? 20)))
   const total = allRows.length
+
+  let qualityCountInconsistency: {
+    qualityReturnCount: number
+    paginationTotal: number
+    onlyInCount?: string[]
+    onlyInRows?: string[]
+  } | null = null
+  if (qualityReturnCountForAnchor !== total) {
+    const rowOrderNos = new Set(allRows.map((r) => r.orderNo))
+    const countOrderNos = new Set(
+      matched.map((a) => a.orderNo).filter(Boolean),
+    )
+    // Prefer bucket orderNos when available for named anchors
+    if (anchorQuery.anchorName && anchorQuery.anchorName !== '未归属') {
+      countOrderNos.clear()
+      for (const bucket of agg.byAnchorKey.values()) {
+        if (bucket.anchorName === anchorQuery.anchorName) {
+          for (const no of bucket.orderNos) countOrderNos.add(no)
+        }
+      }
+    } else if (anchorQuery.anchorName === '未归属') {
+      countOrderNos.clear()
+      for (const a of agg.unassigned) countOrderNos.add(a.orderNo)
+    }
+    const onlyInCount = [...countOrderNos].filter((no) => !rowOrderNos.has(no))
+    const onlyInRows = [...rowOrderNos].filter((no) => !countOrderNos.has(no))
+    console.error(
+      '[buildAnchorQualityRefundDrill] qualityReturnCount !== pagination.total',
+      {
+        anchorName: anchorQuery.anchorName,
+        qualityReturnCount: qualityReturnCountForAnchor,
+        paginationTotal: total,
+        onlyInCount,
+        onlyInRows,
+      },
+    )
+    qualityCountInconsistency = {
+      qualityReturnCount: qualityReturnCountForAnchor,
+      paginationTotal: total,
+      onlyInCount: onlyInCount.slice(0, 50),
+      onlyInRows: onlyInRows.slice(0, 50),
+    }
+  }
+
   const rows = allRows.slice((page - 1) * pageSize, page * pageSize)
 
   return {
@@ -626,7 +670,7 @@ export async function buildAnchorQualityRefundDrill(params: {
     anchorName:
       stats && 'anchorName' in stats ? stats.anchorName : anchorQuery.anchorName ?? '',
     attributionNote:
-      '品退按下单时所在直播场次归属，方便追当场讲品和售后问题；与支付归属可能不同。',
+      '品退按讲品场次归属，可能与支付归属不同。',
     stats: stats as BoardAnchorMetrics | Record<string, unknown> | null,
     pagination: {
       page,
@@ -635,6 +679,13 @@ export async function buildAnchorQualityRefundDrill(params: {
       totalPages: Math.max(1, Math.ceil(total / pageSize)),
     },
     rows,
+    ...(qualityCountInconsistency
+      ? {
+          warning:
+            `品退单数与明细条数不一致：卡片 ${qualityCountInconsistency.qualityReturnCount} / 明细 ${qualityCountInconsistency.paginationTotal}`,
+          qualityCountInconsistency,
+        }
+      : {}),
   }
 }
 

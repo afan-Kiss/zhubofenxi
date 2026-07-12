@@ -31,6 +31,11 @@ interface QualityRefundDrillRow {
 interface DrillData {
   anchorName: string
   attributionNote?: string
+  warning?: string
+  qualityCountInconsistency?: {
+    qualityReturnCount: number
+    paginationTotal: number
+  }
   stats: Record<string, unknown> | null
   pagination: { page: number; pageSize: number; total: number; totalPages: number }
   rows: QualityRefundDrillRow[]
@@ -105,7 +110,9 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
     return () => controller.abort()
   }, [open, anchorName, anchorId, preset, startDate, endDate, page])
 
-  const qualityCount = Number(data?.stats?.qualityReturnCount ?? 0)
+  const statsCount = Number(data?.stats?.qualityReturnCount ?? 0)
+  const listTotal = Number(data?.pagination?.total ?? 0)
+  const qualityCount = data?.warning ? listTotal : statsCount || listTotal
 
   return (
     <BoardDrawerShell
@@ -134,9 +141,13 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
             <p className="font-medium text-rose-900">
               品退订单数：{formatCount(qualityCount)}
             </p>
+            {data.warning ? (
+              <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-amber-800">
+                {data.warning}
+              </p>
+            ) : null}
             <p className="mt-2 leading-relaxed">
-              {data.attributionNote ??
-                '品退按下单时所在直播场次归属，方便追当场讲品和售后问题；与支付归属可能不同。官方品退命中后仍计入品退；售后单仅补充展示最终处理情况。'}
+              {data.attributionNote ?? '品退按讲品场次归属，可能与支付归属不同。'}
             </p>
           </div>
           {data.rows.length === 0 ? (
@@ -170,12 +181,12 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
                         ? `${row.matchedLiveSessionStart} ~ ${row.matchedLiveSessionEnd}`
                         : '—'}
                     </p>
-                    <p className="mt-1">
-                      归属主播：{row.qualityAttributionAnchorName || anchorName}
+                    <p className="mt-1 font-medium text-slate-800">
+                      品退归属主播：{row.qualityAttributionAnchorName || anchorName}
                     </p>
-                    {row.paymentAnchorName ? (
-                      <p className="mt-1">支付归属主播：{row.paymentAnchorName}</p>
-                    ) : null}
+                    <p className="mt-1">
+                      支付归属主播：{row.paymentAnchorName?.trim() || '—'}
+                    </p>
                     <p className="mt-2 font-medium text-rose-800">
                       品退来源：官方品退
                     </p>

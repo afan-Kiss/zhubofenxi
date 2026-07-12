@@ -5,6 +5,7 @@ import {
   boardRowDisplayOrderNo,
   normalizeBoardOrderRow,
   displayAfterSaleReason,
+  formatAttributionBasis,
   type BoardDrillOrderRow,
 } from '../../lib/board-order-row'
 import {
@@ -47,6 +48,7 @@ interface Props {
     anchorOptions: Array<{ id: string; name: string }>
     assigningOrderNo?: string | null
     onAssign: (orderNo: string, anchorName: string) => void
+    onClearManualOverride?: (orderNo: string) => void
   }
 }
 
@@ -248,7 +250,38 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                     </td>
                     <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.orderTime)}</td>
                     <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.liveAccountName)}</td>
-                    <td className="px-2 py-1.5">{displayCell(r.anchorName)}</td>
+                    <td className="px-2 py-1.5">
+                      <div>{displayCell(r.anchorName)}</div>
+                      {(r.paymentAnchorName != null ||
+                        r.qualityAttributionAnchorName != null ||
+                        r.attributionSource != null ||
+                        r.attributionExplain != null) && (
+                        <div className="mt-0.5 space-y-0.5 text-[10px] leading-snug text-slate-500">
+                          <div>
+                            支付归属主播：
+                            {displayCell(r.paymentAnchorName || r.anchorName)}
+                          </div>
+                          <div>
+                            品退归属主播：
+                            {displayCell(r.qualityAttributionAnchorName)}
+                          </div>
+                          <div
+                            className="max-w-[160px] truncate"
+                            title={formatAttributionBasis(
+                              r.attributionSource,
+                              r.attributionExplain,
+                              120,
+                            )}
+                          >
+                            归属依据：
+                            {formatAttributionBasis(
+                              r.attributionSource,
+                              r.attributionExplain,
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-2 py-1.5">
                       <BuyerDisplay nickname={nick === '—' ? '未知' : nick} />
                     </td>
@@ -297,9 +330,11 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                         <OrderAnchorAssignControl
                           orderNo={boardRowDisplayOrderNo(r)}
                           defaultAnchorName={r.anchorName}
+                          attributionSource={r.attributionSource}
                           anchorOptions={manualAnchorAssign.anchorOptions}
                           assigningOrderNo={manualAnchorAssign.assigningOrderNo}
                           onAssign={manualAnchorAssign.onAssign}
+                          onClearManualOverride={manualAnchorAssign.onClearManualOverride}
                         />
                       </td>
                     ) : null}

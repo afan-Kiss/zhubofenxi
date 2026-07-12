@@ -59,7 +59,8 @@ function resolveAnchorId(anchorName: string): string {
   return found?.id ?? `extra-${anchorName}`
 }
 
-function matchScheduleRow(
+/** 导出供静态验收：按直播号+时段匹配排班行（不改优先级链） */
+export function matchScheduleRow(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
   payMs: number,
   rows: Array<{

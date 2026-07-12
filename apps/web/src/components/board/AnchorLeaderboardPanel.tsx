@@ -89,6 +89,10 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         <ListViewToggle mode={viewMode} onChange={setViewMode} />
       </div>
 
+      <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
+        品退按讲品场次归属，可能与支付归属不同。
+      </p>
+
       {showCompareTrend && canCompareTrend ? (
         <div className="mb-4">
           <p className="mb-2 text-[11px] leading-relaxed text-slate-500">

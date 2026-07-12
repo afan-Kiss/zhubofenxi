@@ -69,6 +69,28 @@ export function useManualOrderAnchorAssign(params: {
     [onAssigned],
   )
 
+  const handleClearManualOverride = useCallback(
+    async (orderNo: string) => {
+      const key = orderNo.trim()
+      if (!key) return
+      setAssignError(null)
+      setAssigningOrderNo(key)
+      try {
+        await apiRequest('/api/board/order-anchor-manual-clear', {
+          method: 'POST',
+          body: JSON.stringify({ orderKey: key }),
+        })
+        invalidateBoardLiveQueryCache('order-anchor-manual-clear')
+        onAssigned?.()
+      } catch (e) {
+        setAssignError(e instanceof Error ? e.message : '清除手动指定失败')
+      } finally {
+        setAssigningOrderNo(null)
+      }
+    },
+    [onAssigned],
+  )
+
   const clearAssignError = useCallback(() => setAssignError(null), [])
 
   return {
@@ -76,6 +98,7 @@ export function useManualOrderAnchorAssign(params: {
     assigningOrderNo,
     assignError,
     handleManualAssign,
+    handleClearManualOverride,
     clearAssignError,
   }
 }

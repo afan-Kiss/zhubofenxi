@@ -99,6 +99,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     assigningOrderNo,
     assignError,
     handleManualAssign,
+    handleClearManualOverride,
     clearAssignError,
   } = useManualOrderAnchorAssign({
     enabled: open,
@@ -347,6 +348,9 @@ export const BoardMetricDrawer: React.FC<Props> = ({
               assigningOrderNo,
               onAssign: (orderNo, targetAnchorName) => {
                 void handleManualAssign(orderNo, targetAnchorName)
+              },
+              onClearManualOverride: (orderNo) => {
+                void handleClearManualOverride(orderNo)
               },
             }}
           />

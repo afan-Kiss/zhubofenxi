@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { attributionSourceShortLabel } from '../../lib/board-order-row'
 
 interface AnchorOption {
   id: string
@@ -9,9 +10,11 @@ interface Props {
   orderNo: string
   /** 系统当前归属主播（默认选中，未改时不提交） */
   defaultAnchorName?: string
+  attributionSource?: string | null
   anchorOptions: AnchorOption[]
   assigningOrderNo?: string | null
   onAssign: (orderNo: string, anchorName: string) => void
+  onClearManualOverride?: (orderNo: string) => void
   compact?: boolean
 }
 
@@ -23,9 +26,11 @@ function normalizeAnchorName(name: string | undefined | null): string {
 export const OrderAnchorAssignControl: React.FC<Props> = ({
   orderNo,
   defaultAnchorName,
+  attributionSource,
   anchorOptions,
   assigningOrderNo,
   onAssign,
+  onClearManualOverride,
   compact = false,
 }) => {
   const currentAnchor = normalizeAnchorName(defaultAnchorName)
@@ -51,6 +56,9 @@ export const OrderAnchorAssignControl: React.FC<Props> = ({
 
   const busy = assigningOrderNo === orderNo
   const changed = selected !== currentAnchor
+  const statusLabel = attributionSourceShortLabel(attributionSource)
+  const showClear =
+    attributionSource === 'manual_override' && typeof onClearManualOverride === 'function'
 
   const handleAssign = () => {
     if (!selected || busy || !changed) return
@@ -78,8 +86,18 @@ export const OrderAnchorAssignControl: React.FC<Props> = ({
         onClick={handleAssign}
         className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-medium text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {busy ? '保存中…' : changed ? '保存' : '已归属'}
+        {busy ? '保存中…' : changed ? '保存' : statusLabel}
       </button>
+      {showClear ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onClearManualOverride?.(orderNo)}
+          className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          清除手动指定
+        </button>
+      ) : null}
     </div>
   )
 }

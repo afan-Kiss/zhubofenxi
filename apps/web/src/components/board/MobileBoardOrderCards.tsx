@@ -4,6 +4,7 @@ import {
   boardRowDisplayOrderNo,
   displayAfterSaleReason,
   displayCell,
+  formatAttributionBasis,
   type BoardDrillOrderRow,
 } from '../../lib/board-order-row'
 import { BuyerDisplay } from './BuyerDisplay'
@@ -20,6 +21,7 @@ interface Props {
     anchorOptions: Array<{ id: string; name: string }>
     assigningOrderNo?: string | null
     onAssign: (orderNo: string, anchorName: string) => void
+    onClearManualOverride?: (orderNo: string) => void
   }
 }
 
@@ -176,14 +178,41 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
               <FieldRow label="品退标记">
                 <QualityReturnBadge isQuality={Boolean(r.isQualityReturn)} />
               </FieldRow>
+              {(r.paymentAnchorName != null ||
+                r.qualityAttributionAnchorName != null ||
+                r.attributionSource != null ||
+                r.attributionExplain != null) && (
+                <>
+                  <FieldRow label="支付归属主播">
+                    {displayCell(r.paymentAnchorName || r.anchorName)}
+                  </FieldRow>
+                  <FieldRow label="品退归属主播">
+                    {displayCell(r.qualityAttributionAnchorName)}
+                  </FieldRow>
+                  <FieldRow label="归属依据">
+                    <span
+                      className="line-clamp-2 text-right"
+                      title={formatAttributionBasis(
+                        r.attributionSource,
+                        r.attributionExplain,
+                        120,
+                      )}
+                    >
+                      {formatAttributionBasis(r.attributionSource, r.attributionExplain)}
+                    </span>
+                  </FieldRow>
+                </>
+              )}
               {manualAnchorAssign ? (
                 <FieldRow label="指定主播">
                   <OrderAnchorAssignControl
                     orderNo={orderNo}
                     defaultAnchorName={r.anchorName}
+                    attributionSource={r.attributionSource}
                     anchorOptions={manualAnchorAssign.anchorOptions}
                     assigningOrderNo={manualAnchorAssign.assigningOrderNo}
                     onAssign={manualAnchorAssign.onAssign}
+                    onClearManualOverride={manualAnchorAssign.onClearManualOverride}
                     compact
                   />
                 </FieldRow>

@@ -84,10 +84,15 @@ export function attributionSourceShortLabel(source: string | null | undefined): 
       return '手动指定'
     case 'live_session':
       return '真实场次归属'
+    case 'confirmed_schedule':
+      return '已确认排班归属'
     case 'manual_schedule':
     case 'default_schedule':
     case 'template_virtual':
       return '排班归属'
+    case 'conflict':
+      return '归属冲突'
+    case 'unassigned':
     case 'unmatched':
       return '未归属'
     default:

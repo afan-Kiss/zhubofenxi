@@ -17,6 +17,7 @@ import { getLatestWorkbenchCacheUpdatedAt } from './xhs-after-sales-workbench.se
 import { logInfo, logWarn, presetLabel } from '../utils/server-log'
 import { printStartupSummary } from './startup-summary.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
+import { CANONICAL_ATTRIBUTION_VERSION } from './canonical-order-attribution.service'
 
 export const BUSINESS_CACHE_PRESETS: BusinessRangePreset[] = [
   'today',
@@ -51,6 +52,8 @@ export interface BusinessBoardCacheEntry {
   sourceDataMaxTime: string | null
   /** 原始订单/直播/结算表 updatedAt 最大值，检测 rawJson/售后字段更新 */
   sourceRawMaxUpdatedAt: string | null
+  /** 归属算法版本：版本 bump 后强制重建缓存 */
+  attributionAlgorithmVersion: string
   buildDurationMs: number
   stale?: boolean
   buildError?: string | null
@@ -258,6 +261,7 @@ export async function buildAndSetBusinessBoardCache(params: {
       sourceSyncJobId: await resolveLatestBusinessSyncJobId(),
       sourceDataMaxTime,
       sourceRawMaxUpdatedAt,
+      attributionAlgorithmVersion: CANONICAL_ATTRIBUTION_VERSION,
       buildDurationMs: Date.now() - started,
       stale: false,
       buildError: null,
@@ -323,6 +327,12 @@ export async function getOrBuildBusinessBoardCache(params: {
 
   const hit = cache.get(key)
   if (hit && !params.forceRebuild) {
+    if (hit.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION) {
+      logInfo(
+        '经营缓存',
+        `${presetLabel(params.preset)} 归属算法版本变更（${hit.attributionAlgorithmVersion ?? '—'} → ${CANONICAL_ATTRIBUTION_VERSION}），重建经营缓存`,
+      )
+    } else {
     const latestSourceMax = await resolveSourceDataMaxTime()
     const latestRawMax = await resolveSourceRawMaxUpdatedAt()
     const latestSyncJobId = await resolveLatestBusinessSyncJobId()
@@ -354,6 +364,7 @@ export async function getOrBuildBusinessBoardCache(params: {
         '经营缓存',
         `${presetLabel(params.preset)} 售后工作台已更新，重建经营缓存`,
       )
+    }
     }
   }
   const pending = pendingBuilds.get(key)

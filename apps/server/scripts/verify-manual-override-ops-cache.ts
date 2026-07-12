@@ -98,7 +98,7 @@ async function verifyManualOverrideAttribution(
     return orderNo === override.orderKey || orderNo?.replace(/^P/, '') === override.orderKey.replace(/^P/, '')
   })
   const withRaw = attachRawByMatchToViews(coreViews.length > 0 ? coreViews : [viewRaw], rawByMatch)
-  const qrAgg = aggregateQualityRefundByAnchor({ views: withRaw, liveSessions })
+  const qrAgg = await aggregateQualityRefundByAnchor({ views: withRaw, liveSessions })
   const qrHit = qrAgg.attributions.find(
     (a) =>
       a.orderNo === override.orderKey ||

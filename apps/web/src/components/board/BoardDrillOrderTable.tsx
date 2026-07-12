@@ -258,12 +258,12 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                         r.attributionExplain != null) && (
                         <div className="mt-0.5 space-y-0.5 text-[10px] leading-snug text-slate-500">
                           <div>
-                            支付归属主播：
+                            订单归属主播：
                             {displayCell(r.paymentAnchorName || r.anchorName)}
                           </div>
                           <div>
                             品退归属主播：
-                            {displayCell(r.qualityAttributionAnchorName)}
+                            {displayCell(r.qualityAttributionAnchorName || r.anchorName)}
                           </div>
                           <div
                             className="max-w-[160px] truncate"
@@ -273,7 +273,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                               120,
                             )}
                           >
-                            归属依据：
+                            归属来源：
                             {formatAttributionBasis(
                               r.attributionSource,
                               r.attributionExplain,

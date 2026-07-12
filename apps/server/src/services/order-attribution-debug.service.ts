@@ -65,6 +65,8 @@ function mapAttributionSource(source: ScheduleAttributionSource): string {
     legacy_rule: 'legacy_rule',
     manual_override: 'manual_override',
     unmatched: 'unmatched',
+    confirmed_schedule: 'confirmed_schedule',
+    conflict: 'conflict',
   }
   return map[source] ?? source
 }

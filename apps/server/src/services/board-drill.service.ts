@@ -490,7 +490,7 @@ export async function buildAnchorQualityRefundDrill(params: {
   const liveBundle = await buildRawAnalyzeBundle(range)
   const liveSessions = liveBundle?.liveSessions ?? []
 
-  const agg = aggregateQualityRefundByAnchor({ views: coreViews, liveSessions })
+  const agg = await aggregateQualityRefundByAnchor({ views: coreViews, liveSessions })
   const matched = agg.attributions.filter((attr) =>
     qualityAttributionMatchesAnchor(attr, anchorQuery),
   )
@@ -558,8 +558,8 @@ export async function buildAnchorQualityRefundDrill(params: {
             }
           : null
 
-  const allRows = matched
-    .map((attr) => {
+  const allRows = await Promise.all(
+    matched.map(async (attr) => {
       const raw = scoped.rawByMatch.get(attr.view.matchOrderId || attr.view.orderId)
       const buyerNickname = String(
         (raw as Record<string, unknown> | undefined)?._buyerNickname ??
@@ -584,7 +584,7 @@ export async function buildAnchorQualityRefundDrill(params: {
         officialCase,
         verifySource: 'after_sale_workbench',
       })
-      const attrWithAfterSale = resolveQualityRefundAnchorByOrderTime({
+      const attrWithAfterSale = await resolveQualityRefundAnchorByOrderTime({
         view: attr.view,
         liveSessions,
         afterSaleRecords: mergedAfterSaleRecords,
@@ -595,6 +595,10 @@ export async function buildAnchorQualityRefundDrill(params: {
         buyerNickname,
         orderTime: attr.orderTimeText,
         qualityAttributionAnchorName: anchorNameResolved,
+        orderAttributionSource: attrWithAfterSale?.attributionType ?? attr.attributionType,
+        attributionExplain: attrWithAfterSale?.attributionExplain ?? attr.attributionExplain,
+        liveAccountName: attr.view.liveAccountName ?? '',
+        packageId: attr.view.packageId || '',
         matchedLiveSessionStart: attr.matchedLiveStartTime,
         matchedLiveSessionEnd: attr.matchedLiveEndTime,
         qualityMainSource: qualityInfo.qualityMainSource,
@@ -613,8 +617,9 @@ export async function buildAnchorQualityRefundDrill(params: {
         qualityUnassignedReason: attr.unassignedReason,
         paymentAnchorName: attr.paymentAnchorName,
       }
-    })
-    .sort((a, b) => b.orderTime.localeCompare(a.orderTime))
+    }),
+  )
+  allRows.sort((a, b) => b.orderTime.localeCompare(a.orderTime))
 
   const page = Math.max(1, Math.floor(params.page ?? 1))
   const pageSize = Math.min(100, Math.max(1, Math.floor(params.pageSize ?? 20)))
@@ -670,7 +675,7 @@ export async function buildAnchorQualityRefundDrill(params: {
     anchorName:
       stats && 'anchorName' in stats ? stats.anchorName : anchorQuery.anchorName ?? '',
     attributionNote:
-      '品退按讲品场次归属，可能与支付归属不同。',
+      '品退接口用于确认哪些订单发生品退。主播归属以订单下单时所在直播场次为准，支付、签收、退款和品退统一归到该订单主播。',
     stats: stats as BoardAnchorMetrics | Record<string, unknown> | null,
     pagination: {
       page,

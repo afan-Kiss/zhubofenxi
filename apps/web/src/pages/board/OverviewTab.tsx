@@ -211,7 +211,7 @@ function qualityReturnCardNote(
   if (qualityFeedback?.statusMessage?.trim()) {
     return qualityFeedback.statusMessage.trim()
   }
-  return null
+  return '品退接口用于确认哪些订单发生品退。主播归属以订单下单时所在直播场次为准，支付、签收、退款和品退统一归到该订单主播。'
 }
 
 export const OverviewTab: React.FC = () => {

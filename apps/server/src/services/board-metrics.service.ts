@@ -17,7 +17,6 @@ import {
 } from './business-metrics.service'
 import { logAnchorMetricsDebug } from './board-metrics-debug.service'
 import {
-  aggregateQualityRefundByAnchor,
   getLiveSessionsForQualityRefundAttribution,
   setLiveSessionsForQualityRefundAttribution,
 } from './quality-refund-anchor-attribution.service'
@@ -82,62 +81,19 @@ export function aggregateViewsMetrics(
 
 function applyQualityRefundAnchorCountsToLeaderboard(
   rows: BoardAnchorMetrics[],
-  views: AnalyzedOrderView[],
-  liveSessions: LiveSession[],
-  config?: AnchorConfig,
+  _views: AnalyzedOrderView[],
+  _liveSessions: LiveSession[],
+  _config?: AnchorConfig,
 ): void {
-  const resolvedConfig = config ?? getAnchorConfigSync()
-  const agg = aggregateQualityRefundByAnchor({
-    views,
-    liveSessions,
-    config: resolvedConfig,
-  })
-
-  /** 品退归属按展示名汇总，避免 anchorId 与支付归属 id 不一致时对不上行 */
-  const countByAnchorName = new Map<string, { count: number; anchorId: string }>()
-  for (const bucket of agg.byAnchorKey.values()) {
-    const prev = countByAnchorName.get(bucket.anchorName)
-    countByAnchorName.set(bucket.anchorName, {
-      count: (prev?.count ?? 0) + bucket.count,
-      anchorId: prev?.anchorId || bucket.anchorId,
-    })
-  }
-
-  const rowByName = new Map<string, BoardAnchorMetrics>()
-  for (const row of rows) {
-    rowByName.set(row.anchorName, row)
-  }
-
-  for (const [anchorName, { count, anchorId }] of countByAnchorName) {
-    if (count <= 0 || rowByName.has(anchorName)) continue
-    const cfg =
-      resolvedConfig.anchors.find((a) => a.name === anchorName) ??
-      resolvedConfig.anchors.find((a) => a.id === anchorId)
-    const resolvedId =
-      anchorName === '未归属' ? '' : cfg?.id ?? anchorId ?? `extra-${anchorName}`
-    const empty = aggregateViewsMetrics([], {
-      scope: 'anchor-leaderboard',
-      anchorId: resolvedId,
-      anchorName,
-    })
-    const row: BoardAnchorMetrics = {
-      anchorName,
-      anchorId: resolvedId,
-      color: cfg?.color ?? '#94a3b8',
-      ...empty,
-      gmv: empty.totalGmv,
-      actualSignedCount: empty.signedOrderCount,
-      afterSaleRecordCount: empty.afterSaleRecordCount,
-    }
-    rows.push(row)
-    rowByName.set(anchorName, row)
-  }
-
-  for (const row of rows) {
-    row.qualityReturnCount = countByAnchorName.get(row.anchorName)?.count ?? 0
-    row.qualityReturnRate =
-      row.orderCount > 0 ? row.qualityReturnCount / row.orderCount : null
-  }
+  /**
+   * 品退不再单独重算主播：qualityReturnCount 已由 remapped views
+   * （canonical 归属）经 aggregateViewsMetrics / calculateBusinessMetrics 计入。
+   * 保留空函数以免旧调用点报错。
+   */
+  void rows
+  void _views
+  void _liveSessions
+  void _config
 }
 
 export function aggregateAnchorLeaderboard(

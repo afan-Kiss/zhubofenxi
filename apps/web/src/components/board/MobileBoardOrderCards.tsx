@@ -183,13 +183,13 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
                 r.attributionSource != null ||
                 r.attributionExplain != null) && (
                 <>
-                  <FieldRow label="支付归属主播">
+                  <FieldRow label="订单归属主播">
                     {displayCell(r.paymentAnchorName || r.anchorName)}
                   </FieldRow>
                   <FieldRow label="品退归属主播">
-                    {displayCell(r.qualityAttributionAnchorName)}
+                    {displayCell(r.qualityAttributionAnchorName || r.anchorName)}
                   </FieldRow>
-                  <FieldRow label="归属依据">
+                  <FieldRow label="归属来源">
                     <span
                       className="line-clamp-2 text-right"
                       title={formatAttributionBasis(

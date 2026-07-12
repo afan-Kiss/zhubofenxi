@@ -118,6 +118,8 @@ const SOURCE_LABEL: Record<ScheduleAttributionSource, string> = {
   legacy_rule: '旧规则',
   manual_override: '手动指定',
   unmatched: '未归属',
+  confirmed_schedule: '已确认排班',
+  conflict: '归属冲突',
 }
 
 export async function buildAnchorAuditExportPayload(params: {

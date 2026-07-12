@@ -140,7 +140,7 @@ export async function resolveAnchorByLiveSessionPayTime(
       ) {
         continue
       }
-      if (payMs < bounds.startMs || payMs > bounds.endMs) continue
+      if (payMs < bounds.startMs || payMs >= bounds.endMs) continue
 
       const spanMs = bounds.endMs - bounds.startMs
       if (

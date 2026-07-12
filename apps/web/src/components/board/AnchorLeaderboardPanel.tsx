@@ -90,7 +90,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
       </div>
 
       <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
-        品退按讲品场次归属，可能与支付归属不同。
+        品退接口用于确认哪些订单发生品退。主播归属以订单下单时所在直播场次为准，支付、签收、退款和品退统一归到该订单主播。
       </p>
 
       {showCompareTrend && canCompareTrend ? (
@@ -131,7 +131,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
               <th className="py-2 pr-2 text-right">退款率</th>
               <th
                 className="py-2 pr-4 text-right"
-                title="品退按订单下单时间匹配主播开播场次归属"
+                title="品退与支付统一按订单下单时直播场次归属主播"
               >
                 品退单数
               </th>

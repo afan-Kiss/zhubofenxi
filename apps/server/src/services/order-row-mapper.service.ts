@@ -326,6 +326,10 @@ export function mapViewToBoardOrderRow(
   }
   const attributionSource = remapped.scheduleAttributionSource?.trim() || null
   const paymentAnchorName = v.anchorName?.trim() || '未归属'
+  const qualityAttributionAnchorName =
+    remapped.qualityAttributionAnchorName != null
+      ? String(remapped.qualityAttributionAnchorName).trim() || null
+      : paymentAnchorName // 唯一归属后：品退主播默认等于订单主播
 
   return {
     orderNo: displayOrderNo,
@@ -413,10 +417,7 @@ export function mapViewToBoardOrderRow(
     attributionExplain: remapped.scheduleAttributionExplain?.trim() || null,
     scheduleConfirmed:
       remapped.scheduleConfirmed != null ? Boolean(remapped.scheduleConfirmed) : undefined,
-    qualityAttributionAnchorName:
-      remapped.qualityAttributionAnchorName != null
-        ? String(remapped.qualityAttributionAnchorName).trim() || null
-        : null,
+    qualityAttributionAnchorName,
     paymentAnchorName,
     manualOverride: attributionSource === 'manual_override',
   }

@@ -99,12 +99,17 @@ interface AnchorAttributionHealthReport {
   generatedAt: string
   startDate: string
   endDate: string
+  attributionAlgorithmVersion?: string
   scheduleConflictCount: number
-  templateDeviationCount: number
+  templateDeviationCount?: number
+  templateDeviationWithoutConfirmCount?: number
   unassignedOrderCount: number
   crossShopAbnormalAttributionCount: number
   leaderboardCardDetailMismatchCount: number
   qualityCardDetailMismatchCount: number
+  qualityCrossAnchorDupCount?: number
+  qualityAnchorMismatchCount?: number
+  shopTotalMismatchCount?: number
   issues: Array<{ date?: string; orderNo?: string; reason: string }>
   passed: boolean
   message: string
@@ -196,21 +201,42 @@ export const DataHealthPage: React.FC = () => {
           <h3 className="text-sm font-semibold">{attributionHealth.message}</h3>
           <p className="mt-1 text-xs opacity-80">
             检查范围 {attributionHealth.startDate} ~ {attributionHealth.endDate}
+            {attributionHealth.attributionAlgorithmVersion
+              ? ` · ${attributionHealth.attributionAlgorithmVersion}`
+              : ''}
           </p>
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <p>排班冲突数：{formatCount(attributionHealth.scheduleConflictCount)}</p>
-            <p>模板偏离数：{formatCount(attributionHealth.templateDeviationCount)}</p>
+            <p>
+              模板偏离且无确认：
+              {formatCount(
+                attributionHealth.templateDeviationWithoutConfirmCount ??
+                  attributionHealth.templateDeviationCount ??
+                  0,
+              )}
+            </p>
             <p>未归属订单数：{formatCount(attributionHealth.unassignedOrderCount)}</p>
             <p>跨直播号异常归属数：{formatCount(attributionHealth.crossShopAbnormalAttributionCount)}</p>
             <p>
-              主播卡片与明细数量不一致数：
-              {formatCount(attributionHealth.leaderboardCardDetailMismatchCount)}
+              品退跨主播重复数：
+              {formatCount(attributionHealth.qualityCrossAnchorDupCount ?? 0)}
             </p>
             <p>
-              品退卡片与品退明细不一致数：
+              品退主播与订单主播不一致：
+              {formatCount(attributionHealth.qualityAnchorMismatchCount ?? 0)}
+            </p>
+            <p>
+              品退卡片与明细不一致数：
               {formatCount(attributionHealth.qualityCardDetailMismatchCount)}
             </p>
+            <p>
+              主播合计与全店差异：
+              {formatCount(attributionHealth.shopTotalMismatchCount ?? 0)}
+            </p>
           </div>
+          <p className="mt-3 text-xs opacity-90">
+            品退接口用于确认哪些订单发生品退。主播归属以订单下单时所在直播场次为准，支付、签收、退款和品退统一归到该订单主播。合法且已确认的临时调班不计入异常。
+          </p>
           {!attributionHealth.passed && attributionHealth.issues.length > 0 ? (
             <ul className="mt-3 max-h-48 list-disc space-y-1 overflow-auto pl-5 text-xs">
               {attributionHealth.issues.slice(0, 30).map((issue, idx) => (

@@ -1,35 +1,29 @@
 /**
- * 品退订单主播归属：按订单下单时间匹配直播场次，不使用 paymentTime / 全局订单归属。
+ * 品退主播归属：继承订单唯一归属（canonical），禁止独立时间规则重算。
+ * 保留函数名供旧调用点兼容。
  */
 import type { AnalyzedOrderView, AnchorConfig, LiveSession } from '../types/analysis'
-import { isShopOrInvalidAnchorLabel, mapLiveNickToKnownAnchor } from '../utils/anchor-label'
-import { parseDateTime } from '../utils/time'
 import { anchorGroupKey } from './anchor-attribution.util'
-import { findAnchorByName, matchTimeRule } from './anchor-rules.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
 import { dedupeOrderCountByOrderNo } from './order-master-match.service'
-import { findBestLiveSession } from './live-session.service'
 import { viewCountsAsQualityRefund } from './quality-refund-resolution.service'
 import { resolveQualityRefundInfo } from './quality-refund-resolution.service'
-import { resolveManualAnchorOverrideForView } from './order-anchor-manual-override.service'
 import { getAnchorConfigSync } from './anchor.service'
-
-const RAW_ORDER_PLACE_TIME_KEYS = [
-  'create_time',
-  'createTime',
-  'order_time',
-  'orderTime',
-  'order_create_time',
-  'orderCreateTime',
-  'placed_at',
-  'placedAt',
-] as const
+import {
+  resolveCanonicalOrderAttribution,
+  parseViewOrderCreateTimeMs,
+  canonicalAttributionLabel,
+  type CanonicalAttributionType,
+} from './canonical-order-attribution.service'
 
 export type QualityRefundAnchorAttributionType =
   | 'live_session_anchor'
   | 'live_session_time_rule'
   | 'unassigned'
   | 'manual_override'
+  | 'confirmed_schedule'
+  | 'conflict'
+  | 'live_session'
 
 export interface QualityRefundAnchorAttribution {
   orderNo: string
@@ -47,7 +41,9 @@ export interface QualityRefundAnchorAttribution {
   qualitySourceLabel: string
   qualityReasonText: string
   unassignedReason: string | null
+  /** 与订单唯一归属相同 */
   paymentAnchorName: string
+  attributionExplain?: string
 }
 
 export interface AnchorQualityRefundBucket {
@@ -75,210 +71,112 @@ export function getLiveSessionsForQualityRefundAttribution(): LiveSession[] {
   return liveSessionsCache
 }
 
-function pickStringFromRaw(raw: Record<string, unknown>, keys: readonly string[]): string {
-  for (const k of keys) {
-    const v = raw[k]
-    if (v == null || v === '') continue
-    const s = String(v).trim()
-    if (s) return s
-  }
-  return ''
-}
-
-/** 解析订单下单时间（禁止用 paymentTime） */
+/** @deprecated 使用 parseViewOrderCreateTimeMs */
 export function resolveOrderPlaceTime(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
 ): { date: Date | null; text: string } {
-  const textFromView = view.orderTimeText?.trim() ?? ''
-  if (textFromView && textFromView !== '—') {
-    const parsed = parseDateTime(textFromView)
-    if (parsed.ok) return { date: parsed.date, text: textFromView }
-  }
-  const raw = view.raw
-  if (raw && typeof raw === 'object') {
-    const fromRaw = pickStringFromRaw(raw as Record<string, unknown>, RAW_ORDER_PLACE_TIME_KEYS)
-    if (fromRaw) {
-      const parsed = parseDateTime(fromRaw)
-      if (parsed.ok) return { date: parsed.date, text: fromRaw }
-    }
-  }
-  return { date: null, text: textFromView || '—' }
+  const { ms, text } = parseViewOrderCreateTimeMs(view)
+  return { date: ms != null ? new Date(ms) : null, text }
 }
 
-function resolveAnchorFromLiveSession(
-  session: LiveSession,
-  config: AnchorConfig,
-): { anchorId: string; anchorName: string; attributionType: QualityRefundAnchorAttributionType } {
-  if (session.anchorId) {
-    const anchor = config.anchors.find((a) => a.enabled && a.id === session.anchorId)
-    if (anchor) {
-      return {
-        anchorId: anchor.id,
-        anchorName: anchor.name,
-        attributionType: 'live_session_anchor',
-      }
-    }
+function mapCanonicalType(t: CanonicalAttributionType): QualityRefundAnchorAttributionType {
+  switch (t) {
+    case 'manual_override':
+      return 'manual_override'
+    case 'live_session':
+      return 'live_session'
+    case 'confirmed_schedule':
+      return 'confirmed_schedule'
+    case 'conflict':
+      return 'conflict'
+    default:
+      return 'unassigned'
   }
-  if (session.anchorName) {
-    const trimmed = session.anchorName.trim()
-    if (!isShopOrInvalidAnchorLabel(trimmed)) {
-      const mapped = mapLiveNickToKnownAnchor(trimmed)
-      const found = findAnchorByName(config, mapped ?? trimmed)
-      if (found?.enabled) {
-        return {
-          anchorId: found.id,
-          anchorName: found.name,
-          attributionType: 'live_session_anchor',
-        }
-      }
-    }
-  }
-  const inferred = matchTimeRule(session.startTime, config)
-  if (inferred) {
-    return {
-      anchorId: inferred.anchor.id,
-      anchorName: inferred.anchor.name,
-      attributionType: 'live_session_time_rule',
-    }
-  }
-  return { anchorId: '', anchorName: '未归属', attributionType: 'unassigned' }
 }
 
-export function resolveQualityRefundAnchorByOrderTime(params: {
+/**
+ * 品退归属 = 订单唯一归属。品退接口只确认是否品退，不重算主播。
+ */
+export async function resolveQualityRefundAnchorByOrderTime(params: {
   view: AnalyzedOrderView & { raw?: Record<string, unknown> }
-  liveSessions: LiveSession[]
+  liveSessions?: LiveSession[]
   config?: AnchorConfig
   afterSaleRecords?: Record<string, unknown>[]
-}): QualityRefundAnchorAttribution | null {
-  const { view, liveSessions } = params
+}): Promise<QualityRefundAnchorAttribution | null> {
+  const { view } = params
   if (!viewCountsAsQualityRefund(view)) return null
 
-  const config = params.config ?? getAnchorConfigSync()
-  const orderNo = resolveMetricOrderNo(view)
-  const { date: orderTime, text: orderTimeText } = resolveOrderPlaceTime(view)
   const qualityInfo = resolveQualityRefundInfo({
     view,
     afterSaleRecords: params.afterSaleRecords,
     verifySource: 'after_sale_workbench',
   })
-  const paymentAnchorName = view.anchorName?.trim() || '未归属'
-
-  const manual = resolveManualAnchorOverrideForView(view)
-  if (manual) {
-    const anchorKey =
-      manual.anchorName === '未归属'
-        ? '未归属'
-        : anchorGroupKey({
-            anchorId: manual.anchorId,
-            anchorName: manual.anchorName,
-          } as AnalyzedOrderView)
-    return {
-      orderNo,
-      view,
-      orderTime,
-      orderTimeText,
-      anchorId: manual.anchorId,
-      anchorName: manual.anchorName,
-      anchorKey,
-      matchedLiveSessionId: null,
-      matchedLiveStartTime: null,
-      matchedLiveEndTime: null,
-      attributionType: 'manual_override',
-      qualitySource: qualityInfo.qualityMainSource,
-      qualitySourceLabel: qualityInfo.verifyDisplayLabel,
-      qualityReasonText: qualityInfo.qualityReasonText,
-      unassignedReason: null,
-      paymentAnchorName,
-    }
-  }
-
-  let anchorId = ''
-  let anchorName = '未归属'
-  let attributionType: QualityRefundAnchorAttributionType = 'unassigned'
-  let matchedLiveSessionId: string | null = null
-  let matchedLiveStartTime: string | null = null
-  let matchedLiveEndTime: string | null = null
-  let unassignedReason: string | null = null
-
-  if (!orderTime) {
-    unassignedReason = '无法解析订单下单时间'
-  } else {
-    const session = findBestLiveSession(orderTime, liveSessions)
-    if (!session) {
-      unassignedReason = '下单时间未命中直播场次'
-    } else {
-      matchedLiveSessionId = session.id
-      matchedLiveStartTime = session.startTimeText
-      matchedLiveEndTime = session.endTimeText
-      const fromSession = resolveAnchorFromLiveSession(session, config)
-      anchorId = fromSession.anchorId
-      anchorName = fromSession.anchorName
-      attributionType = fromSession.attributionType
-      if (anchorName === '未归属') {
-        unassignedReason = '命中直播场次但场次未配置主播'
-      }
-    }
-  }
-
+  const canonical = await resolveCanonicalOrderAttribution(view)
+  const create = parseViewOrderCreateTimeMs(view)
+  const orderNo = resolveMetricOrderNo(view)
   const anchorKey =
-    anchorName === '未归属'
+    canonical.canonicalAnchorName === '未归属'
       ? '未归属'
-      : anchorGroupKey({ anchorId, anchorName } as AnalyzedOrderView)
+      : anchorGroupKey({
+          anchorId: canonical.canonicalAnchorId,
+          anchorName: canonical.canonicalAnchorName,
+        } as AnalyzedOrderView)
 
   return {
     orderNo,
     view,
-    orderTime,
-    orderTimeText,
-    anchorId,
-    anchorName,
+    orderTime: create.ms != null ? new Date(create.ms) : null,
+    orderTimeText: create.text,
+    anchorId: canonical.canonicalAnchorId,
+    anchorName: canonical.canonicalAnchorName,
     anchorKey,
-    matchedLiveSessionId,
-    matchedLiveStartTime,
-    matchedLiveEndTime,
-    attributionType,
+    matchedLiveSessionId: canonical.matchedLiveSessionId,
+    matchedLiveStartTime: null,
+    matchedLiveEndTime: null,
+    attributionType: mapCanonicalType(canonical.attributionType),
     qualitySource: qualityInfo.qualityMainSource,
     qualitySourceLabel: qualityInfo.verifyDisplayLabel,
     qualityReasonText: qualityInfo.qualityReasonText,
-    unassignedReason,
-    paymentAnchorName,
+    unassignedReason: canonical.conflictReason ?? (canonical.attributionType === 'unassigned' ? canonical.attributionExplain : null),
+    paymentAnchorName: canonical.canonicalAnchorName,
+    attributionExplain: `${canonicalAttributionLabel(canonical.attributionType)}｜${canonical.attributionExplain}`,
   }
 }
 
-export function aggregateQualityRefundByAnchor(params: {
+export async function aggregateQualityRefundByAnchor(params: {
   views: AnalyzedOrderView[]
   liveSessions?: LiveSession[]
   config?: AnchorConfig
-}): AggregateQualityRefundAnchorResult {
-  const liveSessions = params.liveSessions ?? liveSessionsCache
-  const config = params.config ?? getAnchorConfigSync()
+}): Promise<AggregateQualityRefundAnchorResult> {
+  void params.liveSessions
+  void params.config
   const byAnchorKey = new Map<string, AnchorQualityRefundBucket>()
   const attributions: QualityRefundAnchorAttribution[] = []
   const unassigned: QualityRefundAnchorAttribution[] = []
   const seenOrderNos = new Set<string>()
 
   for (const view of params.views) {
-    const attr = resolveQualityRefundAnchorByOrderTime({ view, liveSessions, config })
+    const attr = await resolveQualityRefundAnchorByOrderTime({ view })
     if (!attr) continue
     if (!attr.orderNo || seenOrderNos.has(attr.orderNo)) continue
     seenOrderNos.add(attr.orderNo)
     attributions.push(attr)
-
-    const bucket =
-      byAnchorKey.get(attr.anchorKey) ??
-      ({
+    if (attr.anchorName === '未归属' || attr.attributionType === 'conflict') {
+      unassigned.push(attr)
+      continue
+    }
+    const existing = byAnchorKey.get(attr.anchorKey)
+    if (existing) {
+      existing.orderNos.push(attr.orderNo)
+      existing.count = existing.orderNos.length
+    } else {
+      byAnchorKey.set(attr.anchorKey, {
         anchorId: attr.anchorId,
         anchorName: attr.anchorName,
         anchorKey: attr.anchorKey,
-        orderNos: [],
-        count: 0,
-      } satisfies AnchorQualityRefundBucket)
-    bucket.orderNos.push(attr.orderNo)
-    bucket.count += 1
-    byAnchorKey.set(attr.anchorKey, bucket)
-
-    if (attr.anchorName === '未归属' || attr.unassignedReason) {
-      unassigned.push(attr)
+        orderNos: [attr.orderNo],
+        count: 1,
+      })
     }
   }
 
@@ -290,57 +188,75 @@ export function aggregateQualityRefundByAnchor(params: {
   }
 }
 
-export interface AnchorQualityRefundAttributionDiagnostic {
-  perAnchor: Array<{ anchorName: string; anchorId: string; qualityReturnCount: number }>
-  unassignedOrders: Array<{
-    orderNo: string
-    orderTimeText: string
-    paymentAnchorName: string
-    reason: string
-    qualitySourceLabel: string
-  }>
-  anchorCardsTotal: number
-  boardQualityReturnCount: number
-  matched: boolean
-  note: string
+export function listQualityRefundAttributionsForAnchor(params: {
+  attributions: QualityRefundAnchorAttribution[]
+  anchorId?: string
+  anchorName?: string
+}): Array<{
+  orderNo: string
+  orderTimeText: string
+  anchorName: string
+  attributionType: QualityRefundAnchorAttributionType
+  qualitySourceLabel: string
+  qualityReasonText: string
+}> {
+  const id = params.anchorId?.trim()
+  const name = params.anchorName?.trim()
+  return params.attributions
+    .filter((a) => {
+      if (name === '未归属') return a.anchorName === '未归属'
+      if (name) return a.anchorName === name
+      if (id) return a.anchorId === id
+      return true
+    })
+    .map((a) => ({
+      orderNo: a.orderNo,
+      orderTimeText: a.orderTimeText,
+      anchorName: a.anchorName,
+      attributionType: a.attributionType,
+      qualitySourceLabel: a.qualitySourceLabel,
+      qualityReasonText: a.qualityReasonText,
+    }))
 }
 
-export function buildAnchorQualityRefundAttributionDiagnostic(params: {
-  views: AnalyzedOrderView[]
-  liveSessions: LiveSession[]
-  boardQualityReturnCount: number
-}): AnchorQualityRefundAttributionDiagnostic {
-  const agg = aggregateQualityRefundByAnchor({
-    views: params.views,
-    liveSessions: params.liveSessions,
-  })
-  const perAnchor = [...agg.byAnchorKey.values()]
+export function qualityRefundPerAnchorSummary(
+  agg: AggregateQualityRefundAnchorResult,
+): Array<{ anchorName: string; anchorId: string; qualityReturnCount: number }> {
+  return [...agg.byAnchorKey.values()]
     .map((b) => ({
       anchorName: b.anchorName,
       anchorId: b.anchorId,
       qualityReturnCount: b.count,
     }))
     .sort((a, b) => b.qualityReturnCount - a.qualityReturnCount)
+}
 
-  const anchorCardsTotal = agg.totalQualityRefundCount
-  const matched = anchorCardsTotal === params.boardQualityReturnCount
-  let note = `主播卡片品退合计 ${anchorCardsTotal} 单，经营总览品退 ${params.boardQualityReturnCount} 单。`
-  if (!matched) {
-    note += ' 合计不一致，请核对低价刷单排除或统计范围。'
-  }
+void getAnchorConfigSync
 
+/** 同步诊断页：品退按订单唯一归属聚合（兼容旧函数名） */
+export async function buildAnchorQualityRefundAttributionDiagnostic(params: {
+  views: AnalyzedOrderView[]
+  liveSessions?: LiveSession[]
+  boardQualityReturnCount?: number
+}): Promise<{
+  boardQualityReturnCount: number
+  attributedQualityReturnCount: number
+  unassignedCount: number
+  byAnchor: Array<{ anchorName: string; qualityReturnCount: number }>
+  note: string
+}> {
+  const agg = await aggregateQualityRefundByAnchor({
+    views: params.views,
+    liveSessions: params.liveSessions,
+  })
   return {
-    perAnchor,
-    unassignedOrders: agg.unassigned.map((a) => ({
-      orderNo: a.orderNo,
-      orderTimeText: a.orderTimeText,
-      paymentAnchorName: a.paymentAnchorName,
-      reason: a.unassignedReason ?? '未归属',
-      qualitySourceLabel: a.qualitySourceLabel,
+    boardQualityReturnCount: params.boardQualityReturnCount ?? agg.totalQualityRefundCount,
+    attributedQualityReturnCount: agg.totalQualityRefundCount - agg.unassigned.length,
+    unassignedCount: agg.unassigned.length,
+    byAnchor: qualityRefundPerAnchorSummary(agg).map((r) => ({
+      anchorName: r.anchorName,
+      qualityReturnCount: r.qualityReturnCount,
     })),
-    anchorCardsTotal,
-    boardQualityReturnCount: params.boardQualityReturnCount,
-    matched,
-    note,
+    note: '品退主播继承订单唯一归属（canonical），不再按品退时间重算',
   }
 }

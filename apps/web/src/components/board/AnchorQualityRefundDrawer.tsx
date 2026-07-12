@@ -10,6 +10,10 @@ interface QualityRefundDrillRow {
   buyerNickname: string
   orderTime: string
   qualityAttributionAnchorName?: string
+  orderAttributionSource?: string
+  attributionExplain?: string
+  liveAccountName?: string
+  packageId?: string
   matchedLiveSessionStart?: string | null
   matchedLiveSessionEnd?: string | null
   qualityMainSource?: string
@@ -147,7 +151,8 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
               </p>
             ) : null}
             <p className="mt-2 leading-relaxed">
-              {data.attributionNote ?? '品退按讲品场次归属，可能与支付归属不同。'}
+              {data.attributionNote ??
+                '品退接口用于确认哪些订单发生品退。主播归属以订单下单时所在直播场次为准，支付、签收、退款和品退统一归到该订单主播。'}
             </p>
           </div>
           {data.rows.length === 0 ? (
@@ -174,24 +179,24 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
                       ) : null}
                     </div>
                     <p className="mt-1">买家：{row.buyerNickname || '—'}</p>
-                    <p className="mt-1">下单时间：{row.orderTime || '—'}</p>
-                    <p className="mt-1">
-                      直播场次：
-                      {row.matchedLiveSessionStart && row.matchedLiveSessionEnd
-                        ? `${row.matchedLiveSessionStart} ~ ${row.matchedLiveSessionEnd}`
-                        : '—'}
-                    </p>
+                    <p className="mt-1">订单下单时间：{row.orderTime || '—'}</p>
+                    <p className="mt-1">来源直播号：{row.liveAccountName || '—'}</p>
+                    <p className="mt-1">包裹号：{row.packageId || '—'}</p>
                     <p className="mt-1 font-medium text-slate-800">
                       品退归属主播：{row.qualityAttributionAnchorName || anchorName}
                     </p>
                     <p className="mt-1">
-                      支付归属主播：{row.paymentAnchorName?.trim() || '—'}
+                      订单归属来源：{row.orderAttributionSource || '—'}
+                      {row.attributionExplain ? `｜${row.attributionExplain}` : ''}
+                    </p>
+                    <p className="mt-1">
+                      订单归属主播：{row.paymentAnchorName?.trim() || '—'}
                     </p>
                     <p className="mt-2 font-medium text-rose-800">
                       品退来源：官方品退
                     </p>
                     <p className="mt-1">官方品退原因：{officialReason}</p>
-                    <p className="mt-1">匹配说明：{row.qualitySourceLabel || '—'}</p>
+                    <p className="mt-1">官方品退匹配方式：{row.qualitySourceLabel || '—'}</p>
                     {afterSaleNo ? (
                       <>
                         <p className="mt-1">

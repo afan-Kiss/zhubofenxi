@@ -143,7 +143,7 @@ export async function buildBoardSyncDiagnose(params: {
   const dateRange = resolveDateRange(preset as DateRangePreset, range.startDate, range.endDate)
   const liveBundle = await buildRawAnalyzeBundle(dateRange)
   const boardQualityReturnCount = Number(cacheEntry?.summary?.qualityReturnCount ?? 0)
-  const anchorQualityRefundAttributionDiagnostic = buildAnchorQualityRefundAttributionDiagnostic({
+  const anchorQualityRefundAttributionDiagnostic = await buildAnchorQualityRefundAttributionDiagnostic({
     views: coreViews,
     liveSessions: liveBundle?.liveSessions ?? [],
     boardQualityReturnCount,

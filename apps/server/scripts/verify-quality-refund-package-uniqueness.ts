@@ -5,6 +5,11 @@
  */
 import type { AnalyzedOrderView, LiveSession } from '../src/types/analysis'
 import { aggregateQualityRefundByAnchor } from '../src/services/quality-refund-anchor-attribution.service'
+import {
+  setCanonicalAttributionTestFixtures,
+  clearCanonicalAttributionCache,
+} from '../src/services/canonical-order-attribution.service'
+import { setManualAnchorOverrideCacheForTests } from '../src/services/order-anchor-manual-override.service'
 
 function assert(cond: boolean, msg: string): void {
   if (!cond) {
@@ -106,8 +111,21 @@ function baseView(
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   console.log('\n=== 品退 P 单 / packageId 跨主播唯一性 ===')
+  clearCanonicalAttributionCache()
+  setManualAnchorOverrideCacheForTests(new Map())
+  setCanonicalAttributionTestFixtures({
+    liveSessions: [
+      {
+        liveId: 'live-a',
+        anchorName: '小红',
+        liveAccountName: '和田雅玉',
+        startMs: Date.parse('2026-07-07T12:00:00+08:00'),
+        endMs: Date.parse('2026-07-07T15:00:00+08:00'),
+      },
+    ],
+  })
 
   const liveSessions: LiveSession[] = [
     makeLiveSession({
@@ -146,7 +164,7 @@ function main(): void {
     }),
   ]
 
-  const agg = aggregateQualityRefundByAnchor({ views, liveSessions })
+  const agg = await aggregateQualityRefundByAnchor({ views, liveSessions })
 
   const orderNoToAnchors = new Map<string, Set<string>>()
   const packageToAnchors = new Map<string, Set<string>>()
@@ -192,6 +210,12 @@ function main(): void {
   }
 
   console.log('\n全部通过')
+  setCanonicalAttributionTestFixtures(null)
+  setManualAnchorOverrideCacheForTests(null)
+  clearCanonicalAttributionCache()
 }
 
-main()
+main().catch((err) => {
+  console.error(err)
+  process.exit(1)
+})

@@ -19,6 +19,13 @@ export function clearManualAnchorOverrideCache(): void {
   cachedOverrideMap = null
 }
 
+/** 仅供单元测试注入内存覆盖，勿用于生产路径 */
+export function setManualAnchorOverrideCacheForTests(
+  map: Map<string, ManualAnchorOverrideEntry> | null,
+): void {
+  cachedOverrideMap = map
+}
+
 export async function ensureManualAnchorOverrideCache(): Promise<
   Map<string, ManualAnchorOverrideEntry>
 > {

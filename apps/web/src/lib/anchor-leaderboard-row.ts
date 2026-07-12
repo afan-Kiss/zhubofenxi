@@ -227,8 +227,7 @@ export function aggregateSummaryFromAnchorRows(
   let refundOnlyCount = 0
   let unknownRefundTypeCount = 0
   let qualityReturnCount = 0
-  let signedCount = 0
-  let actualSignedCount = 0
+  let signedOrderCount = 0
   let incompleteType = false
   for (const row of rows) {
     totalGmv += anchorRowGmv(row)
@@ -242,11 +241,10 @@ export function aggregateSummaryFromAnchorRows(
     unknownRefundTypeCount += anchorRowUnknownRefundTypeCount(row)
     if (anchorRowReturnRefundTypeIncomplete(row)) incompleteType = true
     qualityReturnCount += anchorRowNum(row, 'qualityReturnCount')
-    signedCount += anchorRowNum(row, 'signedCount')
-    actualSignedCount += anchorRowSignedCount(row)
+    signedOrderCount += anchorRowSignedCount(row)
   }
   const refundRate = paidOrderCount > 0 ? returnCount / paidOrderCount : null
-  const signRate = paidOrderCount > 0 ? actualSignedCount / paidOrderCount : null
+  const signRate = paidOrderCount > 0 ? signedOrderCount / paidOrderCount : null
   if (
     returnCount > 0 &&
     returnRefundCount === 0 &&
@@ -274,9 +272,9 @@ export function aggregateSummaryFromAnchorRows(
     unknownRefundTypeCount,
     returnRefundTypeIncomplete: incompleteType,
     qualityReturnCount,
-    signedCount,
-    signedOrderCount: signedCount,
-    actualSignedCount,
+    signedCount: signedOrderCount,
+    signedOrderCount,
+    actualSignedCount: signedOrderCount,
     signRate,
   }
 }

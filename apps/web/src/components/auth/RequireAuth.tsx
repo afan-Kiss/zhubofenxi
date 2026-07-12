@@ -7,6 +7,7 @@ function routePermission(pathname: string): PagePermissionKey | null {
   if (pathname === '/' || pathname.startsWith('/?')) return 'overview'
   if (pathname.startsWith('/anchors')) return 'anchors'
   if (pathname.startsWith('/buyers')) return 'buyers'
+  if (pathname.startsWith('/lucky-gifts')) return 'lucky_gifts'
   if (pathname.startsWith('/operations-report')) return 'operations_report'
   if (pathname.startsWith('/good-reviews')) return 'good_reviews'
   if (pathname.startsWith('/boss-dashboard')) return 'boss_dashboard'

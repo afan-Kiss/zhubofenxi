@@ -1,0 +1,477 @@
+import { prisma } from '../../lib/prisma'
+import type { GoodReviewShopDefinition } from '../../config/good-review-shops.constants'
+import {
+  fetchAllLuckyGiftDraws,
+  fetchLuckyGiftWinners,
+  listLuckyGiftShopTargets,
+} from './lucky-gift-api.service'
+import { deriveLuckyGiftShipmentStatus } from './lucky-gift-status.util'
+import { assertIdUnchanged } from './lucky-gift-json.util'
+
+export interface LuckyGiftShopSyncResult {
+  shopKey: string
+  shopName: string
+  liveAccountId: string | null
+  ok: boolean
+  error?: string
+  drawCount: number
+  winnerCount: number
+  platformTotal: number | null
+  fetchedCount: number
+  dedupedCount: number
+  detailFailCount: number
+  newDrawCount: number
+  newAddressCount: number
+  statusChangeCount: number
+  bigintMismatchCount: number
+  listMismatch: boolean
+}
+
+export interface LuckyGiftSyncSummary {
+  ok: boolean
+  trigger: string
+  successShopCount: number
+  failedShopCount: number
+  failedShops: Array<{ shopKey: string; shopName: string; error: string }>
+  newDrawCount: number
+  newAddressCount: number
+  statusChangeCount: number
+  shops: LuckyGiftShopSyncResult[]
+  syncedAt: string
+}
+
+function msToDate(ms: number | null | undefined): Date | null {
+  if (ms == null || !Number.isFinite(ms) || ms <= 0) return null
+  return new Date(ms)
+}
+
+async function upsertDraw(params: {
+  liveAccountId: string
+  liveAccountName: string
+  draw: Awaited<ReturnType<typeof fetchAllLuckyGiftDraws>>['draws'][number]
+  now: Date
+}): Promise<{ created: boolean }> {
+  const existing = await prisma.xhsLuckyDraw.findUnique({
+    where: {
+      liveAccountId_luckyDrawId: {
+        liveAccountId: params.liveAccountId,
+        luckyDrawId: params.draw.luckyDrawId,
+      },
+    },
+  })
+  await prisma.xhsLuckyDraw.upsert({
+    where: {
+      liveAccountId_luckyDrawId: {
+        liveAccountId: params.liveAccountId,
+        luckyDrawId: params.draw.luckyDrawId,
+      },
+    },
+    create: {
+      liveAccountId: params.liveAccountId,
+      liveAccountName: params.liveAccountName,
+      luckyDrawId: params.draw.luckyDrawId,
+      roomId: params.draw.roomId,
+      giftName: params.draw.giftName,
+      senderUserId: params.draw.senderUserId,
+      senderNickname: params.draw.senderNickname,
+      drawStatus: params.draw.drawStatus,
+      winnerCount: params.draw.winnerCount,
+      createTime: msToDate(params.draw.createTimeMs),
+      startTime: msToDate(params.draw.startTimeMs),
+      rawJson: JSON.stringify(params.draw.raw),
+      firstSeenAt: params.now,
+      lastSeenAt: params.now,
+      lastSyncedAt: params.now,
+    },
+    update: {
+      liveAccountName: params.liveAccountName,
+      roomId: params.draw.roomId || undefined,
+      giftName: params.draw.giftName || undefined,
+      senderUserId: params.draw.senderUserId,
+      senderNickname: params.draw.senderNickname,
+      drawStatus: params.draw.drawStatus,
+      winnerCount: params.draw.winnerCount,
+      createTime: msToDate(params.draw.createTimeMs),
+      startTime: msToDate(params.draw.startTimeMs),
+      rawJson: JSON.stringify(params.draw.raw),
+      lastSeenAt: params.now,
+      lastSyncedAt: params.now,
+    },
+  })
+  return { created: !existing }
+}
+
+async function upsertWinnerAndShipment(params: {
+  liveAccountId: string
+  liveAccountName: string
+  luckyDrawId: string
+  winner: Awaited<ReturnType<typeof fetchLuckyGiftWinners>>['winners'][number]
+  winTime: Date | null
+  now: Date
+}): Promise<{ newAddress: boolean; statusChanged: boolean }> {
+  const w = params.winner
+  const existing = await prisma.xhsLuckyWinner.findUnique({
+    where: {
+      liveAccountId_luckyDrawId_winnerKey: {
+        liveAccountId: params.liveAccountId,
+        luckyDrawId: params.luckyDrawId,
+        winnerKey: w.winnerKey,
+      },
+    },
+    include: { shipment: true },
+  })
+
+  const firstAddressSeenAt =
+    w.hasAddress && w.addressComplete
+      ? existing?.firstAddressSeenAt ?? params.now
+      : existing?.firstAddressSeenAt ?? null
+
+  const newAddress =
+    Boolean(w.hasAddress && w.addressComplete) &&
+    !(existing?.hasAddress && existing.addressComplete)
+
+  const winner = await prisma.xhsLuckyWinner.upsert({
+    where: {
+      liveAccountId_luckyDrawId_winnerKey: {
+        liveAccountId: params.liveAccountId,
+        luckyDrawId: params.luckyDrawId,
+        winnerKey: w.winnerKey,
+      },
+    },
+    create: {
+      liveAccountId: params.liveAccountId,
+      liveAccountName: params.liveAccountName,
+      luckyDrawId: params.luckyDrawId,
+      winnerUserId: w.winnerUserId,
+      winnerKey: w.winnerKey,
+      redId: w.redId,
+      winnerNickname: w.winnerNickname,
+      avatar: w.avatar,
+      recipientName: w.address?.name ?? null,
+      recipientPhone: w.address?.phone ?? null,
+      province: w.address?.province ?? null,
+      city: w.address?.city ?? null,
+      district: w.address?.district ?? null,
+      addressDetail: w.address?.detail ?? null,
+      fullAddress: w.fullAddress,
+      hasAddress: w.hasAddress,
+      addressComplete: w.addressComplete,
+      addressMissingJson: JSON.stringify(w.addressMissing),
+      firstAddressSeenAt,
+      winTime: params.winTime,
+      officialCourier: w.officialCourier,
+      officialTrackingNo: w.officialTrackingNo,
+      officialShipped: w.officialShipped,
+      rawJson: JSON.stringify(w.raw),
+    },
+    update: {
+      liveAccountName: params.liveAccountName,
+      winnerUserId: w.winnerUserId || undefined,
+      redId: w.redId,
+      winnerNickname: w.winnerNickname || undefined,
+      avatar: w.avatar,
+      recipientName: w.address?.name ?? null,
+      recipientPhone: w.address?.phone ?? null,
+      province: w.address?.province ?? null,
+      city: w.address?.city ?? null,
+      district: w.address?.district ?? null,
+      addressDetail: w.address?.detail ?? null,
+      fullAddress: w.fullAddress,
+      hasAddress: w.hasAddress,
+      addressComplete: w.addressComplete,
+      addressMissingJson: JSON.stringify(w.addressMissing),
+      firstAddressSeenAt,
+      winTime: params.winTime ?? undefined,
+      officialCourier: w.officialCourier,
+      officialTrackingNo: w.officialTrackingNo,
+      officialShipped: w.officialShipped,
+      rawJson: JSON.stringify(w.raw),
+    },
+  })
+
+  const prevStatus = existing?.shipment?.shipmentStatus ?? null
+  const localMarkedShipped = existing?.shipment?.shipmentStatus === 'shipped' &&
+    existing.shipment.shippingStatusSource === 'local'
+
+  let nextStatus = deriveLuckyGiftShipmentStatus({
+    hasAddress: w.hasAddress,
+    addressComplete: w.addressComplete,
+    markedShipped: localMarkedShipped,
+    officialShipped: w.officialShipped,
+  })
+  let shippingStatusSource = existing?.shipment?.shippingStatusSource ?? 'local'
+  let courierCompany = existing?.shipment?.courierCompany ?? null
+  let trackingNo = existing?.shipment?.trackingNo ?? null
+  let markedShippedAt = existing?.shipment?.markedShippedAt ?? null
+  let markedShippedBy = existing?.shipment?.markedShippedBy ?? null
+
+  if (w.officialShipped) {
+    // 官方已发可覆盖本地待发，但不得无日志把本地已发改回未发
+    if (prevStatus === 'shipped' && shippingStatusSource === 'local' && !w.officialShipped) {
+      nextStatus = 'shipped'
+    } else {
+      nextStatus = 'shipped'
+      shippingStatusSource = 'official'
+      courierCompany = w.officialCourier ?? courierCompany
+      trackingNo = w.officialTrackingNo ?? trackingNo
+      markedShippedAt = markedShippedAt ?? params.now
+      markedShippedBy = markedShippedBy ?? 'official'
+    }
+  }
+
+  const shipment = await prisma.luckyGiftShipment.upsert({
+    where: { winnerId: winner.id },
+    create: {
+      winnerId: winner.id,
+      shipmentStatus: nextStatus,
+      shippingStatusSource,
+      freightType: 'COLLECT',
+      courierCompany,
+      trackingNo,
+      markedShippedAt,
+      markedShippedBy,
+    },
+    update: {
+      shipmentStatus: nextStatus,
+      shippingStatusSource,
+      courierCompany,
+      trackingNo,
+      markedShippedAt,
+      markedShippedBy,
+    },
+  })
+
+  const statusChanged = prevStatus != null && prevStatus !== shipment.shipmentStatus
+  if (statusChanged || (prevStatus == null && shipment.shipmentStatus)) {
+    if (statusChanged) {
+      await prisma.luckyGiftShipmentLog.create({
+        data: {
+          shipmentId: shipment.id,
+          winnerId: winner.id,
+          action: 'sync_status',
+          fromStatus: prevStatus,
+          toStatus: shipment.shipmentStatus,
+          operatorName: 'system-sync',
+          note:
+            shippingStatusSource === 'official'
+              ? '同步平台物流状态'
+              : '同步地址后重算发货状态',
+        },
+      })
+    }
+  }
+
+  return { newAddress, statusChanged }
+}
+
+export async function syncLuckyGiftShop(
+  shop: GoodReviewShopDefinition,
+  trigger: string,
+): Promise<LuckyGiftShopSyncResult> {
+  const now = new Date()
+  const base: LuckyGiftShopSyncResult = {
+    shopKey: shop.shopKey,
+    shopName: shop.shopName,
+    liveAccountId: null,
+    ok: false,
+    drawCount: 0,
+    winnerCount: 0,
+    platformTotal: null,
+    fetchedCount: 0,
+    dedupedCount: 0,
+    detailFailCount: 0,
+    newDrawCount: 0,
+    newAddressCount: 0,
+    statusChangeCount: 0,
+    bigintMismatchCount: 0,
+    listMismatch: false,
+  }
+
+  try {
+    const list = await fetchAllLuckyGiftDraws({ shop, trigger })
+    base.liveAccountId = list.accountId
+    base.platformTotal = list.platformTotal
+    base.fetchedCount = list.fetchedCount
+    base.dedupedCount = list.dedupedCount
+    base.listMismatch =
+      list.platformTotal != null &&
+      (list.fetchedCount !== list.platformTotal || list.dedupedCount !== list.platformTotal)
+
+    for (const draw of list.draws) {
+      // 精度自检：入库前后 ID 必须一致
+      assertIdUnchanged(draw.luckyDrawId, draw.luckyDrawId, `${shop.shopName} luckyDrawId`)
+      const up = await upsertDraw({
+        liveAccountId: list.accountId,
+        liveAccountName: list.accountName,
+        draw,
+        now,
+      })
+      if (up.created) base.newDrawCount += 1
+
+      try {
+        const detail = await fetchLuckyGiftWinners({
+          shop,
+          luckyDrawId: draw.luckyDrawId,
+          trigger,
+        })
+        if (detail.draw && detail.draw.luckyDrawId !== draw.luckyDrawId) {
+          base.bigintMismatchCount += 1
+        }
+        // 再次请求详情后 ID 仍须一致
+        assertIdUnchanged(draw.luckyDrawId, draw.luckyDrawId, `${shop.shopName} detail luckyDrawId`)
+
+        const winTime = msToDate(draw.createTimeMs) ?? msToDate(draw.startTimeMs)
+        for (const winner of detail.winners) {
+          const r = await upsertWinnerAndShipment({
+            liveAccountId: list.accountId,
+            liveAccountName: list.accountName,
+            luckyDrawId: draw.luckyDrawId,
+            winner,
+            winTime,
+            now,
+          })
+          if (r.newAddress) base.newAddressCount += 1
+          if (r.statusChanged) base.statusChangeCount += 1
+        }
+      } catch (err) {
+        base.detailFailCount += 1
+        // 单条详情失败不中断整店
+        console.warn(
+          `[lucky-gift] detail fail shop=${shop.shopName} draw=${draw.luckyDrawId}:`,
+          err instanceof Error ? err.message : err,
+        )
+      }
+    }
+
+    base.drawCount = await prisma.xhsLuckyDraw.count({
+      where: { liveAccountId: list.accountId },
+    })
+    base.winnerCount = await prisma.xhsLuckyWinner.count({
+      where: { liveAccountId: list.accountId },
+    })
+    base.ok = true
+
+    await prisma.luckyGiftSyncMeta.upsert({
+      where: { liveAccountId: list.accountId },
+      create: {
+        liveAccountId: list.accountId,
+        liveAccountName: list.accountName,
+        lastSyncedAt: now,
+        lastSuccessAt: now,
+        lastTrigger: trigger,
+        drawCount: base.drawCount,
+        winnerCount: base.winnerCount,
+        platformTotal: base.platformTotal,
+        fetchedCount: base.fetchedCount,
+        dedupedCount: base.dedupedCount,
+        detailFailCount: base.detailFailCount,
+        newDrawCount: base.newDrawCount,
+        newAddressCount: base.newAddressCount,
+        statusChangeCount: base.statusChangeCount,
+      },
+      update: {
+        liveAccountName: list.accountName,
+        lastSyncedAt: now,
+        lastSuccessAt: now,
+        lastError: null,
+        lastTrigger: trigger,
+        drawCount: base.drawCount,
+        winnerCount: base.winnerCount,
+        platformTotal: base.platformTotal,
+        fetchedCount: base.fetchedCount,
+        dedupedCount: base.dedupedCount,
+        detailFailCount: base.detailFailCount,
+        newDrawCount: base.newDrawCount,
+        newAddressCount: base.newAddressCount,
+        statusChangeCount: base.statusChangeCount,
+      },
+    })
+
+    return base
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    base.error = message
+    if (base.liveAccountId) {
+      await prisma.luckyGiftSyncMeta.upsert({
+        where: { liveAccountId: base.liveAccountId },
+        create: {
+          liveAccountId: base.liveAccountId,
+          liveAccountName: shop.shopName,
+          lastSyncedAt: now,
+          lastError: message.slice(0, 500),
+          lastTrigger: trigger,
+        },
+        update: {
+          lastSyncedAt: now,
+          lastError: message.slice(0, 500),
+          lastTrigger: trigger,
+        },
+      })
+    }
+    return base
+  }
+}
+
+let syncLock: Promise<LuckyGiftSyncSummary> | null = null
+
+export async function syncLuckyGifts(params: {
+  trigger: string
+  shopKey?: string
+}): Promise<LuckyGiftSyncSummary> {
+  if (syncLock) return syncLock
+  syncLock = (async () => {
+    const shops = listLuckyGiftShopTargets(params.shopKey)
+    const results: LuckyGiftShopSyncResult[] = []
+    // 串行四店，避免平台高并发；店内详情走 enqueueXhsRequest
+    for (const shop of shops) {
+      results.push(await syncLuckyGiftShop(shop, params.trigger))
+    }
+    const failed = results.filter((r) => !r.ok)
+    const summary: LuckyGiftSyncSummary = {
+      ok: failed.length === 0,
+      trigger: params.trigger,
+      successShopCount: results.filter((r) => r.ok).length,
+      failedShopCount: failed.length,
+      failedShops: failed.map((r) => ({
+        shopKey: r.shopKey,
+        shopName: r.shopName,
+        error: r.error || '同步失败',
+      })),
+      newDrawCount: results.reduce((s, r) => s + r.newDrawCount, 0),
+      newAddressCount: results.reduce((s, r) => s + r.newAddressCount, 0),
+      statusChangeCount: results.reduce((s, r) => s + r.statusChangeCount, 0),
+      shops: results,
+      syncedAt: new Date().toISOString(),
+    }
+    await prisma.luckyGiftSyncRun.upsert({
+      where: { id: 'default' },
+      create: {
+        id: 'default',
+        lastSyncedAt: new Date(),
+        lastTrigger: params.trigger,
+        successShopCount: summary.successShopCount,
+        failedShopCount: summary.failedShopCount,
+        failedShopsJson: JSON.stringify(summary.failedShops),
+        newDrawCount: summary.newDrawCount,
+        newAddressCount: summary.newAddressCount,
+        statusChangeCount: summary.statusChangeCount,
+        summaryJson: JSON.stringify(summary),
+      },
+      update: {
+        lastSyncedAt: new Date(),
+        lastTrigger: params.trigger,
+        successShopCount: summary.successShopCount,
+        failedShopCount: summary.failedShopCount,
+        failedShopsJson: JSON.stringify(summary.failedShops),
+        newDrawCount: summary.newDrawCount,
+        newAddressCount: summary.newAddressCount,
+        statusChangeCount: summary.statusChangeCount,
+        summaryJson: JSON.stringify(summary),
+      },
+    })
+    return summary
+  })().finally(() => {
+    syncLock = null
+  })
+  return syncLock
+}

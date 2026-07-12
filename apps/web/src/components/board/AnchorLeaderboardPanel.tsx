@@ -8,9 +8,9 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnCount,
   anchorRowReturnRefundCountDisplay,
-  anchorRowRefundOnlyCount,
   anchorRowLivePeriodLines,
   anchorRowActualSignedAmount,
+  anchorRowSignedCount,
   isHighRefundRate,
   type AnchorLeaderboardRow,
 } from '../../lib/anchor-leaderboard-row'
@@ -27,6 +27,7 @@ interface Props {
   onRowClick?: (row: AnchorLeaderboardRow) => void
   onQualityCountClick?: (row: AnchorLeaderboardRow) => void
   onReturnRefundCountClick?: (row: AnchorLeaderboardRow) => void
+  onReturnCountClick?: (row: AnchorLeaderboardRow) => void
   showLongPeriodRates?: boolean
   showLivePeriod?: boolean
   /** 单日：无成交主播也展示走势与对比 */
@@ -42,6 +43,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   onRowClick,
   onQualityCountClick,
   onReturnRefundCountClick,
+  onReturnCountClick,
   showLongPeriodRates: showRates = true,
   showLivePeriod = false,
   includeZeroPerformance = false,
@@ -65,7 +67,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   const cardClass = showCardsOnDesktop ? 'block' : 'block md:hidden'
   const tableWrapClass = showTableOnDesktop ? 'hidden md:block' : 'hidden'
 
-  const colCount = showExtraColumns ? (showRates ? 11 : 10) : 6
+  const colCount = showExtraColumns ? 11 : 7
 
   return (
     <div>
@@ -118,6 +120,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         onSelect={onRowClick}
         onQualityCountClick={onQualityCountClick}
         onReturnRefundCountClick={onReturnRefundCountClick}
+        onReturnCountClick={onReturnCountClick}
         showLongPeriodRates={showRates}
         showIndividualTrend
         showLivePeriod={showLivePeriod}
@@ -130,23 +133,23 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
           <thead className="bg-rose-50/40 text-slate-500">
             <tr>
               <th className="py-2.5 pl-4 pr-2">主播</th>
-              <th className="py-2 pr-2 text-right">支付金额</th>
+              <th className="py-2 pr-2 text-right">GMV</th>
               <th className="py-2 pr-2 text-right">已签收金额</th>
               <th className="py-2 pr-2 text-right">支付单数</th>
-              <th className="py-2 pr-2 text-right">退款率</th>
-              <th
-                className="py-2 pr-4 text-right"
-                title="品退与支付统一按订单下单时直播场次归属主播"
-              >
-                品退单数
-              </th>
+              <th className="py-2 pr-2 text-right">已签收单数</th>
+              <th className="py-2 pr-2 text-right">退款单数</th>
+              <th className="py-2 pr-4 text-right">退款率</th>
               {showExtraColumns ? (
                 <>
                   <th className="py-2 pr-2 text-right">退款金额</th>
-                  <th className="py-2 pr-2 text-right">退款订单数</th>
                   <th className="py-2 pr-2 text-right">退货退款单数</th>
-                  <th className="py-2 pr-2 text-right">仅退款单数</th>
-                  {showRates ? <th className="pr-4 py-2 text-right">签收率</th> : null}
+                  <th
+                    className="py-2 pr-2 text-right"
+                    title="品退与支付统一按订单下单时直播场次归属主播"
+                  >
+                    品退单数
+                  </th>
+                  <th className="pr-4 py-2 text-right">签收率</th>
                 </>
               ) : null}
             </tr>
@@ -161,6 +164,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
             ) : (
               rows.map((a, idx) => {
                 const refundRate = anchorRowRate(a, 'returnRate')
+                const signRate = anchorRowRate(a, 'signRate')
                 const qualityCount = anchorRowNum(a, 'qualityReturnCount')
                 const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
                 const livePeriodMultiline = liveLines.primary?.includes('\n') ?? false
@@ -198,35 +202,35 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     <td className="py-2 text-right tabular-nums">
                       {formatCount(anchorRowPaidCount(a))}
                     </td>
+                    <td className="py-2 text-right tabular-nums">
+                      {formatCount(anchorRowSignedCount(a))}
+                    </td>
                     <td
-                      className={`py-2 pr-2 text-right tabular-nums ${
+                      className={`py-2 text-right tabular-nums ${
+                        onReturnCountClick ? 'cursor-pointer hover:underline' : ''
+                      }`}
+                      onClick={
+                        onReturnCountClick
+                          ? (e) => {
+                              e.stopPropagation()
+                              onReturnCountClick(a)
+                            }
+                          : undefined
+                      }
+                    >
+                      {formatCount(anchorRowReturnCount(a))}
+                    </td>
+                    <td
+                      className={`py-2 pr-4 text-right tabular-nums ${
                         isHighRefundRate(refundRate) ? 'font-semibold text-rose-600' : ''
                       }`}
                     >
                       {formatRate(refundRate)}
                     </td>
-                    <td
-                      className={`py-2 pr-4 text-right tabular-nums ${
-                        qualityCount > 0 ? 'font-medium text-rose-700' : ''
-                      } ${onQualityCountClick ? 'cursor-pointer hover:underline' : ''}`}
-                      onClick={
-                        onQualityCountClick
-                          ? (e) => {
-                              e.stopPropagation()
-                              onQualityCountClick(a)
-                            }
-                          : undefined
-                      }
-                    >
-                      {formatCount(qualityCount)}
-                    </td>
                     {showExtraColumns ? (
                       <>
                         <td className="py-2 text-right font-medium text-rose-600 tabular-nums">
                           {formatMoney(anchorRowRefundAmount(a))}
-                        </td>
-                        <td className="py-2 text-right tabular-nums">
-                          {formatCount(anchorRowReturnCount(a))}
                         </td>
                         <td
                           className={`py-2 text-right tabular-nums ${
@@ -250,14 +254,24 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                             ? '—'
                             : formatCount(anchorRowReturnRefundCountDisplay(a)!)}
                         </td>
-                        <td className="py-2 text-right tabular-nums">
-                          {formatCount(anchorRowRefundOnlyCount(a))}
+                        <td
+                          className={`py-2 text-right tabular-nums ${
+                            qualityCount > 0 ? 'font-medium text-rose-700' : ''
+                          } ${onQualityCountClick ? 'cursor-pointer hover:underline' : ''}`}
+                          onClick={
+                            onQualityCountClick
+                              ? (e) => {
+                                  e.stopPropagation()
+                                  onQualityCountClick(a)
+                                }
+                              : undefined
+                          }
+                        >
+                          {formatCount(qualityCount)}
                         </td>
-                        {showRates ? (
-                          <td className="py-2 pr-4 text-right tabular-nums">
-                            {formatRate(anchorRowRate(a, 'signRate'))}
-                          </td>
-                        ) : null}
+                        <td className="py-2 pr-4 text-right tabular-nums">
+                          {formatRate(signRate)}
+                        </td>
                       </>
                     ) : null}
                   </tr>

@@ -447,7 +447,22 @@ export async function executeDailyStrategySync(
       )
     }
 
-    // 福袋发货同步仅在 lucky-gift 模块部署后启用；本热修不包含该模块
+    // 四店福袋发货：接入 180 分钟经营同步周期（失败不阻断主流程）
+    if (mode === 'business_core' || mode === 'business_with_quality' || mode === 'full_maintenance') {
+      try {
+        await progress.setStep('syncing_lucky_gifts', 68, '正在同步四店福袋发货')
+        const luckyResult = await (
+          await import('./lucky-gift/lucky-gift-sync.service')
+        ).syncLuckyGifts({ trigger: `business-sync:${job.startedBy ?? 'interval'}` })
+        if (!luckyResult.ok) {
+          const failed = luckyResult.failedShops.map((s) => `${s.shopName}:${s.error}`).join('；')
+          warnings.push(`福袋同步部分失败：${failed || '未知原因'}`)
+        }
+      } catch (err) {
+        warnings.push(`福袋同步失败：${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+
     await progress.setStep('normalizing_data', 65, '更新未完结订单追踪池')
     await refreshTrackingPoolFromRaw(jobId)
     await recheckTrackingPool(jobId)

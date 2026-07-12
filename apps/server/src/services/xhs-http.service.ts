@@ -33,11 +33,17 @@ export interface RequestXhsJsonOptions {
   cookie: string
   referer?: string
   needSign?: boolean
+  /** 额外请求头（如 live-assistant 的 account-id）；不得传入 x-s/x-t 硬编码签名 */
+  extraHeaders?: Record<string, string>
   audit?: XhsRequestAuditContext
   parseEnvelope?: boolean
   apiKey?: string
   /** 默认 20 秒，避免 POST 永远 pending */
   timeoutMs?: number
+  /** 若提供，用此函数解析响应文本（福袋超长 ID 需保字串精度） */
+  parseResponseText?: <T>(text: string) => T
+  /** 捕获原始响应文本（用于超长 ID 校验，勿记录地址/手机号） */
+  captureResponseText?: (text: string) => void
   signLogContext?: {
     tag?: 'quality-badcase-sign' | 'xhs-sign'
     accountName?: string
@@ -123,7 +129,15 @@ export async function requestXhsJson<T>(options: RequestXhsJsonOptions): Promise
     Referer: referer,
     'User-Agent': XHS_BROWSER_UA,
     Cookie: options.cookie,
+    ...(options.extraHeaders ?? {}),
   }
+  // 禁止调用方硬编码平台签名
+  delete headers['x-s']
+  delete headers['x-t']
+  delete headers['x-s-common']
+  delete headers['X-S']
+  delete headers['X-T']
+  delete headers['X-S-Common']
 
   let signMeta = {
     hasAuthorization: false,
@@ -184,6 +198,7 @@ export async function requestXhsJson<T>(options: RequestXhsJsonOptions): Promise
 
     const res = await fetchWithTimeout(options.url, init, timeoutMs)
     const text = await res.text()
+    options.captureResponseText?.(text)
 
     if (!res.ok) {
       const authCheck = isXhsAuthExpired({ httpStatus: res.status, bodyText: text })
@@ -221,7 +236,11 @@ export async function requestXhsJson<T>(options: RequestXhsJsonOptions): Promise
     }
 
     try {
-      const json = JSON.parse(text) as T & { code?: number; success?: boolean; msg?: string }
+      const json = (
+        options.parseResponseText
+          ? options.parseResponseText<T>(text)
+          : (JSON.parse(text) as T)
+      ) as T & { code?: number; success?: boolean; msg?: string }
       if (options.parseEnvelope !== false) {
         const envelope = json as { code?: number; success?: boolean; msg?: string }
         if (envelope.code !== undefined && envelope.code !== 0 && envelope.success === false) {

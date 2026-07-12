@@ -75,6 +75,7 @@ export type XhsSyncStep =
   | 'syncing_settled_settlement'
   | 'syncing_settlement_detail'
   | 'syncing_quality_badcase'
+  | 'syncing_lucky_gifts'
   | 'normalizing_data'
   | 'analyzing_business'
   | 'saving_snapshot'
@@ -92,6 +93,7 @@ export const XHS_SYNC_STEP_LABELS: Record<XhsSyncStep, string> = {
   syncing_settled_settlement: '正在同步已结算明细',
   syncing_settlement_detail: '正在选择性同步结算详情',
   syncing_quality_badcase: '正在同步官方品质反馈',
+  syncing_lucky_gifts: '正在同步四店福袋发货',
   normalizing_data: '正在标准化订单数据',
   analyzing_business: '正在生成经营看板',
   saving_snapshot: '正在保存看板快照',

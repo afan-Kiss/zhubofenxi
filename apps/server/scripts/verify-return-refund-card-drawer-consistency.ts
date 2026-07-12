@@ -27,19 +27,23 @@ function main() {
     path.join(root, 'apps/web/src/components/board/AnchorLeaderboardPanel.tsx'),
     'utf8',
   )
-  assert.match(panel, /onReturnRefundCountClick/)
-  assert.match(panel, /退货退款单数/)
-  assert.match(panel, /退款订单数/)
-  console.log('✓ 主播榜支持退货退款下钻与退款订单数列')
-
   const tab = fs.readFileSync(
     path.join(root, 'apps/web/src/pages/board/AnchorPerformanceTab.tsx'),
     'utf8',
   )
-  assert.match(tab, /returnRefundCount/)
-  assert.match(tab, /退款订单数/)
+  assert.match(panel, /onReturnRefundCountClick/)
+  assert.match(panel, /退货退款单数/)
+  assert.match(panel, /退款单数/)
+  assert.match(tab, /label: 'GMV'/)
+  assert.match(tab, /label: '已签收单数'/)
+  assert.match(tab, /label: '退款单数'/)
+  assert.match(tab, /更多指标/)
   assert.match(tab, /部分售后类型尚未同步/)
-  console.log('✓ 主播业绩页含退款订单数与类型不完整提示')
+  console.log('✓ 主播榜支持退货退款下钻与退款单数列')
+
+  assert.match(tab, /returnRefundCount/)
+  assert.match(tab, /退款单数/)
+  console.log('✓ 主播业绩页含退款单数与类型不完整提示')
 
   const buildViews = fs.readFileSync(
     path.join(root, 'apps/server/src/services/business-analysis.service.ts'),

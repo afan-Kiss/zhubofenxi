@@ -9,6 +9,7 @@ import {
   LogOut,
   ThumbsUp,
   Briefcase,
+  Gift,
 } from 'lucide-react'
 import { PageRequestStatusBar } from './board/PageRequestStatusBar'
 import { CookieHealthWatcher } from './board/CookieHealthWatcher'
@@ -53,6 +54,13 @@ const ALL_NAV: Array<{
     icon: Users,
     dataTestId: 'tab-buyers',
     permission: 'buyers',
+  },
+  {
+    to: '/lucky-gifts',
+    label: '福袋发货',
+    icon: Gift,
+    dataTestId: 'tab-lucky-gifts',
+    permission: 'lucky_gifts',
   },
   {
     to: '/data-health',

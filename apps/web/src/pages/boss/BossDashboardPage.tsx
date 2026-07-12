@@ -6,7 +6,7 @@ import { BossMoneyTrendChart } from '../../components/boss/BossMoneyTrendChart'
 import { BossCurrentMonthBillCard } from '../../components/boss/BossCurrentMonthBillCard'
 import { BossShopRankCards } from '../../components/boss/BossShopRankCards'
 import { BossShopDetailPanel } from '../../components/boss/BossShopDetailPanel'
-import { BossBillDetailDrawer } from '../../components/boss/BossBillDetailDrawer'
+import { BossBillDrawer } from '../../components/boss/BossBillDrawer'
 import { BossDataNotes } from '../../components/boss/BossDataNotes'
 import { formatDataFreshnessTime } from '../../lib/data-freshness'
 
@@ -84,7 +84,7 @@ export const BossDashboardPage: React.FC = () => {
         </>
       ) : null}
 
-      <BossBillDetailDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      <BossBillDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
     </div>
   )
 }

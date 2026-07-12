@@ -61,6 +61,30 @@ interface RollingCloseStatus {
   lastFinishedAt: string | null
 }
 
+interface LuckyGiftHealthReport {
+  configuredShopCount: number
+  configuredShops: string[]
+  missingShops: string[]
+  lastSuccessShopCount: number
+  drawCount: number
+  winnerCount: number
+  noAddressCount: number
+  incompleteAddressCount: number
+  pendingCount: number
+  shippedCount: number
+  detailFailCount: number
+  duplicateWinnerCount: number
+  bigintAnomalyCount: number
+  listMismatchCount: number
+  incompleteFieldCount: number
+  overdueNoAddressCount: number
+  localOfficialConflictCount: number
+  misclassifiedNoAddressCount: number
+  blockers: string[]
+  warnings: string[]
+  statusSumOk: boolean
+}
+
 function formatTriggeredBy(source: string | null | undefined): string {
   switch (String(source ?? '').trim()) {
     case 'manual-api':
@@ -130,6 +154,7 @@ export const DataHealthPage: React.FC = () => {
   const [attributionHealth, setAttributionHealth] = useState<AnchorAttributionHealthReport | null>(
     null,
   )
+  const [luckyGiftHealth, setLuckyGiftHealth] = useState<LuckyGiftHealthReport | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
@@ -140,16 +165,18 @@ export const DataHealthPage: React.FC = () => {
     setLoading(true)
     setError(null)
     try {
-      const [closeStatus, risk, attr] = await Promise.all([
+      const [closeStatus, risk, attr, lucky] = await Promise.all([
         apiRequest<RollingCloseStatus>('/api/board/data-health/rolling-close/status'),
         apiRequest<SyncRiskStatus>('/api/board/sync-risk/status'),
         apiRequest<AnchorAttributionHealthReport>('/api/board/data-health/anchor-attribution').catch(
           () => null,
         ),
+        apiRequest<LuckyGiftHealthReport>('/api/board/lucky-gifts/health').catch(() => null),
       ])
       setStatus(closeStatus)
       setSyncRisk(risk)
       setAttributionHealth(attr)
+      setLuckyGiftHealth(lucky)
     } catch (e) {
       setError(mapRollingCloseError(e))
       setStatus(null)
@@ -250,6 +277,48 @@ export const DataHealthPage: React.FC = () => {
                   {issue.orderNo ? `${issue.orderNo} · ` : ''}
                   {issue.reason}
                 </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
+
+      {luckyGiftHealth ? (
+        <section
+          className={`rounded-xl border p-4 text-sm ${
+            luckyGiftHealth.blockers.length === 0
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-amber-200 bg-amber-50 text-amber-950'
+          }`}
+        >
+          <h3 className="text-sm font-semibold">福袋发货数据健康</h3>
+          <p className="mt-1 text-xs opacity-80">
+            已配置 {luckyGiftHealth.configuredShopCount} 店
+            {luckyGiftHealth.missingShops.length > 0
+              ? ` · 未配置：${luckyGiftHealth.missingShops.join('、')}`
+              : ''}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <p>福袋活动数：{formatCount(luckyGiftHealth.drawCount)}</p>
+            <p>中奖人数：{formatCount(luckyGiftHealth.winnerCount)}</p>
+            <p>未填地址：{formatCount(luckyGiftHealth.noAddressCount)}</p>
+            <p>地址不完整：{formatCount(luckyGiftHealth.incompleteAddressCount)}</p>
+            <p>待发货：{formatCount(luckyGiftHealth.pendingCount)}</p>
+            <p>已发货：{formatCount(luckyGiftHealth.shippedCount)}</p>
+            <p>详情读取失败：{formatCount(luckyGiftHealth.detailFailCount)}</p>
+            <p>重复中奖：{formatCount(luckyGiftHealth.duplicateWinnerCount)}</p>
+          </div>
+          {luckyGiftHealth.blockers.length > 0 ? (
+            <ul className="mt-3 list-disc space-y-1 pl-5 text-xs">
+              {luckyGiftHealth.blockers.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : null}
+          {luckyGiftHealth.warnings.length > 0 ? (
+            <ul className="mt-2 list-disc space-y-1 pl-5 text-xs opacity-90">
+              {luckyGiftHealth.warnings.map((item) => (
+                <li key={item}>{item}</li>
               ))}
             </ul>
           ) : null}

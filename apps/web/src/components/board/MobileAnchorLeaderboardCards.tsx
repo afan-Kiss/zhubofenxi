@@ -8,9 +8,9 @@ import {
   anchorRowRefundAmount,
   anchorRowReturnCount,
   anchorRowReturnRefundCountDisplay,
-  anchorRowRefundOnlyCount,
   anchorRowLivePeriodLines,
   anchorRowActualSignedAmount,
+  anchorRowSignedCount,
   isHighRefundRate,
   anchorRowTrend,
   type AnchorLeaderboardRow,
@@ -24,6 +24,7 @@ interface Props {
   onSelect?: (row: AnchorLeaderboardRow) => void
   onQualityCountClick?: (row: AnchorLeaderboardRow) => void
   onReturnRefundCountClick?: (row: AnchorLeaderboardRow) => void
+  onReturnCountClick?: (row: AnchorLeaderboardRow) => void
   showLongPeriodRates?: boolean
   /** 覆盖外层容器 className；默认手机端显示 */
   className?: string
@@ -87,6 +88,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   onSelect,
   onQualityCountClick,
   onReturnRefundCountClick,
+  onReturnCountClick,
   showLongPeriodRates: showRates = true,
   className = 'block md:hidden',
   showIndividualTrend = true,
@@ -119,7 +121,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
         const livePeriodMultiline = liveLines.primary?.includes('\n') ?? false
         const trend = anchorRowTrend(a)
         const showTrend = showIndividualTrend || (expandedTrendKeys[rowKey] ?? true)
-        const showExtraMetrics = expandedMetricKeys[rowKey] ?? true
+        const showExtraMetrics = expandedMetricKeys[rowKey] ?? false
 
         return (
           <article
@@ -160,26 +162,25 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
             </div>
 
             <div className="mt-3 grid grid-cols-2 gap-2">
-              <MetricCell label="支付金额" value={formatMoney(anchorRowGmv(a))} />
+              <MetricCell label="GMV" value={formatMoney(anchorRowGmv(a))} />
               <MetricCell label="已签收金额" value={formatMoney(anchorRowActualSignedAmount(a))} />
               <MetricCell label="支付单数" value={formatCount(anchorRowPaidCount(a))} />
+              <MetricCell label="已签收单数" value={formatCount(anchorRowSignedCount(a))} />
+              <MetricCell
+                label="退款单数"
+                value={formatCount(anchorRowReturnCount(a))}
+                onClick={onReturnCountClick ? () => onReturnCountClick(a) : undefined}
+              />
               <MetricCell
                 label="退款率"
                 value={formatRate(refundRate)}
                 danger={isHighRefundRate(refundRate)}
-              />
-              <MetricCell
-                label="品退单数"
-                value={qualityCount > 0 ? `品退 ${formatCount(qualityCount)} 单` : formatCount(qualityCount)}
-                danger={qualityCount > 0}
-                onClick={onQualityCountClick ? () => onQualityCountClick(a) : undefined}
               />
             </div>
 
             {showExtraMetrics ? (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <MetricCell label="退款金额" value={formatMoney(anchorRowRefundAmount(a))} danger />
-                <MetricCell label="退款订单数" value={formatCount(anchorRowReturnCount(a))} />
                 <MetricCell
                   label="退货退款单数"
                   value={
@@ -193,10 +194,13 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                       : undefined
                   }
                 />
-                <MetricCell label="仅退款单数" value={formatCount(anchorRowRefundOnlyCount(a))} />
-                {showRates ? (
-                  <MetricCell label="签收率" value={formatRate(signRate)} />
-                ) : null}
+                <MetricCell
+                  label="品退单数"
+                  value={qualityCount > 0 ? `品退 ${formatCount(qualityCount)} 单` : formatCount(qualityCount)}
+                  danger={qualityCount > 0}
+                  onClick={onQualityCountClick ? () => onQualityCountClick(a) : undefined}
+                />
+                <MetricCell label="签收率" value={formatRate(signRate)} />
               </div>
             ) : null}
 
@@ -229,7 +233,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   e.stopPropagation()
                   setExpandedMetricKeys((prev) => ({
                     ...prev,
-                    [rowKey]: !(prev[rowKey] ?? true),
+                    [rowKey]: !(prev[rowKey] ?? false),
                   }))
                 }}
                 className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600"

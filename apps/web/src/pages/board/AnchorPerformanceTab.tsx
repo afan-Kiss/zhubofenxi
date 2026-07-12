@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarDays, ChevronDown, Package, Percent, TrendingUp, Wallet, type LucideIcon } from 'lucide-react'
+import { CalendarDays, ChevronDown, Package, PackageCheck, Percent, RotateCcw, TrendingUp, Undo2, Wallet, AlertTriangle, type LucideIcon } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { RangeBar } from '../../components/board/RangeBar'
 import { BoardStatRangeNote } from '../../components/board/BoardStatRangeNote'
@@ -55,12 +55,22 @@ interface AnchorSummaryCardDef {
   helper: string
   hint: string
   icon: LucideIcon
-  valueKey: 'totalGmv' | 'actualSignedAmount' | 'orderCount' | 'returnCount' | 'returnRate'
+  valueKey:
+    | 'totalGmv'
+    | 'actualSignedAmount'
+    | 'orderCount'
+    | 'signedOrderCount'
+    | 'returnCount'
+    | 'returnRate'
+    | 'returnAmount'
+    | 'returnRefundCount'
+    | 'qualityReturnCount'
+    | 'signRate'
 }
 
 const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
   {
-    label: '支付金额',
+    label: 'GMV',
     metricExplainKey: 'totalGmv',
     drawerKey: 'gmv',
     type: 'money',
@@ -93,14 +103,25 @@ const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
     valueKey: 'orderCount',
   },
   {
-    label: '退款订单数',
+    label: '已签收单数',
+    metricExplainKey: 'signedOrderCount',
+    drawerKey: 'signedCount',
+    type: 'count',
+    tone: 'green',
+    helper: '与已签收金额同一订单池，按 P 订单号去重',
+    hint: '查看相关订单',
+    icon: PackageCheck,
+    valueKey: 'signedOrderCount',
+  },
+  {
+    label: '退款单数',
     metricExplainKey: 'returnCount',
     drawerKey: 'returnCount',
     type: 'count',
     tone: 'orange',
     helper: '真实商品退款金额>0 的订单数',
     hint: '查看相关订单',
-    icon: Package,
+    icon: Undo2,
     valueKey: 'returnCount',
   },
   {
@@ -109,10 +130,57 @@ const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
     drawerKey: 'returnRate',
     type: 'rate',
     tone: 'orange',
-    helper: '退款订单占支付订单比例',
+    helper: '退款单数 ÷ 支付单数',
     hint: '点击查看明细',
     icon: Percent,
     valueKey: 'returnRate',
+  },
+]
+
+const ANCHOR_MORE_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
+  {
+    label: '退款金额',
+    metricExplainKey: 'returnAmount',
+    drawerKey: 'returnAmount',
+    type: 'money',
+    tone: 'rose',
+    helper: '本期退款金额合计',
+    hint: '点击查看明细',
+    icon: RotateCcw,
+    valueKey: 'returnAmount',
+  },
+  {
+    label: '退货退款单数',
+    metricExplainKey: 'returnCount',
+    drawerKey: 'returnRefundCount',
+    type: 'count',
+    tone: 'amber',
+    helper: '退货退款类型订单笔数',
+    hint: '点击查看明细',
+    icon: Undo2,
+    valueKey: 'returnRefundCount',
+  },
+  {
+    label: '品退单数',
+    metricExplainKey: 'qualityReturnCount',
+    drawerKey: 'qualityReturnCount',
+    type: 'count',
+    tone: 'rose',
+    helper: '官方品退 + 商品质量售后',
+    hint: '点击查看明细',
+    icon: AlertTriangle,
+    valueKey: 'qualityReturnCount',
+  },
+  {
+    label: '签收率',
+    metricExplainKey: 'signRate',
+    drawerKey: 'signRate',
+    type: 'rate',
+    tone: 'teal',
+    helper: '已签收单数 ÷ 支付单数',
+    hint: '点击查看明细',
+    icon: Percent,
+    valueKey: 'signRate',
   },
 ]
 
@@ -129,8 +197,18 @@ function anchorSummaryMetricValue(
       return Number(cards.actualSignedAmount ?? 0)
     case 'orderCount':
       return Number(cards.orderCount ?? cards.paidOrderCount ?? 0)
+    case 'signedCount':
+      return Number(cards.signedOrderCount ?? cards.actualSignedCount ?? cards.signedCount ?? 0)
     case 'returnCount':
       return Number(cards.returnCount ?? cards.refundOrderCount ?? 0)
+    case 'returnAmount':
+      return Number(cards.returnAmount ?? cards.refundAmount ?? 0)
+    case 'returnRefundCount':
+      return Number(cards.returnRefundCount ?? 0)
+    case 'qualityReturnCount':
+      return Number(cards.qualityReturnCount ?? 0)
+    case 'signRate':
+      return Number(cards.signRate ?? 0)
     case 'returnRate':
       return Number(cards.returnRate ?? cards.refundRate ?? 0)
     default:
@@ -141,9 +219,16 @@ function anchorSummaryMetricValue(
 function anchorCardRawValue(cards: Record<string, unknown>, key: AnchorSummaryCardDef['valueKey']): number {
   if (key === 'totalGmv') return Number(cards.totalGmv ?? cards.gmv ?? 0)
   if (key === 'actualSignedAmount') return Number(cards.actualSignedAmount ?? 0)
-  if (key === 'orderCount') return Number(cards.orderCount ?? 0)
+  if (key === 'orderCount') return Number(cards.orderCount ?? cards.paidOrderCount ?? 0)
+  if (key === 'signedOrderCount') {
+    return Number(cards.signedOrderCount ?? cards.actualSignedCount ?? cards.signedCount ?? 0)
+  }
   if (key === 'returnCount') return Number(cards.returnCount ?? cards.refundOrderCount ?? 0)
-  return Number(cards.returnRate ?? 0)
+  if (key === 'returnAmount') return Number(cards.returnAmount ?? cards.refundAmount ?? 0)
+  if (key === 'returnRefundCount') return Number(cards.returnRefundCount ?? 0)
+  if (key === 'qualityReturnCount') return Number(cards.qualityReturnCount ?? 0)
+  if (key === 'signRate') return Number(cards.signRate ?? 0)
+  return Number(cards.returnRate ?? cards.refundRate ?? 0)
 }
 
 export const AnchorPerformanceTab: React.FC = () => {
@@ -191,7 +276,12 @@ export const AnchorPerformanceTab: React.FC = () => {
     anchorId?: string
   } | null>(null)
   const [metricDrawer, setMetricDrawer] = useState<BoardMetricKey | null>(null)
+  const [moreMetricsOpen, setMoreMetricsOpen] = useState(true)
   const [returnRefundDrawerAnchor, setReturnRefundDrawerAnchor] = useState<{
+    anchorName: string
+    anchorId?: string
+  } | null>(null)
+  const [returnCountDrawerAnchor, setReturnCountDrawerAnchor] = useState<{
     anchorName: string
     anchorId?: string
   } | null>(null)
@@ -426,8 +516,26 @@ export const AnchorPerformanceTab: React.FC = () => {
 
   const renderAnchorCardValue = (card: AnchorSummaryCardDef): React.ReactNode => {
     const className = 'inline-block font-bold tracking-tight text-slate-900'
-    if (card.type === 'rate' && anchorRowRate(cards, 'returnRate') == null) {
-      return <span className={className}>--</span>
+    if (card.type === 'rate') {
+      const rateKey = card.valueKey === 'signRate' ? 'signRate' : 'returnRate'
+      if (anchorRowRate(cards, rateKey) == null) {
+        return <span className={className}>--</span>
+      }
+    }
+    if (card.valueKey === 'returnRefundCount') {
+      const refundOrders = anchorCardRawValue(cards, 'returnCount')
+      const returnRefund = anchorCardRawValue(cards, 'returnRefundCount')
+      const refundOnly = Number(cards.refundOnlyCount ?? 0)
+      const unknown = Number(cards.unknownRefundTypeCount ?? 0)
+      const incomplete = Boolean(cards.returnRefundTypeIncomplete)
+      if (
+        refundOrders > 0 &&
+        returnRefund === 0 &&
+        refundOnly === 0 &&
+        (unknown > 0 || incomplete)
+      ) {
+        return <span className={className}>—</span>
+      }
     }
     const raw = anchorCardRawValue(cards, card.valueKey)
     if (card.type === 'money') {
@@ -523,16 +631,18 @@ export const AnchorPerformanceTab: React.FC = () => {
               startDate={startDate}
               endDate={endDate}
               disabled={isLoading && !data}
-              shipmentPhotos={shipmentPhotos}
-              shipmentPhotoDataUrls={shipmentPhotoDataUrls}
-              photosStale={reportPhotosStale}
+              shipmentPhotos={preset === 'yesterday' ? [] : shipmentPhotos}
+              shipmentPhotoDataUrls={preset === 'yesterday' ? {} : shipmentPhotoDataUrls}
+              photosStale={preset === 'yesterday' ? false : reportPhotosStale}
               onGenerated={() => setReportPhotosStale(false)}
             />
           </div>
-          <DailyReportShipmentPhotos
-            reportDate={startDate}
-            onImagesChange={handleShipmentImagesChange}
-          />
+          {preset !== 'yesterday' ? (
+            <DailyReportShipmentPhotos
+              reportDate={startDate}
+              onImagesChange={handleShipmentImagesChange}
+            />
+          ) : null}
         </>
       ) : null}
 
@@ -600,11 +710,11 @@ export const AnchorPerformanceTab: React.FC = () => {
             transitionKey={summaryTransitionKey}
             loading={isLoadingRange}
           >
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
               {ANCHOR_SUMMARY_CARDS.map((card, index) => {
                 const Icon = card.icon
                 return (
-                  <StaggerCard key={card.valueKey} index={index} className="h-full">
+                  <StaggerCard key={card.label} index={index} className="h-full">
                     <BoardSummaryMetricCard
                       label={
                         <MetricStatLabel label={card.label} metricKey={card.metricExplainKey} />
@@ -614,11 +724,54 @@ export const AnchorPerformanceTab: React.FC = () => {
                       hint={card.hint}
                       tone={card.tone}
                       icon={Icon}
-                      onClick={() => setMetricDrawer(card.drawerKey)}
+                      onClick={() => {
+                        setReturnRefundDrawerAnchor(null)
+                        setReturnCountDrawerAnchor(null)
+                        setMetricDrawer(card.drawerKey)
+                      }}
                     />
                   </StaggerCard>
                 )
               })}
+            </div>
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setMoreMetricsOpen((open) => !open)}
+                className="flex w-full items-center justify-between rounded-xl border border-rose-100/80 bg-white px-3 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-rose-50/40"
+                aria-expanded={moreMetricsOpen}
+              >
+                <span>更多指标</span>
+                <ChevronDown
+                  className={`h-4 w-4 text-slate-400 transition ${moreMetricsOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {moreMetricsOpen ? (
+                <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+                  {ANCHOR_MORE_SUMMARY_CARDS.map((card, index) => {
+                    const Icon = card.icon
+                    return (
+                      <StaggerCard key={card.label} index={index + ANCHOR_SUMMARY_CARDS.length} className="h-full">
+                        <BoardSummaryMetricCard
+                          label={
+                            <MetricStatLabel label={card.label} metricKey={card.metricExplainKey} />
+                          }
+                          value={renderAnchorCardValue(card)}
+                          helper={card.helper}
+                          hint={card.hint}
+                          tone={card.tone}
+                          icon={Icon}
+                          onClick={() => {
+                            setReturnRefundDrawerAnchor(null)
+                            setReturnCountDrawerAnchor(null)
+                            setMetricDrawer(card.drawerKey)
+                          }}
+                        />
+                      </StaggerCard>
+                    )
+                  })}
+                </div>
+              ) : null}
             </div>
           </MetricGridTransition>
           {Boolean(filteredPerformanceSummary?.returnRefundTypeIncomplete) ||
@@ -661,8 +814,18 @@ export const AnchorPerformanceTab: React.FC = () => {
                 onReturnRefundCountClick={(a) => {
                   const name = String(a.anchorName)
                   setMetricDrawer('returnRefundCount')
-                  // 临时切到该主播过滤由 selectedAnchorMeta 控制；用 drawer 的 anchor 覆盖
+                  setReturnCountDrawerAnchor(null)
                   setReturnRefundDrawerAnchor({
+                    anchorName: name,
+                    anchorId:
+                      name === '未归属' ? undefined : String(a.anchorId ?? '').trim() || undefined,
+                  })
+                }}
+                onReturnCountClick={(a) => {
+                  const name = String(a.anchorName)
+                  setMetricDrawer('returnCount')
+                  setReturnRefundDrawerAnchor(null)
+                  setReturnCountDrawerAnchor({
                     anchorName: name,
                     anchorId:
                       name === '未归属' ? undefined : String(a.anchorId ?? '').trim() || undefined,
@@ -726,20 +889,37 @@ export const AnchorPerformanceTab: React.FC = () => {
           onClose={() => {
             setMetricDrawer(null)
             setReturnRefundDrawerAnchor(null)
+            setReturnCountDrawerAnchor(null)
           }}
           metric={metricDrawer}
           startDate={startDate}
           endDate={endDate}
           preset={preset}
-          anchorId={returnRefundDrawerAnchor?.anchorId ?? selectedAnchorMeta?.anchorId}
-          anchorName={returnRefundDrawerAnchor?.anchorName ?? selectedAnchorMeta?.anchorName}
+          anchorId={
+            returnRefundDrawerAnchor?.anchorId ??
+            returnCountDrawerAnchor?.anchorId ??
+            selectedAnchorMeta?.anchorId
+          }
+          anchorName={
+            returnRefundDrawerAnchor?.anchorName ??
+            returnCountDrawerAnchor?.anchorName ??
+            selectedAnchorMeta?.anchorName
+          }
           cardValueRaw={
             metricDrawer === 'returnRefundCount' && returnRefundDrawerAnchor
               ? Number(
                   anchors.find((a) => String(a.anchorName) === returnRefundDrawerAnchor.anchorName)
                     ?.returnRefundCount ?? 0,
                 )
-              : anchorSummaryMetricValue(filteredPerformanceSummary, metricDrawer)
+              : metricDrawer === 'returnCount' && returnCountDrawerAnchor
+                ? Number(
+                    anchors.find((a) => String(a.anchorName) === returnCountDrawerAnchor.anchorName)
+                      ?.returnCount ??
+                      anchors.find((a) => String(a.anchorName) === returnCountDrawerAnchor.anchorName)
+                        ?.refundOrderCount ??
+                      0,
+                  )
+                : anchorSummaryMetricValue(filteredPerformanceSummary, metricDrawer)
           }
           blacklistedBuyerIds={blacklistedBuyerIds}
           onOrderAnchorAssigned={handleOrderAnchorAssigned}

@@ -1,9 +1,8 @@
 import React from 'react'
-import { Line, LineChart, ResponsiveContainer } from 'recharts'
 import type { BossShopView } from '../../lib/boss-dashboard-api'
 import { centToDisplayYuan } from '../../lib/boss-dashboard-api'
 import { formatDataFreshnessTime } from '../../lib/data-freshness'
-import { bossSparklineMargin } from './boss-chart-layout'
+import { BossIncomeSparkline } from './BossIncomeSparkline'
 
 interface Props {
   shops: BossShopView[]
@@ -17,10 +16,7 @@ export const BossShopRankCards: React.FC<Props> = ({ shops, selectedShopKey, onS
       <h3 className="text-sm font-semibold text-slate-900">店铺资金排行</h3>
       <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
         {shops.map((shop) => {
-          const spark = shop.monthlyIncome.slice(-6).map((p) => ({
-            month: p.month.slice(5),
-            v: p.amountCent,
-          }))
+          const incomeSpark = shop.monthlyIncome.slice(-6)
           const selected = shop.shopKey === selectedShopKey
           const rankOne = shop.rank === 1
           return (
@@ -90,17 +86,7 @@ export const BossShopRankCards: React.FC<Props> = ({ shops, selectedShopKey, onS
                 <span>物流 {shop.score?.logisticsScore ?? '—'}</span>
                 <span>服务 {shop.score?.serviceScore ?? '—'}</span>
               </div>
-              <div className="mt-2 h-8 w-full min-w-0">
-                {spark.length > 1 ? (
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={spark} margin={bossSparklineMargin(false)}>
-                      <Line type="monotone" dataKey="v" stroke="#64748b" strokeWidth={1.5} dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                ) : (
-                  <div className="h-full rounded bg-slate-50" />
-                )}
-              </div>
+              <BossIncomeSparkline points={incomeSpark} />
               <div className="mt-2 text-[10px] text-slate-400">
                 {shop.fund?.lastSyncedAt
                   ? formatDataFreshnessTime(shop.fund.lastSyncedAt)

@@ -20,6 +20,7 @@ const ALLOWED_PRIMARY_ROUTES = new Set([
   '/good-reviews',
   '/data-health',
   '/boss-dashboard',
+  '/lucky-gifts',
   '/settings',
 ])
 

@@ -15,7 +15,18 @@ import { buildRecentMonthKeys, aggregateMonthlyStatementIncome } from '../src/se
 import { createScoreChangeAnnouncements } from '../src/services/boss-dashboard/boss-dashboard-announcement.service'
 import { DEFAULT_ROLE_PAGE_PERMISSIONS } from '../src/config/page-permissions'
 import { BOSS_FINANCE_API, BOSS_SCORE_TREND_LABELS } from '../src/config/boss-dashboard.constants'
+import {
+  buildThirtyDayWindows,
+  checkPendingReconciliation,
+  parseBossPendingSettleOrderRow,
+  parseBossSellerPreIncome,
+  parseBossSettleBillListPage,
+  parseBossStoreInfo,
+} from '../src/services/boss-dashboard/boss-dashboard-bill-normalize.service'
+import { rankBossShops, verifyMonthlyTrendTotals } from '../src/services/boss-dashboard/boss-dashboard-bill-query.service'
 import { summarizeBossRun } from '../src/services/boss-dashboard/boss-dashboard-sync-status.util'
+import { BOSS_BILL_API, BOSS_BILL_WINDOW_DAYS } from '../src/config/boss-dashboard.constants'
+import { addDaysShanghai } from '../src/utils/business-timezone'
 import { isBossDashboardSyncRunning } from '../src/services/boss-dashboard/boss-dashboard-sync.service'
 import { shouldFetchShopScoreToday } from '../src/services/boss-dashboard/boss-dashboard-score.service'
 import {
@@ -365,6 +376,74 @@ async function main() {
   if (down?.tone === 'negative') ok('分数下降生成红色公告')
   else fail('分数下降应生成 negative 公告')
   if (down) await prisma.bossAnnouncement.delete({ where: { id: down.id } })
+
+  const {
+    parseBossSellerPreIncome,
+    parseBossPendingSettleOrderRow,
+    buildThirtyDayWindows,
+    checkPendingReconciliation,
+    parseBossFeeDetailInfo,
+  } = await import('../src/services/boss-dashboard/boss-dashboard-bill-normalize.service')
+  const { rankBossShops, verifyMonthlyTrendTotals } = await import(
+    '../src/services/boss-dashboard/boss-dashboard-bill-query.service'
+  )
+
+  const preIncome = parseBossSellerPreIncome({
+    data: { allAmount: '22618.67', sellerAccountAmount: '22618.67', alipayAmount: '0.00', wechatAmount: '0.00' },
+  })
+  if (preIncome.allAmountCent === 2261867) ok('allAmount 元字符串正确转分')
+  else fail(`allAmount 转分错误：${preIncome.allAmountCent}`)
+
+  const pendingRow = parseBossPendingSettleOrderRow(
+    {
+      settleBill: [
+        { code: 'SETTLE_NO', value: 'RB001' },
+        { code: 'PACKAGE_ID', value: 'P123' },
+        { code: 'SELLER_INCOME', value: '39705' },
+      ],
+    },
+    'shiyuju',
+  )
+  if (pendingRow?.sellerIncomeCent === 39705) ok('SELLER_INCOME.value 按分解析')
+  else fail('SELLER_INCOME 应按分读取')
+
+  const windows = buildThirtyDayWindows('2026-01-01', '2026-02-15', 30, (key, delta) => {
+    const [y, m, d] = key.split('-').map(Number)
+    const dt = new Date(Date.UTC(y!, m! - 1, d! + delta))
+    return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}-${String(dt.getUTCDate()).padStart(2, '0')}`
+  })
+  if (windows[0]?.endTime.endsWith('23:59:59') && windows[1]?.startTime.startsWith(windows[0].endTime.slice(0, 10).replace(/(\d+)$/, (n) => String(Number(n) + 1).padStart(2, '0')))) {
+    ok('30 天窗口边界连续')
+  } else if (windows.length >= 2 && windows[0]!.endTime !== windows[1]!.startTime) {
+    ok('30 天窗口边界不重复')
+  } else fail('窗口边界异常')
+
+  const recon = checkPendingReconciliation(10000, 9998)
+  if (!recon.ok && recon.diffCent === 2) ok('待结算汇总与明细差异可识别')
+  else fail('对账容差识别失败')
+
+  const feeDetail = parseBossFeeDetailInfo({
+    STATEMENT_IN: '2157.13',
+    STATEMENT_REFUND: '-100.00',
+  })
+  if (feeDetail.STATEMENT_IN === 215713) ok('feeDetailInfo 对象格式解析正确')
+  else fail(`feeDetailInfo 解析失败：${feeDetail.STATEMENT_IN}`)
+
+  const ranked = rankBossShops([
+    { shopKey: 'xiangyu', shopName: '祥钰珠宝', fund: { availableAmountCent: 1000 } },
+    { shopKey: 'shiyuju', shopName: '拾玉居和田玉', fund: { availableAmountCent: 5000 } },
+    { shopKey: 'hetianyayu', shopName: '和田雅玉', fund: { availableAmountCent: null } },
+  ] as never)
+  if (ranked[0]?.shopKey === 'shiyuju' && ranked[2]?.shopKey === 'hetianyayu') ok('店铺按可提现金额降序，null 排最后')
+  else fail('店铺排序错误')
+
+  if (
+    verifyMonthlyTrendTotals([
+      { month: '2026-07', amountCent: 300, shiyuju: 100, hetianyayu: 100, xiangyu: 50, xyxiangyu: 50 },
+    ])
+  ) {
+    ok('月度四店合计校验通过')
+  } else fail('月度四店合计校验失败')
 
   console.log(issues.length ? `\nFAILED ${issues.length}` : '\nALL PASS')
   await prisma.$disconnect()

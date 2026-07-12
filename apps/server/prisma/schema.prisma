@@ -934,6 +934,92 @@ model BossAnnouncementUserState {
   @@index([userId])
 }
 
+/// 老板看板：待结算订单快照（金额均为分）
+model BossPendingSettlementSnapshot {
+  id                       String    @id @default(cuid())
+  shopKey                  String
+  liveAccountId            String
+  pendingAmountCent        Int?
+  sellerAccountAmountCent  Int?
+  alipayAmountCent         Int?
+  wechatAmountCent         Int?
+  pendingOrderCount        Int?
+  rangeStart               DateTime?
+  rangeEnd                 DateTime?
+  settlePeriodDays         Int?
+  syncStatus               String    @default("success")
+  syncError                String?
+  reconciliationDiffCent   Int?
+  fundReconcileStatus      String?
+  fundReconcileDiffCent    Int?
+  fundReconcileCheckedAt   DateTime?
+  fetchedAt                DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@index([shopKey, updatedAt])
+  @@index([liveAccountId])
+}
+
+/// 老板看板：待结算订单明细（金额均为分）
+model BossPendingSettlementOrder {
+  id                    String    @id @default(cuid())
+  shopKey               String
+  liveAccountId         String
+  platformSettleNo      String
+  packageId             String?
+  orderCreateTime       DateTime?
+  orderStatus           String?
+  orderFinishTime       DateTime?
+  settleStatus          String?
+  expectedSettleTime    DateTime?
+  transactionType       String?
+  sellerIncomeCent      Int?
+  totalIncomeCent       Int?
+  totalOutcomeCent      Int?
+  platformCommissionCent Int?
+  cpsCommissionCent     Int?
+  installmentFeeCent    Int?
+  lastSeenAt            DateTime?
+  isCurrent             Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@unique([shopKey, platformSettleNo])
+  @@index([shopKey, isCurrent, orderCreateTime])
+  @@index([liveAccountId])
+}
+
+/// 老板看板：已结算日/月账单（金额均为分）
+model BossSettlementPeriodBill {
+  id                   String    @id @default(cuid())
+  shopKey              String
+  liveAccountId        String
+  platformBillNo       String?
+  periodType           String
+  periodStart          DateTime
+  periodEnd            DateTime
+  billDate             String?
+  processStatus        String?
+  settleOrderCount     Int?
+  otherOrderCount      Int?
+  totalCount           Int?
+  totalIncomeCent      Int?
+  totalOutcomeCent     Int?
+  totalChangeCent      Int?
+  totalCommissionCent  Int?
+  feeDetailJson        String?
+  sourceType           String    @default("official")
+  processFinishedAt    DateTime?
+  fetchedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([shopKey, periodType, periodStart])
+  @@index([shopKey, periodType, billDate])
+  @@index([liveAccountId])
+}
+
 /// 老板看板：同步运行记录
 model BossSyncRunLog {
   id           String    @id @default(cuid())
@@ -947,4 +1033,154 @@ model BossSyncRunLog {
 
   @@index([startedAt])
   @@index([status])
+}
+
+/// 四店福袋活动（lucky_draw_id / room_id 超长数字，必须 String）
+model XhsLuckyDraw {
+  id               String   @id @default(cuid())
+  liveAccountId    String
+  liveAccountName  String
+  luckyDrawId      String
+  roomId           String   @default("")
+  giftName         String   @default("")
+  senderUserId     String?
+  senderNickname   String?
+  drawStatus       Int?
+  winnerCount      Int      @default(0)
+  createTime       DateTime?
+  startTime        DateTime?
+  rawJson          String?
+  firstSeenAt      DateTime @default(now())
+  lastSeenAt       DateTime @default(now())
+  lastSyncedAt     DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  winners XhsLuckyWinner[]
+
+  @@unique([liveAccountId, luckyDrawId])
+  @@index([liveAccountId])
+  @@index([createTime])
+  @@index([lastSyncedAt])
+}
+
+/// 福袋中奖人（含地址；无地址也保留）
+model XhsLuckyWinner {
+  id                  String    @id @default(cuid())
+  liveAccountId       String
+  liveAccountName     String
+  luckyDrawId         String
+  winnerUserId        String    @default("")
+  winnerKey           String
+  redId               String?
+  winnerNickname      String    @default("")
+  avatar              String?
+  recipientName       String?
+  recipientPhone      String?
+  province            String?
+  city                String?
+  district            String?
+  addressDetail       String?
+  fullAddress         String?
+  hasAddress          Boolean   @default(false)
+  addressComplete     Boolean   @default(false)
+  addressMissingJson  String    @default("[]")
+  firstAddressSeenAt  DateTime?
+  winTime             DateTime?
+  officialCourier     String?
+  officialTrackingNo  String?
+  officialShipped     Boolean   @default(false)
+  rawJson             String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  draw     XhsLuckyDraw      @relation(fields: [liveAccountId, luckyDrawId], references: [liveAccountId, luckyDrawId], onDelete: Cascade)
+  shipment LuckyGiftShipment?
+
+  @@unique([liveAccountId, luckyDrawId, winnerKey])
+  @@index([liveAccountId])
+  @@index([luckyDrawId])
+  @@index([winnerUserId])
+  @@index([hasAddress, addressComplete])
+  @@index([winTime])
+}
+
+/// 福袋发货状态（本系统标记；官方物流可覆盖待发）
+model LuckyGiftShipment {
+  id                   String    @id @default(cuid())
+  winnerId             String    @unique
+  shipmentStatus       String    @default("no_address")
+  shippingStatusSource String    @default("local")
+  freightType          String    @default("COLLECT")
+  courierCompany       String?
+  trackingNo           String?
+  markedShippedAt      DateTime?
+  markedShippedBy      String?
+  shipmentNote         String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  winner XhsLuckyWinner           @relation(fields: [winnerId], references: [id], onDelete: Cascade)
+  logs   LuckyGiftShipmentLog[]
+
+  @@index([shipmentStatus])
+  @@index([shippingStatusSource])
+  @@index([markedShippedAt])
+}
+
+/// 福袋发货操作日志
+model LuckyGiftShipmentLog {
+  id          String   @id @default(cuid())
+  shipmentId  String
+  winnerId    String
+  action      String
+  fromStatus  String?
+  toStatus    String?
+  operatorId  String?
+  operatorName String?
+  note        String?
+  metaJson    String?
+  createdAt   DateTime @default(now())
+
+  shipment LuckyGiftShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@index([shipmentId, createdAt])
+  @@index([winnerId])
+}
+
+/// 福袋同步元数据（按直播号）
+model LuckyGiftSyncMeta {
+  id                 String    @id @default(cuid())
+  liveAccountId      String    @unique
+  liveAccountName    String    @default("")
+  lastSyncedAt       DateTime?
+  lastSuccessAt      DateTime?
+  lastError          String?
+  lastTrigger        String?
+  drawCount          Int       @default(0)
+  winnerCount        Int       @default(0)
+  platformTotal      Int?
+  fetchedCount       Int?
+  dedupedCount       Int?
+  detailFailCount    Int       @default(0)
+  newDrawCount       Int       @default(0)
+  newAddressCount    Int       @default(0)
+  statusChangeCount  Int       @default(0)
+  updatedAt          DateTime  @updatedAt
+  createdAt          DateTime  @default(now())
+}
+
+/// 福袋全局同步运行摘要
+model LuckyGiftSyncRun {
+  id              String    @id @default("default")
+  lastSyncedAt    DateTime?
+  lastTrigger     String?
+  successShopCount Int      @default(0)
+  failedShopCount  Int      @default(0)
+  failedShopsJson  String   @default("[]")
+  newDrawCount     Int      @default(0)
+  newAddressCount  Int      @default(0)
+  statusChangeCount Int     @default(0)
+  summaryJson      String?
+  updatedAt        DateTime @updatedAt
 }

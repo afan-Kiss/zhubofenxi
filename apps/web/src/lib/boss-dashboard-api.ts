@@ -40,6 +40,34 @@ export interface BossScoreView {
   scoreLabel: string
 }
 
+export interface BossPendingSettlementView {
+  amountCent: number | null
+  orderCount: number | null
+  settlePeriodDays: number | null
+  fetchedAt: string | null
+  syncStatus: string
+  syncError: string | null
+  reconciliationDiffCent: number | null
+}
+
+export interface BossCurrentMonthBillView {
+  settlementNetCent: number | null
+  statementInCent: number | null
+  statementRefundCent: number | null
+  otherFeeCent: number | null
+  commissionCent: number | null
+  settleOrderCount: number | null
+  dataThroughDate: string | null
+  isPartialMonth: boolean
+}
+
+export interface BossMonthlySettlementTrendPoint {
+  month: string
+  amountCent: number | null
+  source: 'official_month' | 'day_aggregate'
+  isPartialMonth: boolean
+}
+
 export interface BossAnnouncementView {
   id: string
   kind: string
@@ -59,6 +87,27 @@ export interface BossAnnouncementView {
   popupShown: boolean
 }
 
+export interface BossMoneyTrendPoint {
+  month: string
+  amountCent: number | null
+  shiyuju: number | null
+  hetianyayu: number | null
+  xiangyu: number | null
+  xyxiangyu: number | null
+}
+
+export type BossTrendPoint = BossMoneyTrendPoint
+
+export const BOSS_TREND_KEYS = ['total', 'shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu'] as const
+
+export const BOSS_TREND_LABELS: Record<(typeof BOSS_TREND_KEYS)[number], string> = {
+  total: '四店合计',
+  shiyuju: '拾玉居和田玉',
+  hetianyayu: '和田雅玉',
+  xiangyu: '祥钰珠宝',
+  xyxiangyu: 'XY祥钰珠宝',
+}
+
 export interface BossDashboardPayload {
   generatedAt: string
   dataNotes: string[]
@@ -68,23 +117,27 @@ export interface BossDashboardPayload {
     withdrawnAmountCent: number
     afterSaleFrozenAmountCent: number
     todayIncomeCent: number
+    pendingSettlementAmountCent: number
+    pendingSettlementOrderCount: number
+    currentMonthSettlementNetCent: number
+    currentMonthCommissionCent: number
+    billReconciliationWarningShopCount: number
     scoreDownShopCount: number
     cannotWithdrawShopCount: number
   }
-  combinedMonthlyIncome: Array<{
-    month: string
-    amountCent: number
-    shiyuju: number
-    hetianyayu: number
-    xiangyu: number
-    xyxiangyu: number
-  }>
+  combinedMonthlyIncome: BossMoneyTrendPoint[]
+  combinedMonthlySettlement: BossMoneyTrendPoint[]
   shops: Array<{
+    rank: number
     shopKey: string
     shopName: string
     fund: BossFundView | null
     score: BossScoreView | null
     monthlyIncome: Array<{ month: string; amountCent: number }>
+    monthlySettlementTrend: BossMonthlySettlementTrendPoint[]
+    pendingSettlement: BossPendingSettlementView
+    currentMonthBill: BossCurrentMonthBillView
+    billReconciliationStatus: string
     scoreTrend: {
       quality: Array<{ date: string; score: number | null }>
       logistics: Array<{ date: string; score: number | null }>
@@ -97,6 +150,22 @@ export interface BossDashboardPayload {
   lastBossSyncAt: string | null
   lastBossSyncStatus: string | null
 }
+
+export interface BossBillOrderView {
+  shopKey: string
+  shopName: string
+  packageId: string | null
+  orderCreateTime: string | null
+  orderStatus: string | null
+  expectedSettleAmountCent: number | null
+  expectedSettleTime: string | null
+  actualSettleTime: string | null
+  platformCommissionCent: number | null
+  settleStatus: string | null
+}
+
+export type BossBillOrderRow = BossBillOrderView
+export type BossShopView = BossDashboardPayload['shops'][number]
 
 const API_BASE = '/api/boss-dashboard'
 
@@ -111,6 +180,22 @@ async function parseJson<T>(res: Response): Promise<T> {
 export async function fetchBossDashboard(): Promise<BossDashboardPayload> {
   const res = await fetch(`${API_BASE}`, { credentials: 'include' })
   return parseJson<BossDashboardPayload>(res)
+}
+
+export async function fetchBossBillOrders(params: {
+  status: 'pending' | 'settled'
+  shopKey?: string
+  page: number
+  pageSize: number
+}): Promise<{ items: BossBillOrderView[]; total: number; page: number; pageSize: number }> {
+  const qs = new URLSearchParams({
+    status: params.status,
+    page: String(params.page),
+    pageSize: String(params.pageSize),
+  })
+  if (params.shopKey) qs.set('shopKey', params.shopKey)
+  const res = await fetch(`${API_BASE}/bill-orders?${qs.toString()}`, { credentials: 'include' })
+  return parseJson(res)
 }
 
 export async function fetchBossAnnouncements(): Promise<{

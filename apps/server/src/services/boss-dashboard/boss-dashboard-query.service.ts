@@ -9,6 +9,15 @@ import {
 import { loadBossScoreTrendSeries } from './boss-dashboard-score.service'
 import { buildBossShopAdvice } from './boss-dashboard-advice.service'
 import { listActiveAnnouncements, countUnreadAnnouncements } from './boss-dashboard-announcement.service'
+import {
+  buildRecentBillMonthKeys,
+  loadBillReconciliationStatus,
+  loadCurrentMonthBillView,
+  loadMonthlySettlementTrend,
+  loadPendingSettlementView,
+  rankBossShops,
+  verifyMonthlyTrendTotals,
+} from './boss-dashboard-bill-query.service'
 
 function latestFundByShop() {
   return Promise.all(
@@ -97,22 +106,35 @@ function serializeScore(
   }
 }
 
+function sumNullable(values: Array<number | null | undefined>): number {
+  return values.reduce<number>((acc, v) => acc + (v ?? 0), 0)
+}
+
 export async function buildBossDashboardPayload(userId?: string) {
   const monthKeys = buildRecentMonthKeys()
+  const settlementMonthKeys = buildRecentBillMonthKeys()
   const [funds, scores] = await Promise.all([latestFundByShop(), latestScoreByShop()])
 
-  const shops = await Promise.all(
+  const shopsRaw = await Promise.all(
     BOSS_DASHBOARD_SHOPS.map(async (shop, index) => {
       const fund = funds[index]?.row ?? null
       const scorePack = scores[index]
       const monthlyIncome = await aggregateMonthlyStatementIncome(shop.shopKey, monthKeys)
+      const monthlySettlementTrend = await loadMonthlySettlementTrend(shop.shopKey, settlementMonthKeys)
       const scoreTrend = await loadBossScoreTrendSeries(shop)
+      const pendingSettlement = await loadPendingSettlementView(shop.shopKey)
+      const currentMonthBill = await loadCurrentMonthBillView(shop.shopKey)
+      const billReconciliationStatus = await loadBillReconciliationStatus(shop.shopKey)
       return {
         shopKey: shop.shopKey,
         shopName: shop.shopName,
         fund: serializeFund(fund),
         score: serializeScore(scorePack?.row ?? null, scorePack?.prev ?? null),
         monthlyIncome,
+        monthlySettlementTrend,
+        pendingSettlement,
+        currentMonthBill,
+        billReconciliationStatus,
         scoreTrend,
         advice: buildBossShopAdvice({
           fund,
@@ -123,49 +145,108 @@ export async function buildBossDashboardPayload(userId?: string) {
     }),
   )
 
-  const sum = (pick: (f: NonNullable<typeof funds[0]['row']>) => number | null | undefined) =>
-    funds.reduce((acc, f) => acc + (f.row ? pick(f.row) ?? 0 : 0), 0)
+  const rankedShops = rankBossShops(shopsRaw)
 
-  const combinedMonthly = monthKeys.map((month) => ({
+  const combinedMonthlyIncome = monthKeys.map((month) => ({
     month,
-    amountCent: shops.reduce(
+    amountCent: rankedShops.reduce(
       (acc, s) => acc + (s.monthlyIncome.find((m) => m.month === month)?.amountCent ?? 0),
       0,
     ),
-    shiyuju: shops.find((s) => s.shopKey === 'shiyuju')?.monthlyIncome.find((m) => m.month === month)?.amountCent ?? 0,
-    hetianyayu: shops.find((s) => s.shopKey === 'hetianyayu')?.monthlyIncome.find((m) => m.month === month)?.amountCent ?? 0,
-    xiangyu: shops.find((s) => s.shopKey === 'xiangyu')?.monthlyIncome.find((m) => m.month === month)?.amountCent ?? 0,
-    xyxiangyu: shops.find((s) => s.shopKey === 'xyxiangyu')?.monthlyIncome.find((m) => m.month === month)?.amountCent ?? 0,
+    shiyuju: rankedShops.find((s) => s.shopKey === 'shiyuju')?.monthlyIncome.find((m) => m.month === month)?.amountCent ?? 0,
+    hetianyayu: rankedShops.find((s) => s.shopKey === 'hetianyayu')?.monthlyIncome.find((m) => m.month === month)?.amountCent ?? 0,
+    xiangyu: rankedShops.find((s) => s.shopKey === 'xiangyu')?.monthlyIncome.find((m) => m.month === month)?.amountCent ?? 0,
+    xyxiangyu: rankedShops.find((s) => s.shopKey === 'xyxiangyu')?.monthlyIncome.find((m) => m.month === month)?.amountCent ?? 0,
   }))
+
+  const combinedMonthlySettlement = settlementMonthKeys.map((month) => {
+    const shiyuju = rankedShops.find((s) => s.shopKey === 'shiyuju')?.monthlySettlementTrend.find((m) => m.month === month)?.amountCent ?? null
+    const hetianyayu = rankedShops.find((s) => s.shopKey === 'hetianyayu')?.monthlySettlementTrend.find((m) => m.month === month)?.amountCent ?? null
+    const xiangyu = rankedShops.find((s) => s.shopKey === 'xiangyu')?.monthlySettlementTrend.find((m) => m.month === month)?.amountCent ?? null
+    const xyxiangyu = rankedShops.find((s) => s.shopKey === 'xyxiangyu')?.monthlySettlementTrend.find((m) => m.month === month)?.amountCent ?? null
+    const parts = [shiyuju, hetianyayu, xiangyu, xyxiangyu]
+    const hasAny = parts.some((p) => p != null)
+    const amountCent = hasAny ? sumNullable(parts) : null
+    return {
+      month,
+      amountCent,
+      shiyuju,
+      hetianyayu,
+      xiangyu,
+      xyxiangyu,
+    }
+  })
+
+  if (!verifyMonthlyTrendTotals(
+    combinedMonthlyIncome.map((p) => ({
+      month: p.month,
+      amountCent: p.amountCent,
+      shiyuju: p.shiyuju,
+      hetianyayu: p.hetianyayu,
+      xiangyu: p.xiangyu,
+      xyxiangyu: p.xyxiangyu,
+    })),
+  )) {
+    throw new Error('到账趋势四店合计校验失败')
+  }
+
+  const settlementForVerify = combinedMonthlySettlement
+    .filter((p) => p.amountCent != null)
+    .map((p) => ({
+      month: p.month,
+      amountCent: p.amountCent!,
+      shiyuju: p.shiyuju ?? 0,
+      hetianyayu: p.hetianyayu ?? 0,
+      xiangyu: p.xiangyu ?? 0,
+      xyxiangyu: p.xyxiangyu ?? 0,
+    }))
+  if (settlementForVerify.length > 0 && !verifyMonthlyTrendTotals(settlementForVerify)) {
+    throw new Error('结算净额趋势四店合计校验失败')
+  }
 
   const announcements = await listActiveAnnouncements(userId)
   const unreadCount = userId ? await countUnreadAnnouncements(userId) : announcements.filter((a) => !a.isRead).length
 
   const latestSync = await prisma.bossSyncRunLog.findFirst({ orderBy: { startedAt: 'desc' } })
 
+  const pendingSettlementAmountCent = sumNullable(rankedShops.map((s) => s.pendingSettlement.amountCent))
+  const pendingSettlementOrderCount = sumNullable(rankedShops.map((s) => s.pendingSettlement.orderCount))
+  const currentMonthSettlementNetCent = sumNullable(rankedShops.map((s) => s.currentMonthBill.settlementNetCent))
+  const currentMonthCommissionCent = sumNullable(rankedShops.map((s) => s.currentMonthBill.commissionCent))
+
   return {
     generatedAt: new Date().toISOString(),
     dataNotes: [
-      '可提现金额以平台资金接口当前值为准',
-      '累计已提现只统计提现成功流水（PAY_SUCCESS）',
-      '每月到账只统计结算入账且收入大于0的流水',
-      '店铺分只展示平台真实分项，不自行平均综合分',
+      '可提现：平台当前可提现余额',
+      '待结算：平台预计待结算订单金额，可能因退款、取消或延迟结算变化',
+      '实际到账：真正进入店铺余额的结算入账',
+      '结算净额：结算账单周期净变动',
+      '累计已提现：只统计提现成功',
+      '平台佣金：账单参考值，不会再次从结算净额重复扣除',
     ],
     totals: {
-      availableAmountCent: sum((f) => f.availableAmountCent),
-      withdrawingAmountCent: sum((f) => f.withdrawingAmountCent),
-      withdrawnAmountCent: sum((f) => f.withdrawnAmountCent),
-      afterSaleFrozenAmountCent: sum((f) => f.afterSaleFrozenAmountCent),
-      todayIncomeCent: sum((f) => f.todayIncomeCent),
-      scoreDownShopCount: shops.filter((s) =>
+      availableAmountCent: sumNullable(rankedShops.map((s) => s.fund?.availableAmountCent)),
+      withdrawingAmountCent: sumNullable(rankedShops.map((s) => s.fund?.withdrawingAmountCent)),
+      withdrawnAmountCent: sumNullable(rankedShops.map((s) => s.fund?.withdrawnAmountCent)),
+      afterSaleFrozenAmountCent: sumNullable(rankedShops.map((s) => s.fund?.afterSaleFrozenAmountCent)),
+      todayIncomeCent: sumNullable(rankedShops.map((s) => s.fund?.todayIncomeCent)),
+      pendingSettlementAmountCent,
+      pendingSettlementOrderCount,
+      currentMonthSettlementNetCent,
+      currentMonthCommissionCent,
+      billReconciliationWarningShopCount: rankedShops.filter(
+        (s) => s.billReconciliationStatus === 'reconciliation_warning',
+      ).length,
+      scoreDownShopCount: rankedShops.filter((s) =>
         [s.score?.qualityDelta, s.score?.logisticsDelta, s.score?.serviceDelta].some(
           (d) => d != null && d < 0,
         ),
       ).length,
-      cannotWithdrawShopCount: shops.filter((s) => s.fund?.canWithdraw === false).length,
+      cannotWithdrawShopCount: rankedShops.filter((s) => s.fund?.canWithdraw === false).length,
     },
-    combinedMonthlyIncome: combinedMonthly,
-    shops,
+    combinedMonthlyIncome,
+    combinedMonthlySettlement,
+    shops: rankedShops,
     announcements,
     unreadAnnouncementCount: unreadCount,
     lastBossSyncAt: latestSync?.finishedAt?.toISOString() ?? latestSync?.startedAt.toISOString() ?? null,

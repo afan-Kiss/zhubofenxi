@@ -4,6 +4,12 @@ export type ShopSyncResult = {
   fundPartial?: boolean
   fundSnapshotWritten?: boolean
   fundError?: string | null
+  billSuccess?: boolean
+  billPartial?: boolean
+  pendingSnapshotWritten?: boolean
+  pendingOrderCount?: number
+  periodBillWrittenCount?: number
+  billError?: string | null
   scoreSkipped: boolean
   scoreSaved: boolean
   scorePartial?: boolean
@@ -22,6 +28,7 @@ export function summarizeBossRun(shopResults: ShopSyncResult[]): {
   skippedShopCount: number
   snapshotWrittenCount: number
   scoreSnapshotWrittenCount: number
+  billSnapshotWrittenCount: number
 } {
   const attemptedShopCount = shopResults.length
   let succeededShopCount = 0
@@ -30,27 +37,32 @@ export function summarizeBossRun(shopResults: ShopSyncResult[]): {
   let skippedShopCount = 0
   let snapshotWrittenCount = 0
   let scoreSnapshotWrittenCount = 0
+  let billSnapshotWrittenCount = 0
   const errors: string[] = []
 
   for (const r of shopResults) {
     const fundOk = r.fundSuccess
     const fundPartial = r.fundPartial === true
+    const billOk = r.billSuccess === true
+    const billPartial = r.billPartial === true
     const scoreOk = r.scoreSaved
     const scorePartial = r.scorePartial === true
     const allSkipped = r.skippedFresh === true
 
     if (r.fundSnapshotWritten) snapshotWrittenCount += 1
     if (r.scoreSaved) scoreSnapshotWrittenCount += 1
+    if (r.pendingSnapshotWritten) billSnapshotWrittenCount += 1
 
     if (allSkipped) {
       skippedShopCount += 1
-    } else if (fundOk && scoreOk && !fundPartial && !scorePartial) {
+    } else if (fundOk && billOk && scoreOk && !fundPartial && !billPartial && !scorePartial) {
       succeededShopCount += 1
-    } else if (fundOk || fundPartial || scoreOk || scorePartial) {
+    } else if (fundOk || fundPartial || billOk || billPartial || scoreOk || scorePartial) {
       partialShopCount += 1
     } else {
       failedShopCount += 1
       if (r.fundError) errors.push(`${r.shopKey}资金：${r.fundError}`)
+      if (r.billError) errors.push(`${r.shopKey}账单：${r.billError}`)
       if (r.scoreReason && !r.scoreSkipped) errors.push(`${r.shopKey}店铺分：${r.scoreReason}`)
     }
   }
@@ -74,5 +86,6 @@ export function summarizeBossRun(shopResults: ShopSyncResult[]): {
     skippedShopCount,
     snapshotWrittenCount,
     scoreSnapshotWrittenCount,
+    billSnapshotWrittenCount,
   }
 }

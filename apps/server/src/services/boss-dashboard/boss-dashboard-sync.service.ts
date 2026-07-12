@@ -1,6 +1,7 @@
 import { BOSS_DASHBOARD_SHOPS } from '../../config/boss-dashboard.constants'
 import { prisma } from '../../lib/prisma'
 import { resolveOfficialShopAccountForStatus } from '../official-shop-account.service'
+import { syncBossBillForShop } from './boss-dashboard-bill.service'
 import { syncBossFundForShop } from './boss-dashboard-fund.service'
 import { syncBossShopScoreForShop } from './boss-dashboard-score.service'
 import { logInfo, logWarn } from '../../utils/server-log'
@@ -36,6 +37,21 @@ export async function runBossDashboardSync(trigger: string): Promise<void> {
           continue
         }
         const fund = await syncBossFundForShop(shop)
+        let bill: {
+          success: boolean
+          partial?: boolean
+          pendingSnapshotWritten?: boolean
+          pendingOrderCount?: number
+          periodBillWrittenCount?: number
+          error?: string
+        } = { success: false, error: 'skipped' }
+        try {
+          bill = await syncBossBillForShop(shop)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          logWarn('老板同步', `${shop.shopName} 账单失败：${msg}`)
+          bill = { success: false, error: msg }
+        }
         let score: {
           skipped: boolean
           saved: boolean
@@ -56,6 +72,12 @@ export async function runBossDashboardSync(trigger: string): Promise<void> {
           fundPartial: fund.partial,
           fundSnapshotWritten: fund.snapshotWritten,
           fundError: fund.error ?? null,
+          billSuccess: bill.success,
+          billPartial: bill.partial,
+          pendingSnapshotWritten: bill.pendingSnapshotWritten,
+          pendingOrderCount: bill.pendingOrderCount,
+          periodBillWrittenCount: bill.periodBillWrittenCount,
+          billError: bill.error ?? null,
           scoreSkipped: score.skipped,
           scoreSaved: score.saved,
           scorePartial: score.partial,
@@ -64,9 +86,12 @@ export async function runBossDashboardSync(trigger: string): Promise<void> {
           skippedFresh:
             !fund.snapshotWritten &&
             !fund.success &&
+            !bill.pendingSnapshotWritten &&
+            !bill.success &&
             score.skipped &&
             !score.saved &&
-            !fund.error,
+            !fund.error &&
+            !bill.error,
         })
       }
       const summary = summarizeBossRun(shopResults)
@@ -81,7 +106,7 @@ export async function runBossDashboardSync(trigger: string): Promise<void> {
       })
       logInfo(
         '老板同步',
-        `完成 status=${summary.status} 资金快照=${summary.snapshotWrittenCount} 店铺分=${summary.scoreSnapshotWrittenCount} 用时 ${Date.now() - startedAt.getTime()}ms`,
+        `完成 status=${summary.status} 资金快照=${summary.snapshotWrittenCount} 账单快照=${summary.billSnapshotWrittenCount} 店铺分=${summary.scoreSnapshotWrittenCount} 用时 ${Date.now() - startedAt.getTime()}ms`,
       )
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

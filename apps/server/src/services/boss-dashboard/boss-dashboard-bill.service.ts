@@ -72,7 +72,7 @@ async function fetchAllPendingOrdersInWindow(
   let pageNum = 1
   let totalPage = 1
   while (pageNum <= totalPage) {
-    const res = await fetchBossSettleBillListAudited(shop, body, pageNum)
+    const res = await fetchBossSettleBillListAudited(shop, { ...body, pageNum }, pageNum)
     if (!res.ok || res.data == null) {
       return { rows: [], failed: true, error: res.errorMessage ?? '待结算明细失败' }
     }
@@ -95,7 +95,12 @@ async function fetchPeriodBillsAllPages(
   let pageNum = 1
   let totalPage = 1
   while (pageNum <= totalPage) {
-    const res = await fetchBossPeriodSettleBillListAudited(shop, body, pageNum, apiName)
+    const res = await fetchBossPeriodSettleBillListAudited(
+      shop,
+      { ...body, pageNum },
+      pageNum,
+      apiName,
+    )
     if (!res.ok || res.data == null) {
       throw new Error(res.errorMessage ?? `${apiName} 失败`)
     }
@@ -171,18 +176,20 @@ async function upsertPeriodBillRows(
 
 async function reconcileFundBillForShop(
   shop: GoodReviewShopDefinition,
-  liveAccountId: string,
 ): Promise<{ status: string; diffCent: number | null }> {
   const monthKey = shanghaiMonthKey()
-  const startTime = `${startOfMonthKeyShanghai(Number(monthKey.slice(0, 4)), Number(monthKey.slice(5, 7)))} 00:00:00`
-  const endTime = `${formatDateKeyShanghai()} 23:59:59`
+  const year = Number(monthKey.slice(0, 4))
+  const month = Number(monthKey.slice(5, 7))
+  const monthStart = `${startOfMonthKeyShanghai(year, month)} 00:00:00`
+  const monthEnd = `${formatDateKeyShanghai()} 23:59:59`
+
   const res = await fetchBossPeriodFundBillListAudited(
     shop,
     {
-      periodType: 'MONTH',
-      timeType: 'SETTLE_TIME',
-      startTime,
-      endTime,
+      periodType: 'DAY',
+      timeType: 'COMPLETE_TIME',
+      startTime: monthStart,
+      endTime: monthEnd,
       pageNum: 1,
       pageSize: BOSS_BILL_PAGE_SIZE,
     },
@@ -192,7 +199,7 @@ async function reconcileFundBillForShop(
     return { status: 'unknown', diffCent: null }
   }
   const parsed = parseBossPeriodFundBillPage(res.data)
-  const fundBill = parsed.rows[0]
+  const fundBill = parsed.rows.find((row) => row.totalChangeCent != null) ?? parsed.rows[0]
   if (!fundBill || fundBill.totalChangeCent == null) {
     return { status: 'unknown', diffCent: null }
   }
@@ -206,7 +213,7 @@ async function reconcileFundBillForShop(
     select: { incomeAmountCent: true, outcomeAmountCent: true },
   })
   const localNet = flows.reduce((acc, f) => acc + f.incomeAmountCent - f.outcomeAmountCent, 0)
-  const diff = (fundBill.totalChangeCent ?? 0) - localNet
+  const diff = fundBill.totalChangeCent - localNet
   if (Math.abs(diff) <= 1) return { status: 'ok', diffCent: diff }
   return { status: 'reconciliation_warning', diffCent: diff }
 }
@@ -354,7 +361,7 @@ export async function syncBossBillForShop(shop: GoodReviewShopDefinition): Promi
 
   let fundReconcile = { status: 'unknown', diffCent: null as number | null }
   try {
-    fundReconcile = await reconcileFundBillForShop(shop, account.id)
+    fundReconcile = await reconcileFundBillForShop(shop)
   } catch (err) {
     logWarn('老板账单', `${shop.shopName} 资金账单核对失败：${err instanceof Error ? err.message : String(err)}`)
   }

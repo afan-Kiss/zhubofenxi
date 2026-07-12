@@ -38,13 +38,43 @@ export function readSettleBillField(fields: SettleBillField[], code: string): Se
   return fields.find((f) => f.code === code) ?? null
 }
 
-/** SELLER_INCOME.value 为分；其余金额字段按元字符串或分处理 */
+/** settleBill / feeDetailInfo 数组里 value 为分的字段 */
+const SETTLE_BILL_VALUE_CENT_CODES = new Set([
+  'SELLER_INCOME',
+  'TOTAL_IN_AMOUNT',
+  'TOTAL_OUT_AMOUNT',
+  'TOTAL_GOODS_COMMISSION',
+  'TOTAL_CPS_COMMISSION',
+  'TOTAL_INSTALLMENT_AMOUNT',
+  ...BOSS_BILL_FEE_CODES,
+])
+
+function parseBillArrayValueCent(raw: unknown, displayValue?: unknown): number | null {
+  if (raw == null || raw === '') {
+    if (displayValue != null && displayValue !== '') {
+      return yuanStringToCent(displayValue, 'displayValue')
+    }
+    return null
+  }
+  const sv = String(raw).trim()
+  if (!sv) return null
+  if (!sv.includes('.') && /^-?\d+$/.test(sv)) {
+    const n = Number(sv)
+    if (Number.isFinite(n)) return Math.round(n)
+  }
+  const fromRaw = yuanStringToCent(raw, 'value')
+  if (fromRaw != null) return fromRaw
+  if (displayValue != null && displayValue !== '') {
+    return yuanStringToCent(displayValue, 'displayValue')
+  }
+  return null
+}
+
+/** SELLER_INCOME.value 为分；feeDetailInfo 数组 value 亦为分 */
 export function parseSettleBillCentField(field: SettleBillField | null, fieldName: string): number | null {
   if (!field || field.value == null || field.value === '') return null
-  if (fieldName === 'SELLER_INCOME') {
-    const n = typeof field.value === 'number' ? field.value : Number(String(field.value))
-    if (Number.isFinite(n)) return Math.round(n)
-    return null
+  if (SETTLE_BILL_VALUE_CENT_CODES.has(fieldName)) {
+    return parseBillArrayValueCent(field.value, field.displayValue)
   }
   return yuanStringToCent(field.value, fieldName)
 }
@@ -53,6 +83,9 @@ export function parseBossBillDateTime(raw: unknown): Date | null {
   if (raw == null || raw === '') return null
   const s = String(raw).trim()
   if (!s) return null
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    return new Date(`${s}T00:00:00+08:00`)
+  }
   const normalized = s.includes('T') ? s : s.replace(' ', 'T')
   const d = new Date(`${normalized}+08:00`)
   return Number.isNaN(d.getTime()) ? null : d
@@ -216,7 +249,7 @@ export function parseBossFeeDetailInfo(raw: unknown): BossFeeDetailMap {
       const rec = asRecord(item)
       if (!rec?.code) continue
       const code = String(rec.code)
-      const cent = yuanStringToCent(rec.value ?? rec.displayValue, code)
+      const cent = parseBillArrayValueCent(rec.value, rec.displayValue)
       if (cent != null) result[code] = cent
     }
     for (const code of BOSS_BILL_FEE_CODES) {

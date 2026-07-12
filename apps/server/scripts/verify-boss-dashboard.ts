@@ -19,6 +19,7 @@ import {
   buildThirtyDayWindows,
   checkPendingReconciliation,
   parseBossPendingSettleOrderRow,
+  parseBossPeriodSettleBillRow,
   parseBossSellerPreIncome,
   parseBossSettleBillListPage,
   parseBossStoreInfo,
@@ -391,21 +392,48 @@ async function main() {
   const preIncome = parseBossSellerPreIncome({
     data: { allAmount: '22618.67', sellerAccountAmount: '22618.67', alipayAmount: '0.00', wechatAmount: '0.00' },
   })
-  if (preIncome.allAmountCent === 2261867) ok('allAmount 元字符串正确转分')
+  if (preIncome.allAmountCent === 2261867) ok('allAmount 元字符串正确转分（HAR 22618.67）')
   else fail(`allAmount 转分错误：${preIncome.allAmountCent}`)
 
   const pendingRow = parseBossPendingSettleOrderRow(
     {
       settleBill: [
-        { code: 'SETTLE_NO', value: 'RB001' },
-        { code: 'PACKAGE_ID', value: 'P123' },
-        { code: 'SELLER_INCOME', value: '39705' },
+        { code: 'SETTLE_NO', value: 'RB0226071100000000000000000010641211' },
+        { code: 'PACKAGE_ID', value: 'P799318986560245961' },
+        { code: 'SELLER_INCOME', value: '20705', displayValue: '207.05' },
+        { code: 'TOTAL_GOODS_COMMISSION', value: '995', displayValue: '-9.95' },
       ],
     },
     'shiyuju',
   )
-  if (pendingRow?.sellerIncomeCent === 39705) ok('SELLER_INCOME.value 按分解析')
-  else fail('SELLER_INCOME 应按分读取')
+  if (pendingRow?.sellerIncomeCent === 20705) ok('HAR SELLER_INCOME.value=20705 按分解析')
+  else fail(`HAR SELLER_INCOME 解析错误：${pendingRow?.sellerIncomeCent}`)
+  if (pendingRow?.platformCommissionCent === 995) ok('HAR TOTAL_GOODS_COMMISSION.value=995 按分解析')
+  else fail(`HAR 佣金解析错误：${pendingRow?.platformCommissionCent}`)
+
+  const harFeeDetail = parseBossFeeDetailInfo([
+    { code: 'STATEMENT_IN', value: '215713', displayValue: '2157.13' },
+    { code: 'STATEMENT_REFUND', value: '-489189', displayValue: '-4891.89' },
+  ])
+  if (harFeeDetail.STATEMENT_IN === 215713) ok('HAR feeDetailInfo 数组 STATEMENT_IN 按分解析')
+  else fail(`HAR feeDetailInfo 解析错误：${harFeeDetail.STATEMENT_IN}`)
+  if (harFeeDetail.STATEMENT_REFUND === -489189) ok('HAR feeDetailInfo 退款保留原始正负分')
+  else fail(`HAR 退款符号错误：${harFeeDetail.STATEMENT_REFUND}`)
+
+  const harPeriodBill = parseBossPeriodSettleBillRow({
+    periodSettleNo: 'RB0626071100000000000000000004147814',
+    periodType: 'DAY',
+    billDate: '2026-07-12 00:00:00',
+    startTime: '2026-07-11',
+    endTime: '2026-07-12 00:00:00',
+    totalChangeAmount: '2157.13',
+    totalCommissionAmount: '93.87',
+    settleOrderCount: 3,
+    processStatus: 'SUCCESS',
+    feeDetailInfo: [{ code: 'STATEMENT_IN', value: '215713', displayValue: '2157.13' }],
+  })
+  if (harPeriodBill?.totalChangeCent === 215713) ok('HAR 日账单 totalChangeAmount 元转分')
+  else fail(`HAR totalChangeAmount 错误：${harPeriodBill?.totalChangeCent}`)
 
   const windows = buildThirtyDayWindows('2026-01-01', '2026-02-15', 30, (key, delta) => {
     const [y, m, d] = key.split('-').map(Number)

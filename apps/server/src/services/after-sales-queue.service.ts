@@ -191,23 +191,24 @@ export async function selectAfterSalesQueueTasks(
   resetAfterSalesQueueBatchShopFlags()
 
   const now = new Date()
-  const candidates = await prisma.xhsAfterSalesWorkbenchQueue.findMany({
-    where: {
-      OR: [
-        { status: 'pending' },
-        { status: 'retry_wait', nextAttemptAt: { lte: now } },
-      ],
-    },
-    orderBy: [{ nextAttemptAt: 'asc' }, { createdAt: 'asc' }],
-    take: limits.globalPerMinute * 4,
-    select: {
-      id: true,
-      liveAccountId: true,
-      orderNo: true,
-      status: true,
-      temporaryAttemptCount: true,
-    },
-  })
+  // SQLite 存 naive datetime；Prisma DateTime 过滤在部分环境下会匹配不到到期任务
+  const candidateLimit = limits.globalPerMinute * 4
+  const candidates = await prisma.$queryRaw<
+    Array<{
+      id: string
+      liveAccountId: string
+      orderNo: string
+      status: string
+      temporaryAttemptCount: number
+    }>
+  >`
+    SELECT id, liveAccountId, orderNo, status, temporaryAttemptCount
+    FROM XhsAfterSalesWorkbenchQueue
+    WHERE status = 'pending'
+       OR (status = 'retry_wait' AND (nextAttemptAt IS NULL OR nextAttemptAt <= datetime('now')))
+    ORDER BY COALESCE(nextAttemptAt, createdAt) ASC, createdAt ASC
+    LIMIT ${candidateLimit}
+  `
 
   const selected: typeof candidates = []
   const perShop = new Map<string, number>()

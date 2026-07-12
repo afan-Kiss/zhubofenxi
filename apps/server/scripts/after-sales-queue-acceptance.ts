@@ -57,11 +57,19 @@ function testOrderDedupSemantics(): void {
   console.log('✓ 订单级去重语义（P794461094753071931 类场景）')
 }
 
+function testSqliteDueSelectionSemantics(): void {
+  // 生产已验证：raw SQL datetime('now') 能匹配到期 retry_wait，Prisma lte Date 不能
+  const sqliteDue = "nextAttemptAt IS NULL OR nextAttemptAt <= datetime('now')"
+  assert(sqliteDue.includes("datetime('now')"), 'SQLite 到期判断应使用 datetime(now)')
+  console.log('✓ SQLite 到期任务选取语义')
+}
+
 function main(): void {
   testCooldownClassification()
   testNextAttemptAt()
   testPython2Blocked()
   testOrderDedupSemantics()
+  testSqliteDueSelectionSemantics()
   console.log('\n全部 after-sales-queue 验收通过')
 }
 

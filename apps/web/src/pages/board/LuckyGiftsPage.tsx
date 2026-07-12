@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckSquare, Copy, Gift, Loader2, RefreshCw, Square, Truck } from 'lucide-react'
+import { CheckSquare, ChevronDown, Copy, Gift, Info, Loader2, RefreshCw, Square, Truck, X } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
 import { useAuth } from '../../providers/AuthProvider'
 import {
@@ -95,6 +95,14 @@ interface LuckyGiftItem {
 
 const SHOP_ORDER = ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu'] as const
 
+const FILTER_BTN =
+  'inline-flex h-9 items-center rounded-lg border px-3 text-sm transition-colors'
+const FILTER_BTN_ACTIVE = 'border-slate-800 bg-slate-800 text-white'
+const FILTER_BTN_IDLE = 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+const ACTION_BTN =
+  'inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50'
+const ACTION_BTN_PRIMARY = 'inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm text-white hover:bg-emerald-700'
+
 function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -109,6 +117,163 @@ function statusTone(status: string): string {
     return 'bg-amber-50 text-amber-800 border-amber-200'
   if (status === 'shipped') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
   return 'bg-slate-50 text-slate-600 border-slate-200'
+}
+
+function shopPillClass(active: boolean): string {
+  return [
+    'inline-flex min-h-[3rem] min-w-[8.5rem] flex-col items-start justify-center rounded-xl border px-3 py-2 text-left transition-colors',
+    active ? 'border-slate-800 bg-slate-800 text-white shadow-sm' : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300',
+  ].join(' ')
+}
+
+function LuckyGiftRow(props: {
+  item: LuckyGiftItem
+  checked: boolean
+  onToggle: () => void
+  expanded: boolean
+  onToggleExpand: () => void
+  canViewPii: boolean
+  canMutate: boolean
+  isSuperAdmin: boolean
+  onCopy: () => void
+  onShip: () => void
+  onUndo: () => void
+}) {
+  const { item, checked, expanded } = props
+  const showAddress = item.shipmentStatus !== 'no_address'
+  const freight = item.freightLabel?.trim() || '到付'
+
+  return (
+    <article
+      className={`rounded-2xl border bg-white shadow-sm ${
+        item.shipmentStatus === 'no_address' || item.shipmentStatus === 'incomplete_address'
+          ? 'border-amber-100'
+          : 'border-slate-100'
+      }`}
+    >
+      <div className="flex gap-3 p-4 sm:gap-4">
+        <div className="flex shrink-0 items-start pt-1">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={props.onToggle}
+            className="mt-0.5 h-4 w-4 rounded border-slate-300"
+            aria-label="选择此条"
+          />
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="min-w-0 flex-1 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-semibold text-slate-900">{item.giftName || '直播福袋'}</h3>
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{item.liveAccountName}</span>
+              <span className={`rounded-md border px-2 py-0.5 text-xs ${statusTone(item.shipmentStatus)}`}>
+                {item.shipmentStatusLabel}
+              </span>
+              {freight && (
+                <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-500">{freight}</span>
+              )}
+            </div>
+
+            <div className="space-y-1 text-sm text-slate-700">
+              <p>
+                <span className="text-slate-500">中奖人</span>{' '}
+                {item.winnerNickname || '—'}
+                {item.redId ? (
+                  <span className="ml-2 text-slate-500">
+                    小红书号 {item.redId}
+                  </span>
+                ) : null}
+              </p>
+              {showAddress ? (
+                <>
+                  <p>
+                    <span className="text-slate-500">收件人</span> {item.recipientName || '—'}
+                    <span className="mx-2 text-slate-300">|</span>
+                    <span className="text-slate-500">手机</span> {item.recipientPhone || '—'}
+                  </p>
+                  <p className="break-all leading-relaxed text-slate-800">{item.fullAddress || '—'}</p>
+                  {item.addressMissing?.length > 0 && item.shipmentStatus !== 'shipped' && (
+                    <p className="text-amber-800">地址不完整：{item.addressMissing.join('、')}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-amber-800">中奖人尚未填写地址</p>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
+              {item.winTime && <span>中奖 {formatDateTime(item.winTime)}</span>}
+              {item.shipDeadlineHint && item.shipDeadlineHint !== '—' && (
+                <span>{item.shipDeadlineHint}</span>
+              )}
+              {item.addressDeadlineHint && <span>{item.addressDeadlineHint}</span>}
+            </div>
+
+            <button
+              type="button"
+              onClick={props.onToggleExpand}
+              className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
+            >
+              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+              {expanded ? '收起更多信息' : '展开更多信息'}
+            </button>
+
+            {expanded && (
+              <div className="space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                <p>福袋编号 {item.luckyDrawId}</p>
+                {item.roomId && <p>直播间编号 {item.roomId}</p>}
+                {item.firstAddressSeenAt && (
+                  <p>系统首次发现地址 {formatDateTime(item.firstAddressSeenAt)}</p>
+                )}
+                {item.markedShippedAt && <p>系统已记录发货 {formatDateTime(item.markedShippedAt)}</p>}
+                {(item.courierCompany || item.trackingNo || item.trackingPending) && (
+                  <p>
+                    物流 {item.courierCompany || '—'} /{' '}
+                    {item.trackingPending ? '单号待补' : item.trackingNo || '—'}
+                  </p>
+                )}
+                {item.shipmentNote && <p>备注 {item.shipmentNote}</p>}
+                {item.shippingStatusSourceLabel && (
+                  <p>状态来源 {item.shippingStatusSourceLabel}</p>
+                )}
+                {item.rawAddress && (
+                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-[11px]">
+                    {JSON.stringify(item.rawAddress, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex shrink-0 flex-row items-center gap-2 sm:w-28 sm:flex-col sm:justify-center">
+            <button type="button" onClick={props.onCopy} className={`${ACTION_BTN} w-full justify-center`}>
+              <Copy className="h-3.5 w-3.5" />
+              复制
+            </button>
+            {props.canMutate && item.shipmentStatus === 'pending' && item.addressComplete && (
+              <button type="button" onClick={props.onShip} className={`${ACTION_BTN_PRIMARY} w-full justify-center`}>
+                <Truck className="h-3.5 w-3.5" />
+                标记已发
+              </button>
+            )}
+            {props.canMutate &&
+              props.isSuperAdmin &&
+              item.shipmentStatus === 'shipped' &&
+              item.shippingStatusSource === 'local' && (
+                <button
+                  type="button"
+                  onClick={props.onUndo}
+                  className={`${ACTION_BTN} w-full justify-center text-xs`}
+                >
+                  撤销
+                </button>
+              )}
+          </div>
+        </div>
+      </div>
+    </article>
+  )
 }
 
 export const LuckyGiftsPage: React.FC = () => {
@@ -127,6 +292,7 @@ export const LuckyGiftsPage: React.FC = () => {
   const [syncing, setSyncing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [showSyncDetails, setShowSyncDetails] = useState(false)
 
   const [shopKey, setShopKey] = useState<string>('all')
   const [status, setStatus] = useState<StatusFilter>('todo')
@@ -140,7 +306,7 @@ export const LuckyGiftsPage: React.FC = () => {
   const [courier, setCourier] = useState('')
   const [trackingNo, setTrackingNo] = useState('')
   const [note, setNote] = useState('')
-  const [expandedRaw, setExpandedRaw] = useState<Set<string>>(new Set())
+  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -189,6 +355,18 @@ export const LuckyGiftsPage: React.FC = () => {
     [items, selected],
   )
 
+  const sortedShops = useMemo(
+    () =>
+      (summary?.shops ?? [])
+        .slice()
+        .sort(
+          (a, b) =>
+            SHOP_ORDER.indexOf(a.shopKey as (typeof SHOP_ORDER)[number]) -
+            SHOP_ORDER.indexOf(b.shopKey as (typeof SHOP_ORDER)[number]),
+        ),
+    [summary?.shops],
+  )
+
   async function handleCopyPendingAll() {
     if (!canViewPii) {
       setMessage('当前账号无权复制完整地址')
@@ -217,7 +395,7 @@ export const LuckyGiftsPage: React.FC = () => {
     }
     const text = buildLuckyGiftAuditCopyText(items)
     const ok = await copyTextToClipboard(text)
-    setMessage(ok ? `已复制内部核对清单 ${items.length} 条（含未填地址）` : '复制失败')
+    setMessage(ok ? `已复制 ${items.length} 条地址信息` : '复制失败')
   }
 
   async function handleCopyOne(item: LuckyGiftItem) {
@@ -228,7 +406,7 @@ export const LuckyGiftsPage: React.FC = () => {
     if (!(item.shipmentStatus === 'pending' && item.addressComplete)) {
       const text = buildLuckyGiftAuditCopyText([item])
       const ok = await copyTextToClipboard(text)
-      setMessage(ok ? '已复制该条核对信息' : '复制失败')
+      setMessage(ok ? '已复制该条信息' : '复制失败')
       return
     }
     const text = buildLuckyGiftShipCopyText([item])
@@ -245,17 +423,9 @@ export const LuckyGiftsPage: React.FC = () => {
         '/api/board/lucky-gifts/sync',
         { method: 'POST' },
       )
-      const parts = [
-        `拉到数据：${data.withDataShopCount ?? 0} 店`,
-        `确认无数据：${data.confirmedEmptyShopCount ?? 0} 店`,
-        `尚不能确认为空：${data.ambiguousEmptyShopCount ?? 0} 店`,
-        `部分成功：${data.partialSuccessShopCount ?? 0} 店`,
-        `失败：${data.failedShopCount} 店`,
-        `新增福袋：${data.newDrawCount}`,
-        `新增中奖人：${data.newWinnerCount ?? 0}`,
-        `新增地址：${data.newAddressCount}`,
-      ]
-      setMessage(`同步完成：${parts.join('｜')}`)
+      setMessage(
+        `同步完成：拉到 ${data.withDataShopCount ?? 0} 店，新增福袋 ${data.newDrawCount}，新增地址 ${data.newAddressCount}`,
+      )
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : '同步失败')
@@ -337,62 +507,69 @@ export const LuckyGiftsPage: React.FC = () => {
       { key: 'pending', label: '待发货', value: summary?.pending ?? 0 },
       { key: 'no_address', label: '未填地址', value: summary?.noAddress ?? 0 },
       { key: 'shipped', label: '已发货', value: summary?.shipped ?? 0 },
-      { key: 'todayNew', label: '今日新增', value: summary?.todayNew ?? 0 },
-      { key: 'allWinners', label: '全部福袋', value: summary?.totalWinners ?? 0 },
+      { key: 'todayNew', label: '今日新同步', value: summary?.todayNew ?? 0 },
+      { key: 'allWinners', label: '全部中奖记录', value: summary?.totalWinners ?? 0 },
     ]
 
   return (
-    <div className="space-y-4" data-testid="lucky-gifts-page">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-xl font-semibold text-slate-900">
-            <Gift className="h-5 w-5 text-rose-500" />
-            福袋发货
-          </h1>
-          <p className="mt-1 text-sm text-slate-500">
-            四店直播福袋统一管理｜全部到付｜地址可直接复制给快递员
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {isSuperAdmin && (
+    <div className="mx-auto max-w-6xl space-y-6 pb-8" data-testid="lucky-gifts-page">
+      {/* 1. 顶部标题区 */}
+      <section className="space-y-3">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="flex items-center gap-2 text-2xl font-semibold text-slate-900">
+              <Gift className="h-6 w-6 text-rose-500" />
+              福袋发货
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              四店直播福袋统一管理｜地址可直接复制给快递员
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={() => void handleSyncAll()}
+                disabled={syncing}
+                className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
+              >
+                {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                立即同步四店
+              </button>
+            )}
             <button
               type="button"
-              onClick={() => void handleSyncAll()}
-              disabled={syncing}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm text-white hover:bg-slate-800 disabled:opacity-60"
+              onClick={() => void load()}
+              className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-700 hover:bg-slate-50"
             >
-              {syncing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              立即同步四店
+              刷新本地
             </button>
-          )}
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
-          >
-            刷新本地
-          </button>
+          </div>
         </div>
-      </div>
 
-      {summary && (
-        <div className="rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500">
-          最近同步：{formatDateTime(summary.sync.lastSyncedAt)}｜拉到数据{' '}
-          {summary.sync.withDataShopCount ?? 0} 店｜确认无数据{' '}
-          {summary.sync.confirmedEmptyShopCount ?? 0} 店｜尚不能确认为空{' '}
-          {summary.sync.ambiguousEmptyShopCount ?? 0} 店｜失败 {summary.sync.failedShopCount} 店｜新增福袋{' '}
-          {summary.sync.newDrawCount}｜新增中奖人 {summary.sync.newWinnerCount ?? 0}｜新增地址{' '}
-          {summary.sync.newAddressCount}
-          {summary.sync.failedShops?.length > 0 && (
-            <span className="ml-2 text-amber-700">
-              异常：
-              {summary.sync.failedShops.map((s) => `${s.shopName}（${s.error}）`).join('；')}
-            </span>
-          )}
-        </div>
-      )}
+        {summary && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-400">
+            <span>最近同步 {formatDateTime(summary.sync.lastSyncedAt)}</span>
+            <span>·</span>
+            <span>拉到数据 {summary.sync.withDataShopCount ?? 0} 店</span>
+            <span>·</span>
+            <span>新增福袋 {summary.sync.newDrawCount}</span>
+            <span>·</span>
+            <span>新增地址 {summary.sync.newAddressCount}</span>
+            <button
+              type="button"
+              onClick={() => setShowSyncDetails(true)}
+              className="inline-flex items-center gap-1 text-slate-500 hover:text-slate-700"
+            >
+              <Info className="h-3.5 w-3.5" />
+              同步详情
+            </button>
+          </div>
+        )}
+      </section>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+      {/* 2. 总览区 */}
+      <section className="grid grid-flow-col auto-cols-[minmax(7.5rem,1fr)] gap-3 overflow-x-auto pb-1 sm:grid-flow-row sm:grid-cols-5 sm:overflow-visible sm:pb-0">
         {summaryCards.map((c) => (
           <button
             key={c.key}
@@ -408,352 +585,249 @@ export const LuckyGiftsPage: React.FC = () => {
                 setStatus(c.key)
               }
             }}
-            className="rounded-2xl border border-slate-100 bg-white px-3 py-3 text-left shadow-sm hover:border-slate-300"
+            className="flex min-h-[5.5rem] flex-col justify-center rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm transition hover:border-slate-300"
           >
-            <div className="text-[11px] text-slate-500">{c.label}</div>
-            <div className="mt-1 text-lg font-semibold text-slate-900">{c.value}</div>
+            <div className="text-xs text-slate-500">{c.label}</div>
+            <div className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{c.value}</div>
           </button>
         ))}
-      </div>
+      </section>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => setShopKey('all')}
-          className={`rounded-full border px-3 py-1.5 text-xs ${
-            shopKey === 'all' ? 'border-slate-900 bg-slate-900 text-white' : 'border-slate-200 bg-white'
-          }`}
-        >
-          全部四店
+      {/* 3. 店铺二级汇总 */}
+      <section className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => setShopKey('all')} className={shopPillClass(shopKey === 'all')}>
+          <span className="text-sm font-medium">全部四店</span>
         </button>
-        {(summary?.shops ?? [])
-          .slice()
-          .sort((a, b) => SHOP_ORDER.indexOf(a.shopKey as (typeof SHOP_ORDER)[number]) - SHOP_ORDER.indexOf(b.shopKey as (typeof SHOP_ORDER)[number]))
-          .map((s) => (
-            <button
-              key={s.shopKey}
-              type="button"
-              onClick={() => setShopKey(s.shopKey)}
-              className={`rounded-full border px-3 py-1.5 text-xs ${
-                shopKey === s.shopKey
-                  ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-200 bg-white'
-              }`}
-            >
-              {s.shopName}
-              <span className="ml-1 opacity-80">
-                福袋 {s.drawCount}｜中奖 {s.winnerCount}｜待发 {s.pending}｜未填地址 {s.noAddress}
-              </span>
-              {s.syncStatusLabel && (
-                <span className="ml-1 block text-[10px] opacity-70">
-                  {s.syncStatusLabel}
-                  {s.lastSyncedAt ? `｜${formatDateTime(s.lastSyncedAt)}` : ''}
-                  {s.lastError ? `｜${s.lastError}` : ''}
-                </span>
-              )}
-            </button>
-          ))}
-      </div>
-
-      <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ['todo', '待处理'],
-            ['pending', '待发货'],
-            ['no_address', '未填地址'],
-            ['shipped', '已发货'],
-            ['all', '全部'],
-          ] as const
-        ).map(([k, label]) => (
+        {sortedShops.map((s) => (
           <button
-            key={k}
+            key={s.shopKey}
             type="button"
-            onClick={() => setStatus(k)}
-            className={`rounded-lg border px-3 py-1.5 text-xs ${
-              status === k ? 'border-rose-300 bg-rose-50 text-rose-800' : 'border-slate-200 bg-white'
-            }`}
+            onClick={() => setShopKey(s.shopKey)}
+            className={shopPillClass(shopKey === s.shopKey)}
+            title={
+              s.syncStatusLabel || s.lastError
+                ? `${s.syncStatusLabel ?? ''}${s.lastError ? ` · ${s.lastError}` : ''}`
+                : undefined
+            }
           >
-            {label}
+            <span className="text-sm font-medium leading-tight">{s.shopName}</span>
+            <span className={`mt-0.5 text-[11px] leading-snug ${shopKey === s.shopKey ? 'text-slate-200' : 'text-slate-500'}`}>
+              活动 {s.drawCount}｜待发 {s.pending}｜缺地址 {s.noAddress}
+            </span>
           </button>
         ))}
-      </div>
+      </section>
 
-      <div className="flex flex-col gap-2 rounded-xl border border-slate-100 bg-white p-3 sm:flex-row sm:items-center">
-        <input
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          placeholder="搜索昵称/收件人/手机/地址/福袋名/福袋ID/直播间ID"
-          className="min-w-0 flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm"
-        />
+      {/* 4. 筛选 / 操作区 */}
+      <section className="space-y-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap gap-2">
           {(
             [
-              ['today', '今天'],
-              ['7d', '近7天'],
-              ['30d', '近30天'],
-              ['all', '全部历史'],
-              ['custom', '自定义'],
+              ['todo', '待处理'],
+              ['pending', '待发货'],
+              ['no_address', '未填地址'],
+              ['shipped', '已发货'],
+              ['all', '全部'],
             ] as const
           ).map(([k, label]) => (
             <button
               key={k}
               type="button"
-              onClick={() => setDateRange(k)}
-              className={`rounded-lg border px-2.5 py-1.5 text-xs ${
-                dateRange === k ? 'border-slate-800 bg-slate-800 text-white' : 'border-slate-200'
-              }`}
+              onClick={() => setStatus(k)}
+              className={`${FILTER_BTN} ${status === k ? FILTER_BTN_ACTIVE : FILTER_BTN_IDLE}`}
             >
               {label}
             </button>
           ))}
         </div>
+
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <input
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="搜索昵称、收件人、手机、地址或福袋名"
+            className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 px-3 text-sm"
+          />
+          <div className="flex flex-wrap gap-2">
+            {(
+              [
+                ['today', '今天'],
+                ['7d', '近7天'],
+                ['30d', '近30天'],
+                ['all', '全部历史'],
+                ['custom', '自定义'],
+              ] as const
+            ).map(([k, label]) => (
+              <button
+                key={k}
+                type="button"
+                onClick={() => setDateRange(k)}
+                className={`${FILTER_BTN} ${dateRange === k ? FILTER_BTN_ACTIVE : FILTER_BTN_IDLE}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {dateRange === 'custom' && (
-          <div className="flex items-center gap-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
             <input
               type="date"
               value={startDate}
               onChange={(e) => setStartDate(e.target.value)}
-              className="rounded border border-slate-200 px-2 py-1"
+              className="h-9 rounded-lg border border-slate-200 px-2"
             />
             <span>至</span>
             <input
               type="date"
               value={endDate}
               onChange={(e) => setEndDate(e.target.value)}
-              className="rounded border border-slate-200 px-2 py-1"
+              className="h-9 rounded-lg border border-slate-200 px-2"
             />
           </div>
         )}
-      </div>
 
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => void handleCopyPendingAll()}
-          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs hover:bg-slate-50"
-        >
-          <Copy className="h-3.5 w-3.5" />
-          复制全部待发地址
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleCopySelected()}
-          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs hover:bg-slate-50"
-        >
-          复制所选
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelected(new Set(items.map((i) => i.id)))}
-          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
-        >
-          <CheckSquare className="h-3.5 w-3.5" />
-          全选当前结果
-        </button>
-        <button
-          type="button"
-          onClick={() => setSelected(new Set())}
-          className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs"
-        >
-          <Square className="h-3.5 w-3.5" />
-          取消全选
-        </button>
-        <button
-          type="button"
-          onClick={() => void handleCopyAuditAll()}
-          className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900"
-        >
-          复制全部（含未填地址）
-        </button>
-        {canMutate && (
+        <div className="flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+          <button type="button" onClick={() => void handleCopyPendingAll()} className={ACTION_BTN}>
+            <Copy className="h-3.5 w-3.5" />
+            复制全部待发货地址
+          </button>
+          <button type="button" onClick={() => void handleCopySelected()} className={ACTION_BTN}>
+            复制所选
+          </button>
+          <button type="button" onClick={() => void handleCopyAuditAll()} className={ACTION_BTN}>
+            复制当前结果地址（含缺失标记）
+          </button>
           <button
             type="button"
-            onClick={() => {
-              setBatchShip(true)
-              setShipModalId('batch')
-            }}
-            className="inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-3 py-2 text-xs text-white"
+            onClick={() => setSelected(new Set(items.map((i) => i.id)))}
+            className={ACTION_BTN}
           >
-            <Truck className="h-3.5 w-3.5" />
-            标记所选已发
+            <CheckSquare className="h-3.5 w-3.5" />
+            全选当前结果
           </button>
-        )}
-        {isSuperAdmin && shopKey !== 'all' && (
-          <button
-            type="button"
-            onClick={() => void handleSyncShop(shopKey)}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-xs"
-          >
-            重新同步本店
+          <button type="button" onClick={() => setSelected(new Set())} className={ACTION_BTN}>
+            <Square className="h-3.5 w-3.5" />
+            取消全选
           </button>
-        )}
-      </div>
+          {canMutate && (
+            <button
+              type="button"
+              onClick={() => {
+                setBatchShip(true)
+                setShipModalId('batch')
+              }}
+              className={ACTION_BTN_PRIMARY}
+            >
+              <Truck className="h-3.5 w-3.5" />
+              标记所选已发
+            </button>
+          )}
+          {isSuperAdmin && shopKey !== 'all' && (
+            <button type="button" onClick={() => void handleSyncShop(shopKey)} className={ACTION_BTN}>
+              重新同步本店
+            </button>
+          )}
+        </div>
+      </section>
 
       {message && (
-        <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800">
           {message}
         </div>
       )}
       {error && (
-        <div className="rounded-lg border border-rose-100 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-          {error}
-        </div>
+        <div className="rounded-xl border border-rose-100 bg-rose-50 px-4 py-2.5 text-sm text-rose-700">{error}</div>
       )}
 
-      {loading ? (
-        <div className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-white px-4 py-10 text-sm text-slate-500">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          正在读取本地福袋数据…
-        </div>
-      ) : items.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-500">
-          当前筛选无记录。超级管理员可点击「立即同步四店」拉取平台数据。
-        </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="text-xs text-slate-500">共 {total} 条中奖记录（按中奖人计）</div>
-          {items.map((item) => {
-            const checked = selected.has(item.id)
-            const warn = item.shipmentStatus === 'no_address' || item.shipmentStatus === 'incomplete_address'
-            return (
-              <div
-                key={item.id}
-                className={`rounded-2xl border bg-white p-4 shadow-sm ${
-                  warn ? 'border-amber-200 bg-amber-50/40' : 'border-slate-100'
-                }`}
-              >
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          setSelected((prev) => {
-                            const next = new Set(prev)
-                            if (next.has(item.id)) next.delete(item.id)
-                            else next.add(item.id)
-                            return next
-                          })
-                        }}
-                      />
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
-                        {item.liveAccountName}
-                      </span>
-                      <span
-                        className={`rounded-full border px-2 py-0.5 text-xs ${statusTone(item.shipmentStatus)}`}
-                      >
-                        {item.shipmentStatusLabel}
-                      </span>
-                      <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs text-violet-700">
-                        到付
-                      </span>
-                      <span className="text-xs text-slate-500">{formatDateTime(item.winTime)}</span>
-                      <span className="text-[11px] text-slate-400">{item.shippingStatusSourceLabel}</span>
-                    </div>
+      {/* 5. 列表区 */}
+      <section className="space-y-3">
+        {!loading && items.length > 0 && (
+          <p className="text-xs text-slate-400">当前 {total} 条记录</p>
+        )}
 
-                    <div className="text-base font-medium text-slate-900 break-all">{item.giftName || '直播福袋'}</div>
-                    <div className="grid gap-1 text-sm text-slate-700 sm:grid-cols-2">
-                      <div>中奖人：{item.winnerNickname || '—'}</div>
-                      <div>小红书号：{item.redId || '—'}</div>
-                      {item.shipmentStatus === 'no_address' ? (
-                        <div className="sm:col-span-2 text-amber-800">中奖人尚未填写地址</div>
-                      ) : (
-                        <>
-                          <div className="break-all">收件人：{item.recipientName || '—'}</div>
-                          <div className="break-all">手机号：{item.recipientPhone || '—'}</div>
-                          <div className="sm:col-span-2 break-all whitespace-pre-wrap">
-                            收货地址：{item.fullAddress || '—'}
-                          </div>
-                        </>
-                      )}
-                      {item.addressMissing?.length > 0 && item.shipmentStatus !== 'shipped' && (
-                        <div className="sm:col-span-2 text-amber-800">
-                          缺少：{item.addressMissing.join('、')}
-                        </div>
-                      )}
-                      {item.addressDeadlineHint && (
-                        <div className="sm:col-span-2 text-xs text-amber-700">{item.addressDeadlineHint}</div>
-                      )}
-                      <div className="sm:col-span-2 text-xs text-slate-500">{item.shipDeadlineHint}</div>
-                      {item.firstAddressSeenAt && (
-                        <div className="sm:col-span-2 text-xs text-slate-400">
-                          系统首次发现地址：{formatDateTime(item.firstAddressSeenAt)}
-                        </div>
-                      )}
-                      <div className="break-all text-xs text-slate-500">福袋ID：{item.luckyDrawId}</div>
-                      <div className="break-all text-xs text-slate-500">直播间ID：{item.roomId || '—'}</div>
-                      {(item.courierCompany || item.trackingNo || item.trackingPending) && (
-                        <div className="sm:col-span-2 text-sm">
-                          物流：{item.courierCompany || '—'} /{' '}
-                          {item.trackingPending ? '物流单号待补' : item.trackingNo || '—'}
-                        </div>
-                      )}
-                      {item.markedShippedAt && (
-                        <div className="text-xs text-slate-500">
-                          标记发货：{formatDateTime(item.markedShippedAt)}
-                        </div>
-                      )}
-                    </div>
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-100 bg-white px-4 py-16 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            正在读取本地福袋数据…
+          </div>
+        ) : items.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-16 text-center text-sm text-slate-500">
+            当前没有符合条件的记录。可以点右上角「立即同步四店」重新拉数据。
+          </div>
+        ) : (
+          items.map((item) => (
+            <LuckyGiftRow
+              key={item.id}
+              item={item}
+              checked={selected.has(item.id)}
+              onToggle={() => {
+                setSelected((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(item.id)) next.delete(item.id)
+                  else next.add(item.id)
+                  return next
+                })
+              }}
+              expanded={expandedDetails.has(item.id)}
+              onToggleExpand={() => {
+                setExpandedDetails((prev) => {
+                  const next = new Set(prev)
+                  if (next.has(item.id)) next.delete(item.id)
+                  else next.add(item.id)
+                  return next
+                })
+              }}
+              canViewPii={canViewPii}
+              canMutate={canMutate}
+              isSuperAdmin={isSuperAdmin}
+              onCopy={() => void handleCopyOne(item)}
+              onShip={() => {
+                setBatchShip(false)
+                setShipModalId(item.id)
+              }}
+              onUndo={() => void undoShip(item.id)}
+            />
+          ))
+        )}
+      </section>
 
-                    <button
-                      type="button"
-                      className="text-xs text-slate-400 underline"
-                      onClick={() =>
-                        setExpandedRaw((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(item.id)) next.delete(item.id)
-                          else next.add(item.id)
-                          return next
-                        })
-                      }
-                    >
-                      {expandedRaw.has(item.id) ? '收起平台原始地址字段' : '展开平台原始地址字段'}
-                    </button>
-                    {expandedRaw.has(item.id) && item.rawAddress && (
-                      <pre className="overflow-x-auto rounded-lg bg-slate-50 p-2 text-[11px] text-slate-600">
-                        {JSON.stringify(item.rawAddress, null, 2)}
-                      </pre>
-                    )}
-                  </div>
-
-                  <div className="flex shrink-0 flex-row gap-2 lg:flex-col">
-                    <button
-                      type="button"
-                      onClick={() => void handleCopyOne(item)}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs hover:bg-slate-50"
-                    >
-                      复制这一单
-                    </button>
-                    {canMutate && item.shipmentStatus === 'pending' && item.addressComplete && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setBatchShip(false)
-                          setShipModalId(item.id)
-                        }}
-                        className="rounded-lg bg-emerald-600 px-3 py-2 text-xs text-white"
-                      >
-                        标记已发
-                      </button>
-                    )}
-                    {canMutate &&
-                      isSuperAdmin &&
-                      item.shipmentStatus === 'shipped' &&
-                      item.shippingStatusSource === 'local' && (
-                        <button
-                          type="button"
-                          onClick={() => void undoShip(item.id)}
-                          className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-600"
-                        >
-                          撤销误标记
-                        </button>
-                      )}
-                  </div>
+      {showSyncDetails && summary && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="text-base font-semibold text-slate-900">同步详情</h3>
+              <button type="button" onClick={() => setShowSyncDetails(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mt-3 space-y-2 text-sm text-slate-600">
+              <p>最近同步 {formatDateTime(summary.sync.lastSyncedAt)}</p>
+              <p>拉到数据 {summary.sync.withDataShopCount ?? 0} 店</p>
+              <p>确认无数据 {summary.sync.confirmedEmptyShopCount ?? 0} 店</p>
+              <p>尚不能确认为空 {summary.sync.ambiguousEmptyShopCount ?? 0} 店</p>
+              <p>部分成功 {summary.sync.partialSuccessShopCount ?? 0} 店</p>
+              <p>失败 {summary.sync.failedShopCount} 店</p>
+              <p>新增福袋 {summary.sync.newDrawCount} · 新增中奖人 {summary.sync.newWinnerCount ?? 0} · 新增地址 {summary.sync.newAddressCount}</p>
+              {summary.sync.failedShops?.length > 0 && (
+                <div className="rounded-lg bg-amber-50 px-3 py-2 text-amber-900">
+                  {summary.sync.failedShops.map((s) => (
+                    <p key={s.shopName}>{s.shopName}：{s.error}</p>
+                  ))}
                 </div>
+              )}
+              <div className="border-t border-slate-100 pt-2">
+                {sortedShops.map((s) => (
+                  <p key={s.shopKey} className="text-xs text-slate-500">
+                    {s.shopName}：{s.syncStatusLabel || '—'}
+                    {s.lastSyncedAt ? ` · ${formatDateTime(s.lastSyncedAt)}` : ''}
+                    {s.lastError ? ` · ${s.lastError}` : ''}
+                  </p>
+                ))}
               </div>
-            )
-          })}
+            </div>
+          </div>
         </div>
       )}
 
@@ -789,9 +863,7 @@ export const LuckyGiftsPage: React.FC = () => {
                   className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
                 />
               </label>
-              <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                运费方式：到付（只读）
-              </div>
+              <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-700">运费方式：到付（只读）</div>
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <button

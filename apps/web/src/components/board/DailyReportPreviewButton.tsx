@@ -18,15 +18,14 @@ function isTrendChartElementReady(el: Element): boolean {
   const trendState = el.getAttribute('data-anchor-trend-chart')
   const compareState = el.getAttribute('data-anchor-trend-compare')
   const state = trendState ?? compareState
-  if (state === 'empty') return false
+  // Empty placeholders never render curves; do not block capture waiting on them.
+  if (state === 'empty') return true
   if (state !== 'ready') return false
   const svg = el.querySelector('svg')
-  if (!svg || svg.getBoundingClientRect().height <= 0) return false
-  const paths = svg.querySelectorAll('path.recharts-curve, path.recharts-area-curve')
-  return paths.length > 0
+  return Boolean(svg && svg.getBoundingClientRect().height > 0)
 }
 
-async function waitForTrendChartsReady(root: HTMLElement, timeoutMs = 8000): Promise<void> {
+async function waitForTrendChartsReady(root: HTMLElement, timeoutMs = 5000): Promise<void> {
   const charts = Array.from(
     root.querySelectorAll('[data-anchor-trend-chart], [data-anchor-trend-compare]'),
   )
@@ -166,22 +165,37 @@ async function prepareExportPhotosForCapture(root: HTMLElement): Promise<() => v
   }
 }
 
+function withCaptureTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => {
+      window.setTimeout(() => reject(new Error(message)), timeoutMs)
+    }),
+  ])
+}
+
 async function renderSheetToPng(node: HTMLElement): Promise<string> {
   const baseOptions = {
     cacheBust: true,
     backgroundColor: '#ffffff',
     skipFonts: true,
+    style: { transform: 'scale(1)' },
   } as const
-  for (const pixelRatio of [3, 2, 1]) {
+  let lastError: unknown = null
+  // Long sheets with many charts can hang or OOM at pixelRatio 3; prefer 2 then 1.
+  for (const pixelRatio of [2, 1]) {
     try {
-      return await toPng(node, {
-        ...baseOptions,
-        pixelRatio,
-        style: { transform: 'scale(1)' },
-      })
-    } catch {
-      // try lower ratio on memory / canvas limits
+      return await withCaptureTimeout(
+        toPng(node, { ...baseOptions, pixelRatio }),
+        45_000,
+        '日报图片生成超时，请稍后重试',
+      )
+    } catch (err) {
+      lastError = err
     }
+  }
+  if (lastError instanceof Error && lastError.message.includes('日报')) {
+    throw lastError
   }
   throw new Error('日报图片生成失败')
 }
@@ -335,8 +349,8 @@ export const DailyReportPreviewButton: React.FC<Props> = ({
       ? createPortal(
           <div
             aria-hidden
-            className="pointer-events-none fixed left-0 top-0 -z-50 opacity-0"
-            style={{ width: sheetWidthPx }}
+            className="pointer-events-none fixed left-0 top-0 -z-50"
+            style={{ width: sheetWidthPx, visibility: 'hidden' }}
           >
             <DailyReportImageSheet ref={sheetRef} data={report} shipmentPhotos={sheetPhotos} />
           </div>,

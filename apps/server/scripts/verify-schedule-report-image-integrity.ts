@@ -252,13 +252,23 @@ function auditImageSheetStatic(): void {
 function auditExportStatic(): void {
   section('图片导出静态检查 OperationsDailyReport')
   const content = readWeb('pages/operations/OperationsDailyReport.tsx')
+  const exportLib = readWeb('lib/operations-report-image-export.ts')
   if (!content) return
 
-  if (!content.includes('toPng')) fail('OperationsDailyReport 未使用 toPng')
-  else ok('使用 toPng 导出')
-  if (!/pixelRatio:\s*2/.test(content)) fail('pixelRatio 未 >= 2')
-  else ok('pixelRatio >= 2')
-  if (!content.includes("backgroundColor: '#ffffff'")) fail('backgroundColor 不是白色')
+  if (!content.includes('captureOperationsReportSheet')) {
+    fail('OperationsDailyReport 未使用 captureOperationsReportSheet')
+  } else {
+    ok('使用 captureOperationsReportSheet 导出')
+  }
+  if (!exportLib.includes('toBlob')) fail('operations-report-image-export 未使用 toBlob')
+  else ok('使用 toBlob 导出')
+  if (!exportLib.includes('waitForReportSheetReady')) fail('缺少 waitForReportSheetReady')
+  else ok('有 waitForReportSheetReady')
+  if (!exportLib.includes('detectBlankImageBlob')) fail('缺少白图检测 detectBlankImageBlob')
+  else ok('有白图检测')
+  if (!/pixelRatio:\s*2/.test(exportLib)) fail('默认 pixelRatio 未 >= 2')
+  else ok('默认 pixelRatio >= 2')
+  if (!exportLib.includes("backgroundColor: '#ffffff'")) fail('backgroundColor 不是白色')
   else ok('backgroundColor 白色')
   if (!content.includes('previewUrl')) fail('缺少预览 previewUrl')
   else ok('有预览')
@@ -272,6 +282,18 @@ function auditExportStatic(): void {
   else ok('refreshing 时禁用或提示')
   if (!content.includes('下载长图')) fail('缺少下载长图按钮')
   else ok('有下载长图按钮')
+  if (content.includes('left-[-9999px]') || content.includes('left:-9999px')) {
+    fail('仍使用极端屏幕外定位 left:-9999px')
+  } else {
+    ok('未使用极端屏幕外定位')
+  }
+  if (!content.includes('OPERATIONS_REPORT_EXPORT_HOST_ID')) {
+    fail('缺少独立 export host')
+  } else {
+    ok('使用独立 export host')
+  }
+  if (!content.includes('onError')) fail('预览 img 缺少 onError')
+  else ok('预览 img 有 onError')
   if (content.includes('uploadDailyReportImage') || content.includes('上传图片')) {
     warn('OperationsDailyReport 似乎含上传图片入口，请确认是否与「仅导出长图」一致')
   } else {

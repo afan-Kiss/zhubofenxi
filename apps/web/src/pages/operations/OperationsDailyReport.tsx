@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { toPng } from 'html-to-image'
 import { createPortal } from 'react-dom'
 import { apiRequest } from '../../lib/api'
 import { useOperationsReportFetch } from '../../hooks/useOperationsReportFetch'
@@ -31,6 +30,16 @@ import type { OperationsBiDrillRequest } from './operationsBiDrillTypes'
 import { OperationsCoreMetrics, CollapsibleWarnings } from '../../components/operations/charts/OperationsCoreMetrics'
 import { DailyReportCharts } from '../../components/operations/charts/DailyReportCharts'
 import { useChartTopLimit } from '../../components/operations/charts/useChartTopLimit'
+import {
+  OPERATIONS_REPORT_EXPORT_HOST_ID,
+  captureOperationsReportSheet,
+  formatReportCaptureError,
+  getOperationsReportExportHostStyle,
+  logReportCaptureDiagnostics,
+  measureReportSheet,
+  revokeReportImageUrl,
+  waitForNextPaint,
+} from '../../lib/operations-report-image-export'
 
 interface Props {
   dateKey: string
@@ -43,12 +52,47 @@ type DailyLoadResult = {
   cacheWarning: string | null
 }
 
+type PreviewMeta = {
+  width: number
+  height: number
+  naturalWidth: number
+  naturalHeight: number
+  fileSize: number
+  pixelRatio: number
+  compatNote: string | null
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+async function waitForSheetRef(
+  ref: React.RefObject<HTMLDivElement | null>,
+  timeoutMs = 4_000,
+): Promise<HTMLDivElement> {
+  const started = Date.now()
+  while (!ref.current) {
+    if (Date.now() - started > timeoutMs) {
+      throw new Error('长图组件未就绪，请刷新后重试')
+    }
+    await waitForNextPaint()
+    await new Promise((resolve) => window.setTimeout(resolve, 40))
+  }
+  return ref.current
+}
+
 export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChange }) => {
   const sheetRef = useRef<HTMLDivElement>(null)
+  const previewBlobRef = useRef<Blob | null>(null)
   const topLimit = useChartTopLimit()
   const [exporting, setExporting] = useState(false)
   const [exportError, setExportError] = useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [previewMeta, setPreviewMeta] = useState<PreviewMeta | null>(null)
+  const [previewImageError, setPreviewImageError] = useState<string | null>(null)
+  const [previewImageLoaded, setPreviewImageLoaded] = useState(false)
   const [showFullHot, setShowFullHot] = useState(false)
   const [showFullReturn, setShowFullReturn] = useState(false)
 
@@ -80,6 +124,15 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
     onLoadingChange?.(loading)
   }, [loading, onLoadingChange])
 
+  const clearPreview = () => {
+    revokeReportImageUrl(previewUrl)
+    setPreviewUrl(null)
+    setPreviewMeta(null)
+    setPreviewImageError(null)
+    setPreviewImageLoaded(false)
+    previewBlobRef.current = null
+  }
+
   const handleExportImage = async () => {
     if (!report) {
       setExportError('数据还没加载完，请稍后再导出长图')
@@ -89,36 +142,63 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
       setExportError('正在刷新数据，请稍后再导出长图')
       return
     }
-    if (!sheetRef.current) {
-      setExportError('长图生成失败，请刷新后重试；如果还是失败，先截图当前页面发群。')
-      return
-    }
+
     setExporting(true)
     setExportError(null)
+    clearPreview()
+
     try {
-      const dataUrl = await toPng(sheetRef.current, {
-        cacheBust: true,
-        pixelRatio: 2,
-        backgroundColor: '#ffffff',
+      const node = await waitForSheetRef(sheetRef)
+      const preDim = measureReportSheet(node)
+      logReportCaptureDiagnostics('pre-capture-sheet', {
+        width: preDim.width,
+        height: preDim.height,
+        rectWidth: preDim.rectWidth,
+        rectHeight: preDim.rectHeight,
+      } as Parameters<typeof logReportCaptureDiagnostics>[1])
+
+      const result = await captureOperationsReportSheet(node)
+      previewBlobRef.current = result.blob
+      setPreviewUrl(result.objectUrl)
+      setPreviewMeta({
+        width: result.width,
+        height: result.height,
+        naturalWidth: result.diagnostics.naturalWidth,
+        naturalHeight: result.diagnostics.naturalHeight,
+        fileSize: result.blob.size,
+        pixelRatio: result.pixelRatio,
+        compatNote: result.compatNote,
       })
-      setPreviewUrl(dataUrl)
-    } catch {
-      setExportError('长图生成失败，请刷新后重试；如果还是失败，先截图当前页面发群。')
+      setPreviewImageLoaded(false)
+      setPreviewImageError(null)
+    } catch (err) {
+      console.error('[operations-report-export] capture failed', err)
+      const message = formatReportCaptureError(err)
+      setExportError(message)
+      if (err instanceof Error) {
+        logReportCaptureDiagnostics('capture-failed', {
+          errorName: err.name,
+          errorMessage: err.message,
+        })
+      }
     } finally {
       setExporting(false)
     }
   }
 
   const handleClosePreview = () => {
-    setPreviewUrl(null)
+    clearPreview()
   }
 
   const handleDownloadImage = () => {
-    if (!previewUrl) return
+    const blob = previewBlobRef.current
+    if (!blob || !previewImageLoaded) return
+    const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
-    link.href = previewUrl
+    link.href = url
     link.download = `运营日报-${dateKey}.png`
     link.click()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000)
   }
 
   const handleReviewSaved = (note: OpsReviewNotePayload) => {
@@ -168,6 +248,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
 
   const hotRows = report.rankings?.products.hot.items ?? []
   const returnRows = report.rankings?.products.highReturn.items ?? []
+  const exportHostStyle = getOperationsReportExportHostStyle()
 
   return (
     <OperationsReportLoadShell loading={loading} refreshing={refreshing}>
@@ -180,6 +261,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
         <div className="flex flex-wrap items-center gap-3">
           <button
             type="button"
+            data-testid="ops-daily-export-btn"
             disabled={exporting || refreshing || !report}
             onClick={() => void handleExportImage()}
             className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm text-rose-700 hover:bg-rose-50 disabled:opacity-50"
@@ -190,7 +272,10 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
       </div>
 
       {exportError ? (
-        <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <p
+          data-testid="ops-daily-export-error"
+          className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-700"
+        >
           {exportError}
         </p>
       ) : null}
@@ -336,7 +421,12 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
 
       {report
         ? createPortal(
-            <div className="pointer-events-none fixed left-[-9999px] top-0">
+            <div
+              id={OPERATIONS_REPORT_EXPORT_HOST_ID}
+              aria-hidden
+              className="pointer-events-none"
+              style={exportHostStyle}
+            >
               <OperationsReportImageSheet ref={sheetRef} data={report} />
             </div>,
             document.body,
@@ -351,17 +441,74 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
           panelClassName="max-h-[min(92dvh,calc(100dvh-2rem))] w-[min(760px,calc(100vw-1.5rem))] overflow-auto p-4"
           backdropClassName="bg-black/55"
         >
-          <div className="mb-3 flex items-center justify-between gap-2">
-            <p className="text-sm font-medium text-slate-800">长图预览（可保存发群）</p>
-            <button
-              type="button"
-              onClick={handleDownloadImage}
-              className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50"
-            >
-              下载长图
-            </button>
+          <div
+            data-testid="ops-daily-export-preview"
+            className="mb-3 flex flex-wrap items-center justify-between gap-2"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-800">长图预览（可保存发群）</p>
+              {previewMeta ? (
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {previewMeta.naturalWidth} × {previewMeta.naturalHeight} px ·{' '}
+                  {formatFileSize(previewMeta.fileSize)}
+                  {previewMeta.compatNote ? ` · ${previewMeta.compatNote}` : ''}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                data-testid="ops-daily-export-download"
+                disabled={!previewImageLoaded || Boolean(previewImageError)}
+                onClick={handleDownloadImage}
+                className="rounded-full border border-rose-200 bg-white px-3 py-1.5 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                下载长图
+              </button>
+              <button
+                type="button"
+                data-testid="ops-daily-export-close"
+                onClick={handleClosePreview}
+                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+              >
+                关闭
+              </button>
+            </div>
           </div>
-          <img src={previewUrl} alt="运营日报" className="max-w-full rounded-xl" />
+
+          {previewImageError ? (
+            <p
+              data-testid="ops-daily-export-preview-error"
+              className="rounded-xl border border-red-100 bg-red-50 px-3 py-4 text-sm text-red-700"
+            >
+              预览加载失败：{previewImageError}
+            </p>
+          ) : (
+            <img
+              data-testid="ops-daily-export-preview-img"
+              src={previewUrl}
+              alt="运营日报"
+              className="max-w-full rounded-xl"
+              onLoad={(e) => {
+                const img = e.currentTarget
+                setPreviewImageLoaded(true)
+                setPreviewImageError(null)
+                setPreviewMeta((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        naturalWidth: img.naturalWidth,
+                        naturalHeight: img.naturalHeight,
+                      }
+                    : prev,
+                )
+              }}
+              onError={() => {
+                setPreviewImageLoaded(false)
+                setPreviewImageError('图片无法在浏览器中显示，请尝试重新导出')
+              }}
+            />
+          )}
         </ViewportModal>
       ) : null}
     </div>

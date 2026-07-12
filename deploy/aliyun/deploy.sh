@@ -4,7 +4,7 @@ set -euo pipefail
 
 DEPLOY_DIR="/www/wwwroot/zhubo-analysis"
 APP_NAME="zhubo-analysis"
-PUBLIC_IP="${PUBLIC_IP:-8.137.126.18}"
+PUBLIC_IP="${PUBLIC_IP:-47.108.21.50}"
 GIT_REPO="${GIT_REPO:-https://github.com/afan-Kiss/zhubofenxi.git}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
 USE_GIT="${USE_GIT:-1}"

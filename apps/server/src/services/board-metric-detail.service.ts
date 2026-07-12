@@ -47,6 +47,7 @@ export type BoardMetricKey =
   | 'signRate'
   | 'returnAmount'
   | 'returnCount'
+  | 'returnRefundCount'
   | 'qualityReturnCount'
   | 'qualityReturnRate'
   | 'orderCount'
@@ -106,6 +107,14 @@ const METRIC_DEFS: Record<
     description: '仅统计匹配订单主表的有效成功售后；不含表外售后记录。',
     valueKey: 'returnCount',
   },
+  returnRefundCount: {
+    title: '退货退款单数',
+    formula:
+      '退货退款单数 = 本期已支付且真实商品退款金额>0，且售后类型判定为退货退款的订单数（按 P 单号去重）',
+    description:
+      '优先依据售后原始 return_type；不含仅退款、纯运费、申请中/已取消。类型未同步完整时卡片可能显示「--」。',
+    valueKey: 'returnRefundCount',
+  },
   qualityReturnCount: {
     title: '品退单数',
     formula:
@@ -159,6 +168,8 @@ function matchMetricViews(views: AnalyzedOrderView[], metric: BoardMetricKey, ta
     case 'returnCount':
     case 'returnRate':
       return views.filter((v) => viewCountsAsRefundOrder(v))
+    case 'returnRefundCount':
+      return views.filter((v) => viewCountsAsRefundOrder(v) && Boolean(v.isReturnRefundOrder))
     case 'freightRefundAmount':
       return views.filter((v) => v.isFreightRefundOnly)
     case 'qualityReturnCount':
@@ -181,6 +192,7 @@ const METRICS_ORDER_DEDUPE: BoardMetricKey[] = [
   'returnAmount',
   'returnCount',
   'returnRate',
+  'returnRefundCount',
   'qualityReturnCount',
   'qualityReturnRate',
   'freightRefundAmount',
@@ -228,6 +240,10 @@ function buildPageSummary(views: AnalyzedOrderView[]): Record<string, unknown> {
     signedOrderCount: m.signedOrderCount,
     actualSignedCount: m.signedOrderCount,
     returnCount: m.refundOrderCount,
+    returnRefundCount: m.returnOrderCount,
+    refundOnlyCount: m.refundOnlyOrderCount,
+    unknownRefundTypeCount: m.unknownRefundTypeOrderCount,
+    returnRefundTypeIncomplete: m.returnRefundTypeIncomplete,
     afterSaleRecordCount: m.afterSaleRecordCount,
     qualityReturnCount: m.qualityRefundOrderCount,
     returnAmount: m.refundAmount,
@@ -268,6 +284,7 @@ function formatValueText(metric: BoardMetricKey, value: number | null): string {
     metric === 'orderCount' ||
     metric === 'signedCount' ||
     metric === 'returnCount' ||
+    metric === 'returnRefundCount' ||
     metric === 'qualityReturnCount'
   ) {
     return formatCount(value)
@@ -383,7 +400,8 @@ export async function buildBoardMetricDetail(params: {
     if (
       params.metric === 'returnAmount' ||
       params.metric === 'returnCount' ||
-      params.metric === 'returnRate'
+      params.metric === 'returnRate' ||
+      params.metric === 'returnRefundCount'
     ) {
       sourceViews = dedupeRefundMetricViewsByOrderNoMaxRefund(sourceViews)
     } else if (params.metric === 'freightRefundAmount') {

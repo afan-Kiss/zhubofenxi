@@ -64,6 +64,15 @@ export interface BusinessMetrics {
   /** 退货退款订单数（P 订单号去重） */
   returnOrderCount: number
 
+  /** 仅退款订单数（P 订单号去重） */
+  refundOnlyOrderCount: number
+
+  /** 有退款金额但类型未识别 */
+  unknownRefundTypeOrderCount: number
+
+  /** 退款类型数据不完整（有退款但退货退款/仅退款均为0且存在未识别） */
+  returnRefundTypeIncomplete: boolean
+
   /** 退款率 = 退款订单数 ÷ 支付订单数；分母为 0 时为 null */
   refundRate: number | null
 
@@ -213,6 +222,12 @@ export function calculateBusinessMetrics(
     qualityRefundOrderCount: metricSets.qualityRefundOrderCount,
 
     returnOrderCount: metricSets.returnOrderCount,
+
+    refundOnlyOrderCount: metricSets.refundOnlyOrderCount,
+
+    unknownRefundTypeOrderCount: metricSets.unknownRefundTypeOrderCount,
+
+    returnRefundTypeIncomplete: metricSets.returnRefundTypeIncomplete,
 
     refundRate: metricSets.refundRate,
 

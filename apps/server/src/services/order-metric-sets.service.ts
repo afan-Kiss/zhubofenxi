@@ -21,6 +21,8 @@ export interface OrderMetricSets {
   paidOrderNos: string[]
   refundOrderNos: string[]
   returnRefundOrderNos: string[]
+  refundOnlyOrderNos: string[]
+  unknownRefundTypeOrderNos: string[]
   qualityRefundOrderNos: string[]
   signedOrderNos: string[]
   afterSaleRecordCount: number
@@ -29,12 +31,16 @@ export interface OrderMetricSets {
   paidOrderCount: number
   refundOrderCount: number
   returnOrderCount: number
+  refundOnlyOrderCount: number
+  unknownRefundTypeOrderCount: number
   qualityRefundOrderCount: number
   signedOrderCount: number
   refundRate: number | null
   returnRate: number | null
   qualityRefundRate: number | null
   signRate: number | null
+  /** 有退款金额但类型未识别 → 前端应显示 -- */
+  returnRefundTypeIncomplete: boolean
 }
 
 export function buildOrderMetricSets(
@@ -48,6 +54,8 @@ export function buildOrderMetricSets(
   const paidOrderNos: string[] = []
   const refundOrderNos: string[] = []
   const returnRefundOrderNos: string[] = []
+  const refundOnlyOrderNos: string[] = []
+  const unknownRefundTypeOrderNos: string[] = []
   const qualityRefundOrderNos: string[] = []
   const signedOrderNos: string[] = []
   let afterSaleRecordCount = 0
@@ -72,6 +80,14 @@ export function buildOrderMetricSets(
       returnRefundOrderNos.push(no)
     }
 
+    if (paid && viewCountsAsRefundOrder(v) && v.isRefundOnlyOrder && no) {
+      refundOnlyOrderNos.push(no)
+    }
+
+    if (paid && viewCountsAsRefundOrder(v) && v.isRefundTypeUnknown && no) {
+      unknownRefundTypeOrderNos.push(no)
+    }
+
     if (paid && viewCountsAsQualityRefund(v, officialPackageIds) && no) {
       qualityRefundOrderNos.push(no)
     }
@@ -85,6 +101,14 @@ export function buildOrderMetricSets(
   const returnResult = calcOrderRate({
     paidOrderNos,
     numeratorOrderNos: returnRefundOrderNos,
+  })
+  const refundOnlyResult = calcOrderRate({
+    paidOrderNos,
+    numeratorOrderNos: refundOnlyOrderNos,
+  })
+  const unknownResult = calcOrderRate({
+    paidOrderNos,
+    numeratorOrderNos: unknownRefundTypeOrderNos,
   })
   const qualityResult = calcOrderRate({
     paidOrderNos,
@@ -119,10 +143,18 @@ export function buildOrderMetricSets(
     }
   }
 
+  const returnRefundTypeIncomplete =
+    unknownResult.numeratorOrderCount > 0 ||
+    (refundResult.refundOrderCount > 0 &&
+      returnResult.numeratorOrderCount === 0 &&
+      refundOnlyResult.numeratorOrderCount === 0)
+
   return {
     paidOrderNos,
     refundOrderNos,
     returnRefundOrderNos,
+    refundOnlyOrderNos,
+    unknownRefundTypeOrderNos,
     qualityRefundOrderNos,
     signedOrderNos,
     afterSaleRecordCount,
@@ -131,11 +163,14 @@ export function buildOrderMetricSets(
     paidOrderCount: refundResult.paidOrderCount,
     refundOrderCount: refundResult.refundOrderCount,
     returnOrderCount: returnResult.numeratorOrderCount,
+    refundOnlyOrderCount: refundOnlyResult.numeratorOrderCount,
+    unknownRefundTypeOrderCount: unknownResult.numeratorOrderCount,
     qualityRefundOrderCount: qualityResult.numeratorOrderCount,
     signedOrderCount: signResult.numeratorOrderCount,
     refundRate: refundResult.refundRate,
     returnRate: returnResult.rate,
     qualityRefundRate: qualityResult.rate,
     signRate: signResult.rate,
+    returnRefundTypeIncomplete,
   }
 }

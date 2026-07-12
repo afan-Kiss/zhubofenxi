@@ -413,6 +413,14 @@ model XhsAfterSalesWorkbenchCache {
   successReturnCount       Int       @default(0)
   returnsIds               String?
   rawDetail                Json?
+  /// 结构化售后类型（不依赖 rawDetail 全量进内存即可统计退货退款）
+  hasReturnRefund          Boolean   @default(false)
+  hasRefundOnly            Boolean   @default(false)
+  returnRefundCount        Int       @default(0)
+  refundOnlyCount          Int       @default(0)
+  afterSaleType            String?
+  returnTypeCodes          String?
+  classificationSource     String?
   fetchStatus              String    @default("pending")
   fetchError               String?
   fetchedAt                DateTime?
@@ -422,6 +430,7 @@ model XhsAfterSalesWorkbenchCache {
   @@unique([liveAccountId, orderNo])
   @@index([fetchStatus])
   @@index([liveAccountId])
+  @@index([hasReturnRefund])
 }
 
 /// 售后工作台补数队列

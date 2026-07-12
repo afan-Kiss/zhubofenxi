@@ -37,6 +37,9 @@ export interface BoardViewsMetrics extends BusinessMetrics {
   /** API 兼容字段，等同 qualityRefundRate */
   qualityReturnRate: number | null
   returnRefundCount: number
+  refundOnlyCount: number
+  unknownRefundTypeCount: number
+  returnRefundTypeIncomplete: boolean
   /** API 兼容：退货率 */
   returnRefundRate: number | null
   freightRefundCount: number
@@ -66,6 +69,9 @@ function toLegacyMetrics(m: BusinessMetrics, views: AnalyzedOrderView[]): BoardV
     qualityReturnRate: m.qualityRefundRate,
     returnRate: m.refundRate,
     returnRefundCount: m.returnOrderCount,
+    refundOnlyCount: m.refundOnlyOrderCount,
+    unknownRefundTypeCount: m.unknownRefundTypeOrderCount,
+    returnRefundTypeIncomplete: m.returnRefundTypeIncomplete,
     returnRefundRate: m.returnRate,
     freightRefundCount,
     afterSaleClosedNoRefundCount,

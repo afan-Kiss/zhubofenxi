@@ -15,6 +15,7 @@ export type BoardMetricKey =
   | 'signRate'
   | 'returnAmount'
   | 'returnCount'
+  | 'returnRefundCount'
   | 'qualityReturnCount'
   | 'qualityReturnRate'
   | 'orderCount'

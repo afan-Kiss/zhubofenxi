@@ -175,6 +175,12 @@ function buildSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unkno
 
     returnRefundRate: m.returnRate,
 
+    refundOnlyCount: m.refundOnlyOrderCount,
+
+    unknownRefundTypeCount: m.unknownRefundTypeOrderCount,
+
+    returnRefundTypeIncomplete: m.returnRefundTypeIncomplete,
+
     qualityReturnRate: m.qualityRefundRate,
 
     signedOrderCount: m.signedOrderCount,

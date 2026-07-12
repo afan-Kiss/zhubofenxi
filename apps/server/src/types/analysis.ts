@@ -250,8 +250,14 @@ export interface AnalyzedOrderView {
   isActualSigned: boolean
   /** 订单状态维度签收（含已完成/交易成功，与退款无关） */
   statusSigned?: boolean
-  /** 退货退款类售后 */
+  /** 退货退款类售后（成功商品退款 + 类型=return_refund） */
   isReturnRefundOrder?: boolean
+  /** 仅退款类售后（成功商品退款 + 类型=refund_only） */
+  isRefundOnlyOrder?: boolean
+  /** 有真实退款但售后类型未知 */
+  isRefundTypeUnknown?: boolean
+  /** 退货退款/仅退款分类来源 */
+  returnRefundClassificationSource?: string
   isQualityReturn: boolean
   returnAmountCent: number
   /** 商品退款金额（分），不含运费补偿 */

@@ -31,6 +31,11 @@ export interface RollingDataHealthCloseReport {
   afterSaleCacheRecordScope: 'all_db' | 'range'
   unassignedOrderCount: number
   duplicateOrderCount: number
+  returnRefundOrderCount: number
+  refundOnlyOrderCount: number
+  unknownRefundTypeOrderCount: number
+  classifiedRefundOrderCount: number
+  returnRefundTypeIncomplete: boolean
   warnings: string[]
 }
 

@@ -67,6 +67,12 @@ function buildWarnings(input: {
   qualityRefundOrderCount: number
   unassignedOrderCount: number
   duplicateOrderCount: number
+  refundOrderCount: number
+  returnRefundOrderCount: number
+  refundOnlyOrderCount: number
+  unknownRefundTypeOrderCount: number
+  returnRefundTypeIncomplete: boolean
+  refundAmountYuan: number
 }): string[] {
   const warnings: string[] = []
   if (input.afterSaleRelatedOrderCount === 0) {
@@ -86,6 +92,19 @@ function buildWarnings(input: {
   }
   if (input.duplicateOrderCount > 0) {
     warnings.push(`发现 ${input.duplicateOrderCount} 条重复订单风险`)
+  }
+  if (
+    input.refundAmountYuan > 0 &&
+    input.returnRefundOrderCount === 0 &&
+    input.refundOnlyOrderCount === 0
+  ) {
+    warnings.push(
+      '存在真实退款金额，但退款类型未正确识别，主播退货退款单数暂不可信。',
+    )
+  } else if (input.returnRefundTypeIncomplete || input.unknownRefundTypeOrderCount > 0) {
+    warnings.push(
+      `有 ${input.unknownRefundTypeOrderCount} 单退款类型未识别，退货退款/仅退款区分暂不完整。`,
+    )
   }
   return warnings
 }
@@ -141,6 +160,12 @@ export async function buildRollingDataHealthCloseReport(input: {
     afterSaleCacheRecordScope: afterSaleCache.scope,
     unassignedOrderCount,
     duplicateOrderCount,
+    returnRefundOrderCount: metrics.returnOrderCount,
+    refundOnlyOrderCount: metrics.refundOnlyOrderCount,
+    unknownRefundTypeOrderCount: metrics.unknownRefundTypeOrderCount,
+    classifiedRefundOrderCount:
+      metrics.returnOrderCount + metrics.refundOnlyOrderCount,
+    returnRefundTypeIncomplete: metrics.returnRefundTypeIncomplete,
     warnings: buildWarnings({
       afterSaleRelatedOrderCount: metrics.afterSaleRelatedOrderCount,
       afterSaleSignalRecordCount: metrics.afterSaleRecordCount,
@@ -148,6 +173,12 @@ export async function buildRollingDataHealthCloseReport(input: {
       qualityRefundOrderCount: metrics.qualityRefundOrderCount,
       unassignedOrderCount,
       duplicateOrderCount,
+      refundOrderCount: metrics.refundOrderCount,
+      returnRefundOrderCount: metrics.returnOrderCount,
+      refundOnlyOrderCount: metrics.refundOnlyOrderCount,
+      unknownRefundTypeOrderCount: metrics.unknownRefundTypeOrderCount,
+      returnRefundTypeIncomplete: metrics.returnRefundTypeIncomplete,
+      refundAmountYuan: metrics.refundAmount,
     }),
   }
 }

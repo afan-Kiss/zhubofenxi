@@ -168,6 +168,11 @@ export interface BoardOrderRow {
   paymentAnchorName?: string | null
   /** 是否手动指定覆盖 */
   manualOverride?: boolean
+  /** 退货退款分类 */
+  isReturnRefundOrder?: boolean
+  isRefundOnlyOrder?: boolean
+  isRefundTypeUnknown?: boolean
+  returnRefundClassificationSource?: string | null
 }
 
 export type BoardDrillOrderRow = BoardOrderRow
@@ -420,6 +425,10 @@ export function mapViewToBoardOrderRow(
     qualityAttributionAnchorName,
     paymentAnchorName,
     manualOverride: attributionSource === 'manual_override',
+    isReturnRefundOrder: Boolean(v.isReturnRefundOrder),
+    isRefundOnlyOrder: Boolean(v.isRefundOnlyOrder),
+    isRefundTypeUnknown: Boolean(v.isRefundTypeUnknown),
+    returnRefundClassificationSource: v.returnRefundClassificationSource ?? null,
   }
 }
 

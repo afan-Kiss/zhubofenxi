@@ -6,7 +6,9 @@ import {
   anchorRowPaidCount,
   anchorRowRate,
   anchorRowRefundAmount,
-  anchorRowReturnRefundCount,
+  anchorRowReturnCount,
+  anchorRowReturnRefundCountDisplay,
+  anchorRowRefundOnlyCount,
   anchorRowLivePeriodLines,
   anchorRowActualSignedAmount,
   isHighRefundRate,
@@ -24,6 +26,7 @@ interface Props {
   emptyText?: string
   onRowClick?: (row: AnchorLeaderboardRow) => void
   onQualityCountClick?: (row: AnchorLeaderboardRow) => void
+  onReturnRefundCountClick?: (row: AnchorLeaderboardRow) => void
   showLongPeriodRates?: boolean
   showLivePeriod?: boolean
   /** 单日：无成交主播也展示走势与对比 */
@@ -38,6 +41,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   emptyText = '暂无数据',
   onRowClick,
   onQualityCountClick,
+  onReturnRefundCountClick,
   showLongPeriodRates: showRates = true,
   showLivePeriod = false,
   includeZeroPerformance = false,
@@ -61,7 +65,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   const cardClass = showCardsOnDesktop ? 'block' : 'block md:hidden'
   const tableWrapClass = showTableOnDesktop ? 'hidden md:block' : 'hidden'
 
-  const colCount = showExtraColumns ? (showRates ? 9 : 8) : 6
+  const colCount = showExtraColumns ? (showRates ? 11 : 10) : 6
 
   return (
     <div>
@@ -113,6 +117,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         emptyText={emptyText}
         onSelect={onRowClick}
         onQualityCountClick={onQualityCountClick}
+        onReturnRefundCountClick={onReturnRefundCountClick}
         showLongPeriodRates={showRates}
         showIndividualTrend
         showLivePeriod={showLivePeriod}
@@ -138,7 +143,9 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
               {showExtraColumns ? (
                 <>
                   <th className="py-2 pr-2 text-right">退款金额</th>
+                  <th className="py-2 pr-2 text-right">退款订单数</th>
                   <th className="py-2 pr-2 text-right">退货退款单数</th>
+                  <th className="py-2 pr-2 text-right">仅退款单数</th>
                   {showRates ? <th className="pr-4 py-2 text-right">签收率</th> : null}
                 </>
               ) : null}
@@ -219,7 +226,32 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                           {formatMoney(anchorRowRefundAmount(a))}
                         </td>
                         <td className="py-2 text-right tabular-nums">
-                          {formatCount(anchorRowReturnRefundCount(a))}
+                          {formatCount(anchorRowReturnCount(a))}
+                        </td>
+                        <td
+                          className={`py-2 text-right tabular-nums ${
+                            onReturnRefundCountClick ? 'cursor-pointer hover:underline' : ''
+                          }`}
+                          title={
+                            anchorRowReturnRefundCountDisplay(a) == null
+                              ? '部分售后类型尚未同步，暂不能准确区分退货退款与仅退款。'
+                              : undefined
+                          }
+                          onClick={
+                            onReturnRefundCountClick && anchorRowReturnRefundCountDisplay(a) != null
+                              ? (e) => {
+                                  e.stopPropagation()
+                                  onReturnRefundCountClick(a)
+                                }
+                              : undefined
+                          }
+                        >
+                          {anchorRowReturnRefundCountDisplay(a) == null
+                            ? '—'
+                            : formatCount(anchorRowReturnRefundCountDisplay(a)!)}
+                        </td>
+                        <td className="py-2 text-right tabular-nums">
+                          {formatCount(anchorRowRefundOnlyCount(a))}
                         </td>
                         {showRates ? (
                           <td className="py-2 pr-4 text-right tabular-nums">

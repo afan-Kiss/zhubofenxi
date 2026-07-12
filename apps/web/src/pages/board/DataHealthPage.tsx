@@ -42,6 +42,11 @@ interface RollingDataHealthCloseReport {
   afterSaleCacheRecordCount: number
   unassignedOrderCount: number
   duplicateOrderCount: number
+  returnRefundOrderCount?: number
+  refundOnlyOrderCount?: number
+  unknownRefundTypeOrderCount?: number
+  classifiedRefundOrderCount?: number
+  returnRefundTypeIncomplete?: boolean
   warnings: string[]
 }
 

@@ -179,6 +179,14 @@ function RollingCloseSection({ report }: { report: RollingDataHealthCloseSummary
           退款率：{formatRateDisplay(report.refundRate)}
         </div>
         <div className="text-[11px] text-slate-600">
+          退款订单数：{(report.refundOrderCount ?? 0).toLocaleString('zh-CN')} 单
+        </div>
+        <div className="text-[11px] text-slate-600">
+          退货退款：{(report.returnRefundOrderCount ?? 0).toLocaleString('zh-CN')} 单
+          ｜仅退款：{(report.refundOnlyOrderCount ?? 0).toLocaleString('zh-CN')} 单
+          ｜未识别：{(report.unknownRefundTypeOrderCount ?? 0).toLocaleString('zh-CN')} 单
+        </div>
+        <div className="text-[11px] text-slate-600">
           品退单数：{report.qualityRefundOrderCount.toLocaleString('zh-CN')} 单
         </div>
         <div className="text-[11px] text-slate-600">

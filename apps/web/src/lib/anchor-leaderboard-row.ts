@@ -83,6 +83,32 @@ export function anchorRowReturnRefundCount(row: AnchorLeaderboardRow): number {
   return anchorRowNum(row, 'returnRefundCount')
 }
 
+export function anchorRowRefundOnlyCount(row: AnchorLeaderboardRow): number {
+  return anchorRowNum(row, 'refundOnlyCount')
+}
+
+export function anchorRowUnknownRefundTypeCount(row: AnchorLeaderboardRow): number {
+  return anchorRowNum(row, 'unknownRefundTypeCount')
+}
+
+export function anchorRowReturnRefundTypeIncomplete(row: AnchorLeaderboardRow): boolean {
+  return Boolean(row.returnRefundTypeIncomplete)
+}
+
+/** 退货退款单数展示：完全无法分类时返回 null（前端显示 --） */
+export function anchorRowReturnRefundCountDisplay(row: AnchorLeaderboardRow): number | null {
+  const refundOrders = anchorRowReturnCount(row)
+  const returnRefund = anchorRowReturnRefundCount(row)
+  const refundOnly = anchorRowRefundOnlyCount(row)
+  const unknown = anchorRowUnknownRefundTypeCount(row)
+  // 有退款但退货退款/仅退款均为0，且存在未识别 → 不可信，显示 —
+  if (refundOrders > 0 && returnRefund === 0 && refundOnly === 0 && unknown > 0) return null
+  if (refundOrders > 0 && returnRefund === 0 && refundOnly === 0 && anchorRowReturnRefundTypeIncomplete(row)) {
+    return null
+  }
+  return returnRefund
+}
+
 export function anchorRowReturnRefundRate(row: AnchorLeaderboardRow): number | null {
   return anchorRowRate(row, 'returnRefundRate')
 }
@@ -198,9 +224,12 @@ export function aggregateSummaryFromAnchorRows(
   let returnCount = 0
   let returnAmount = 0
   let returnRefundCount = 0
+  let refundOnlyCount = 0
+  let unknownRefundTypeCount = 0
   let qualityReturnCount = 0
   let signedCount = 0
   let actualSignedCount = 0
+  let incompleteType = false
   for (const row of rows) {
     totalGmv += anchorRowGmv(row)
     validSalesAmount += anchorRowValidSales(row)
@@ -209,12 +238,23 @@ export function aggregateSummaryFromAnchorRows(
     returnCount += anchorRowReturnCount(row)
     returnAmount += anchorRowRefundAmount(row)
     returnRefundCount += anchorRowReturnRefundCount(row)
+    refundOnlyCount += anchorRowRefundOnlyCount(row)
+    unknownRefundTypeCount += anchorRowUnknownRefundTypeCount(row)
+    if (anchorRowReturnRefundTypeIncomplete(row)) incompleteType = true
     qualityReturnCount += anchorRowNum(row, 'qualityReturnCount')
     signedCount += anchorRowNum(row, 'signedCount')
     actualSignedCount += anchorRowSignedCount(row)
   }
   const refundRate = paidOrderCount > 0 ? returnCount / paidOrderCount : null
   const signRate = paidOrderCount > 0 ? actualSignedCount / paidOrderCount : null
+  if (
+    returnCount > 0 &&
+    returnRefundCount === 0 &&
+    refundOnlyCount === 0 &&
+    unknownRefundTypeCount > 0
+  ) {
+    incompleteType = true
+  }
   return {
     totalGmv,
     gmv: totalGmv,
@@ -230,6 +270,9 @@ export function aggregateSummaryFromAnchorRows(
     returnAmount,
     refundAmount: returnAmount,
     returnRefundCount,
+    refundOnlyCount,
+    unknownRefundTypeCount,
+    returnRefundTypeIncomplete: incompleteType,
     qualityReturnCount,
     signedCount,
     signedOrderCount: signedCount,

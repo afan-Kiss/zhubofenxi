@@ -6,7 +6,9 @@ import {
   anchorRowPaidCount,
   anchorRowRate,
   anchorRowRefundAmount,
-  anchorRowReturnRefundCount,
+  anchorRowReturnCount,
+  anchorRowReturnRefundCountDisplay,
+  anchorRowRefundOnlyCount,
   anchorRowLivePeriodLines,
   anchorRowActualSignedAmount,
   isHighRefundRate,
@@ -21,6 +23,7 @@ interface Props {
   emptyText?: string
   onSelect?: (row: AnchorLeaderboardRow) => void
   onQualityCountClick?: (row: AnchorLeaderboardRow) => void
+  onReturnRefundCountClick?: (row: AnchorLeaderboardRow) => void
   showLongPeriodRates?: boolean
   /** 覆盖外层容器 className；默认手机端显示 */
   className?: string
@@ -83,6 +86,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   emptyText = '暂无数据',
   onSelect,
   onQualityCountClick,
+  onReturnRefundCountClick,
   showLongPeriodRates: showRates = true,
   className = 'block md:hidden',
   showIndividualTrend = true,
@@ -175,10 +179,21 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
             {showExtraMetrics ? (
               <div className="mt-2 grid grid-cols-2 gap-2">
                 <MetricCell label="退款金额" value={formatMoney(anchorRowRefundAmount(a))} danger />
+                <MetricCell label="退款订单数" value={formatCount(anchorRowReturnCount(a))} />
                 <MetricCell
                   label="退货退款单数"
-                  value={formatCount(anchorRowReturnRefundCount(a))}
+                  value={
+                    anchorRowReturnRefundCountDisplay(a) == null
+                      ? '—'
+                      : formatCount(anchorRowReturnRefundCountDisplay(a)!)
+                  }
+                  onClick={
+                    onReturnRefundCountClick && anchorRowReturnRefundCountDisplay(a) != null
+                      ? () => onReturnRefundCountClick(a)
+                      : undefined
+                  }
                 />
+                <MetricCell label="仅退款单数" value={formatCount(anchorRowRefundOnlyCount(a))} />
                 {showRates ? (
                   <MetricCell label="签收率" value={formatRate(signRate)} />
                 ) : null}

@@ -16,6 +16,7 @@ import {
   type AfterSaleOrderAggregate,
   type NormalizedAfterSaleRecord,
 } from './xhs-after-sales-range.service'
+import { deriveStructuredAfterSaleTypeFromRaw } from './resolve-return-refund-classification.service'
 import {
   extractAfterSaleReasonText,
   isCanceledOrInvalidAfterSale,
@@ -54,6 +55,13 @@ export interface AfterSalesWorkbenchRefund {
   afterSaleStatus: string | null
   successReturnCount: number
   returnsIds: string[]
+  hasReturnRefund?: boolean
+  hasRefundOnly?: boolean
+  returnRefundCount?: number
+  refundOnlyCount?: number
+  afterSaleType?: string | null
+  returnTypeCodes?: string | null
+  classificationSource?: string | null
   fetchStatus: WorkbenchFetchStatus
   fetchError: string | null
   fetchedAt: Date | null
@@ -167,6 +175,8 @@ export function aggregateWorkbenchRefund(
 
   hasFreightOnlyRefund = officialRefundAmountCent === 0 && freightRefundAmountCent > 0
 
+  const structured = deriveStructuredAfterSaleTypeFromRaw(successRecords)
+
   return {
     orderNo,
     packageId: orderNo,
@@ -184,6 +194,13 @@ export function aggregateWorkbenchRefund(
     afterSaleStatus: statuses.join('；') || null,
     successReturnCount: successRecords.length,
     returnsIds,
+    hasReturnRefund: structured.hasReturnRefund,
+    hasRefundOnly: structured.hasRefundOnly,
+    returnRefundCount: structured.returnRefundCount,
+    refundOnlyCount: structured.refundOnlyCount,
+    afterSaleType: structured.afterSaleType,
+    returnTypeCodes: structured.returnTypeCodes || null,
+    classificationSource: structured.classificationSource,
   }
 }
 
@@ -347,6 +364,13 @@ function rowToRefund(row: {
   afterSaleStatus: string | null
   successReturnCount: number
   returnsIds: string | null
+  hasReturnRefund?: boolean
+  hasRefundOnly?: boolean
+  returnRefundCount?: number
+  refundOnlyCount?: number
+  afterSaleType?: string | null
+  returnTypeCodes?: string | null
+  classificationSource?: string | null
   fetchStatus: string
   fetchError: string | null
   fetchedAt: Date | null
@@ -355,11 +379,30 @@ function rowToRefund(row: {
   let freightRefundAmountCent = 0
   let hasFreightOnlyRefund = false
   let buyerUserId: string | null = null
+  let structured = {
+    hasReturnRefund: Boolean(row.hasReturnRefund),
+    hasRefundOnly: Boolean(row.hasRefundOnly),
+    returnRefundCount: Number(row.returnRefundCount ?? 0),
+    refundOnlyCount: Number(row.refundOnlyCount ?? 0),
+    afterSaleType: row.afterSaleType ?? null,
+    returnTypeCodes: row.returnTypeCodes ?? null,
+    classificationSource: row.classificationSource ?? null,
+  }
   if (row.rawDetail && Array.isArray(row.rawDetail)) {
     const agg = aggregateWorkbenchRefund(row.rawDetail as Record<string, unknown>[], row.orderNo)
     freightRefundAmountCent = agg.freightRefundAmountCent
     hasFreightOnlyRefund = agg.hasFreightOnlyRefund
     buyerUserId = agg.buyerUserId
+    // rawDetail 可回填/覆盖结构化分类
+    structured = {
+      hasReturnRefund: Boolean(agg.hasReturnRefund),
+      hasRefundOnly: Boolean(agg.hasRefundOnly),
+      returnRefundCount: Number(agg.returnRefundCount ?? 0),
+      refundOnlyCount: Number(agg.refundOnlyCount ?? 0),
+      afterSaleType: agg.afterSaleType ?? null,
+      returnTypeCodes: agg.returnTypeCodes ?? null,
+      classificationSource: agg.classificationSource ?? null,
+    }
   }
   return {
     liveAccountId: resolveLiveAccountId(row.liveAccountId),
@@ -379,6 +422,7 @@ function rowToRefund(row: {
     afterSaleStatus: row.afterSaleStatus,
     successReturnCount: row.successReturnCount,
     returnsIds: row.returnsIds ? row.returnsIds.split(',').filter(Boolean) : [],
+    ...structured,
     fetchStatus: row.fetchStatus as WorkbenchFetchStatus,
     fetchError: row.fetchError,
     fetchedAt: row.fetchedAt,
@@ -499,6 +543,13 @@ export async function saveWorkbenchCache(
       successReturnCount: result.successReturnCount,
       returnsIds: result.returnsIds.join(',') || null,
       rawDetail: result.rawDetail ? (result.rawDetail as object) : undefined,
+      hasReturnRefund: Boolean(result.hasReturnRefund),
+      hasRefundOnly: Boolean(result.hasRefundOnly),
+      returnRefundCount: Number(result.returnRefundCount ?? 0),
+      refundOnlyCount: Number(result.refundOnlyCount ?? 0),
+      afterSaleType: result.afterSaleType ?? null,
+      returnTypeCodes: result.returnTypeCodes ?? null,
+      classificationSource: result.classificationSource ?? null,
       fetchStatus: result.fetchStatus,
       fetchError: result.fetchError,
       fetchedAt: result.fetchedAt,
@@ -518,6 +569,13 @@ export async function saveWorkbenchCache(
       successReturnCount: result.successReturnCount,
       returnsIds: result.returnsIds.join(',') || null,
       rawDetail: result.rawDetail ? (result.rawDetail as object) : undefined,
+      hasReturnRefund: Boolean(result.hasReturnRefund),
+      hasRefundOnly: Boolean(result.hasRefundOnly),
+      returnRefundCount: Number(result.returnRefundCount ?? 0),
+      refundOnlyCount: Number(result.refundOnlyCount ?? 0),
+      afterSaleType: result.afterSaleType ?? null,
+      returnTypeCodes: result.returnTypeCodes ?? null,
+      classificationSource: result.classificationSource ?? null,
       fetchStatus: result.fetchStatus,
       fetchError: result.fetchError,
       fetchedAt: result.fetchedAt,
@@ -681,7 +739,7 @@ export async function bootstrapWorkbenchCache(): Promise<void> {
   await refreshWorkbenchMemoryCache()
 }
 
-/** 从 DB 售后缓存加载 rawDetail，供本地看板 / 买家排行品退统计 */
+/** 从 DB 售后缓存加载售后聚合；优先 rawDetail，缺失时用结构化分类字段 */
 export async function loadAfterSalesBundleForOrderNos(
   queries: LiveAccountOrderQuery[],
   paidOrderNos?: Set<string>,
@@ -709,29 +767,67 @@ export async function loadAfterSalesBundleForOrderNos(
       })),
       fetchStatus: { in: ['success', 'empty'] },
     },
-    select: { liveAccountId: true, orderNo: true, rawDetail: true },
+    select: {
+      liveAccountId: true,
+      orderNo: true,
+      rawDetail: true,
+      officialRefundAmountCent: true,
+      afterSaleReason: true,
+      afterSaleStatus: true,
+      hasReturnRefund: true,
+      hasRefundOnly: true,
+      returnRefundCount: true,
+      refundOnlyCount: true,
+      afterSaleType: true,
+      returnTypeCodes: true,
+      successReturnCount: true,
+      returnsIds: true,
+    },
   })
 
   for (const row of rows) {
-    const detail = row.rawDetail
-    if (!detail || !Array.isArray(detail)) continue
     const cacheKey = liveAccountOrderKey(row.liveAccountId, row.orderNo)
-    const raws: Record<string, unknown>[] = []
-    const norms: NormalizedAfterSaleRecord[] = []
-    for (const item of detail) {
-      if (!item || typeof item !== 'object') continue
-      const rec = item as Record<string, unknown>
-      raws.push(rec)
-      const norm = normalizeAfterSaleRecord(rec)
-      if (norm) norms.push(norm)
+    const detail = row.rawDetail
+    if (detail && Array.isArray(detail)) {
+      const raws: Record<string, unknown>[] = []
+      const norms: NormalizedAfterSaleRecord[] = []
+      for (const item of detail) {
+        if (!item || typeof item !== 'object') continue
+        const rec = item as Record<string, unknown>
+        raws.push(rec)
+        const norm = normalizeAfterSaleRecord(rec)
+        if (norm) norms.push(norm)
+      }
+      if (raws.length > 0) {
+        rawAfterSalesByOrderNo.set(cacheKey, raws)
+      }
+      const paidSet = paidOrderNos ?? new Set([row.orderNo])
+      const built = buildAfterSaleByOrderNo(norms, paidSet)
+      const agg = built.get(row.orderNo)
+      if (agg) afterSaleByOrderNo.set(cacheKey, agg)
+      continue
     }
-    if (raws.length > 0) {
-      rawAfterSalesByOrderNo.set(cacheKey, raws)
+
+    // rawDetail 缺失：用结构化字段恢复 afterSaleAgg（保证退货退款统计不依赖全量 JSON）
+    if (
+      row.hasReturnRefund ||
+      row.hasRefundOnly ||
+      row.officialRefundAmountCent > 0 ||
+      (row.afterSaleType && row.afterSaleType !== 'none')
+    ) {
+      afterSaleByOrderNo.set(cacheKey, {
+        orderNo: row.orderNo,
+        refundAmountCent: row.officialRefundAmountCent,
+        returnRefundAmountCent: row.hasReturnRefund ? row.officialRefundAmountCent : 0,
+        afterSaleCount: row.successReturnCount || (row.officialRefundAmountCent > 0 ? 1 : 0),
+        returnIds: row.returnsIds ? row.returnsIds.split(',').filter(Boolean) : [],
+        reasons: row.afterSaleReason ? [row.afterSaleReason] : [],
+        statuses: row.afterSaleStatus ? [row.afterSaleStatus] : [],
+        hasRefund: row.officialRefundAmountCent > 0,
+        hasReturnRefund: Boolean(row.hasReturnRefund),
+        hasProductQualityRefund: false,
+      })
     }
-    const paidSet = paidOrderNos ?? new Set([row.orderNo])
-    const built = buildAfterSaleByOrderNo(norms, paidSet)
-    const agg = built.get(row.orderNo)
-    if (agg) afterSaleByOrderNo.set(cacheKey, agg)
   }
 
   return { rawAfterSalesByOrderNo, afterSaleByOrderNo }

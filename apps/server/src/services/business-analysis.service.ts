@@ -44,6 +44,8 @@ import {
 import { resolveOfficialPaidAmountCent } from './resolve-official-paid-amount.service'
 import { classifyOrderAfterSale } from './after-sale-classification.service'
 import type { AfterSaleOrderAggregate } from './xhs-after-sales-range.service'
+import { resolveReturnRefundClassification } from './resolve-return-refund-classification.service'
+import { resolveViewRefundAmountCent } from './order-refund-metrics.service'
 import { isStatusSignedOrder } from './order-sign-status.service'
 import { computeStrictOrderViewFields } from './strict-after-sale-metrics.service'
 import {
@@ -234,7 +236,10 @@ function buildViews(
       isReturned: classification.countsAsProductRefund || classification.countsAsReturnRefund,
       isActualSigned: strictFields.isEffectiveSigned,
       statusSigned: isStatusSignedOrder(o),
-      isReturnRefundOrder: Boolean(afterSaleAgg?.hasReturnRefund),
+      isReturnRefundOrder: false,
+      isRefundOnlyOrder: false,
+      isRefundTypeUnknown: false,
+      returnRefundClassificationSource: 'none',
       isQualityReturn: false,
       strictQualityRefund: strictFields.strictQualityRefund,
       hasHistoricalQualityReason: strictFields.hasHistoricalQualityReason,
@@ -290,6 +295,39 @@ function buildViews(
       buyerShortCode: displayFields?.buyerShortCode,
       statRangeRefundAmountCent,
     }
+
+    const productRefundCent = Math.max(
+      view.productRefundAmountCent ?? 0,
+      view.afterSalesWorkbenchRefundAmountCent ?? 0,
+      view.realAfterSaleAmountCent ?? 0,
+      resolveViewRefundAmountCent(view),
+    )
+    const returnRefundResolved = resolveReturnRefundClassification({
+      hasSuccessfulProductRefund: productRefundCent > 0 && !classification.isFreightRefundOnly,
+      isFreightRefundOnly: classification.isFreightRefundOnly,
+      rawAfterSales: afterSaleRecords,
+      afterSaleAgg,
+      structuredCache: workbench
+        ? {
+            hasReturnRefund: workbench.hasReturnRefund,
+            hasRefundOnly: workbench.hasRefundOnly,
+            returnRefundCount: workbench.returnRefundCount,
+            refundOnlyCount: workbench.refundOnlyCount,
+            afterSaleType: workbench.afterSaleType,
+            returnTypeCodes: workbench.returnTypeCodes,
+            classificationSource: workbench.classificationSource,
+          }
+        : null,
+      classification,
+      orderStatusText: o.orderStatusText,
+      afterSaleStatusText: o.afterSaleStatusText,
+      workbenchAfterSaleStatus: workbench?.afterSaleStatus,
+    })
+    view.isReturnRefundOrder = returnRefundResolved.isReturnRefundOrder
+    view.isRefundOnlyOrder = returnRefundResolved.isRefundOnlyOrder
+    view.isRefundTypeUnknown = !returnRefundResolved.typeKnown && productRefundCent > 0
+    view.returnRefundClassificationSource = returnRefundResolved.classificationSource
+
     const packageCacheKey = displayNo ? liveAccountPackageKey(o.liveAccountId, displayNo) : ''
     if (packageCacheKey && officialByPackage.has(packageCacheKey)) {
       view = applyOfficialQualityToView(view, officialByPackage.get(packageCacheKey)!)

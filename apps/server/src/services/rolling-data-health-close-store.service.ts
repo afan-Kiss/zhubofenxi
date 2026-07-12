@@ -204,3 +204,18 @@ export async function isRollingDataHealthCloseLocked(): Promise<boolean> {
   }
   return clearExpiredRollingCloseLockIfNeeded()
 }
+
+export async function readLastRollingDataHealthCloseRunLog(): Promise<RollingDataHealthCloseRunLogEntry | null> {
+  try {
+    const raw = await fs.readFile(runsLogPath(), 'utf8')
+    const lines = raw
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean)
+    if (lines.length === 0) return null
+    return JSON.parse(lines[lines.length - 1]!) as RollingDataHealthCloseRunLogEntry
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw err
+  }
+}

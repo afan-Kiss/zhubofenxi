@@ -204,3 +204,37 @@ export async function runRollingDataHealthClose(input: {
 }
 
 export type { RollingDataHealthCloseReport } from './rolling-data-health-close-store.service'
+
+export async function getRollingDataHealthCloseStatus(): Promise<{
+  registered: boolean
+  dailyTime: string
+  timezone: string
+  latest: RollingDataHealthCloseReport | null
+  running: boolean
+  lastRunStatus: 'pass' | 'failed' | null
+  lastError: string | null
+  lastFinishedAt: string | null
+}> {
+  const { getRollingDataHealthCloseSchedulerInfo } = await import('./scheduler.service')
+  const {
+    readLatestRollingDataHealthCloseReport,
+    readLastRollingDataHealthCloseRunLog,
+    isRollingDataHealthCloseLocked,
+  } = await import('./rolling-data-health-close-store.service')
+  const scheduler = getRollingDataHealthCloseSchedulerInfo()
+  const [latest, lastRun, running] = await Promise.all([
+    readLatestRollingDataHealthCloseReport(),
+    readLastRollingDataHealthCloseRunLog(),
+    isRollingDataHealthCloseLocked(),
+  ])
+  return {
+    registered: scheduler.registered,
+    dailyTime: scheduler.dailyTime,
+    timezone: scheduler.timezone,
+    latest,
+    running,
+    lastRunStatus: lastRun?.status ?? null,
+    lastError: lastRun?.status === 'failed' ? lastRun.errorMessage ?? '执行失败' : null,
+    lastFinishedAt: lastRun?.finishedAt ?? null,
+  }
+}

@@ -32,6 +32,22 @@ export const BUYER_RANKING_TIMEZONE = 'Asia/Shanghai'
 export const ROLLING_DATA_HEALTH_CLOSE_DAILY_TIME = '03:10'
 export const ROLLING_DATA_HEALTH_CLOSE_STARTUP_STALE_MS = 30 * 60 * 60 * 1000
 
+export function isRollingDataHealthCloseSchedulerRegistered(): boolean {
+  return rollingDataHealthCloseCronTask != null
+}
+
+export function getRollingDataHealthCloseSchedulerInfo(): {
+  registered: boolean
+  dailyTime: string
+  timezone: string
+} {
+  return {
+    registered: isRollingDataHealthCloseSchedulerRegistered(),
+    dailyTime: ROLLING_DATA_HEALTH_CLOSE_DAILY_TIME,
+    timezone: BUYER_RANKING_TIMEZONE,
+  }
+}
+
 export async function getSchedulerStatus(): Promise<{
   enabled: boolean
   apiSyncTime: string

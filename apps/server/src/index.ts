@@ -90,17 +90,7 @@ async function main() {
   const { app, webMounted } = createApp()
   await listenHttp(app, webMounted)
 
-  try {
-    const { initMonthlyCloseScheduler } = await import('./services/monthly-close-scheduler.service')
-    initMonthlyCloseScheduler()
-    logInfo('月度结账调度', '月度结账调度已注册')
-  } catch (err) {
-    logError(
-      '月度结账调度',
-      `月度结账调度注册失败：${err instanceof Error ? err.message : String(err)}`,
-      err,
-    )
-  }
+  // 定时任务统一由 deferred-boot → initScheduler 注册（含滚动结账与月度结账），避免重复注册
 
   startDeferredBootTasks()
 

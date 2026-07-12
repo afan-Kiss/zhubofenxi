@@ -2,6 +2,7 @@ import { Router } from 'express'
 import { attachRequestUser } from '../middleware/local-viewer.middleware'
 import { requireAuth } from '../middleware/auth.middleware'
 import { requireMaintenanceTools } from '../middleware/maintenance.middleware'
+import { requireSuperAdmin } from '../middleware/role.middleware'
 import { getClientIp } from '../middleware/audit.middleware'
 import { sendFail, sendOk } from '../utils/response'
 import {
@@ -85,13 +86,15 @@ boardRouter.get('/sync-meta', async (_req, res) => {
   }
 })
 
-boardRouter.post('/data-health/rolling-close/run', async (_req, res) => {
+boardRouter.post('/data-health/rolling-close/run', requireSuperAdmin, async (_req, res) => {
   try {
     const { runRollingDataHealthClose } = await import('../services/rolling-data-health-close.service')
     const report = await runRollingDataHealthClose({ triggeredBy: 'manual-api' })
     sendOk(res, { ok: true, report })
   } catch (err) {
-    sendFail(res, err instanceof Error ? err.message : '滚动30天数据健康结账失败', 500)
+    const message = err instanceof Error ? err.message : '滚动30天数据健康结账失败'
+    const status = /正在执行中|请稍后再试/.test(message) ? 409 : 500
+    sendFail(res, message, status)
   }
 })
 
@@ -103,6 +106,17 @@ boardRouter.get('/data-health/rolling-close/latest', async (_req, res) => {
     sendOk(res, await readLatestRollingDataHealthCloseReport())
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '读取滚动30天结账报告失败', 500)
+  }
+})
+
+boardRouter.get('/data-health/rolling-close/status', async (_req, res) => {
+  try {
+    const { getRollingDataHealthCloseStatus } = await import(
+      '../services/rolling-data-health-close.service'
+    )
+    sendOk(res, await getRollingDataHealthCloseStatus())
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '读取滚动30天结账状态失败', 500)
   }
 })
 
@@ -1318,6 +1332,7 @@ boardRouter.get('/buyer-ranking/summary-drill', async (req, res) => {
   }
 })
 
+/** @deprecated 旧月度结账状态；数据健康主页面请用 /data-health/rolling-close/* */
 boardRouter.get('/monthly-close/status', async (_req, res) => {
   try {
     const { getMonthlyCloseStatus } = await import('../services/monthly-close-auto.service')
@@ -1328,6 +1343,7 @@ boardRouter.get('/monthly-close/status', async (_req, res) => {
   }
 })
 
+/** @deprecated 旧月度结账报告；保留兼容，不作为数据健康主数据源 */
 boardRouter.get('/monthly-close/report', async (req, res) => {
   try {
     const month = req.query.month ? String(req.query.month) : undefined
@@ -1345,7 +1361,8 @@ boardRouter.get('/monthly-close/report', async (req, res) => {
   }
 })
 
-boardRouter.post('/monthly-close/rerun', requireMaintenanceTools, async (req, res) => {
+/** @deprecated 旧月度结账重跑；须超级管理员，且仍受维护开关约束 */
+boardRouter.post('/monthly-close/rerun', requireSuperAdmin, requireMaintenanceTools, async (req, res) => {
   try {
     const month = req.body?.month ? String(req.body.month) : undefined
     const { runMonthlyCloseAuto } = await import('../services/monthly-close-auto.service')

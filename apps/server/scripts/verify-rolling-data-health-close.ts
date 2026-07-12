@@ -316,6 +316,152 @@ async function main(): Promise<void> {
     fail('monthly-close-scheduler 逻辑缺失')
   }
 
+  const dataHealthPage = read('web/src/pages/board/DataHealthPage.tsx')
+  const indexTs = read('server/src/index.ts')
+  const roleMw = read('server/src/middleware/role.middleware.ts')
+
+  if (dataHealthPage.includes('数据健康 / 滚动30天结账')) {
+    ok('DataHealthPage 标题为滚动30天结账')
+  } else {
+    fail('DataHealthPage 标题未改为滚动30天结账')
+  }
+
+  if (
+    !dataHealthPage.includes('每月 15') &&
+    !dataHealthPage.includes('每月15') &&
+    !dataHealthPage.includes('月度结账') &&
+    !dataHealthPage.includes('本月结账')
+  ) {
+    ok('DataHealthPage 不再出现每月15日/月度结账旧文案')
+  } else {
+    fail('DataHealthPage 仍含每月15日或月度结账旧文案')
+  }
+
+  if (dataHealthPage.includes('/api/board/data-health/rolling-close/status')) {
+    ok('DataHealthPage 主数据源为 rolling-close/status')
+  } else {
+    fail('DataHealthPage 未改用 rolling-close/status')
+  }
+
+  if (!dataHealthPage.includes('/api/board/monthly-close/status')) {
+    ok('DataHealthPage 不再调用 monthly-close/status 作为主数据源')
+  } else {
+    fail('DataHealthPage 仍调用 monthly-close/status')
+  }
+
+  if (!dataHealthPage.includes('/api/board/monthly-close/rerun')) {
+    ok('DataHealthPage 不再调用 monthly-close/rerun')
+  } else {
+    fail('DataHealthPage 仍调用 monthly-close/rerun')
+  }
+
+  if (dataHealthPage.includes('/api/board/data-health/rolling-close/run')) {
+    ok('DataHealthPage 手动核对调用 rolling-close/run')
+  } else {
+    fail('DataHealthPage 未调用 rolling-close/run')
+  }
+
+  if (
+    dataHealthPage.includes("user?.role === 'super_admin'") &&
+    dataHealthPage.includes('立即重新核对滚动30天')
+  ) {
+    ok('仅 super_admin 可见手动核对按钮文案')
+  } else {
+    fail('手动核对按钮权限或文案不正确')
+  }
+
+  if (!dataHealthPage.includes('请联系管理员') && !dataHealthPage.includes('/维护|403|404|未启用|权限/')) {
+    ok('DataHealthPage 不再粗暴映射为「请联系管理员」')
+  } else {
+    fail('DataHealthPage 仍含错误权限文案映射')
+  }
+
+  const loadStart = dataHealthPage.indexOf('const load = useCallback')
+  const loadEnd = dataHealthPage.indexOf('}, [])', loadStart)
+  const loadBlock = loadStart >= 0 && loadEnd > loadStart ? dataHealthPage.slice(loadStart, loadEnd) : ''
+  if (loadBlock.includes('rolling-close/status') && !loadBlock.includes('rolling-close/run')) {
+    ok('页面打开只读状态，load 不触发 POST run')
+  } else {
+    fail('页面打开可能自动触发 POST run，或 load 未隔离')
+  }
+
+  if (
+    routes.includes("boardRouter.post('/data-health/rolling-close/run', requireSuperAdmin") &&
+    !/rolling-close\/run',\s*requireMaintenanceTools/.test(routes)
+  ) {
+    ok('POST rolling-close/run 使用 requireSuperAdmin，不依赖维护开关')
+  } else {
+    fail('POST rolling-close/run 权限中间件不正确')
+  }
+
+  if (routes.includes("boardRouter.get('/data-health/rolling-close/status'")) {
+    ok('存在 GET rolling-close/status')
+  } else {
+    fail('缺少 GET rolling-close/status')
+  }
+
+  if (routes.includes("'/monthly-close/rerun', requireSuperAdmin")) {
+    ok('旧 monthly-close/rerun 已加 requireSuperAdmin')
+  } else {
+    fail('旧 monthly-close/rerun 缺少 requireSuperAdmin')
+  }
+
+  if (roleMw.includes('requireSuperAdmin') && roleMw.includes("requireRole('super_admin')")) {
+    ok('存在 requireSuperAdmin 中间件')
+  } else {
+    fail('缺少 requireSuperAdmin 中间件')
+  }
+
+  if (!indexTs.includes('initMonthlyCloseScheduler') && scheduler.includes('initMonthlyCloseScheduler')) {
+    ok('月度结账调度仅由 initScheduler 注册，index.ts 不再重复注册')
+  } else {
+    fail('月度结账调度仍可能在 index.ts 与 initScheduler 重复注册')
+  }
+
+  if (scheduler.includes('getRollingDataHealthCloseSchedulerInfo')) {
+    ok('scheduler 导出滚动结账注册状态查询')
+  } else {
+    fail('scheduler 未导出滚动结账注册状态')
+  }
+
+  if (store.includes('readLastRollingDataHealthCloseRunLog')) {
+    ok('store 可读取最近一次运行日志')
+  } else {
+    fail('store 缺少 readLastRollingDataHealthCloseRunLog')
+  }
+
+  const metricLabels = [
+    '支付金额',
+    '已签收金额',
+    '支付订单数',
+    '已签收订单数',
+    '签收率',
+    '退款金额',
+    '退款订单数',
+    '退款率',
+    '品退订单数',
+    '品退率',
+    '售后相关订单数',
+    '售后缓存记录数',
+    '未归属订单数',
+    '重复订单风险数',
+  ]
+  if (metricLabels.every((l) => dataHealthPage.includes(l))) {
+    ok('页面展示滚动结账核心指标字段')
+  } else {
+    fail('页面缺少滚动结账核心指标字段')
+  }
+
+  if (
+    dataHealthPage.includes('report.gmvAmountYuan') &&
+    dataHealthPage.includes('report.actualSignedAmountYuan') &&
+    dataHealthPage.includes('report.paidOrderCount')
+  ) {
+    ok('页面金额/单数直接绑定 latest 报告字段')
+  } else {
+    fail('页面未直接绑定 latest 报告金额/单数字段')
+  }
+
   if (
     !signalService.includes("negWords.some((w) => raw.includes(w)) && raw.includes('售后')") &&
     signalService.includes('NO_AFTER_SALE_PHRASES')

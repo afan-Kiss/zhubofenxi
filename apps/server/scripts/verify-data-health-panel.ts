@@ -88,6 +88,26 @@ function main(): void {
     fail('OverviewTab 副标题未更新为新口径')
   }
 
+  const dataHealthPage = read('web/src/pages/board/DataHealthPage.tsx')
+  if (dataHealthPage.includes('数据健康 / 滚动30天结账')) {
+    ok('DataHealthPage 使用滚动30天结账标题')
+  } else {
+    fail('DataHealthPage 未改为滚动30天结账')
+  }
+  if (
+    dataHealthPage.includes('rolling-close/status') &&
+    !dataHealthPage.includes('monthly-close/status')
+  ) {
+    ok('DataHealthPage 主数据源为 rolling-close，不再用 monthly-close')
+  } else {
+    fail('DataHealthPage 仍依赖 monthly-close 主数据源')
+  }
+  if (!dataHealthPage.includes('请联系管理员') && !dataHealthPage.includes('每月 15')) {
+    ok('DataHealthPage 无旧月度结账错误提示/15日文案')
+  } else {
+    fail('DataHealthPage 仍含旧月度结账错误提示或15日文案')
+  }
+
   if (syncMetaService.includes('totalAfterSaleRecords')) {
     ok('board-sync-meta 返回 totalAfterSaleRecords')
   } else {

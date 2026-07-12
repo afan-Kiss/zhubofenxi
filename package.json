@@ -43,6 +43,7 @@
     "verify:good-review-dedupe-key": "tsx apps/server/scripts/verify-good-review-dedupe-key.ts",
     "verify:good-review-sync-pagination": "tsx apps/server/scripts/verify-good-review-sync-pagination.ts",
     "verify:lucky-gifts": "tsx apps/server/scripts/verify-lucky-gifts.ts",
+    "verify:lucky-gift-anchor-fee": "tsx apps/server/scripts/verify-lucky-gift-anchor-fee.ts",
     "diagnose:lucky-gifts": "tsx apps/server/scripts/diagnose-lucky-gift-sync.ts",
     "verify:good-review-price": "tsx apps/server/scripts/verify-good-review-price.ts",
     "verify:good-reviews-pagination": "tsx apps/server/scripts/verify-good-reviews-pagination.ts",

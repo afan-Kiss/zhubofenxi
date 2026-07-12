@@ -59,8 +59,6 @@ interface LuckyGiftItem {
   id: string
   liveAccountId: string
   liveAccountName: string
-  luckyDrawId: string
-  roomId: string
   giftName: string
   winnerNickname: string
   redId: string | null
@@ -70,27 +68,26 @@ interface LuckyGiftItem {
   hasAddress: boolean
   addressComplete: boolean
   addressMissing: string[]
-  firstAddressSeenAt: string | null
   winTime: string | null
-  winDayN: number | null
-  addressDeadlineHint: string | null
-  shipDeadlineHint: string
+  addressDeadlineLabel: string | null
+  shipDeadlineLabel: string | null
   shipmentStatus: string
   shipmentStatusLabel: string
   shippingStatusSource: string
-  shippingStatusSourceLabel: string
-  freightLabel: string
+  freightLabel: string | null
   courierCompany: string | null
   trackingNo: string | null
   markedShippedAt: string | null
   shipmentNote: string | null
   trackingPending: boolean
-  rawAddress?: {
-    province: string | null
-    city: string | null
-    district: string | null
-    detail: string | null
-  }
+  anchorName: string | null
+  anchorId: string | null
+  anchorAttributionSource: string
+  sfMonthlyFeeYuan: number | null
+  sfFeeStatus: string
+  sfFeeQueriedAt: string | null
+  sfFeeError: string | null
+  isSfTracking: boolean
 }
 
 const SHOP_ORDER = ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu'] as const
@@ -126,121 +123,160 @@ function shopPillClass(active: boolean): string {
   ].join(' ')
 }
 
+function anchorLabel(item: LuckyGiftItem): string {
+  return item.anchorName?.trim() ? `主播 ${item.anchorName}` : '主播待确认'
+}
+
+function sfFeeDisplay(item: LuckyGiftItem): string | null {
+  if (item.shipmentStatus !== 'shipped' || !item.isSfTracking) return null
+  if (item.sfFeeStatus === 'querying') return '顺丰费用查询中…'
+  if (item.sfFeeStatus === 'available' && item.sfMonthlyFeeYuan != null) {
+    return `顺丰月结：¥${item.sfMonthlyFeeYuan.toFixed(2)}`
+  }
+  if (item.sfFeeStatus === 'not_billed') return '顺丰费用：暂未出账'
+  if (item.sfFeeStatus === 'failed') return '顺丰费用暂时查不到'
+  return null
+}
+
 function LuckyGiftRow(props: {
   item: LuckyGiftItem
   checked: boolean
   onToggle: () => void
-  expanded: boolean
-  onToggleExpand: () => void
+  logisticsOpen: boolean
+  onToggleLogistics: () => void
   canViewPii: boolean
   canMutate: boolean
   isSuperAdmin: boolean
   onCopy: () => void
   onShip: () => void
   onUndo: () => void
+  onRefreshSfFee?: () => void
 }) {
-  const { item, checked, expanded } = props
-  const showAddress = item.shipmentStatus !== 'no_address'
-  const freight = item.freightLabel?.trim() || '到付'
+  const { item } = props
+  const isNoAddress = item.shipmentStatus === 'no_address' || item.shipmentStatus === 'incomplete_address'
+  const isPending = item.shipmentStatus === 'pending'
+  const isShipped = item.shipmentStatus === 'shipped'
+  const sfFee = sfFeeDisplay(item)
+  const hasLogisticsDetail =
+    isShipped &&
+    (item.courierCompany || item.trackingNo || item.markedShippedAt || sfFee || item.shipmentNote)
 
   return (
     <article
       className={`rounded-2xl border bg-white shadow-sm ${
-        item.shipmentStatus === 'no_address' || item.shipmentStatus === 'incomplete_address'
-          ? 'border-amber-100'
-          : 'border-slate-100'
+        isNoAddress ? 'border-amber-100' : 'border-slate-100'
       }`}
+      data-testid="lucky-gift-card"
     >
       <div className="flex gap-3 p-4 sm:gap-4">
         <div className="flex shrink-0 items-start pt-1">
           <input
             type="checkbox"
-            checked={checked}
+            checked={props.checked}
             onChange={props.onToggle}
             className="mt-0.5 h-4 w-4 rounded border-slate-300"
             aria-label="选择此条"
           />
         </div>
 
-        <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-start">
           <div className="min-w-0 flex-1 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
               <h3 className="text-base font-semibold text-slate-900">{item.giftName || '直播福袋'}</h3>
-              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{item.liveAccountName}</span>
+              <span className="text-slate-400">｜</span>
+              <span className="text-slate-600">{item.liveAccountName}</span>
+              <span className="text-slate-400">｜</span>
+              <span className="text-slate-600">{anchorLabel(item)}</span>
+              <span className="text-slate-400">｜</span>
               <span className={`rounded-md border px-2 py-0.5 text-xs ${statusTone(item.shipmentStatus)}`}>
                 {item.shipmentStatusLabel}
               </span>
-              {freight && (
-                <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-500">{freight}</span>
-              )}
+              {item.freightLabel ? (
+                <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-500">
+                  {item.freightLabel}
+                </span>
+              ) : null}
             </div>
 
-            <div className="space-y-1 text-sm text-slate-700">
-              <p>
-                <span className="text-slate-500">中奖人</span>{' '}
-                {item.winnerNickname || '—'}
-                {item.redId ? (
-                  <span className="ml-2 text-slate-500">
-                    小红书号 {item.redId}
-                  </span>
+            {isNoAddress ? (
+              <div className="space-y-1 text-sm text-slate-700">
+                <p>
+                  中奖人：{item.winnerNickname || '—'}
+                  {item.redId ? <span className="ml-2 text-slate-500">小红书号 {item.redId}</span> : null}
+                </p>
+                <p className="text-amber-800">
+                  {item.shipmentStatus === 'incomplete_address'
+                    ? `地址不完整：${item.addressMissing.join('、')}`
+                    : '中奖人尚未填写地址'}
+                </p>
+              </div>
+            ) : isPending ? (
+              <div className="space-y-1 text-sm text-slate-800">
+                <p className="font-medium">
+                  {item.recipientName || '—'}
+                  <span className="mx-2 font-normal text-slate-300">|</span>
+                  {item.recipientPhone || '—'}
+                </p>
+                <p className="break-all leading-relaxed">{item.fullAddress || '—'}</p>
+                {item.winnerNickname ? (
+                  <p className="text-xs text-slate-400">中奖人 {item.winnerNickname}</p>
                 ) : null}
-              </p>
-              {showAddress ? (
-                <>
-                  <p>
-                    <span className="text-slate-500">收件人</span> {item.recipientName || '—'}
-                    <span className="mx-2 text-slate-300">|</span>
-                    <span className="text-slate-500">手机</span> {item.recipientPhone || '—'}
+              </div>
+            ) : (
+              <div className="space-y-1 text-sm text-slate-800">
+                <p className="font-medium">
+                  {item.recipientName || '—'}
+                  <span className="mx-2 font-normal text-slate-300">|</span>
+                  {item.recipientPhone || '—'}
+                </p>
+                <p className="break-all leading-relaxed">{item.fullAddress || '—'}</p>
+                {(item.courierCompany || item.trackingNo) && (
+                  <p className="text-slate-600">
+                    {item.courierCompany || '物流'} {item.trackingNo || '单号待补'}
                   </p>
-                  <p className="break-all leading-relaxed text-slate-800">{item.fullAddress || '—'}</p>
-                  {item.addressMissing?.length > 0 && item.shipmentStatus !== 'shipped' && (
-                    <p className="text-amber-800">地址不完整：{item.addressMissing.join('、')}</p>
-                  )}
-                </>
-              ) : (
-                <p className="text-amber-800">中奖人尚未填写地址</p>
-              )}
-            </div>
+                )}
+                {sfFee ? <p className="text-sky-700">{sfFee}</p> : null}
+              </div>
+            )}
 
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-400">
-              {item.winTime && <span>中奖 {formatDateTime(item.winTime)}</span>}
-              {item.shipDeadlineHint && item.shipDeadlineHint !== '—' && (
-                <span>{item.shipDeadlineHint}</span>
+              {item.winTime && isNoAddress && <span>中奖：{formatDateTime(item.winTime)}</span>}
+              {isNoAddress && item.addressDeadlineLabel && <span>{item.addressDeadlineLabel}</span>}
+              {isPending && item.shipDeadlineLabel && <span>{item.shipDeadlineLabel}</span>}
+              {isShipped && item.markedShippedAt && (
+                <span>已发货：{formatDateTime(item.markedShippedAt)}</span>
               )}
-              {item.addressDeadlineHint && <span>{item.addressDeadlineHint}</span>}
             </div>
 
-            <button
-              type="button"
-              onClick={props.onToggleExpand}
-              className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
-            >
-              <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-              {expanded ? '收起更多信息' : '展开更多信息'}
-            </button>
+            {hasLogisticsDetail && (
+              <button
+                type="button"
+                onClick={props.onToggleLogistics}
+                className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
+              >
+                <ChevronDown
+                  className={`h-3.5 w-3.5 transition-transform ${props.logisticsOpen ? 'rotate-180' : ''}`}
+                />
+                {props.logisticsOpen ? '收起物流详情' : '物流详情'}
+              </button>
+            )}
 
-            {expanded && (
-              <div className="space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                <p>福袋编号 {item.luckyDrawId}</p>
-                {item.roomId && <p>直播间编号 {item.roomId}</p>}
-                {item.firstAddressSeenAt && (
-                  <p>系统首次发现地址 {formatDateTime(item.firstAddressSeenAt)}</p>
-                )}
-                {item.markedShippedAt && <p>系统已记录发货 {formatDateTime(item.markedShippedAt)}</p>}
-                {(item.courierCompany || item.trackingNo || item.trackingPending) && (
-                  <p>
-                    物流 {item.courierCompany || '—'} /{' '}
-                    {item.trackingPending ? '单号待补' : item.trackingNo || '—'}
-                  </p>
-                )}
-                {item.shipmentNote && <p>备注 {item.shipmentNote}</p>}
-                {item.shippingStatusSourceLabel && (
-                  <p>状态来源 {item.shippingStatusSourceLabel}</p>
-                )}
-                {item.rawAddress && (
-                  <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all text-[11px]">
-                    {JSON.stringify(item.rawAddress, null, 2)}
-                  </pre>
+            {props.logisticsOpen && hasLogisticsDetail && (
+              <div className="space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                {item.courierCompany && <p>物流公司：{item.courierCompany}</p>}
+                {item.trackingNo && <p>运单号：{item.trackingNo}</p>}
+                {item.markedShippedAt && <p>已发货时间：{formatDateTime(item.markedShippedAt)}</p>}
+                {sfFee && <p>{sfFee}</p>}
+                {item.sfFeeQueriedAt && <p>费用查询于 {formatDateTime(item.sfFeeQueriedAt)}</p>}
+                {item.shipmentNote && <p>发货备注：{item.shipmentNote}</p>}
+                {props.isSuperAdmin && item.sfFeeStatus === 'failed' && props.onRefreshSfFee && (
+                  <button
+                    type="button"
+                    onClick={props.onRefreshSfFee}
+                    className="mt-1 text-sky-600 hover:underline"
+                  >
+                    重新查询
+                  </button>
                 )}
               </div>
             )}
@@ -251,7 +287,7 @@ function LuckyGiftRow(props: {
               <Copy className="h-3.5 w-3.5" />
               复制
             </button>
-            {props.canMutate && item.shipmentStatus === 'pending' && item.addressComplete && (
+            {props.canMutate && isPending && item.addressComplete && (
               <button type="button" onClick={props.onShip} className={`${ACTION_BTN_PRIMARY} w-full justify-center`}>
                 <Truck className="h-3.5 w-3.5" />
                 标记已发
@@ -259,7 +295,7 @@ function LuckyGiftRow(props: {
             )}
             {props.canMutate &&
               props.isSuperAdmin &&
-              item.shipmentStatus === 'shipped' &&
+              isShipped &&
               item.shippingStatusSource === 'local' && (
                 <button
                   type="button"
@@ -307,6 +343,16 @@ export const LuckyGiftsPage: React.FC = () => {
   const [trackingNo, setTrackingNo] = useState('')
   const [note, setNote] = useState('')
   const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
+
+  async function refreshSfFee(id: string) {
+    try {
+      await apiRequest(`/api/board/lucky-gifts/winners/${id}/sf-fee/refresh`, { method: 'POST' })
+      setMessage('已重新查询顺丰费用')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '查询失败')
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -770,8 +816,8 @@ export const LuckyGiftsPage: React.FC = () => {
                   return next
                 })
               }}
-              expanded={expandedDetails.has(item.id)}
-              onToggleExpand={() => {
+              logisticsOpen={expandedDetails.has(item.id)}
+              onToggleLogistics={() => {
                 setExpandedDetails((prev) => {
                   const next = new Set(prev)
                   if (next.has(item.id)) next.delete(item.id)
@@ -788,6 +834,7 @@ export const LuckyGiftsPage: React.FC = () => {
                 setShipModalId(item.id)
               }}
               onUndo={() => void undoShip(item.id)}
+              onRefreshSfFee={() => void refreshSfFee(item.id)}
             />
           ))
         )}

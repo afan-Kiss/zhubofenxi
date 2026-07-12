@@ -14,6 +14,16 @@ export interface LuckyGiftCopyItem {
   hasAddress?: boolean
 }
 
+const FREIGHT_KEYWORDS = ['运费自理', '到付', '运费到付', '邮费自理', '邮费到付']
+
+function resolveFreightForCopy(giftName: string | null | undefined): string {
+  const name = String(giftName || '')
+  if (FREIGHT_KEYWORDS.some((k) => name.includes(k))) {
+    return name.includes('到付') ? '到付' : '运费自理'
+  }
+  return '到付'
+}
+
 function formatWinTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -26,6 +36,7 @@ export function buildLuckyGiftShipCopyText(items: LuckyGiftCopyItem[]): string {
   const blocks = items.map((item, idx) => {
     const shop = item.liveAccountName || '未知店铺'
     const gift = item.giftName || '直播福袋'
+    const freight = resolveFreightForCopy(gift)
     return [
       `${idx + 1}. 【${shop}】直播福袋`,
       '',
@@ -33,7 +44,7 @@ export function buildLuckyGiftShipCopyText(items: LuckyGiftCopyItem[]): string {
       `手机号：${item.recipientPhone || '—'}`,
       `收货地址：${item.fullAddress || '—'}`,
       `物品：${gift}`,
-      '运费：到付',
+      `运费：${freight}`,
       '备注：直播间福袋',
     ].join('\n')
   })
@@ -82,7 +93,7 @@ export function buildLuckyGiftAuditCopyText(items: LuckyGiftCopyItem[]): string 
         `手机号：${item.recipientPhone || '—'}`,
         `地址：${item.fullAddress || '—'}`,
         `福袋：${item.giftName || '—'}`,
-        '运费：到付',
+        `运费：${resolveFreightForCopy(item.giftName)}`,
       ].join('\n')
     })
     .join('\n\n--------------------\n\n')

@@ -1,6 +1,7 @@
 import { prisma } from '../../lib/prisma'
 import { deriveLuckyGiftShipmentStatus } from './lucky-gift-status.util'
 import type { LuckyGiftShipmentStatus } from './lucky-gift.types'
+import { isSfTrackingNo } from './lucky-gift-sf-fee.service'
 
 export async function markLuckyGiftShipped(params: {
   winnerId: string
@@ -78,6 +79,15 @@ export async function markLuckyGiftShipped(params: {
   }
 
   const toStatus: LuckyGiftShipmentStatus = 'shipped'
+  const newTracking = params.trackingNo?.trim() || shipment.trackingNo
+  const trackingChanged =
+    newTracking &&
+    shipment.trackingNo &&
+    newTracking.toUpperCase() !== shipment.trackingNo.toUpperCase()
+  const sfReset =
+    trackingChanged ||
+    (newTracking && isSfTrackingNo(newTracking) && shipment.sfFeeTrackingNo !== newTracking)
+
   const updated = await prisma.luckyGiftShipment.update({
     where: { id: shipment.id },
     data: {
@@ -85,10 +95,19 @@ export async function markLuckyGiftShipped(params: {
       shippingStatusSource: 'local',
       freightType: 'COLLECT',
       courierCompany: params.courierCompany?.trim() || shipment.courierCompany,
-      trackingNo: params.trackingNo?.trim() || shipment.trackingNo,
+      trackingNo: newTracking,
       markedShippedAt: new Date(),
       markedShippedBy: params.operatorName || params.operatorId || 'unknown',
       shipmentNote: params.note ?? shipment.shipmentNote,
+      ...(sfReset
+        ? {
+            sfFeeStatus: 'unknown',
+            sfMonthlyFeeCent: null,
+            sfFeeQueriedAt: null,
+            sfFeeError: null,
+            sfFeeTrackingNo: null,
+          }
+        : {}),
     },
   })
   await prisma.luckyGiftShipmentLog.create({

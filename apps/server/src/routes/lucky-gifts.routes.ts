@@ -4,6 +4,7 @@ import { requireAuth } from '../middleware/auth.middleware'
 import { requirePagePermission } from '../middleware/page-permission.middleware'
 import { requireRole, requireSuperAdmin } from '../middleware/role.middleware'
 import { sendFail, sendOk } from '../utils/response'
+import { prisma } from '../lib/prisma'
 import { resolveGoodReviewShopKey } from '../config/good-review-shops.constants'
 import { getLuckyGiftHealthReport } from '../services/lucky-gift/lucky-gift-health.service'
 import {
@@ -111,6 +112,36 @@ luckyGiftsRouter.post('/sync/:liveAccountId', requireSuperAdmin, async (req, res
     next(err)
   }
 })
+
+luckyGiftsRouter.post(
+  '/winners/:id/sf-fee/refresh',
+  requireRole('super_admin'),
+  async (req, res, next) => {
+    try {
+      const id = String(req.params.id || '').trim()
+      const winner = await prisma.xhsLuckyWinner.findUnique({
+        where: { id },
+        include: { shipment: true },
+      })
+      if (!winner?.shipment) {
+        sendFail(res, '记录不存在或未发货', 404)
+        return
+      }
+      const tracking = winner.shipment.trackingNo ?? winner.officialTrackingNo
+      if (!tracking) {
+        sendFail(res, '暂无运单号', 400)
+        return
+      }
+      const { queryAndCacheSfFeeForShipment } = await import(
+        '../services/lucky-gift/lucky-gift-sf-fee.service'
+      )
+      const data = await queryAndCacheSfFeeForShipment(winner.shipment.id, tracking, true)
+      sendOk(res, data)
+    } catch (err) {
+      next(err)
+    }
+  },
+)
 
 luckyGiftsRouter.patch(
   '/winners/:id/shipment',

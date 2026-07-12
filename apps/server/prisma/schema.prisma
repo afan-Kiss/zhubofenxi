@@ -1126,6 +1126,11 @@ model LuckyGiftShipment {
   markedShippedAt      DateTime?
   markedShippedBy      String?
   shipmentNote         String?
+  sfMonthlyFeeCent     Int?
+  sfFeeStatus          String    @default("unknown")
+  sfFeeQueriedAt       DateTime?
+  sfFeeError           String?
+  sfFeeTrackingNo      String?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 

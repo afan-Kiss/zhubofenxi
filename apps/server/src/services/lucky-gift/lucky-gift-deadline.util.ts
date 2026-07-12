@@ -1,0 +1,55 @@
+/** 福袋地址/发货截止时间（上海时区日历日） */
+
+export type DeadlineStatus = 'normal' | 'due_soon' | 'overdue'
+
+const SH_TZ = 'Asia/Shanghai'
+
+function shanghaiDateKey(d: Date): string {
+  return d.toLocaleDateString('en-CA', { timeZone: SH_TZ })
+}
+
+function endOfShanghaiDay(dateKey: string): Date {
+  return new Date(`${dateKey}T23:59:59.999+08:00`)
+}
+
+function addCalendarDays(dateKey: string, days: number): string {
+  const base = new Date(`${dateKey}T12:00:00+08:00`)
+  base.setDate(base.getDate() + days)
+  return shanghaiDateKey(base)
+}
+
+/** 中奖后第7天 23:59:59（中奖当天为第1天） */
+export function computeAddressDeadlineAt(winTime: Date): Date {
+  const winKey = shanghaiDateKey(winTime)
+  const deadlineKey = addCalendarDays(winKey, 6)
+  return endOfShanghaiDay(deadlineKey)
+}
+
+/** 地址填写后第15天 23:59:59（填写当天为第1天） */
+export function computeShipDeadlineAt(addressSubmittedAt: Date): Date {
+  const addrKey = shanghaiDateKey(addressSubmittedAt)
+  const deadlineKey = addCalendarDays(addrKey, 14)
+  return endOfShanghaiDay(deadlineKey)
+}
+
+export function computeDeadlineStatus(deadlineAt: Date, now = new Date()): DeadlineStatus {
+  if (now.getTime() > deadlineAt.getTime()) return 'overdue'
+  const msLeft = deadlineAt.getTime() - now.getTime()
+  if (msLeft <= 2 * 86_400_000) return 'due_soon'
+  return 'normal'
+}
+
+export function formatDeadlineLabel(
+  deadlineAt: Date,
+  prefix: string,
+  status: DeadlineStatus,
+): string {
+  if (status === 'overdue') {
+    if (prefix.includes('填写地址')) return '已超过填写地址截止时间'
+    return '已超过发货截止时间'
+  }
+  const d = deadlineAt
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const label = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  return `${prefix}：${label}`
+}

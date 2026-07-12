@@ -1,5 +1,7 @@
 /** 福袋发货复制文本（纯文本，粘贴微信不乱） */
 
+import { resolveFreightForCopy } from './lucky-gift-freight.util'
+
 export interface LuckyGiftCopyItem {
   liveAccountName: string
   giftName: string
@@ -27,6 +29,7 @@ export function buildLuckyGiftShipCopyText(items: LuckyGiftCopyItem[]): string {
   const blocks = items.map((item, idx) => {
     const shop = item.liveAccountName || '未知店铺'
     const gift = item.giftName || '直播福袋'
+    const freight = resolveFreightForCopy(gift)
     return [
       `${idx + 1}. 【${shop}】直播福袋`,
       '',
@@ -34,7 +37,7 @@ export function buildLuckyGiftShipCopyText(items: LuckyGiftCopyItem[]): string {
       `手机号：${item.recipientPhone || '—'}`,
       `收货地址：${item.fullAddress || '—'}`,
       `物品：${gift}`,
-      '运费：到付',
+      `运费：${freight}`,
       '备注：直播间福袋',
     ].join('\n')
   })
@@ -84,7 +87,7 @@ export function buildLuckyGiftAuditCopyText(items: LuckyGiftCopyItem[]): string 
         `手机号：${item.recipientPhone || '—'}`,
         `地址：${item.fullAddress || '—'}`,
         `福袋：${item.giftName || '—'}`,
-        '运费：到付',
+        `运费：${resolveFreightForCopy(item.giftName)}`,
       ].join('\n')
     })
     .join('\n\n--------------------\n\n')

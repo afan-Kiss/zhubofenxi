@@ -3,8 +3,21 @@ import {
   GOOD_REVIEW_SHOPS,
   resolveGoodReviewShopKey,
 } from '../../config/good-review-shops.constants'
-import { daysSinceWin, shipmentStatusLabel, shippingSourceLabel } from './lucky-gift-status.util'
+import { shipmentStatusLabel } from './lucky-gift-status.util'
 import type { LuckyGiftShipmentStatus } from './lucky-gift.types'
+import { extractAddressSubmittedAt } from './lucky-gift-address-time.util'
+import {
+  computeAddressDeadlineAt,
+  computeDeadlineStatus,
+  computeShipDeadlineAt,
+  formatDeadlineLabel,
+} from './lucky-gift-deadline.util'
+import { resolveLuckyGiftAnchorsBatch } from './lucky-gift-anchor-attribution.service'
+import { resolveFreightLabelForDisplay } from './lucky-gift-freight.util'
+import {
+  ensureSfFeesForShipments,
+  mapSfFeeForApi,
+} from './lucky-gift-sf-fee.service'
 
 export type LuckyGiftListStatusFilter =
   | 'todo'
@@ -77,11 +90,6 @@ export function maskLuckyGiftPii<T extends Record<string, unknown>>(row: T): T {
     recipientName: row.recipientName ? '***' : row.recipientName,
     recipientPhone: row.recipientPhone ? '***********' : row.recipientPhone,
     fullAddress: row.fullAddress ? '（无权限查看完整地址）' : row.fullAddress,
-    addressDetail: row.addressDetail ? '***' : row.addressDetail,
-    province: null,
-    city: null,
-    district: null,
-    rawAddress: undefined,
   }
 }
 
@@ -268,61 +276,119 @@ export async function listLuckyGifts(params: {
   ])
 
   const showPii = canViewLuckyGiftPii(params.role)
+  const anchorMap = await resolveLuckyGiftAnchorsBatch(rows)
+
+  const sfCandidates = rows
+    .filter((w) => (w.shipment?.shipmentStatus || 'no_address') === 'shipped')
+    .map((w) => ({
+      shipmentId: w.shipment!.id,
+      trackingNo: w.shipment?.trackingNo ?? w.officialTrackingNo,
+      shipmentStatus: w.shipment?.shipmentStatus || 'shipped',
+      sfFeeStatus: w.shipment?.sfFeeStatus ?? null,
+      sfFeeQueriedAt: w.shipment?.sfFeeQueriedAt ?? null,
+      sfFeeTrackingNo: w.shipment?.sfFeeTrackingNo ?? null,
+    }))
+  await ensureSfFeesForShipments(sfCandidates, { maxQueries: 8 })
+
+  const shipmentIds = rows.map((w) => w.shipment?.id).filter(Boolean) as string[]
+  const refreshedShipments =
+    shipmentIds.length > 0
+      ? await prisma.luckyGiftShipment.findMany({ where: { id: { in: shipmentIds } } })
+      : []
+  const shipmentById = new Map(refreshedShipments.map((s) => [s.id, s]))
+
   const items = rows.map((w) => {
     const status = (w.shipment?.shipmentStatus || 'no_address') as LuckyGiftShipmentStatus
     const source = w.shipment?.shippingStatusSource || 'local'
-    const dayN = daysSinceWin(w.winTime)
+    const giftName = w.draw?.giftName ?? ''
+    const anchor = anchorMap.get(w.id)
+    const shipment = w.shipment?.id ? shipmentById.get(w.shipment.id) ?? w.shipment : w.shipment
+
+    const addrSubmitted = extractAddressSubmittedAt(w.rawJson, w.firstAddressSeenAt)
+    const now = new Date()
+
+    let addressDeadlineAt: string | null = null
+    let addressDeadlineStatus: string | null = null
+    let addressDeadlineLabel: string | null = null
+    let shipDeadlineAt: string | null = null
+    let shipDeadlineLabel: string | null = null
+    let addressSubmittedAt: string | null = null
+    let addressSubmittedAtSource: string | null = null
+
+    if (w.winTime && (status === 'no_address' || status === 'incomplete_address')) {
+      const deadline = computeAddressDeadlineAt(w.winTime)
+      const st = computeDeadlineStatus(deadline, now)
+      addressDeadlineAt = deadline.toISOString()
+      addressDeadlineStatus = st
+      addressDeadlineLabel = formatDeadlineLabel(deadline, '填写地址截止', st)
+    }
+
+    if (
+      status === 'pending' &&
+      w.addressComplete &&
+      addrSubmitted.at
+    ) {
+      addressSubmittedAt = addrSubmitted.at.toISOString()
+      addressSubmittedAtSource = addrSubmitted.source
+      const shipDeadline = computeShipDeadlineAt(addrSubmitted.at)
+      const prefix =
+        addrSubmitted.source === 'first_seen_estimate' ? '预计最晚发货' : '最晚发货'
+      shipDeadlineAt = shipDeadline.toISOString()
+      shipDeadlineLabel = formatDeadlineLabel(
+        shipDeadline,
+        prefix,
+        computeDeadlineStatus(shipDeadline, now),
+      )
+    }
+
+    const sfFee = shipment
+      ? mapSfFeeForApi({
+          sfMonthlyFeeCent: shipment.sfMonthlyFeeCent,
+          sfFeeStatus: shipment.sfFeeStatus,
+          sfFeeQueriedAt: shipment.sfFeeQueriedAt,
+          sfFeeError: shipment.sfFeeError,
+          trackingNo: shipment.trackingNo ?? w.officialTrackingNo,
+        })
+      : null
+
     const row = {
       id: w.id,
       liveAccountId: w.liveAccountId,
       liveAccountName: w.liveAccountName,
-      luckyDrawId: w.luckyDrawId,
-      roomId: w.draw?.roomId ?? '',
-      giftName: w.draw?.giftName ?? '',
-      winnerUserId: w.winnerUserId,
-      redId: w.redId,
+      giftName,
       winnerNickname: w.winnerNickname,
-      avatar: w.avatar,
+      redId: w.redId,
       recipientName: w.recipientName,
       recipientPhone: w.recipientPhone,
-      province: w.province,
-      city: w.city,
-      district: w.district,
-      addressDetail: w.addressDetail,
       fullAddress: w.fullAddress,
       hasAddress: w.hasAddress,
       addressComplete: w.addressComplete,
       addressMissing: parseMissing(w.addressMissingJson),
-      firstAddressSeenAt: w.firstAddressSeenAt?.toISOString() ?? null,
       winTime: w.winTime?.toISOString() ?? null,
-      winDayN: dayN,
-      addressDeadlineHint:
-        status === 'no_address' || status === 'incomplete_address'
-          ? dayN == null
-            ? '平台要求中奖后7日内填写地址'
-            : dayN > 7
-              ? `已超过7天未填地址（第${dayN}天）`
-              : `中奖第${dayN}天，距离7天还剩${7 - dayN + 1}天`
-          : null,
-      shipDeadlineHint: '平台要求填写地址后15日内发货',
+      addressDeadlineAt,
+      addressDeadlineStatus,
+      addressDeadlineLabel,
+      addressSubmittedAt,
+      addressSubmittedAtSource,
+      shipDeadlineAt,
+      shipDeadlineLabel,
       shipmentStatus: status,
       shipmentStatusLabel: shipmentStatusLabel(status),
       shippingStatusSource: source,
-      shippingStatusSourceLabel: shippingSourceLabel(source),
-      freightType: 'COLLECT',
-      freightLabel: '到付',
-      courierCompany: w.shipment?.courierCompany ?? w.officialCourier,
-      trackingNo: w.shipment?.trackingNo ?? w.officialTrackingNo,
-      markedShippedAt: w.shipment?.markedShippedAt?.toISOString() ?? null,
-      markedShippedBy: w.shipment?.markedShippedBy ?? null,
-      shipmentNote: w.shipment?.shipmentNote ?? null,
-      trackingPending: status === 'shipped' && !(w.shipment?.trackingNo || w.officialTrackingNo),
-      rawAddress: {
-        province: w.province,
-        city: w.city,
-        district: w.district,
-        detail: w.addressDetail,
-      },
+      freightLabel: resolveFreightLabelForDisplay(giftName),
+      courierCompany: shipment?.courierCompany ?? w.officialCourier,
+      trackingNo: shipment?.trackingNo ?? w.officialTrackingNo,
+      markedShippedAt: shipment?.markedShippedAt?.toISOString() ?? null,
+      shipmentNote: shipment?.shipmentNote ?? null,
+      trackingPending: status === 'shipped' && !(shipment?.trackingNo || w.officialTrackingNo),
+      anchorName: anchor?.anchorName ?? null,
+      anchorId: anchor?.anchorId ?? null,
+      anchorAttributionSource: anchor?.anchorAttributionSource ?? 'unresolved',
+      sfMonthlyFeeYuan: sfFee?.sfMonthlyFeeYuan ?? null,
+      sfFeeStatus: sfFee?.sfFeeStatus ?? 'unknown',
+      sfFeeQueriedAt: sfFee?.sfFeeQueriedAt ?? null,
+      sfFeeError: sfFee?.sfFeeError ?? null,
+      isSfTracking: sfFee?.isSfTracking ?? false,
     }
     return showPii ? row : maskLuckyGiftPii(row)
   })

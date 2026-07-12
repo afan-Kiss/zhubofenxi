@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { loadEnv, SERVER_ROOT } from '../config/env'
@@ -25,6 +25,7 @@ export interface XhsSignedHeaders {
 
 export type SignTestFailureReason =
   | 'python_unavailable'
+  | 'python2_interpreter_not_supported'
   | 'python_module_missing'
   | 'script_not_found'
   | 'xhshow_not_installed'
@@ -67,6 +68,8 @@ export interface SignRunDiagnostics {
 
 const SIGN_TEST_MESSAGES: Record<SignTestFailureReason, string> = {
   python_unavailable: '未找到可用 Python，请安装 Python 或设置 XHS_SIGN_PYTHON',
+  python2_interpreter_not_supported:
+    'python2_interpreter_not_supported：检测到 Python 2，签名仅支持 Python 3，请设置 XHS_SIGN_PYTHON=/usr/bin/python3',
   python_module_missing:
     'Python 缺少 xhshow 等依赖，请执行：pip install -r apps/server/tools/xhs_signer/requirements.txt',
   script_not_found: '小红书签名脚本不存在，请检查 XHS_SIGNER_SCRIPT 或 tools/xhs_signer/signer.py',
@@ -107,7 +110,9 @@ export function getSignPythonCandidates(): string[] {
     process.env.XHS_SIGN_PYTHON?.trim(),
     process.env.XHS_SIGNER_PYTHON?.trim(),
   ].filter(Boolean) as string[]
-  const defaults = ['py', 'python', 'python3']
+  // Prefer python3 first: bare `python` on Linux often points to 2.7, which cannot
+  // run signer.py (`from __future__ import annotations`).
+  const defaults = ['python3', '/usr/bin/python3', 'py', 'python']
   const seen = new Set<string>()
   const out: string[] = []
   for (const cmd of [...fromEnv, ...defaults]) {
@@ -247,6 +252,51 @@ function logSignDiagnostics(
   else logInfo(scope, text)
 }
 
+function probePythonMajorVersion(pythonPath: string): number | null {
+  try {
+    const r = spawnSync(pythonPath, ['-c', 'import sys; print(sys.version_info[0])'], {
+      encoding: 'utf8',
+      timeout: 8000,
+      windowsHide: true,
+    })
+    const out = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim()
+    const major = Number.parseInt(out.split(/\s+/)[0] ?? '', 10)
+    return Number.isFinite(major) ? major : null
+  } catch {
+    return null
+  }
+}
+
+function probePythonVersionLabel(pythonPath: string): string {
+  try {
+    const r = spawnSync(pythonPath, ['-V'], { encoding: 'utf8', timeout: 5000, windowsHide: true })
+    return (r.stdout || r.stderr || '').trim() || 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+/** 调用 signer 前检测解释器，拒绝 Python 2 */
+export function assertPython3Interpreter(
+  pythonPath: string,
+  ctx?: SignLogContext,
+): { ok: true; version: string } | { ok: false; reason: SignTestFailureReason; version: string } {
+  const version = probePythonVersionLabel(pythonPath)
+  const major = probePythonMajorVersion(pythonPath)
+  if (major == null) {
+    return { ok: false, reason: 'python_unavailable', version }
+  }
+  if (major < 3) {
+    logSignDiagnostics(
+      'warn',
+      `python2_interpreter_not_supported path=${pythonPath} version=${version} shop=${ctx?.liveAccountId ?? '—'} api=signer stage=pre_spawn`,
+      ctx,
+    )
+    return { ok: false, reason: 'python2_interpreter_not_supported', version }
+  }
+  return { ok: true, version }
+}
+
 function isPythonSpawnError(stderr: string, stdout: string, spawnErr?: string): boolean {
   const text = `${spawnErr ?? ''} ${stderr} ${stdout}`.toLowerCase()
   return (
@@ -254,6 +304,17 @@ function isPythonSpawnError(stderr: string, stdout: string, spawnErr?: string): 
     text.includes('not found') ||
     text.includes('系统找不到指定的文件') ||
     text.includes('is not recognized as an internal or external command')
+  )
+}
+
+/** Wrong interpreter (e.g. Python 2.7) — try the next candidate instead of aborting. */
+function isWrongPythonInterpreterError(stderr: string, stdout: string): boolean {
+  const text = `${stderr}\n${stdout}`
+  return (
+    text.includes('future feature annotations is not defined') ||
+    /SyntaxError:[\s\S]*annotations/i.test(text) ||
+    text.includes('Bad magic number') ||
+    /Python 2\.\d/i.test(text)
   )
 }
 
@@ -275,6 +336,7 @@ function classifySignFailure(
 ): SignTestFailureReason {
   const text = `${stderr}\n${stdout}\n${spawnErr ?? ''}`
   if (isPythonSpawnError(stderr, stdout, spawnErr)) return 'python_unavailable'
+  if (isWrongPythonInterpreterError(stderr, stdout)) return 'python_unavailable'
   if (isPythonModuleError(text)) return 'python_module_missing'
   if (text.includes('缺少 a1')) return 'cookie_missing_a1'
   if (text.includes('access-token-ark')) return 'cookie_missing_access_token'
@@ -516,6 +578,27 @@ async function runSignerProcess(
 
   for (const pythonPath of pythonCandidates) {
     lastPython = pythonPath
+    const pre = assertPython3Interpreter(pythonPath, opts?.logContext)
+    if (!pre.ok) {
+      lastAttempt = {
+        ok: false,
+        stdout: '',
+        stderr: `python2_interpreter_not_supported path=${pythonPath} version=${pre.version}`,
+        exitCode: null,
+        failureReason: pre.reason,
+      }
+      if (pre.reason === 'python2_interpreter_not_supported' || pre.reason === 'python_unavailable') {
+        continue
+      }
+      break
+    }
+    if (isXhsSignDebugEnabled()) {
+      logSignDiagnostics(
+        'info',
+        `signer python=${pythonPath} version=${pre.version} shop=${opts?.logContext?.liveAccountId ?? '—'}`,
+        opts?.logContext,
+      )
+    }
     const attempt = await spawnSignerOnce(pythonPath, script.path, input)
     if (attempt.ok && attempt.headers) {
       if (isXhsSignDebugEnabled()) {

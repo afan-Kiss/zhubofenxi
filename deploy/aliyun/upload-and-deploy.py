@@ -16,7 +16,7 @@ from pathlib import Path
 import paramiko
 
 ROOT = Path(__file__).resolve().parents[2]
-HOST = os.environ.get("DEPLOY_HOST", "8.137.126.18")
+HOST = os.environ.get("DEPLOY_HOST", "47.108.21.50")
 USER = os.environ.get("DEPLOY_USER", "root")
 PASSWORD = os.environ.get("SSH_PASS", "")
 DEPLOY_DIR = "/www/wwwroot/zhubo-analysis"
@@ -218,7 +218,9 @@ def build_env_content() -> str:
         "AUTH_MODE": "session",
         "AUTH_ALLOW_REGISTER": "true",
         "XHS_SIGNER_ENABLED": "true",
-        "XHS_SIGNER_PYTHON": "tools/xhs_signer/.venv/bin/python",
+        "XHS_SIGN_PYTHON": "/usr/bin/python3",
+        "XHS_SIGNER_PYTHON": "/usr/bin/python3",
+        "XHS_SIGNER_SCRIPT": "/www/wwwroot/zhubo-analysis/apps/server/tools/xhs_signer/signer.py",
         "DATABASE_URL": "file:../data/app.db",
         "GIT_COMMIT": resolve_deploy_git_commit(),
         "APP_VERSION": resolve_app_version(),
@@ -405,6 +407,9 @@ preserve_keys = [
     "COOKIE_ENCRYPTION_KEY",
     "CONTROL_SERVICE_TOKEN",
     "SHOP_COOKIE_UPLOAD_TOKEN",
+    "XHS_SIGN_PYTHON",
+    "XHS_SIGNER_PYTHON",
+    "XHS_SIGNER_SCRIPT",
 ]
 target = Path("{DEPLOY_DIR}/apps/server/.env")
 merged = load_env(target)
@@ -523,7 +528,7 @@ chmod +x "$DEPLOY_DIR"/deploy/aliyun/*.sh "$DEPLOY_DIR"/scripts/install-xhs-sign
 
         run(client, "curl -i --max-time 10 http://127.0.0.1:4723/api/health")
         run(client, "curl -i --max-time 10 http://127.0.0.1/api/health")
-        run(client, "curl -i --max-time 15 http://8.137.126.18/api/health")
+        run(client, "curl -i --max-time 15 http://47.108.21.50/api/health")
         run(client, "export NVM_DIR=/root/.nvm && . /root/.nvm/nvm.sh && pm2 status")
         run(
             client,

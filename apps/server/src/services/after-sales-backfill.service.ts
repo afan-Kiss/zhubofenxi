@@ -3,8 +3,17 @@
  */
 import { prisma } from '../lib/prisma'
 import {
+  completeAfterSalesQueueTask,
+  selectAfterSalesQueueTasks,
+} from './after-sales-queue.service'
+import {
+  DEFAULT_AFTER_SALES_QUEUE_LIMITS,
+  type AfterSalesQueueRateLimits,
+} from './after-sales-queue.types'
+import {
+  fetchAfterSalesWorkbenchByOrderNo,
   pickBuyerUserIdFromRawJson,
-  syncWorkbenchForOrderNo,
+  saveWorkbenchCache,
 } from './xhs-after-sales-workbench.service'
 import {
   TaskProgressReporter,
@@ -25,35 +34,46 @@ async function resolveAccountName(liveAccountId: string): Promise<string> {
   return row?.displayName?.trim() || liveAccountId
 }
 
-export async function runAfterSalesBackfillBatch(limit = 60): Promise<{
+export async function runAfterSalesBackfillBatch(
+  limits: AfterSalesQueueRateLimits = DEFAULT_AFTER_SALES_QUEUE_LIMITS,
+): Promise<{
   processed: number
   success: number
   failed: number
+  retryWait: number
+  blocked: number
 }> {
-  const pending = await prisma.xhsAfterSalesWorkbenchQueue.findMany({
-    where: { status: 'pending' },
-    take: limit,
-    orderBy: { createdAt: 'asc' },
-  })
+  const pending = await selectAfterSalesQueueTasks(limits)
 
   if (pending.length === 0) {
-    return { processed: 0, success: 0, failed: 0 }
+    return { processed: 0, success: 0, failed: 0, retryWait: 0, blocked: 0 }
   }
 
   const started = Date.now()
   taskStart(
     '售后补查',
-    `本次发现 ${pending.length} 笔订单缺少售后详情，正在补查售后状态、退款原因、退款金额，用于完善退款/品退/买家售后统计，不会改动支付金额。`,
+    `本次调度 ${pending.length} 笔售后详情（全局≤${limits.globalPerMinute}/分，每店≤${limits.perShopPerMinute}/分），用于完善退款/品退统计，不会改动支付金额。`,
   )
 
-  const reporter = new TaskProgressReporter('售后补查', pending.length, 10, 15_000)
+  const reporter = new TaskProgressReporter('售后补查', pending.length, 5, 15_000)
   let success = 0
   let failed = 0
+  let retryWait = 0
+  let blocked = 0
   let currentAccount = ''
 
   const accountStats = new Map<
     string,
-    { accountName: string; liveAccountId: string; processed: number; success: number; failed: number; empty: number }
+    {
+      accountName: string
+      liveAccountId: string
+      processed: number
+      success: number
+      failed: number
+      retryWait: number
+      blocked: number
+      empty: number
+    }
   >()
 
   for (const item of pending) {
@@ -66,6 +86,8 @@ export async function runAfterSalesBackfillBatch(limit = 60): Promise<{
       processed: 0,
       success: 0,
       failed: 0,
+      retryWait: 0,
+      blocked: 0,
       empty: 0,
     }
     stat.processed++
@@ -81,23 +103,44 @@ export async function runAfterSalesBackfillBatch(limit = 60): Promise<{
         rawOrder?.rawJson as Record<string, unknown> | undefined,
         rawOrder?.buyerId,
       )
-      const result = await syncWorkbenchForOrderNo(item.orderNo, item.liveAccountId, {
+      const result = await fetchAfterSalesWorkbenchByOrderNo(item.orderNo, item.liveAccountId, {
         fallbackBuyerUserId,
       })
-      if (result.fetchStatus === 'failed') {
+      if (result.fetchStatus !== 'failed') {
+        await saveWorkbenchCache(result, item.liveAccountId)
+      }
+      const finalStatus = await completeAfterSalesQueueTask({
+        queueId: item.id,
+        liveAccountId: item.liveAccountId,
+        orderNo: item.orderNo,
+        result,
+      })
+      if (finalStatus === 'done') {
+        success++
+        if (result.fetchStatus === 'empty') stat.empty++
+        else stat.success++
+        reporter.tick(true, `当前账号=${accountName}，接口=售后工作台详情`)
+      } else if (finalStatus === 'retry_wait') {
+        retryWait++
+        stat.retryWait++
+        reporter.tick(false, `当前账号=${accountName}，冷却等待，接口=售后工作台详情`)
+      } else if (finalStatus === 'blocked') {
+        blocked++
+        stat.blocked++
+        reporter.tick(false, `当前账号=${accountName}，店铺阻塞，接口=售后工作台详情`)
+      } else {
         failed++
         stat.failed++
         reporter.tick(false, `当前账号=${accountName}，接口=售后工作台详情`)
-      } else if (result.fetchStatus === 'empty') {
-        success++
-        stat.empty++
-        reporter.tick(true, `当前账号=${accountName}，接口=售后工作台详情`)
-      } else {
-        success++
-        stat.success++
-        reporter.tick(true, `当前账号=${accountName}，接口=售后工作台详情`)
       }
-    } catch {
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      await completeAfterSalesQueueTask({
+        queueId: item.id,
+        liveAccountId: item.liveAccountId,
+        orderNo: item.orderNo,
+        result: { fetchStatus: 'failed', fetchError: msg.slice(0, 500) },
+      })
       failed++
       stat.failed++
       reporter.tick(false, `当前账号=${accountName}，接口=售后工作台详情`)
@@ -120,26 +163,18 @@ export async function runAfterSalesBackfillBatch(limit = 60): Promise<{
       ctx,
       apiRows,
       matchedOrders: stat.success,
-      unmatched: stat.empty + stat.failed,
+      unmatched: stat.empty + stat.failed + stat.retryWait + stat.blocked,
     })
   }
 
   const durationSec = Math.round((Date.now() - started) / 1000)
   const lastAccount = currentAccount || '—'
 
-  if (failed > 0) {
-    reporter.finish(
-      `${pending.length} 笔订单补查结束，成功 ${success}，失败 ${failed}，用时 ${durationSec} 秒。` +
-        `失败订单可稍后自动重试；不影响已同步订单与支付金额。最后处理账号=${lastAccount}`,
-    )
-  } else {
-    reporter.finish(
-      `${pending.length} 笔订单补查完成，成功 ${success}，失败 ${failed}，用时 ${durationSec} 秒。` +
-        `不影响支付金额与订单主数据。`,
-    )
-  }
+  reporter.finish(
+    `${pending.length} 笔补查结束，成功 ${success}，冷却等待 ${retryWait}，阻塞 ${blocked}，永久失败 ${failed}，用时 ${durationSec} 秒。最后处理账号=${lastAccount}`,
+  )
 
-  return { processed: pending.length, success, failed }
+  return { processed: pending.length, success, failed, retryWait, blocked }
 }
 
 export async function logAfterSalesBackfillFailure(

@@ -26,6 +26,7 @@ interface BossDashboardContextValue {
   loading: boolean
   error: string | null
   refreshDisplay: () => Promise<void>
+  refreshAnnouncements: () => Promise<boolean>
   markRead: (id: string) => Promise<void>
   markAllRead: () => Promise<void>
   markPopupShown: (id: string) => Promise<void>
@@ -56,15 +57,16 @@ export const BossDashboardProvider: React.FC<{ children: React.ReactNode }> = ({
   const [error, setError] = useState<string | null>(null)
   const loadedRef = useRef(false)
 
-  const refreshAnnouncements = useCallback(async () => {
-    if (!enabled) return
+  const refreshAnnouncements = useCallback(async (): Promise<boolean> => {
+    if (!enabled) return false
     try {
       const res = await fetchBossAnnouncements()
       setAnnouncements(res.announcements)
       setUnreadCount(res.unreadCount)
       setPopupCandidate(res.popupCandidate)
+      return true
     } catch {
-      /* 保留旧公告 */
+      return false
     }
   }, [enabled])
 
@@ -130,6 +132,7 @@ export const BossDashboardProvider: React.FC<{ children: React.ReactNode }> = ({
       loading,
       error,
       refreshDisplay,
+      refreshAnnouncements,
       markRead,
       markAllRead,
       markPopupShown,
@@ -142,6 +145,7 @@ export const BossDashboardProvider: React.FC<{ children: React.ReactNode }> = ({
       loading,
       error,
       refreshDisplay,
+      refreshAnnouncements,
       markRead,
       markAllRead,
       markPopupShown,

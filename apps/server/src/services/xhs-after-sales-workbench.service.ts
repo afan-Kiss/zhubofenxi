@@ -653,21 +653,36 @@ export function pickBuyerUserIdFromRawJson(
 export async function syncWorkbenchForOrderNo(
   orderNo: string,
   liveAccountId?: string,
-  opts?: { fallbackBuyerUserId?: string },
+  opts?: { fallbackBuyerUserId?: string; queueId?: string },
 ): Promise<AfterSalesWorkbenchRefund> {
   const accountId = resolveLiveAccountId(liveAccountId)
   const result = await fetchAfterSalesWorkbenchByOrderNo(orderNo, accountId, opts)
   if (result.fetchStatus !== 'failed') {
     await saveWorkbenchCache(result, accountId)
   }
-  await prisma.xhsAfterSalesWorkbenchQueue.updateMany({
-    where: { liveAccountId: accountId, orderNo: orderNo.trim() },
-    data: {
-      status: result.fetchStatus === 'failed' ? 'failed' : 'done',
-      lastError: result.fetchError,
-      attempts: { increment: 1 },
-    },
-  })
+  if (opts?.queueId) {
+    const { completeAfterSalesQueueTask } = await import('./after-sales-queue.service')
+    await completeAfterSalesQueueTask({
+      queueId: opts.queueId,
+      liveAccountId: accountId,
+      orderNo: orderNo.trim(),
+      result,
+    })
+  } else {
+    const { completeAfterSalesQueueTask } = await import('./after-sales-queue.service')
+    const row = await prisma.xhsAfterSalesWorkbenchQueue.findFirst({
+      where: { liveAccountId: accountId, orderNo: orderNo.trim() },
+      select: { id: true },
+    })
+    if (row) {
+      await completeAfterSalesQueueTask({
+        queueId: row.id,
+        liveAccountId: accountId,
+        orderNo: orderNo.trim(),
+        result,
+      })
+    }
+  }
   return result
 }
 

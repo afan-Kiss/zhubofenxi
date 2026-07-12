@@ -435,18 +435,27 @@ model XhsAfterSalesWorkbenchCache {
 
 /// 售后工作台补数队列
 model XhsAfterSalesWorkbenchQueue {
-  id            String   @id @default(cuid())
-  liveAccountId String   @default("legacy")
-  orderNo       String
-  status    String   @default("pending")
-  attempts  Int      @default(0)
-  lastError String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                    String    @id @default(cuid())
+  liveAccountId         String    @default("legacy")
+  orderNo               String
+  status                String    @default("pending")
+  /// 累计请求次数（兼容旧字段）
+  attempts              Int       @default(0)
+  temporaryAttemptCount Int       @default(0)
+  permanentFailureCount Int       @default(0)
+  errorType             String?
+  lastError             String?
+  nextAttemptAt         DateTime?
+  lastAttemptAt         DateTime?
+  completedAt           DateTime?
+  runningSince          DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
   @@unique([liveAccountId, orderNo])
   @@index([status])
   @@index([liveAccountId])
+  @@index([status, nextAttemptAt])
 }
 
 /// 未完结订单追踪池

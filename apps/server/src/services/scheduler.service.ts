@@ -311,7 +311,7 @@ function scheduleWorkbenchQueueProcessor(): void {
     void (async () => {
       try {
         const { runAfterSalesBackfillBatch } = await import('./after-sales-backfill.service')
-        await runAfterSalesBackfillBatch(60)
+        await runAfterSalesBackfillBatch()
       } catch (err) {
         logError(
           '售后补查',

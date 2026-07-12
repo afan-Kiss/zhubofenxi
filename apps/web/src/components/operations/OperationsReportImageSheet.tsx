@@ -1,4 +1,5 @@
 import React, { forwardRef } from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import type { DailyOperationsReportPayload } from '../../pages/operations/operationsReportTypes'
 import {
   formatDuration,
@@ -99,7 +100,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
               className="mb-2 rounded-xl border border-slate-200 bg-white p-3 text-xs leading-relaxed"
             >
               <p className="text-sm font-semibold">
-                {row.anchorName} · {row.sessionLabel || row.shopName}
+                {formatAnchorDisplayName(row.anchorName)} · {row.sessionLabel || row.shopName}
               </p>
               <p className="mt-1 text-slate-600">
                 实际直播 {liveTime} · 归属时段 {attributionRange}

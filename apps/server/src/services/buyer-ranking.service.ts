@@ -683,9 +683,9 @@ export function buildBuyerRankingSummaryFromViews(
   }
 }
 
-export async function buildBuyerRankingAllItems(
+export async function buildBuyerRankingAllItemsWithContext(
   params: Omit<Parameters<typeof buildBuyerRanking>[0], 'page' | 'pageSize'>,
-): Promise<BuyerRankingItem[]> {
+): Promise<{ items: BuyerRankingItem[]; views: AnalyzedOrderView[] }> {
   const range = resolveBuyerRankingDateRange(
     params.preset ?? 'today',
     params.startDate,
@@ -710,8 +710,15 @@ export async function buildBuyerRankingAllItems(
       views = views.filter((v) => v.anchorName === anchor.name || v.anchorId === anchor.id)
     }
   }
-  let items = aggregateViews(views).map((a) => toItem(a))
-  return filterByType(items, params.type ?? 'all')
+  const items = filterByType(aggregateViews(views).map((a) => toItem(a)), params.type ?? 'all')
+  return { items, views }
+}
+
+export async function buildBuyerRankingAllItems(
+  params: Omit<Parameters<typeof buildBuyerRanking>[0], 'page' | 'pageSize'>,
+): Promise<BuyerRankingItem[]> {
+  const { items } = await buildBuyerRankingAllItemsWithContext(params)
+  return items
 }
 
 /** 高风险售后客户榜：支付时间 + 本期售后发生时间双口径（含历史订单本期售后） */

@@ -65,10 +65,12 @@ export class ReportImageCaptureError extends Error {
 export const OPERATIONS_REPORT_EXPORT_HOST_ID = 'operations-report-export-host'
 export const ANCHOR_DAILY_REPORT_EXPORT_HOST_ID = 'anchor-daily-report-export-host'
 
+const EXPORT_HOST_OFFSCREEN_LEFT_PX = -12_000
+
 export function getReportExportHostStyle(widthPx: number): CSSProperties {
   return {
     position: 'fixed',
-    left: 0,
+    left: EXPORT_HOST_OFFSCREEN_LEFT_PX,
     top: 0,
     width: widthPx,
     zIndex: -1,

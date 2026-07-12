@@ -3,8 +3,8 @@ import type { BuyerProfileData } from './buyer-profile'
 export const BUYER_PROFILE_CACHE_TTL_MS = 30 * 60 * 1000
 /** 与后端 BUYER_RANKING_CACHE_VERSION 对齐；变更时递增 STORAGE_KEY */
 export const BUYER_PROFILE_EXPECTED_CACHE_VERSION =
-  'buyer_summary_unified_refund_v13_low_price_filter'
-const STORAGE_KEY = 'buyer-profile-cache-v5'
+  'buyer_summary_unified_refund_v14_buyer_value_shop'
+const STORAGE_KEY = 'buyer-profile-cache-v6'
 const CACHE_KEY = 'buyers|profile'
 
 export interface BuyerProfileCacheEntry {

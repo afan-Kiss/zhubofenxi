@@ -1,3 +1,7 @@
+import {
+  formatAnchorDisplayName,
+  UNASSIGNED_ANCHOR_INTERNAL,
+} from './anchor-display-name'
 import { displayOrderNoForRow, pickDisplayOrderNoFromRow } from './display-order-no'
 
 /** 经营看板 Drawer 统一订单行（与后端 mapViewToBoardDrillRow 对齐） */
@@ -94,7 +98,7 @@ export function attributionSourceShortLabel(source: string | null | undefined): 
       return '归属冲突'
     case 'unassigned':
     case 'unmatched':
-      return '未归属'
+      return formatAnchorDisplayName(UNASSIGNED_ANCHOR_INTERNAL)
     default:
       return source ? '自动归属' : '自动归属'
   }
@@ -169,7 +173,7 @@ export function normalizeBoardOrderRow(raw: Record<string, unknown>): BoardDrill
       raw.afterSaleApplyTime != null ? displayCell(raw.afterSaleApplyTime) : undefined,
     afterSaleCompleteTime:
       raw.afterSaleCompleteTime != null ? displayCell(raw.afterSaleCompleteTime) : undefined,
-    anchorName: displayCell(raw.anchorName ?? '未归属'),
+    anchorName: formatAnchorDisplayName(String(raw.anchorName ?? '')),
     liveAccountName: displayCell(raw.liveAccountName ?? '未知直播号'),
     buyerNickname: displayCell(raw.buyerNickname),
     buyerId: displayCell(raw.buyerIdentityCode ?? raw.buyerId),

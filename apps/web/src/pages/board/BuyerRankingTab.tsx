@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { Pagination } from '../../components/ui/Pagination'
 import { OfficialQualitySyncNote } from '../../components/board/OfficialQualitySyncNote'
-import { clearBuyerProfileCache } from '../../lib/buyer-profile-cache'
+import { clearBuyerProfileCache, readBuyerProfileCache, writeBuyerProfileCache } from '../../lib/buyer-profile-cache'
 import {
   BuyerSummaryDrawer,
   type BuyerSummaryKey,
@@ -19,6 +19,7 @@ import {
 } from '../../lib/board-orders-filter'
 import {
   fetchBadBuyerRanking,
+  autoRebuildBuyerProfile,
   fetchBuyerProfile,
   fetchBuyerValueRanking,
   fetchWechatWeeklyBuyerText,
@@ -40,6 +41,7 @@ import {
   resolveBuyerRankingHeaderHint,
   resolveBuyerRankingMainCard,
   shouldShowBuyerRankingItems,
+  shouldAutoRebuildBuyerProfile,
 } from '../../lib/buyer-ranking-ui'
 import { AnimatedTabs } from '../../components/ui/AnimatedTabs'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
@@ -149,10 +151,13 @@ export const BuyerRankingTab: React.FC = () => {
   const { formatMoney, formatCount } = useAmountDisplay()
   const { cookieHealth, syncMeta } = useBoardLiveQuery()
 
-  const [profile, setProfile] = useState<BuyerProfileData | null>(null)
+  const [profile, setProfile] = useState<BuyerProfileData | null>(() => {
+    const cached = readBuyerProfileCache()
+    return cached?.data ?? null
+  })
   const [badBuyerData, setBadBuyerData] = useState<BadBuyerRankingData | null>(null)
   const [valueRankingData, setValueRankingData] = useState<BuyerValueRankingData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(() => !readBuyerProfileCache())
   const [error, setError] = useState<string | null>(null)
   const [refreshBusy, setRefreshBusy] = useState(false)
   const [rankingTab, setRankingTab] = useState('highValue')
@@ -187,6 +192,10 @@ export const BuyerRankingTab: React.FC = () => {
   const isHighValueTab = rankingTab === 'highValue'
 
   const load = useCallback(async (tab: string, pageNo: number) => {
+    const usesStandaloneRankingApi = tab === 'highValue' || tab === 'badBuyer'
+    const profileTab = usesStandaloneRankingApi ? 'highValue' : tab
+    const profilePage = usesStandaloneRankingApi ? 1 : pageNo
+
     if (tab === 'highValue') {
       if (
         valueRankingPreset === 'custom' &&
@@ -196,65 +205,70 @@ export const BuyerRankingTab: React.FC = () => {
         setLoading(false)
         return
       }
-      setLoading(true)
-      setError(null)
-      try {
-        const data = await fetchBuyerValueRanking({
-          preset: valueRankingPreset,
-          startDate: valueRankingPreset === 'custom' ? valueRankingCustomStart : undefined,
-          endDate: valueRankingPreset === 'custom' ? valueRankingCustomEnd : undefined,
-          type: valueRankingType,
-          limit: 50,
-        })
-        setValueRankingData(data)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : '加载高价值客户榜单失败')
-        setValueRankingData(null)
-      } finally {
-        setLoading(false)
-      }
-      return
-    }
-
-    if (tab === 'badBuyer') {
+    } else if (tab === 'badBuyer') {
       if (badBuyerPreset === 'custom' && (!badBuyerCustomStart.trim() || !badBuyerCustomEnd.trim())) {
         setBadBuyerData(null)
         setLoading(false)
         return
       }
-      setLoading(true)
-      setError(null)
-      try {
-        const data = await fetchBadBuyerRanking({
-          preset: badBuyerPreset,
-          startDate: badBuyerPreset === 'custom' ? badBuyerCustomStart : undefined,
-          endDate: badBuyerPreset === 'custom' ? badBuyerCustomEnd : undefined,
-          limit: 10,
-        })
-        setBadBuyerData(data)
-      } catch (e) {
-        setError(e instanceof Error ? e.message : '加载高风险售后客户提醒失败')
-        setBadBuyerData(null)
-      } finally {
-        setLoading(false)
-      }
-      return
     }
 
     setLoading(true)
     setError(null)
+
     try {
-      const data = await fetchBuyerProfile({
-        rankingTab: tab,
-        page: pageNo,
+      const profilePromise = fetchBuyerProfile({
+        rankingTab: profileTab,
+        page: profilePage,
         pageSize,
+      }).then((data) => {
+        writeBuyerProfileCache(data)
+        setProfile(data)
+        return data
       })
-      clearBuyerProfileCache()
-      setProfile(data)
+
+      if (tab === 'highValue') {
+        const [, data] = await Promise.all([
+          profilePromise,
+          fetchBuyerValueRanking({
+            preset: valueRankingPreset,
+            startDate: valueRankingPreset === 'custom' ? valueRankingCustomStart : undefined,
+            endDate: valueRankingPreset === 'custom' ? valueRankingCustomEnd : undefined,
+            type: valueRankingType,
+            limit: 50,
+          }),
+        ])
+        setValueRankingData(data)
+        return
+      }
+
+      if (tab === 'badBuyer') {
+        const [, data] = await Promise.all([
+          profilePromise,
+          fetchBadBuyerRanking({
+            preset: badBuyerPreset,
+            startDate: badBuyerPreset === 'custom' ? badBuyerCustomStart : undefined,
+            endDate: badBuyerPreset === 'custom' ? badBuyerCustomEnd : undefined,
+            limit: 10,
+          }),
+        ])
+        setBadBuyerData(data)
+        return
+      }
+
+      await profilePromise
     } catch (e) {
-      setError(e instanceof Error ? e.message : '加载买家画像失败')
-      setProfile(null)
-      clearBuyerProfileCache()
+      if (tab === 'highValue') {
+        setError(e instanceof Error ? e.message : '加载高价值客户榜单失败')
+        setValueRankingData(null)
+      } else if (tab === 'badBuyer') {
+        setError(e instanceof Error ? e.message : '加载高风险售后客户提醒失败')
+        setBadBuyerData(null)
+      } else {
+        setError(e instanceof Error ? e.message : '加载买家画像失败')
+        setProfile(null)
+        clearBuyerProfileCache()
+      }
     } finally {
       setLoading(false)
     }
@@ -282,7 +296,9 @@ export const BuyerRankingTab: React.FC = () => {
     buyerProfileStatus,
     refreshBusy,
   })
-  const mainCardVariant = resolveBuyerRankingMainCard(buyerUiState, hasCache)
+  const mainCardVariant = resolveBuyerRankingMainCard(buyerUiState, hasCache, {
+    usesStandaloneRankingApi: isBadBuyerTab || isHighValueTab,
+  })
   const isProfileRebuilding =
     buyerUiState === 'building' ||
     buyerProfileStatus?.rebuilding === true ||
@@ -297,6 +313,7 @@ export const BuyerRankingTab: React.FC = () => {
   const showRankingContent =
     isBadBuyerTab || isHighValueTab || shouldShowBuyerRankingItems(profile, buyerProfileStatus)
   const displayProfile = showRankingContent && !isBadBuyerTab && !isHighValueTab ? profile : null
+  const summaryProfile = showRankingContent && !isBadBuyerTab ? profile : null
 
   const activeWechatPreset = isBadBuyerTab ? badBuyerPreset : wechatPreset
   const activeWechatCustomStart = isBadBuyerTab ? badBuyerCustomStart : wechatCustomStart
@@ -384,9 +401,14 @@ export const BuyerRankingTab: React.FC = () => {
     return () => window.clearInterval(timer)
   }, [isProfileRebuilding, buyerUiState, profile?.cacheStale, cacheCompatible, load, rankingTab, page])
 
-  const summary = displayProfile?.summary ?? null
-  const sampleMeta = displayProfile?.sampleMeta ?? null
-  const highValueDef = displayProfile?.highValueCustomerDefinition ?? null
+  useEffect(() => {
+    if (!shouldAutoRebuildBuyerProfile(profile, buyerProfileStatus)) return
+    void autoRebuildBuyerProfile().catch(() => undefined)
+  }, [profile, buyerProfileStatus])
+
+  const summary = summaryProfile?.summary ?? null
+  const sampleMeta = summaryProfile?.sampleMeta ?? null
+  const highValueDef = summaryProfile?.highValueCustomerDefinition ?? null
 
   const items = isBadBuyerTab
     ? (badBuyerData?.items ?? []).filter(
@@ -572,7 +594,7 @@ export const BuyerRankingTab: React.FC = () => {
         </div>
       </div>
 
-      {buyerUiState === 'loading' && !isBadBuyerTab ? (
+      {buyerUiState === 'loading' && !profile && !isBadBuyerTab && !isHighValueTab ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-5 text-center text-sm text-slate-500">
           正在加载买家画像…
         </div>

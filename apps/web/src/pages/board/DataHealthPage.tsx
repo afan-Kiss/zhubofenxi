@@ -144,6 +144,18 @@ interface AnchorAttributionHealthReport {
   message: string
 }
 
+function apiRequestWithTimeout<T>(
+  path: string,
+  timeoutMs: number,
+  init?: RequestInit,
+): Promise<T> {
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs)
+  return apiRequest<T>(path, { ...init, signal: controller.signal }).finally(() => {
+    window.clearTimeout(timer)
+  })
+}
+
 export const DataHealthPage: React.FC = () => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const { user } = useAuth()
@@ -155,40 +167,60 @@ export const DataHealthPage: React.FC = () => {
     null,
   )
   const [luckyGiftHealth, setLuckyGiftHealth] = useState<LuckyGiftHealthReport | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [closeLoading, setCloseLoading] = useState(true)
+  const [extrasLoading, setExtrasLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [techOpen, setTechOpen] = useState(false)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const loadCloseStatus = useCallback(async () => {
+    setCloseLoading(true)
     setError(null)
     try {
-      const [closeStatus, risk, attr, lucky] = await Promise.all([
-        apiRequest<RollingCloseStatus>('/api/board/data-health/rolling-close/status'),
-        apiRequest<SyncRiskStatus>('/api/board/sync-risk/status'),
-        apiRequest<AnchorAttributionHealthReport>('/api/board/data-health/anchor-attribution').catch(
-          () => null,
-        ),
-        apiRequest<LuckyGiftHealthReport>('/api/board/lucky-gifts/health').catch(() => null),
-      ])
+      const closeStatus = await apiRequest<RollingCloseStatus>(
+        '/api/board/data-health/rolling-close/status',
+      )
       setStatus(closeStatus)
-      setSyncRisk(risk)
-      setAttributionHealth(attr)
-      setLuckyGiftHealth(lucky)
     } catch (e) {
       setError(mapRollingCloseError(e))
       setStatus(null)
-      setSyncRisk(null)
     } finally {
-      setLoading(false)
+      setCloseLoading(false)
     }
   }, [])
 
+  const loadSupplementary = useCallback(async () => {
+    setExtrasLoading(true)
+    try {
+      const [risk, attr, lucky] = await Promise.all([
+        apiRequestWithTimeout<SyncRiskStatus>('/api/board/sync-risk/status', 12_000).catch(
+          () => null,
+        ),
+        apiRequestWithTimeout<AnchorAttributionHealthReport>(
+          '/api/board/data-health/anchor-attribution',
+          20_000,
+        ).catch(() => null),
+        apiRequestWithTimeout<LuckyGiftHealthReport>('/api/board/lucky-gifts/health', 12_000).catch(
+          () => null,
+        ),
+      ])
+      setSyncRisk(risk)
+      setAttributionHealth(attr)
+      setLuckyGiftHealth(lucky)
+    } finally {
+      setExtrasLoading(false)
+    }
+  }, [])
+
+  const load = useCallback(async () => {
+    await Promise.all([loadCloseStatus(), loadSupplementary()])
+  }, [loadCloseStatus, loadSupplementary])
+
   useEffect(() => {
-    void load()
-  }, [load])
+    void loadCloseStatus()
+    void loadSupplementary()
+  }, [loadCloseStatus, loadSupplementary])
 
   const handleRun = async () => {
     if (!canRunRollingClose || running) return
@@ -247,7 +279,7 @@ export const DataHealthPage: React.FC = () => {
                   0,
               )}
             </p>
-            <p>未归属订单数：{formatCount(attributionHealth.unassignedOrderCount)}</p>
+            <p>自然流散客订单数：{formatCount(attributionHealth.unassignedOrderCount)}</p>
             <p>跨直播号异常归属数：{formatCount(attributionHealth.crossShopAbnormalAttributionCount)}</p>
             <p>
               品退跨主播重复数：
@@ -330,11 +362,13 @@ export const DataHealthPage: React.FC = () => {
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <p>
             自动核对：
-            {status == null
-              ? '—'
-              : status.registered
-                ? '已开启'
-                : '未开启'}
+            {closeLoading
+              ? '读取中…'
+              : status == null
+                ? '—'
+                : status.registered
+                  ? '已开启'
+                  : '未开启'}
           </p>
           <p>执行时间：每日 {status?.dailyTime ?? '03:10'}</p>
           <p>时区：{status?.timezone ?? 'Asia/Shanghai'}</p>
@@ -364,9 +398,14 @@ export const DataHealthPage: React.FC = () => {
             自动核对尚未注册。服务重启后会重新开启；也可由管理员手动生成一份报告。
           </p>
         ) : null}
+        {extrasLoading ? (
+          <p className="mt-2 text-xs text-slate-400">
+            归属与福袋健康检查在后台加载，不影响滚动30天核对结果。
+          </p>
+        ) : null}
       </section>
 
-      {loading ? (
+      {closeLoading ? (
         <p className="text-sm text-slate-500">正在加载滚动30天核对状态…</p>
       ) : error ? (
         <p className="text-sm text-red-700">{error}</p>
@@ -458,7 +497,7 @@ export const DataHealthPage: React.FC = () => {
                 value={formatCount(report.afterSaleCacheRecordCount)}
               />
               <MetricCard
-                label="未归属订单数"
+                label="自然流散客订单数"
                 value={formatCount(report.unassignedOrderCount)}
                 danger={report.unassignedOrderCount > 0}
               />

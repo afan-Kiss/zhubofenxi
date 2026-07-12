@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { apiRequest } from '../../lib/api'
 import {
   buildAnchorDrawerSummaryText,
@@ -306,7 +307,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
     <BoardDrawerShell
       open={open}
       onClose={onClose}
-      title={anchorName}
+      title={formatAnchorDisplayName(anchorName)}
       testId="anchor-order-drawer"
       subtitle={`${startDate} ~ ${endDate} · 主播订单明细`}
       headerExtra={

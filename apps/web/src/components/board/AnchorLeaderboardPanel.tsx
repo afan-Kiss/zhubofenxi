@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import {
   anchorRowGmv,
@@ -180,7 +181,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                   >
                     <td className="py-2.5 pl-4">
                       <div className="flex flex-col gap-1">
-                        <span className="font-medium text-rose-800">{String(a.anchorName)}</span>
+                        <span className="font-medium text-rose-800">{formatAnchorDisplayName(String(a.anchorName))}</span>
                         {showLivePeriod && liveLines.primary ? (
                           <span
                             className={`text-[12px] ${

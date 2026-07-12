@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { CheckSquare, ChevronDown, Copy, Gift, Info, Loader2, RefreshCw, Square, Truck, X } from 'lucide-react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { apiRequest } from '../../lib/api'
 import { useAuth } from '../../providers/AuthProvider'
 import {
@@ -124,7 +125,8 @@ function shopPillClass(active: boolean): string {
 }
 
 function anchorLabel(item: LuckyGiftItem): string {
-  return item.anchorName?.trim() ? `主播 ${item.anchorName}` : '主播待确认'
+  if (item.anchorName?.trim()) return `主播 ${formatAnchorDisplayName(item.anchorName)}`
+  return formatAnchorDisplayName(null)
 }
 
 function sfFeeDisplay(item: LuckyGiftItem): string | null {
@@ -183,8 +185,6 @@ function LuckyGiftRow(props: {
           <div className="min-w-0 flex-1 space-y-2">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
               <h3 className="text-base font-semibold text-slate-900">{item.giftName || '直播福袋'}</h3>
-              <span className="text-slate-400">｜</span>
-              <span className="text-slate-600">{item.liveAccountName}</span>
               <span className="text-slate-400">｜</span>
               <span className="text-slate-600">{anchorLabel(item)}</span>
               <span className="text-slate-400">｜</span>

@@ -1,6 +1,6 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import type { BuyerRankingItem } from './buyer-ranking.service'
-import { buildBuyerRankingAllItems } from './buyer-ranking.service'
+import { buildBuyerRankingAllItemsWithContext } from './buyer-ranking.service'
 import {
   BUYER_RANKING_PRESET_LABELS,
   resolveBuyerRankingDateRange,
@@ -9,12 +9,7 @@ import {
 } from '../utils/buyer-ranking-date-range'
 import {
   buildBuyerShopMapFromViews,
-  type BuyerShopAggregate,
 } from './buyer-shop-aggregate.service'
-import { buildRawAnalyzeBundle } from './xhs-api-sync/xhs-analysis-from-raw.service'
-import { prepareAnalysisArtifactsFromRaw } from './business-analysis.service'
-import { buyerRankingRangeToAnalysisRange } from '../utils/buyer-ranking-date-range'
-import { filterViewsForBuyerRanking, attachRawByMatchToViews } from './low-price-brush-order.service'
 import { mapViewToBuyerOrderStandard } from './buyer-order-standard.service'
 import { countAftersaleAppliesForViewRow } from './buyer-aftersale-event.util'
 import { resolveBuyerIdentityFromView } from './buyer-identity.service'
@@ -83,33 +78,6 @@ function buildAftersaleApplyCountByBuyer(views: AnalyzedOrderView[]): Map<string
     map.set(identity.buyerKey, (map.get(identity.buyerKey) ?? 0) + n)
   }
   return map
-}
-
-async function loadBuyerValueContextForRange(
-  preset: string,
-  startDate?: string,
-  endDate?: string,
-): Promise<{
-  shopMap: Map<string, BuyerShopAggregate>
-  aftersaleApplyByBuyer: Map<string, number>
-}> {
-  const range = resolveBuyerRankingDateRange(preset, startDate, endDate)
-  const bundle = await buildRawAnalyzeBundle(buyerRankingRangeToAnalysisRange(range))
-  if (!bundle) {
-    return { shopMap: new Map(), aftersaleApplyByBuyer: new Map() }
-  }
-  const artifacts = prepareAnalysisArtifactsFromRaw(bundle)
-  const rawByMatch = new Map<string, Record<string, unknown>>()
-  for (const o of artifacts?.dedupe.uniqueOrders ?? []) {
-    if (o.raw) rawByMatch.set(o.matchOrderId, o.raw as Record<string, unknown>)
-  }
-  const views = filterViewsForBuyerRanking(
-    attachRawByMatchToViews(artifacts?.views ?? [], rawByMatch),
-  )
-  return {
-    shopMap: buildBuyerShopMapFromViews(views),
-    aftersaleApplyByBuyer: buildAftersaleApplyCountByBuyer(views),
-  }
 }
 
 function sortBuyerValueRankingItems(
@@ -228,20 +196,16 @@ export async function buildBuyerValueRanking(params: {
   const type = params.type ?? 'true_high_value'
   const limit = Math.min(100, Math.max(1, Math.floor(params.limit ?? 50)))
 
-  const items = await buildBuyerRankingAllItems({
+  const { items: rawItems, views } = await buildBuyerRankingAllItemsWithContext({
     preset: presetKey,
     startDate: params.startDate,
     endDate: params.endDate,
     type: 'all',
   })
+  const shopMap = buildBuyerShopMapFromViews(views)
+  const aftersaleApplyByBuyer = buildAftersaleApplyCountByBuyer(views)
 
-  const { shopMap, aftersaleApplyByBuyer } = await loadBuyerValueContextForRange(
-    presetKey,
-    params.startDate,
-    params.endDate,
-  )
-
-  const enriched: BuyerValueRankingItem[] = items
+  const enriched: BuyerValueRankingItem[] = rawItems
     .filter((item) => (item.buyerSummary?.paidOrderCount ?? item.paidOrderCount ?? 0) > 0)
     .map((item) => ({
       ...item,

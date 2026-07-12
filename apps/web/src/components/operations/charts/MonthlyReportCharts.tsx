@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo } from 'react'
+import { formatAnchorDisplayName } from '../../../lib/anchor-display-name'
 import { OperationsChartCard } from './OperationsChartCard'
 import { OperationsBarChart } from './OperationsBarChart'
 import { OperationsPieChart } from './OperationsPieChart'
@@ -47,7 +48,7 @@ export const MonthlyReportCharts: React.FC<Props> = ({ drillContext, report }) =
         .slice(0, topLimit)
         .map((a) => ({
           key: a.anchorName,
-          label: a.anchorName,
+          label: formatAnchorDisplayName(a.anchorName),
           value: a.validAmountYuan,
           fullLabel: a.anchorName,
         })),
@@ -126,7 +127,9 @@ export const MonthlyReportCharts: React.FC<Props> = ({ drillContext, report }) =
         >
           <OperationsBarChart
             items={anchorItems}
-            onItemClick={(item) => openDrill(buildAnchorAmountDrill(drillContext, item.label))}
+            onItemClick={(item) =>
+              openDrill(buildAnchorAmountDrill(drillContext, item.fullLabel ?? item.key))
+            }
           />
         </OperationsChartCard>
 

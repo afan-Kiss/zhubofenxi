@@ -1,4 +1,5 @@
 import React from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import type { AnchorRankItem } from '../../pages/operations/operationsReportTypes'
 import type {
   OperationsBiDrillContextProps,
@@ -57,7 +58,7 @@ export const AnchorRankingTable: React.FC<Props> = ({
         <tbody>
           {rows.map((row) => (
             <tr key={row.anchorName} className="border-t border-slate-100">
-              <td className="px-3 py-2 font-medium">{row.anchorName}</td>
+              <td className="px-3 py-2 font-medium">{formatAnchorDisplayName(row.anchorName)}</td>
               <td className="px-3 py-2 text-slate-600">{row.shopName}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>
               <td className="px-3 py-2">{formatOrderCount(row.soldOrderCount)}</td>

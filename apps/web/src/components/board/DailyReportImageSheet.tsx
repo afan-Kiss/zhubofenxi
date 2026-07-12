@@ -1,4 +1,5 @@
 import React from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import {
   formatDensity,
   formatDuration,
@@ -159,7 +160,7 @@ function AnchorNameBadge({
         compact ? 'py-0.5 text-[9px]' : 'py-[3px] text-[10px]'
       }`}
     >
-      {name}
+      {formatAnchorDisplayName(name)}
     </span>
   )
 }
@@ -262,7 +263,7 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-base font-semibold text-slate-900">
-            {row.anchorName}
+            {formatAnchorDisplayName(row.anchorName)}
             {row.shopName ? ` · ${row.shopName}` : ''}
           </p>
           {row.sessionLabel ? (

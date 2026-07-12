@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { OperationsChartCard } from './OperationsChartCard'
 import { OperationsBarChart } from './OperationsBarChart'
 import { OperationsPieChart } from './OperationsPieChart'
+import { formatAnchorDisplayName } from '../../../lib/anchor-display-name'
 import { useOperationsBiDrill } from '../OperationsBiDrillProvider'
 import { useChartTopLimit } from './useChartTopLimit'
 import {
@@ -56,7 +57,12 @@ export const DailyReportCharts: React.FC<Props> = ({
       map.set(a.anchorName, (map.get(a.anchorName) ?? 0) + a.validAmountYuan)
     }
     return [...map.entries()]
-      .map(([name, value]) => ({ key: name, label: name, value, fullLabel: name }))
+      .map(([name, value]) => ({
+        key: name,
+        label: formatAnchorDisplayName(name),
+        value,
+        fullLabel: name,
+      }))
       .sort((a, b) => b.value - a.value)
       .slice(0, topLimit)
   }, [anchors, topLimit])
@@ -96,7 +102,9 @@ export const DailyReportCharts: React.FC<Props> = ({
       >
         <OperationsBarChart
           items={anchorItems}
-          onItemClick={(item) => openDrill(buildAnchorAmountDrill(drillContext, item.label))}
+          onItemClick={(item) =>
+            openDrill(buildAnchorAmountDrill(drillContext, item.fullLabel ?? item.key))
+          }
         />
       </OperationsChartCard>
 

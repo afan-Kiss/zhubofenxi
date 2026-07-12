@@ -535,23 +535,14 @@ export async function getBuyerRankingProfile(): Promise<BuyerRankingProfilePaylo
   }
 
   if (!sampleMeta) {
-    try {
-      const bundle = await buildRawAnalyzeBundleAll()
-      const artifacts = bundle ? prepareAnalysisArtifactsFromRaw(bundle) : null
-      const rawByMatch = new Map<string, Record<string, unknown>>()
-      for (const o of artifacts?.dedupe.uniqueOrders ?? []) {
-        if (o.raw) rawByMatch.set(o.matchOrderId, o.raw as Record<string, unknown>)
-      }
-      const viewsWithRaw = attachRawByMatchToViews(artifacts?.views ?? [], rawByMatch)
-      const buyerRankingViews = filterViewsForBuyerRanking(filterViewsForCoreMetrics(viewsWithRaw))
-      sampleMeta = buildBuyerRankingSampleMetaFromViews(
-        buyerRankingViews,
-        row.updatedAt.toISOString(),
-        bundle?.orders,
-      )
-    } catch {
-      // TODO: sampleMeta 需重建买家排行缓存后持久化
-      sampleMeta = undefined
+    sampleMeta = {
+      lastUpdatedAt: row.updatedAt.toISOString(),
+      sampleOrderCount: row.orderCount,
+      sampleCustomerCount: row.buyerCount,
+      sampleStartTime: null,
+      sampleEndTime: null,
+      sampleTimeField: 'payTime',
+      sampleDescription: '按支付时间统计，客户按买家ID去重。',
     }
   }
 

@@ -55,37 +55,48 @@ export function isBuyerProfileCacheCompatible(
 
 
 
-/** 是否允许展示买家排行列表与 summary（版本 stale 时不展示旧榜数据） */
-export function shouldShowBuyerRankingItems(
-
+function profileHasReadableRankingData(
   profile: BuyerProfileData | null | undefined,
-
-  buyerProfileStatus?: BoardSyncMeta['buyerProfileStatus'] | null,
-
 ): boolean {
+  if (!profile) return false
+  if ((profile.items?.length ?? 0) > 0) return true
+  if ((profile.buyerCount ?? 0) > 0) return true
+  if ((profile.summary?.highValueCount ?? 0) > 0) return true
+  if ((profile.summary?.repurchaseCount ?? 0) > 0) return true
+  if ((profile.summary?.refundCount ?? 0) > 0) return true
+  if ((profile.summary?.qualityHeavyCount ?? 0) > 0) return true
+  return false
+}
 
+/** 是否允许展示买家排行列表与 summary（重建中仍展示已有缓存） */
+export function shouldShowBuyerRankingItems(
+  profile: BuyerProfileData | null | undefined,
+  buyerProfileStatus?: BoardSyncMeta['buyerProfileStatus'] | null,
+): boolean {
   if (!hasBuyerProfileCache(profile)) return false
 
-  if (!isBuyerProfileCacheCompatible(profile)) return false
+  const hasReadable = profileHasReadableRankingData(profile)
 
-  if (buyerProfileStatus?.cacheCompatible === false) return false
+  if (buyerProfileStatus?.status === 'stale_with_cache' && hasReadable) return true
+  if (profile?.cacheStale && hasReadable) return true
+
+  if (!isBuyerProfileCacheCompatible(profile)) {
+    return hasReadable
+  }
+
+  if (buyerProfileStatus?.cacheCompatible === false) {
+    return hasReadable
+  }
 
   if (
-
     buyerProfileStatus?.expectedCacheVersion &&
-
     buyerProfileStatus.cacheVersion &&
-
     buyerProfileStatus.cacheVersion !== buyerProfileStatus.expectedCacheVersion
-
   ) {
-
-    return false
-
+    return hasReadable
   }
 
   return true
-
 }
 
 
@@ -329,12 +340,11 @@ export function resolveBuyerRankingHeaderHint(input: {
 
 
 export function resolveBuyerRankingMainCard(
-
   uiState: BuyerRankingUiState,
-
   hasCache: boolean,
-
+  opts?: { usesStandaloneRankingApi?: boolean },
 ): BuyerRankingMainCardVariant {
+  if (opts?.usesStandaloneRankingApi) return null
 
   if (uiState === 'stuck') return 'stuck'
 
@@ -345,7 +355,6 @@ export function resolveBuyerRankingMainCard(
   if (uiState === 'building' && !hasCache) return 'rebuilding'
 
   return null
-
 }
 
 

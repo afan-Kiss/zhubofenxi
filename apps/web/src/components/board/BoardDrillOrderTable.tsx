@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import {
   displayCell,
@@ -251,7 +252,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                     <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.orderTime)}</td>
                     <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.liveAccountName)}</td>
                     <td className="px-2 py-1.5">
-                      <div>{displayCell(r.anchorName)}</div>
+                      <div>{formatAnchorDisplayName(r.anchorName)}</div>
                       {(r.paymentAnchorName != null ||
                         r.qualityAttributionAnchorName != null ||
                         r.attributionSource != null ||
@@ -259,11 +260,11 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                         <div className="mt-0.5 space-y-0.5 text-[10px] leading-snug text-slate-500">
                           <div>
                             订单归属主播：
-                            {displayCell(r.paymentAnchorName || r.anchorName)}
+                            {formatAnchorDisplayName(r.paymentAnchorName || r.anchorName)}
                           </div>
                           <div>
                             品退归属主播：
-                            {displayCell(r.qualityAttributionAnchorName || r.anchorName)}
+                            {formatAnchorDisplayName(r.qualityAttributionAnchorName || r.anchorName)}
                           </div>
                           <div
                             className="max-w-[160px] truncate"

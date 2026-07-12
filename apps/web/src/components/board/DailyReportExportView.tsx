@@ -1,5 +1,6 @@
 /** @deprecated 未被引用；日报截图请使用 DailyReportImageSheet */
 import React from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import './daily-report-export.css'
 import {
   formatDensity,
@@ -63,7 +64,7 @@ function ExportAnchorCard({ row }: { row: DailyReportAnchorRow }) {
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="truncate text-[13px] font-semibold text-slate-900">
-            {row.anchorName}｜{row.sessionLabel}
+            {formatAnchorDisplayName(row.anchorName)}｜{row.sessionLabel}
           </p>
           <p className="mt-0.5 truncate text-[11px] text-slate-500">{row.shopName}</p>
         </div>

@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import {
   CartesianGrid,
   Legend,
@@ -300,7 +301,7 @@ function CompareTooltip({
                 className="inline-block h-2 w-2 rounded-full"
                 style={{ backgroundColor: entry.color }}
               />
-              {entry.anchorName}
+              {formatAnchorDisplayName(entry.anchorName)}
             </span>
             <span className="font-medium tabular-nums text-slate-800">
               {entry.isNull ? '未到该时长' : formatMoney(entry.value ?? 0)}
@@ -534,7 +535,9 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
               formatter={(value: string) => {
                 const hit = series.find((s) => s.dataKey === value)
                 return (
-                  <span className="text-[11px] text-slate-600">{hit?.anchorName ?? value}</span>
+                  <span className="text-[11px] text-slate-600">
+                    {formatAnchorDisplayName(hit?.anchorName ?? value)}
+                  </span>
                 )
               }}
             />

@@ -201,7 +201,7 @@ function RollingCloseSection({ report }: { report: RollingDataHealthCloseSummary
           {report.afterSaleCacheRecordScope === 'all_db' ? '（全库累计）' : ''}
         </div>
         <div className="text-[11px] text-slate-600">
-          未归属订单：{report.unassignedOrderCount.toLocaleString('zh-CN')} 单
+          自然流散客订单：{report.unassignedOrderCount.toLocaleString('zh-CN')} 单
         </div>
       </div>
       {report.warnings.length > 0 ? (

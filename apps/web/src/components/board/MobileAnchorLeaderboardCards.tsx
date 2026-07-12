@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import {
   anchorRowGmv,
@@ -112,7 +113,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   return (
     <div className={`space-y-3 ${className}`}>
       {rows.map((a, idx) => {
-        const name = String(a.anchorName ?? '—')
+        const name = formatAnchorDisplayName(String(a.anchorName ?? ''))
         const rowKey = String(a.anchorId ?? name ?? idx)
         const refundRate = anchorRowRate(a, 'returnRate')
         const signRate = anchorRowRate(a, 'signRate')

@@ -148,6 +148,11 @@ export interface RollingDataHealthCloseSummary {
   afterSaleCacheRecordScope: 'all_db' | 'range'
   unassignedOrderCount: number
   duplicateOrderCount: number
+  returnRefundOrderCount: number
+  refundOnlyOrderCount: number
+  unknownRefundTypeOrderCount: number
+  classifiedRefundOrderCount: number
+  returnRefundTypeIncomplete: boolean
   warnings: string[]
 }
 
@@ -177,6 +182,11 @@ function toRollingDataHealthCloseSummary(
     afterSaleCacheRecordScope: report.afterSaleCacheRecordScope,
     unassignedOrderCount: report.unassignedOrderCount,
     duplicateOrderCount: report.duplicateOrderCount,
+    returnRefundOrderCount: report.returnRefundOrderCount,
+    refundOnlyOrderCount: report.refundOnlyOrderCount,
+    unknownRefundTypeOrderCount: report.unknownRefundTypeOrderCount,
+    classifiedRefundOrderCount: report.classifiedRefundOrderCount,
+    returnRefundTypeIncomplete: report.returnRefundTypeIncomplete,
     warnings: report.warnings,
   }
 }

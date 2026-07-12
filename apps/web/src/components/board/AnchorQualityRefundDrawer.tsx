@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { apiRequest } from '../../lib/api'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { Pagination } from '../ui/Pagination'
@@ -122,7 +123,7 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
     <BoardDrawerShell
       open={open}
       onClose={onClose}
-      title={`${anchorName} · 品退明细`}
+      title={`${formatAnchorDisplayName(anchorName)} · 品退明细`}
       subtitle={`${startDate} ~ ${endDate}`}
       footer={
         data ? (
@@ -183,7 +184,7 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
                     <p className="mt-1">来源直播号：{row.liveAccountName || '—'}</p>
                     <p className="mt-1">包裹号：{row.packageId || '—'}</p>
                     <p className="mt-1 font-medium text-slate-800">
-                      品退归属主播：{row.qualityAttributionAnchorName || anchorName}
+                      品退归属主播：{formatAnchorDisplayName(row.qualityAttributionAnchorName || anchorName)}
                     </p>
                     <p className="mt-1">
                       订单归属来源：{row.orderAttributionSource || '—'}
@@ -231,7 +232,7 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
                     ) : null}
                     {row.qualityUnassignedReason ? (
                       <p className="mt-1 text-amber-700">
-                        未归属原因：{row.qualityUnassignedReason}
+                        自然流散客原因：{row.qualityUnassignedReason}
                       </p>
                     ) : null}
                   </li>

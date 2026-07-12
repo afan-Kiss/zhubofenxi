@@ -1,4 +1,5 @@
 import React from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import type { DailyOperationsAnchorRow } from '../../pages/operations/operationsReportTypes'
 import {
   formatDuration,
@@ -57,7 +58,7 @@ export const AnchorOperationsTable: React.FC<Props> = ({ rows }) => {
         <tbody>
           {rows.map((row) => (
             <tr key={row.anchorName} className="border-t border-slate-100">
-              <td className="px-3 py-2 font-medium text-slate-900">{row.anchorName}</td>
+              <td className="px-3 py-2 font-medium text-slate-900">{formatAnchorDisplayName(row.anchorName)}</td>
               <td className="px-3 py-2 text-slate-600">{row.sessionLabel}</td>
               <td className="px-3 py-2 text-slate-600">{formatAnchorSessionTiming(row)}</td>
               <td className="px-3 py-2">{formatIntegerMoney(row.validAmountYuan)}</td>

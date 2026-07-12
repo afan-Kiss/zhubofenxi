@@ -1,4 +1,5 @@
 import React, { useState } from 'react'
+import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import {
   boardRowDisplayOrderNo,
@@ -132,7 +133,7 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
                 来源直播号 {displayCell(r.liveAccountName)}
               </span>
               <span className="rounded-full bg-slate-50 px-2 py-0.5 text-slate-600">
-                主播 {displayCell(r.anchorName)}
+                主播 {formatAnchorDisplayName(r.anchorName)}
               </span>
               <span className="rounded-full bg-slate-50 px-2 py-0.5 text-slate-600">
                 {displayCell(r.orderStatus)}
@@ -184,10 +185,10 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
                 r.attributionExplain != null) && (
                 <>
                   <FieldRow label="订单归属主播">
-                    {displayCell(r.paymentAnchorName || r.anchorName)}
+                    {formatAnchorDisplayName(r.paymentAnchorName || r.anchorName)}
                   </FieldRow>
                   <FieldRow label="品退归属主播">
-                    {displayCell(r.qualityAttributionAnchorName || r.anchorName)}
+                    {formatAnchorDisplayName(r.qualityAttributionAnchorName || r.anchorName)}
                   </FieldRow>
                   <FieldRow label="归属来源">
                     <span

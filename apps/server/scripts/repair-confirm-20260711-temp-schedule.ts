@@ -1,9 +1,6 @@
 /**
- * 确认 2026-07-11 合法临时调班（用户确认真实排班）
- *
- * 用法:
- *   npx tsx apps/server/scripts/repair-confirm-20260711-temp-schedule.ts
- *   npx tsx apps/server/scripts/repair-confirm-20260711-temp-schedule.ts --apply
+ * 强制整理 2026-07-11 为用户确认的四场临时调班（禁用冲突旧行）
+ * npx tsx apps/server/scripts/repair-confirm-20260711-temp-schedule.ts --apply --force-clean
  */
 import { prisma } from '../src/lib/prisma'
 import { buildScheduleBounds } from '../src/utils/anchor-schedule-time.util'
@@ -13,7 +10,8 @@ import { clearCanonicalAttributionCache } from '../src/services/canonical-order-
 const DATE = '2026-07-11'
 const NOTE = '2026-07-11 人工确认临时调班'
 const CONFIRM_BY = 'system-repair'
-const CONFIRM_NOTE = '用户确认真实临时调班：子杰拾玉居早场；小白和田雅玉早场；小红和田雅玉下午场；小艺XY下午场'
+const CONFIRM_NOTE =
+  '用户确认真实临时调班：子杰拾玉居早场；小白和田雅玉早场09:30-14:00；小红和田雅玉下午场14:00-18:30；小艺XY下午场14:00-18:30'
 
 const TARGET = [
   {
@@ -46,6 +44,9 @@ const TARGET = [
   },
 ] as const
 
+/** 晚场保留 */
+const KEEP_EVENING = [{ shopName: '拾玉居和田玉', startTime: '18:30', anchorName: '飞云' }] as const
+
 function hm(d: Date): string {
   return d.toLocaleTimeString('zh-CN', {
     timeZone: 'Asia/Shanghai',
@@ -55,39 +56,48 @@ function hm(d: Date): string {
   })
 }
 
+function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
+  return aStart < bEnd && bStart < aEnd
+}
+
 async function main(): Promise<void> {
   const apply = process.argv.includes('--apply')
+  const forceClean = process.argv.includes('--force-clean')
   const existing = await prisma.anchorDailySchedule.findMany({
-    where: { scheduleDate: DATE, enabled: true },
+    where: { scheduleDate: DATE },
     orderBy: { startAt: 'asc' },
   })
-  console.log(`[0711] 当前排班 ${existing.length} 条:`)
-  for (const r of existing) {
-    console.log(
-      `  ${r.anchorName} | ${r.shopName} | ${hm(r.startAt)}-${hm(r.endAt)} | confirmed=${r.confirmed} | note=${r.note ?? ''}`,
-    )
-  }
+  console.log(JSON.stringify({ phase: 'before', count: existing.length, rows: existing.map((r) => ({
+    id: r.id,
+    anchorName: r.anchorName,
+    shopName: r.shopName,
+    start: hm(r.startAt),
+    end: hm(r.endAt),
+    enabled: r.enabled,
+    confirmed: r.confirmed,
+    note: r.note,
+  })) }, null, 2))
 
   if (!apply) {
-    console.log('\n只读模式。加 --apply 写入确认与备注，并失效缓存。')
+    console.log('dry-run only; pass --apply --force-clean')
     return
   }
 
   const now = new Date()
-  // 先禁用当日全部，再 upsert 目标四场（保留晚场等其他已确认场次时更稳妥：仅更新目标）
+  const targetIds = new Set<string>()
+
   for (const t of TARGET) {
     const bounds = buildScheduleBounds(DATE, t.startTime, t.endTime)
     const hit = existing.find(
       (r) =>
         r.shopName === t.shopName &&
-        Math.abs(r.startAt.getTime() - bounds.startAt.getTime()) < 60_000 &&
-        Math.abs(r.endAt.getTime() - bounds.endAt.getTime()) < 60_000,
+        r.anchorName === t.anchorName &&
+        Math.abs(r.startAt.getTime() - bounds.startAt.getTime()) < 5 * 60_000,
     )
     if (hit) {
       await prisma.anchorDailySchedule.update({
         where: { id: hit.id },
         data: {
-          anchorName: t.anchorName,
           liveRoomName: t.liveRoomName,
           startAt: bounds.startAt,
           endAt: bounds.endAt,
@@ -97,9 +107,11 @@ async function main(): Promise<void> {
           confirmNote: CONFIRM_NOTE,
           note: NOTE,
           enabled: true,
+          source: 'manual',
         },
       })
-      console.log(`  updated ${hit.id} → ${t.anchorName}@${t.shopName}`)
+      targetIds.add(hit.id)
+      console.log(JSON.stringify({ updated: hit.id, ...t }))
     } else {
       const created = await prisma.anchorDailySchedule.create({
         data: {
@@ -118,48 +130,72 @@ async function main(): Promise<void> {
           enabled: true,
         },
       })
-      console.log(`  created ${created.id} → ${t.anchorName}@${t.shopName}`)
+      targetIds.add(created.id)
+      console.log(JSON.stringify({ created: created.id, ...t }))
     }
   }
 
-  // 清理与目标冲突的同店同时段其他主播
-  const after = await prisma.anchorDailySchedule.findMany({
-    where: { scheduleDate: DATE, enabled: true },
-  })
-  for (const r of after) {
-    const isTarget = TARGET.some(
-      (t) =>
-        t.anchorName === r.anchorName &&
-        t.shopName === r.shopName &&
-        hm(r.startAt) === t.startTime,
-    )
-    if (isTarget) continue
-    // 同店同开始时间但主播不同 → 禁用
-    const conflict = TARGET.find(
-      (t) => t.shopName === r.shopName && hm(r.startAt) === t.startTime && t.anchorName !== r.anchorName,
-    )
-    if (conflict) {
-      await prisma.anchorDailySchedule.update({
-        where: { id: r.id },
-        data: { enabled: false, note: `${r.note ?? ''}|被0711临时调班替换`.trim() },
+  if (forceClean) {
+    const after = await prisma.anchorDailySchedule.findMany({ where: { scheduleDate: DATE } })
+    for (const r of after) {
+      if (targetIds.has(r.id)) continue
+      const isEveningKeep = KEEP_EVENING.some(
+        (k) => k.shopName === r.shopName && k.anchorName === r.anchorName && hm(r.startAt) === k.startTime,
+      )
+      if (isEveningKeep) {
+        // ensure evening stays enabled/confirmed
+        if (!r.enabled) {
+          await prisma.anchorDailySchedule.update({
+            where: { id: r.id },
+            data: { enabled: true },
+          })
+        }
+        continue
+      }
+      // disable any other same-day row that overlaps a target shop window or is extra morning/afternoon
+      const overlapsTarget = TARGET.some((t) => {
+        const bounds = buildScheduleBounds(DATE, t.startTime, t.endTime)
+        return (
+          r.shopName === t.shopName &&
+          overlaps(r.startAt.getTime(), r.endAt.getTime(), bounds.startAt.getTime(), bounds.endAt.getTime())
+        )
       })
-      console.log(`  disabled conflict ${r.id} ${r.anchorName}@${r.shopName}`)
+      if (overlapsTarget || r.shopName === '和田雅玉' || r.shopName === 'XY祥钰珠宝' || r.shopName === '拾玉居和田玉') {
+        // keep non-overlapping evening already handled; disable leftover day slots
+        if (hm(r.startAt) >= '18:30' && r.shopName === '拾玉居和田玉') continue
+        await prisma.anchorDailySchedule.update({
+          where: { id: r.id },
+          data: {
+            enabled: false,
+            note: `${r.note ?? ''}|被0711临时调班强制整理禁用`.replace(/^\|/, ''),
+          },
+        })
+        console.log(JSON.stringify({ disabled: r.id, anchorName: r.anchorName, shopName: r.shopName, start: hm(r.startAt) }))
+      }
     }
   }
 
   clearCanonicalAttributionCache()
   await invalidateBusinessBoardCacheForDate(DATE)
+
   const finalRows = await prisma.anchorDailySchedule.findMany({
     where: { scheduleDate: DATE, enabled: true },
     orderBy: { startAt: 'asc' },
   })
-  console.log('\n[0711] 最终排班:')
-  for (const r of finalRows) {
-    console.log(
-      `  ${r.anchorName} | ${r.shopName} | ${hm(r.startAt)}-${hm(r.endAt)} | confirmed=${r.confirmed} | note=${r.note ?? ''}`,
-    )
-  }
-  console.log('DONE')
+  console.log(JSON.stringify({
+    phase: 'after',
+    count: finalRows.length,
+    rows: finalRows.map((r) => ({
+      id: r.id,
+      anchorName: r.anchorName,
+      shopName: r.shopName,
+      start: hm(r.startAt),
+      end: hm(r.endAt),
+      confirmed: r.confirmed,
+      note: r.note,
+      confirmNote: r.confirmNote,
+    })),
+  }, null, 2))
 }
 
 main()

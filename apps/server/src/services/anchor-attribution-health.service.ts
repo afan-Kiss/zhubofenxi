@@ -119,11 +119,22 @@ export async function buildAnchorAttributionHealthReport(input?: {
     }
 
     const swap = detectTemplateAnchorSwap(dateKey, draft)
-    const allConfirmed = rows.every((r) => r.confirmed)
-    const allHaveReason = rows.every((r) => hasConfirmReason(r.note, r.confirmNote))
-    if (swap && !(allConfirmed && allHaveReason)) {
-      scheduleConflictCount += 1
-      issues.push({ date: dateKey, reason: swap.message })
+    if (swap) {
+      // 仅要求「偏离模板」的排班有确认+原因；晚场等未偏离行不必带调班原因
+      const deviantRows = rows.filter((r) => {
+        const startHm = hm(r.startAt.getTime(), dateKey, 'start')
+        const tpl = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.find(
+          (t) => t.shopName === r.shopName && t.startTime === startHm,
+        )
+        return Boolean(tpl && tpl.anchorName !== r.anchorName)
+      })
+      const justified =
+        deviantRows.length > 0 &&
+        deviantRows.every((r) => r.confirmed && hasConfirmReason(r.note, r.confirmNote))
+      if (!justified) {
+        scheduleConflictCount += 1
+        issues.push({ date: dateKey, reason: swap.message })
+      }
     }
 
     for (const r of draft) {

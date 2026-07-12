@@ -10,6 +10,10 @@ import { isDateScheduleConfirmed } from './anchor-schedule-confirm.service'
 import { buildEffectiveScheduleRowsForDate } from '../utils/anchor-effective-schedule.util'
 import { listActiveTemplatesForDate } from './anchor-schedule-template.service'
 import { writeOperationLog } from './audit.service'
+import {
+  validateScheduleHardRules,
+  type ScheduleHardConflict,
+} from '../utils/schedule-hard-validation.util'
 
 const HISTORICAL_SCHEDULE_OVERRIDE_MESSAGE =
   '历史已确认排班不能直接覆盖，请先明确选择「修改历史排班」并填写原因'
@@ -94,13 +98,15 @@ export interface ScheduleMutationResult {
   changed: boolean
   affectedDate: string
   shouldRefreshPerformance: boolean
+  confirmPreviewLines?: string[]
+  hardValidationWarnings?: string[]
 }
 
 export class ScheduleSaveError extends Error {
-  conflicts: ScheduleConflict[]
+  conflicts: Array<ScheduleConflict | ScheduleHardConflict>
 
-  constructor(conflicts: ScheduleConflict[]) {
-    super('当前排班有冲突，不能保存')
+  constructor(conflicts: Array<ScheduleConflict | ScheduleHardConflict>, message?: string) {
+    super(message ?? conflicts[0]?.message ?? '当前排班有冲突，不能保存')
     this.conflicts = conflicts
   }
 }
@@ -317,11 +323,16 @@ function effectiveRowToDto(row: EffectiveScheduleRow, dateKey: string): DailySch
   }
 }
 
-export function buildScheduleMutationResult(dateKey: string): ScheduleMutationResult {
+export function buildScheduleMutationResult(
+  dateKey: string,
+  extra?: { confirmPreviewLines?: string[]; hardValidationWarnings?: string[] },
+): ScheduleMutationResult {
   return {
     changed: true,
     affectedDate: dateKey,
     shouldRefreshPerformance: true,
+    confirmPreviewLines: extra?.confirmPreviewLines,
+    hardValidationWarnings: extra?.hardValidationWarnings,
   }
 }
 
@@ -528,7 +539,13 @@ export async function saveDailySchedules(params: {
   confirm?: boolean
   forceHistoricalScheduleChange?: boolean
   changeReason?: string
-}): Promise<{ date: string; schedules: DailyScheduleDto[]; warnings: string[] }> {
+  allowCrossShopOverlap?: boolean
+}): Promise<{
+  date: string
+  schedules: DailyScheduleDto[]
+  warnings: string[]
+  confirmPreviewLines: string[]
+}> {
   const historicalOverrideNote = await assertHistoricalScheduleChangeAllowed({
     date: params.date,
     forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
@@ -551,22 +568,18 @@ export async function saveDailySchedules(params: {
     throw new ScheduleSaveError(validation.conflicts)
   }
 
-  const draftEnabled = params.schedules.filter((s) => s.enabled !== false)
-  const draftConflicts = detectScheduleConflicts(
-    draftEnabled.map((s) => {
-      const { startAt, endAt } = buildScheduleBounds(params.date, s.startTime, s.endTime)
-      return {
-        anchorName: s.anchorName.trim(),
-        shopName: s.shopName.trim(),
-        liveRoomName: s.liveRoomName.trim(),
-        startAt,
-        endAt,
-      }
-    }),
-  )
-  if (draftConflicts.length) {
-    throw new ScheduleSaveError(draftConflicts)
+  const hard = validateScheduleHardRules({
+    date: params.date,
+    schedules: params.schedules,
+    allowCrossShopOverlap: params.allowCrossShopOverlap,
+    changeReason: params.changeReason,
+    forConfirm: Boolean(params.confirm),
+  })
+  if (!hard.ok) {
+    throw new ScheduleSaveError(hard.conflicts)
   }
+
+  const draftEnabled = params.schedules.filter((s) => s.enabled !== false)
 
   await prisma.anchorDailySchedule.deleteMany({
     where: { scheduleDate: params.date },
@@ -601,8 +614,11 @@ export async function saveDailySchedules(params: {
     })
   }
   const result = await listDailySchedulesForDate(params.date)
-  result.warnings.push(...validation.warnings)
-  return result
+  result.warnings.push(...validation.warnings, ...hard.warnings)
+  return {
+    ...result,
+    confirmPreviewLines: hard.confirmPreviewLines,
+  }
 }
 
 export async function copyDailySchedules(params: {
@@ -683,12 +699,24 @@ export async function validateDailySchedulesBody(params: {
     startTime: string
     endTime: string
     enabled?: boolean
+    note?: string
   }>
+  allowCrossShopOverlap?: boolean
+  changeReason?: string
+  forConfirm?: boolean
 }) {
   const validation = validateScheduleDraft(params.date, params.schedules)
+  const hard = validateScheduleHardRules({
+    date: params.date,
+    schedules: params.schedules,
+    allowCrossShopOverlap: params.allowCrossShopOverlap,
+    changeReason: params.changeReason,
+    forConfirm: params.forConfirm,
+  })
   return {
-    ok: validation.ok,
-    conflicts: validation.conflicts,
-    warnings: validation.warnings,
+    ok: validation.ok && hard.ok,
+    conflicts: [...validation.conflicts, ...hard.conflicts],
+    warnings: [...validation.warnings, ...hard.warnings],
+    confirmPreviewLines: hard.confirmPreviewLines,
   }
 }

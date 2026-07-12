@@ -86,7 +86,13 @@ anchorSchedulesRouter.post('/validate', async (req, res, next) => {
       return
     }
     const schedules = Array.isArray(body.schedules) ? body.schedules : []
-    const result = await validateDailySchedulesBody({ date, schedules })
+    const result = await validateDailySchedulesBody({
+      date,
+      schedules,
+      allowCrossShopOverlap: Boolean(body.allowCrossShopOverlap),
+      changeReason: body.changeReason ? String(body.changeReason) : undefined,
+      forConfirm: Boolean(body.forConfirm ?? body.confirm),
+    })
     sendOk(res, result)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '校验失败', 400)
@@ -109,8 +115,16 @@ anchorSchedulesRouter.post('/', async (req, res, next) => {
       confirm: Boolean(body.confirm),
       forceHistoricalScheduleChange: Boolean(body.forceHistoricalScheduleChange),
       changeReason: body.changeReason ? String(body.changeReason) : undefined,
+      allowCrossShopOverlap: Boolean(body.allowCrossShopOverlap),
     })
-    sendOk(res, { ok: true, ...data, ...buildScheduleMutationResult(date) })
+    sendOk(res, {
+      ok: true,
+      ...data,
+      ...buildScheduleMutationResult(date, {
+        confirmPreviewLines: data.confirmPreviewLines,
+        hardValidationWarnings: data.warnings,
+      }),
+    })
   } catch (err) {
     if (err instanceof ScheduleSaveError) {
       res.status(400).json({

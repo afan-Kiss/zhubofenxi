@@ -229,6 +229,18 @@ export const AnchorSchedulePage: React.FC = () => {
 
   const handleSave = async (confirm = false) => {
     if (hasBlockingIssues) return
+    if (confirm) {
+      const preview = rows
+        .filter((r) => r.enabled !== false)
+        .map(
+          (r) =>
+            `${r.shopName.trim() || r.liveRoomName.trim()} ${r.startTime.trim()}–${r.endTime.trim()} → ${r.anchorName.trim()}`,
+        )
+      const ok = window.confirm(
+        `请按直播号逐行确认排班：\n\n${preview.join('\n')}\n\n确认后将锁定当天排班并重算业绩。`,
+      )
+      if (!ok) return
+    }
     setSaving(true)
     setError(null)
     setMessage(null)
@@ -261,6 +273,19 @@ export const AnchorSchedulePage: React.FC = () => {
   }
 
   const handleConfirm = async (targetDate: string) => {
+    const preview = rows
+      .filter((r) => r.enabled !== false)
+      .map(
+        (r) =>
+          `${r.shopName.trim() || r.liveRoomName.trim()} ${r.startTime.trim()}–${r.endTime.trim()} → ${r.anchorName.trim()}`,
+      )
+    if (
+      targetDate === date &&
+      preview.length > 0 &&
+      !window.confirm(`请按直播号逐行确认排班：\n\n${preview.join('\n')}`)
+    ) {
+      return
+    }
     setSaving(true)
     setError(null)
     try {

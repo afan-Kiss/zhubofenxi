@@ -8,6 +8,7 @@ import { auditMiddleware } from './middleware/audit.middleware'
 import { perfLogMiddleware } from './middleware/perf-log.middleware'
 import { mountWebStatic } from './middleware/staticWeb'
 import { errorHandlerMiddleware } from './middleware/error-handler.middleware'
+import { resolveReportBuildMeta } from './utils/report-build-meta'
 import { auditRouter } from './routes/audit.routes'
 import { authRouter } from './routes/auth.routes'
 import { downloadRouter } from './routes/download.routes'
@@ -65,7 +66,13 @@ export function createApp() {
   getDataDir()
 
   app.get('/api/health', (_req, res) => {
-    res.json({ ok: true, service: 'live-business-api' })
+    const meta = resolveReportBuildMeta(false)
+    res.json({
+      ok: true,
+      service: 'live-business-api',
+      appVersion: meta.appVersion,
+      gitCommit: meta.gitCommit,
+    })
   })
 
   app.use('/api/app', appRouter)

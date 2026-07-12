@@ -95,6 +95,21 @@ function formatRateValue(
   return formatRate(rate)
 }
 
+interface AnchorAttributionHealthReport {
+  generatedAt: string
+  startDate: string
+  endDate: string
+  scheduleConflictCount: number
+  templateDeviationCount: number
+  unassignedOrderCount: number
+  crossShopAbnormalAttributionCount: number
+  leaderboardCardDetailMismatchCount: number
+  qualityCardDetailMismatchCount: number
+  issues: Array<{ date?: string; orderNo?: string; reason: string }>
+  passed: boolean
+  message: string
+}
+
 export const DataHealthPage: React.FC = () => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const { user } = useAuth()
@@ -102,6 +117,9 @@ export const DataHealthPage: React.FC = () => {
 
   const [status, setStatus] = useState<RollingCloseStatus | null>(null)
   const [syncRisk, setSyncRisk] = useState<SyncRiskStatus | null>(null)
+  const [attributionHealth, setAttributionHealth] = useState<AnchorAttributionHealthReport | null>(
+    null,
+  )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [running, setRunning] = useState(false)
@@ -112,12 +130,16 @@ export const DataHealthPage: React.FC = () => {
     setLoading(true)
     setError(null)
     try {
-      const [closeStatus, risk] = await Promise.all([
+      const [closeStatus, risk, attr] = await Promise.all([
         apiRequest<RollingCloseStatus>('/api/board/data-health/rolling-close/status'),
         apiRequest<SyncRiskStatus>('/api/board/sync-risk/status'),
+        apiRequest<AnchorAttributionHealthReport>('/api/board/data-health/anchor-attribution').catch(
+          () => null,
+        ),
       ])
       setStatus(closeStatus)
       setSyncRisk(risk)
+      setAttributionHealth(attr)
     } catch (e) {
       setError(mapRollingCloseError(e))
       setStatus(null)
@@ -162,6 +184,46 @@ export const DataHealthPage: React.FC = () => {
           每天 03:10 自动核对已经稳定下来的滚动30天数据。统计范围会延迟15天，避免刚签收、刚退款的订单反复变化。
         </p>
       </div>
+
+      {attributionHealth ? (
+        <section
+          className={`rounded-xl border p-4 text-sm ${
+            attributionHealth.passed
+              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+              : 'border-amber-200 bg-amber-50 text-amber-950'
+          }`}
+        >
+          <h3 className="text-sm font-semibold">{attributionHealth.message}</h3>
+          <p className="mt-1 text-xs opacity-80">
+            检查范围 {attributionHealth.startDate} ~ {attributionHealth.endDate}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <p>排班冲突数：{formatCount(attributionHealth.scheduleConflictCount)}</p>
+            <p>模板偏离数：{formatCount(attributionHealth.templateDeviationCount)}</p>
+            <p>未归属订单数：{formatCount(attributionHealth.unassignedOrderCount)}</p>
+            <p>跨直播号异常归属数：{formatCount(attributionHealth.crossShopAbnormalAttributionCount)}</p>
+            <p>
+              主播卡片与明细数量不一致数：
+              {formatCount(attributionHealth.leaderboardCardDetailMismatchCount)}
+            </p>
+            <p>
+              品退卡片与品退明细不一致数：
+              {formatCount(attributionHealth.qualityCardDetailMismatchCount)}
+            </p>
+          </div>
+          {!attributionHealth.passed && attributionHealth.issues.length > 0 ? (
+            <ul className="mt-3 max-h-48 list-disc space-y-1 overflow-auto pl-5 text-xs">
+              {attributionHealth.issues.slice(0, 30).map((issue, idx) => (
+                <li key={`${issue.date ?? ''}-${issue.orderNo ?? ''}-${idx}`}>
+                  {issue.date ? `${issue.date} · ` : ''}
+                  {issue.orderNo ? `${issue.orderNo} · ` : ''}
+                  {issue.reason}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-700">
         <h3 className="text-sm font-semibold text-slate-900">自动核对安排</h3>

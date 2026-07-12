@@ -97,6 +97,8 @@
     "verify:hetianyayu-morning-schedule-attribution": "tsx apps/server/scripts/verify-hetianyayu-morning-schedule-attribution.ts",
     "verify:order-attribution-source-labels": "tsx apps/server/scripts/verify-order-attribution-source-labels.ts",
     "verify:quality-refund-package-uniqueness": "tsx apps/server/scripts/verify-quality-refund-package-uniqueness.ts",
+    "verify:schedule-hard-validation": "tsx apps/server/scripts/verify-schedule-hard-validation.ts",
+    "audit:full-schedule-attribution-health": "tsx apps/server/scripts/audit-full-schedule-attribution-health.ts",
     "verify:anchor-valid-revenue-dedupe": "tsx apps/server/scripts/verify-anchor-valid-revenue-dedupe.ts",
     "audit:daily-report-shipped-20260704": "tsx apps/server/scripts/audit-daily-report-shipped-20260704.ts",
     "audit:anchor-valid-order-20260703": "tsx apps/server/scripts/audit-anchor-valid-order-20260703.ts",

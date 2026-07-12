@@ -40,13 +40,55 @@ export async function confirmDailySchedules(params: {
   date: string
   confirmedBy?: string
   confirmNote?: string
-}): Promise<{ date: string; confirmed: boolean; scheduleCount: number }> {
+}): Promise<{
+  date: string
+  confirmed: boolean
+  scheduleCount: number
+  confirmPreviewLines: string[]
+}> {
   const rows = await prisma.anchorDailySchedule.findMany({
     where: { scheduleDate: params.date, enabled: true },
+    orderBy: { startAt: 'asc' },
   })
   if (!rows.length) {
     throw new Error(`${params.date} 没有排班可确认，请先生成或保存排班`)
   }
+
+  const { validateScheduleHardRules } = await import('../utils/schedule-hard-validation.util')
+  const draft = rows.map((r) => {
+    const startTime = r.startAt.toLocaleTimeString('en-GB', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+    let endTime = r.endAt.toLocaleTimeString('en-GB', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+    const endDay = r.endAt.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+    if (endTime === '00:00' && endDay > params.date) endTime = '24:00'
+    return {
+      anchorName: r.anchorName,
+      shopName: r.shopName,
+      liveRoomName: r.liveRoomName,
+      startTime,
+      endTime,
+      enabled: true,
+      note: r.note,
+    }
+  })
+  const hard = validateScheduleHardRules({
+    date: params.date,
+    schedules: draft,
+    forConfirm: true,
+  })
+  if (!hard.ok) {
+    throw new Error(hard.conflicts.map((c) => c.message).join('；') || '排班存在冲突，不能确认')
+  }
+
   const now = new Date()
   await prisma.anchorDailySchedule.updateMany({
     where: { scheduleDate: params.date },
@@ -60,7 +102,12 @@ export async function confirmDailySchedules(params: {
   })
   const { invalidateBusinessBoardCacheForDate } = await import('./anchor-schedule-cache.service')
   await invalidateBusinessBoardCacheForDate(params.date)
-  return { date: params.date, confirmed: true, scheduleCount: rows.length }
+  return {
+    date: params.date,
+    confirmed: true,
+    scheduleCount: rows.length,
+    confirmPreviewLines: hard.confirmPreviewLines,
+  }
 }
 
 export async function getScheduleConfirmStatus(dateKey: string): Promise<{

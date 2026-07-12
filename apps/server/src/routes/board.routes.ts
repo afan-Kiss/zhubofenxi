@@ -120,6 +120,17 @@ boardRouter.get('/data-health/rolling-close/status', async (_req, res) => {
   }
 })
 
+boardRouter.get('/data-health/anchor-attribution', async (_req, res) => {
+  try {
+    const { buildAnchorAttributionHealthReport } = await import(
+      '../services/anchor-attribution-health.service'
+    )
+    sendOk(res, await buildAnchorAttributionHealthReport())
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '主播归属健康检查失败', 500)
+  }
+})
+
 boardRouter.get('/sync-debug', async (_req, res) => {
   try {
     const { buildBoardSyncDebugForApi } = await import('../services/board-sync-debug.service')

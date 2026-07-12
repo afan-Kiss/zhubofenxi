@@ -7,12 +7,20 @@ import {
 } from './lucky-gift-api.service'
 import { deriveLuckyGiftShipmentStatus } from './lucky-gift-status.util'
 import { assertIdUnchanged } from './lucky-gift-json.util'
+import {
+  LUCKY_GIFT_SYNC_STATUS_LABEL,
+  type LuckyGiftSyncShopStatus,
+} from './lucky-gift-platform-response.util'
 
 export interface LuckyGiftShopSyncResult {
   shopKey: string
   shopName: string
   liveAccountId: string | null
+  hostId: string | null
+  hostIdSource: 'live_session' | 'cookie' | null
   ok: boolean
+  syncStatus: LuckyGiftSyncShopStatus
+  syncStatusLabel: string
   error?: string
   drawCount: number
   winnerCount: number
@@ -21,10 +29,14 @@ export interface LuckyGiftShopSyncResult {
   dedupedCount: number
   detailFailCount: number
   newDrawCount: number
+  newWinnerCount: number
   newAddressCount: number
   statusChangeCount: number
   bigintMismatchCount: number
   listMismatch: boolean
+  roomsScanned: number
+  roomsWithData: number
+  lastSyncedAt: string
 }
 
 export interface LuckyGiftSyncSummary {
@@ -32,8 +44,13 @@ export interface LuckyGiftSyncSummary {
   trigger: string
   successShopCount: number
   failedShopCount: number
-  failedShops: Array<{ shopKey: string; shopName: string; error: string }>
+  confirmedEmptyShopCount: number
+  ambiguousEmptyShopCount: number
+  partialSuccessShopCount: number
+  withDataShopCount: number
+  failedShops: Array<{ shopKey: string; shopName: string; error: string; syncStatus: string }>
   newDrawCount: number
+  newWinnerCount: number
   newAddressCount: number
   statusChangeCount: number
   shops: LuckyGiftShopSyncResult[]
@@ -43,6 +60,14 @@ export interface LuckyGiftSyncSummary {
 function msToDate(ms: number | null | undefined): Date | null {
   if (ms == null || !Number.isFinite(ms) || ms <= 0) return null
   return new Date(ms)
+}
+
+function isSyncOk(status: LuckyGiftSyncShopStatus): boolean {
+  return status === 'success_with_data' || status === 'confirmed_empty' || status === 'partial_success'
+}
+
+function isWithData(status: LuckyGiftSyncShopStatus): boolean {
+  return status === 'success_with_data' || status === 'partial_success'
 }
 
 async function upsertDraw(params: {
@@ -108,7 +133,7 @@ async function upsertWinnerAndShipment(params: {
   winner: Awaited<ReturnType<typeof fetchLuckyGiftWinners>>['winners'][number]
   winTime: Date | null
   now: Date
-}): Promise<{ newAddress: boolean; statusChanged: boolean }> {
+}): Promise<{ created: boolean; newAddress: boolean; statusChanged: boolean }> {
   const w = params.winner
   const existing = await prisma.xhsLuckyWinner.findUnique({
     where: {
@@ -121,14 +146,13 @@ async function upsertWinnerAndShipment(params: {
     include: { shipment: true },
   })
 
+  const incomingHasAddress = Boolean(w.hasAddress && w.addressComplete)
   const firstAddressSeenAt =
-    w.hasAddress && w.addressComplete
-      ? existing?.firstAddressSeenAt ?? params.now
-      : existing?.firstAddressSeenAt ?? null
+    incomingHasAddress ? existing?.firstAddressSeenAt ?? params.now : existing?.firstAddressSeenAt ?? null
 
-  const newAddress =
-    Boolean(w.hasAddress && w.addressComplete) &&
-    !(existing?.hasAddress && existing.addressComplete)
+  const newAddress = incomingHasAddress && !(existing?.hasAddress && existing.addressComplete)
+
+  const preserveAddress = Boolean(existing?.hasAddress && existing.addressComplete) && !incomingHasAddress
 
   const winner = await prisma.xhsLuckyWinner.upsert({
     where: {
@@ -170,16 +194,24 @@ async function upsertWinnerAndShipment(params: {
       redId: w.redId,
       winnerNickname: w.winnerNickname || undefined,
       avatar: w.avatar,
-      recipientName: w.address?.name ?? null,
-      recipientPhone: w.address?.phone ?? null,
-      province: w.address?.province ?? null,
-      city: w.address?.city ?? null,
-      district: w.address?.district ?? null,
-      addressDetail: w.address?.detail ?? null,
-      fullAddress: w.fullAddress,
-      hasAddress: w.hasAddress,
-      addressComplete: w.addressComplete,
-      addressMissingJson: JSON.stringify(w.addressMissing),
+      recipientName: preserveAddress
+        ? existing?.recipientName ?? null
+        : w.address?.name ?? existing?.recipientName ?? null,
+      recipientPhone: preserveAddress
+        ? existing?.recipientPhone ?? null
+        : w.address?.phone ?? existing?.recipientPhone ?? null,
+      province: preserveAddress ? existing?.province ?? null : w.address?.province ?? existing?.province ?? null,
+      city: preserveAddress ? existing?.city ?? null : w.address?.city ?? existing?.city ?? null,
+      district: preserveAddress ? existing?.district ?? null : w.address?.district ?? existing?.district ?? null,
+      addressDetail: preserveAddress
+        ? existing?.addressDetail ?? null
+        : w.address?.detail ?? existing?.addressDetail ?? null,
+      fullAddress: preserveAddress ? existing?.fullAddress ?? null : w.fullAddress ?? existing?.fullAddress ?? null,
+      hasAddress: preserveAddress ? existing?.hasAddress ?? false : w.hasAddress,
+      addressComplete: preserveAddress ? existing?.addressComplete ?? false : w.addressComplete,
+      addressMissingJson: preserveAddress
+        ? existing?.addressMissingJson ?? '[]'
+        : JSON.stringify(w.addressMissing),
       firstAddressSeenAt,
       winTime: params.winTime ?? undefined,
       officialCourier: w.officialCourier,
@@ -190,12 +222,13 @@ async function upsertWinnerAndShipment(params: {
   })
 
   const prevStatus = existing?.shipment?.shipmentStatus ?? null
-  const localMarkedShipped = existing?.shipment?.shipmentStatus === 'shipped' &&
+  const localMarkedShipped =
+    existing?.shipment?.shipmentStatus === 'shipped' &&
     existing.shipment.shippingStatusSource === 'local'
 
   let nextStatus = deriveLuckyGiftShipmentStatus({
-    hasAddress: w.hasAddress,
-    addressComplete: w.addressComplete,
+    hasAddress: preserveAddress ? Boolean(existing?.hasAddress) : w.hasAddress,
+    addressComplete: preserveAddress ? Boolean(existing?.addressComplete) : w.addressComplete,
     markedShipped: localMarkedShipped,
     officialShipped: w.officialShipped,
   })
@@ -206,7 +239,6 @@ async function upsertWinnerAndShipment(params: {
   let markedShippedBy = existing?.shipment?.markedShippedBy ?? null
 
   if (w.officialShipped) {
-    // 官方已发可覆盖本地待发，但不得无日志把本地已发改回未发
     if (prevStatus === 'shipped' && shippingStatusSource === 'local' && !w.officialShipped) {
       nextStatus = 'shipped'
     } else {
@@ -238,42 +270,46 @@ async function upsertWinnerAndShipment(params: {
       trackingNo,
       markedShippedAt,
       markedShippedBy,
+      shipmentNote: existing?.shipment?.shipmentNote ?? undefined,
     },
   })
 
   const statusChanged = prevStatus != null && prevStatus !== shipment.shipmentStatus
-  if (statusChanged || (prevStatus == null && shipment.shipmentStatus)) {
-    if (statusChanged) {
-      await prisma.luckyGiftShipmentLog.create({
-        data: {
-          shipmentId: shipment.id,
-          winnerId: winner.id,
-          action: 'sync_status',
-          fromStatus: prevStatus,
-          toStatus: shipment.shipmentStatus,
-          operatorName: 'system-sync',
-          note:
-            shippingStatusSource === 'official'
-              ? '同步平台物流状态'
-              : '同步地址后重算发货状态',
-        },
-      })
-    }
+  if (statusChanged) {
+    await prisma.luckyGiftShipmentLog.create({
+      data: {
+        shipmentId: shipment.id,
+        winnerId: winner.id,
+        action: 'sync_status',
+        fromStatus: prevStatus,
+        toStatus: shipment.shipmentStatus,
+        operatorName: 'system-sync',
+        note:
+          shippingStatusSource === 'official'
+            ? '同步平台物流状态'
+            : '同步地址后重算发货状态',
+      },
+    })
   }
 
-  return { newAddress, statusChanged }
+  return { created: !existing, newAddress, statusChanged }
 }
 
 export async function syncLuckyGiftShop(
   shop: GoodReviewShopDefinition,
   trigger: string,
+  options?: { maxDraws?: number; limitRooms?: number },
 ): Promise<LuckyGiftShopSyncResult> {
   const now = new Date()
   const base: LuckyGiftShopSyncResult = {
     shopKey: shop.shopKey,
     shopName: shop.shopName,
     liveAccountId: null,
+    hostId: null,
+    hostIdSource: null,
     ok: false,
+    syncStatus: 'request_failed',
+    syncStatusLabel: LUCKY_GIFT_SYNC_STATUS_LABEL.request_failed,
     drawCount: 0,
     winnerCount: 0,
     platformTotal: null,
@@ -281,24 +317,66 @@ export async function syncLuckyGiftShop(
     dedupedCount: 0,
     detailFailCount: 0,
     newDrawCount: 0,
+    newWinnerCount: 0,
     newAddressCount: 0,
     statusChangeCount: 0,
     bigintMismatchCount: 0,
     listMismatch: false,
+    roomsScanned: 0,
+    roomsWithData: 0,
+    lastSyncedAt: now.toISOString(),
   }
 
   try {
-    const list = await fetchAllLuckyGiftDraws({ shop, trigger })
+    const list = await fetchAllLuckyGiftDraws({
+      shop,
+      trigger,
+      maxDraws: options?.maxDraws,
+      limitRooms: options?.limitRooms,
+    })
     base.liveAccountId = list.accountId
+    base.hostId = list.hostId
+    base.hostIdSource = list.hostIdSource
     base.platformTotal = list.platformTotal
     base.fetchedCount = list.fetchedCount
     base.dedupedCount = list.dedupedCount
+    base.roomsScanned = list.roomsScanned
+    base.roomsWithData = list.roomsWithData
+    base.syncStatus = list.syncStatus
+    base.syncStatusLabel = LUCKY_GIFT_SYNC_STATUS_LABEL[list.syncStatus]
+    base.error = list.syncStatusError
     base.listMismatch =
       list.platformTotal != null &&
       (list.fetchedCount !== list.platformTotal || list.dedupedCount !== list.platformTotal)
 
+    if (
+      list.syncStatus === 'auth_failed' ||
+      list.syncStatus === 'parse_failed' ||
+      list.syncStatus === 'request_failed' ||
+      list.syncStatus === 'parameter_failed'
+    ) {
+      base.ok = false
+      base.error = list.syncStatusError || base.syncStatusLabel
+      await prisma.luckyGiftSyncMeta.upsert({
+        where: { liveAccountId: list.accountId },
+        create: {
+          liveAccountId: list.accountId,
+          liveAccountName: list.accountName,
+          lastSyncedAt: now,
+          lastError: base.error?.slice(0, 500) ?? null,
+          lastTrigger: trigger,
+        },
+        update: {
+          liveAccountName: list.accountName,
+          lastSyncedAt: now,
+          lastError: base.error?.slice(0, 500) ?? null,
+          lastTrigger: trigger,
+        },
+      })
+      return base
+    }
+
     for (const draw of list.draws) {
-      // 精度自检：入库前后 ID 必须一致
       assertIdUnchanged(draw.luckyDrawId, draw.luckyDrawId, `${shop.shopName} luckyDrawId`)
       const up = await upsertDraw({
         liveAccountId: list.accountId,
@@ -313,11 +391,11 @@ export async function syncLuckyGiftShop(
           shop,
           luckyDrawId: draw.luckyDrawId,
           trigger,
+          hostId: list.hostId,
         })
         if (detail.draw && detail.draw.luckyDrawId !== draw.luckyDrawId) {
           base.bigintMismatchCount += 1
         }
-        // 再次请求详情后 ID 仍须一致
         assertIdUnchanged(draw.luckyDrawId, draw.luckyDrawId, `${shop.shopName} detail luckyDrawId`)
 
         const winTime = msToDate(draw.createTimeMs) ?? msToDate(draw.startTimeMs)
@@ -330,17 +408,23 @@ export async function syncLuckyGiftShop(
             winTime,
             now,
           })
+          if (r.created) base.newWinnerCount += 1
           if (r.newAddress) base.newAddressCount += 1
           if (r.statusChanged) base.statusChangeCount += 1
         }
       } catch (err) {
         base.detailFailCount += 1
-        // 单条详情失败不中断整店
         console.warn(
           `[lucky-gift] detail fail shop=${shop.shopName} draw=${draw.luckyDrawId}:`,
           err instanceof Error ? err.message : err,
         )
       }
+    }
+
+    if (base.detailFailCount > 0 && base.fetchedCount > 0) {
+      base.syncStatus = 'partial_success'
+      base.syncStatusLabel = LUCKY_GIFT_SYNC_STATUS_LABEL.partial_success
+      base.error = `${base.detailFailCount} 个福袋详情拉取失败`
     }
 
     base.drawCount = await prisma.xhsLuckyDraw.count({
@@ -349,7 +433,7 @@ export async function syncLuckyGiftShop(
     base.winnerCount = await prisma.xhsLuckyWinner.count({
       where: { liveAccountId: list.accountId },
     })
-    base.ok = true
+    base.ok = isSyncOk(base.syncStatus)
 
     await prisma.luckyGiftSyncMeta.upsert({
       where: { liveAccountId: list.accountId },
@@ -357,7 +441,7 @@ export async function syncLuckyGiftShop(
         liveAccountId: list.accountId,
         liveAccountName: list.accountName,
         lastSyncedAt: now,
-        lastSuccessAt: now,
+        lastSuccessAt: base.ok ? now : null,
         lastTrigger: trigger,
         drawCount: base.drawCount,
         winnerCount: base.winnerCount,
@@ -372,8 +456,8 @@ export async function syncLuckyGiftShop(
       update: {
         liveAccountName: list.accountName,
         lastSyncedAt: now,
-        lastSuccessAt: now,
-        lastError: null,
+        lastSuccessAt: base.ok ? now : base.drawCount > 0 ? now : undefined,
+        lastError: base.ok ? null : base.error?.slice(0, 500) ?? null,
         lastTrigger: trigger,
         drawCount: base.drawCount,
         winnerCount: base.winnerCount,
@@ -391,6 +475,8 @@ export async function syncLuckyGiftShop(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     base.error = message
+    base.syncStatus = message.includes('Cookie') || message.includes('登录') ? 'auth_failed' : 'request_failed'
+    base.syncStatusLabel = LUCKY_GIFT_SYNC_STATUS_LABEL[base.syncStatus]
     if (base.liveAccountId) {
       await prisma.luckyGiftSyncMeta.upsert({
         where: { liveAccountId: base.liveAccountId },
@@ -417,14 +503,20 @@ let syncLock: Promise<LuckyGiftSyncSummary> | null = null
 export async function syncLuckyGifts(params: {
   trigger: string
   shopKey?: string
+  maxDraws?: number
+  limitRooms?: number
 }): Promise<LuckyGiftSyncSummary> {
   if (syncLock) return syncLock
   syncLock = (async () => {
     const shops = listLuckyGiftShopTargets(params.shopKey)
     const results: LuckyGiftShopSyncResult[] = []
-    // 串行四店，避免平台高并发；店内详情走 enqueueXhsRequest
     for (const shop of shops) {
-      results.push(await syncLuckyGiftShop(shop, params.trigger))
+      results.push(
+        await syncLuckyGiftShop(shop, params.trigger, {
+          maxDraws: params.maxDraws,
+          limitRooms: params.limitRooms,
+        }),
+      )
     }
     const failed = results.filter((r) => !r.ok)
     const summary: LuckyGiftSyncSummary = {
@@ -432,12 +524,18 @@ export async function syncLuckyGifts(params: {
       trigger: params.trigger,
       successShopCount: results.filter((r) => r.ok).length,
       failedShopCount: failed.length,
+      withDataShopCount: results.filter((r) => isWithData(r.syncStatus)).length,
+      confirmedEmptyShopCount: results.filter((r) => r.syncStatus === 'confirmed_empty').length,
+      ambiguousEmptyShopCount: results.filter((r) => r.syncStatus === 'ambiguous_empty').length,
+      partialSuccessShopCount: results.filter((r) => r.syncStatus === 'partial_success').length,
       failedShops: failed.map((r) => ({
         shopKey: r.shopKey,
         shopName: r.shopName,
-        error: r.error || '同步失败',
+        error: r.error || r.syncStatusLabel,
+        syncStatus: r.syncStatus,
       })),
       newDrawCount: results.reduce((s, r) => s + r.newDrawCount, 0),
+      newWinnerCount: results.reduce((s, r) => s + r.newWinnerCount, 0),
       newAddressCount: results.reduce((s, r) => s + r.newAddressCount, 0),
       statusChangeCount: results.reduce((s, r) => s + r.statusChangeCount, 0),
       shops: results,

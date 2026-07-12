@@ -4,8 +4,10 @@ export const LUCKY_GIFT_REFERER = 'https://ark.xiaohongshu.com/live_lottery'
 export const LUCKY_GIFT_ORIGIN = 'https://ark.xiaohongshu.com'
 
 export const LUCKY_GIFT_API = {
-  /** GET params: hostId, page, pageSize（前端 getAllDrawRecord 已确认） */
+  /** GET params: hostId, page, pageSize（当前/在播福袋，无 room_id 时常为空） */
   listPage: 'https://live-assistant.xiaohongshu.com/api/sns/red/live/lucky_draw/page',
+  /** GET params: hostId, room_id, page, pageSize（历史福袋，生产已核实） */
+  historyGet: 'https://live-assistant.xiaohongshu.com/api/sns/red/live/lucky_draw_history/get',
   /** GET query: lucky_draw_id（HAR 已确认） */
   winnerWithAddress:
     'https://live-assistant.xiaohongshu.com/api/sns/red/live/lucky_boy_with_address/get',
@@ -66,4 +68,31 @@ export interface LuckyGiftListPageResult {
   rawText: string
   /** 列表页中原始 id 文本（用于精度校验） */
   rawIdTexts: string[]
+}
+
+export interface LuckyGiftRoomFetchStat {
+  roomId: string
+  pageCount: number
+  fetchedCount: number
+  status: import('./lucky-gift-platform-response.util').LuckyGiftSyncShopStatus
+  error?: string
+}
+
+export interface LuckyGiftFetchAllResult {
+  accountId: string
+  accountName: string
+  hostId: string
+  hostIdSource: 'live_session' | 'cookie'
+  draws: NormalizedLuckyDraw[]
+  platformTotal: number | null
+  fetchedCount: number
+  dedupedCount: number
+  pageCount: number
+  roomsScanned: number
+  roomsWithData: number
+  roomStats: LuckyGiftRoomFetchStat[]
+  listPageStatus: import('./lucky-gift-platform-response.util').LuckyGiftSyncShopStatus
+  listPageError?: string
+  syncStatus: import('./lucky-gift-platform-response.util').LuckyGiftSyncShopStatus
+  syncStatusError?: string
 }

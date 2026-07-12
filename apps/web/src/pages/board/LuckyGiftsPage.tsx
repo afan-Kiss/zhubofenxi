@@ -23,6 +23,10 @@ interface ShopStat {
   drawCount: number
   lastSyncedAt: string | null
   lastError: string | null
+  syncStatus?: string | null
+  syncStatusLabel?: string | null
+  fetchedDrawCount?: number
+  fetchedWinnerCount?: number
 }
 
 interface SummaryPayload {
@@ -38,8 +42,13 @@ interface SummaryPayload {
     lastSyncedAt: string | null
     successShopCount: number
     failedShopCount: number
-    failedShops: Array<{ shopName: string; error: string }>
+    withDataShopCount?: number
+    confirmedEmptyShopCount?: number
+    ambiguousEmptyShopCount?: number
+    partialSuccessShopCount?: number
+    failedShops: Array<{ shopName: string; error: string; syncStatus?: string }>
     newDrawCount: number
+    newWinnerCount?: number
     newAddressCount: number
     statusChangeCount: number
   }
@@ -232,15 +241,21 @@ export const LuckyGiftsPage: React.FC = () => {
     setSyncing(true)
     setMessage(null)
     try {
-      const data = await apiRequest<{
-        successShopCount: number
-        failedShopCount: number
-        newDrawCount: number
-        newAddressCount: number
-      }>('/api/board/lucky-gifts/sync', { method: 'POST' })
-      setMessage(
-        `同步完成：成功 ${data.successShopCount} 店，失败 ${data.failedShopCount} 店，新增福袋 ${data.newDrawCount}，新增地址 ${data.newAddressCount}`,
+      const data = await apiRequest<SummaryPayload['sync'] & { shops?: ShopStat[] }>(
+        '/api/board/lucky-gifts/sync',
+        { method: 'POST' },
       )
+      const parts = [
+        `拉到数据：${data.withDataShopCount ?? 0} 店`,
+        `确认无数据：${data.confirmedEmptyShopCount ?? 0} 店`,
+        `尚不能确认为空：${data.ambiguousEmptyShopCount ?? 0} 店`,
+        `部分成功：${data.partialSuccessShopCount ?? 0} 店`,
+        `失败：${data.failedShopCount} 店`,
+        `新增福袋：${data.newDrawCount}`,
+        `新增中奖人：${data.newWinnerCount ?? 0}`,
+        `新增地址：${data.newAddressCount}`,
+      ]
+      setMessage(`同步完成：${parts.join('｜')}`)
       await load()
     } catch (err) {
       setError(err instanceof Error ? err.message : '同步失败')
@@ -362,13 +377,15 @@ export const LuckyGiftsPage: React.FC = () => {
 
       {summary && (
         <div className="rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs text-slate-500">
-          最近同步：{formatDateTime(summary.sync.lastSyncedAt)}｜成功{' '}
-          {summary.sync.successShopCount} 店｜失败 {summary.sync.failedShopCount} 店｜新增福袋{' '}
-          {summary.sync.newDrawCount}｜新增地址 {summary.sync.newAddressCount}｜状态变化{' '}
-          {summary.sync.statusChangeCount}
+          最近同步：{formatDateTime(summary.sync.lastSyncedAt)}｜拉到数据{' '}
+          {summary.sync.withDataShopCount ?? 0} 店｜确认无数据{' '}
+          {summary.sync.confirmedEmptyShopCount ?? 0} 店｜尚不能确认为空{' '}
+          {summary.sync.ambiguousEmptyShopCount ?? 0} 店｜失败 {summary.sync.failedShopCount} 店｜新增福袋{' '}
+          {summary.sync.newDrawCount}｜新增中奖人 {summary.sync.newWinnerCount ?? 0}｜新增地址{' '}
+          {summary.sync.newAddressCount}
           {summary.sync.failedShops?.length > 0 && (
             <span className="ml-2 text-amber-700">
-              失败：
+              异常：
               {summary.sync.failedShops.map((s) => `${s.shopName}（${s.error}）`).join('；')}
             </span>
           )}
@@ -425,8 +442,15 @@ export const LuckyGiftsPage: React.FC = () => {
             >
               {s.shopName}
               <span className="ml-1 opacity-80">
-                待发 {s.pending}｜未填地址 {s.noAddress}｜已发 {s.shipped}
+                福袋 {s.drawCount}｜中奖 {s.winnerCount}｜待发 {s.pending}｜未填地址 {s.noAddress}
               </span>
+              {s.syncStatusLabel && (
+                <span className="ml-1 block text-[10px] opacity-70">
+                  {s.syncStatusLabel}
+                  {s.lastSyncedAt ? `｜${formatDateTime(s.lastSyncedAt)}` : ''}
+                  {s.lastError ? `｜${s.lastError}` : ''}
+                </span>
+              )}
             </button>
           ))}
       </div>

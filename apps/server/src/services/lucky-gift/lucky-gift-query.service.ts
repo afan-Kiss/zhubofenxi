@@ -122,6 +122,28 @@ export async function getLuckyGiftSummary(params?: { accountId?: string }) {
   })
   const run = await prisma.luckyGiftSyncRun.findUnique({ where: { id: 'default' } })
   const metas = await prisma.luckyGiftSyncMeta.findMany()
+  let lastSummary: {
+    withDataShopCount?: number
+    confirmedEmptyShopCount?: number
+    ambiguousEmptyShopCount?: number
+    partialSuccessShopCount?: number
+    newWinnerCount?: number
+    shops?: Array<{
+      shopKey: string
+      syncStatus?: string
+      syncStatusLabel?: string
+      fetchedCount?: number
+      winnerCount?: number
+      error?: string
+      lastSyncedAt?: string
+    }>
+  } | null = null
+  try {
+    lastSummary = run?.summaryJson ? JSON.parse(run.summaryJson) : null
+  } catch {
+    lastSummary = null
+  }
+  const lastShopMap = new Map((lastSummary?.shops ?? []).map((s) => [s.shopKey, s]))
 
   const shopStats = []
   for (const shop of GOOD_REVIEW_SHOPS) {
@@ -143,6 +165,7 @@ export async function getLuckyGiftSummary(params?: { accountId?: string }) {
       else if (st === 'shipped') sShip += 1
     }
     const meta = liveAccountId ? metas.find((m) => m.liveAccountId === liveAccountId) : null
+    const lastShop = lastShopMap.get(shop.shopKey)
     shopStats.push({
       shopKey: shop.shopKey,
       shopName: shop.shopName,
@@ -155,8 +178,12 @@ export async function getLuckyGiftSummary(params?: { accountId?: string }) {
       drawCount: liveAccountId
         ? await prisma.xhsLuckyDraw.count({ where: { liveAccountId } })
         : 0,
-      lastSyncedAt: meta?.lastSuccessAt?.toISOString() ?? meta?.lastSyncedAt?.toISOString() ?? null,
-      lastError: meta?.lastError ?? null,
+      lastSyncedAt: meta?.lastSuccessAt?.toISOString() ?? meta?.lastSyncedAt?.toISOString() ?? lastShop?.lastSyncedAt ?? null,
+      lastError: meta?.lastError ?? lastShop?.error ?? null,
+      syncStatus: lastShop?.syncStatus ?? null,
+      syncStatusLabel: lastShop?.syncStatusLabel ?? null,
+      fetchedDrawCount: lastShop?.fetchedCount ?? meta?.fetchedCount ?? null,
+      fetchedWinnerCount: lastShop?.winnerCount ?? meta?.winnerCount ?? null,
     })
   }
 
@@ -174,6 +201,10 @@ export async function getLuckyGiftSummary(params?: { accountId?: string }) {
       lastTrigger: run?.lastTrigger ?? null,
       successShopCount: run?.successShopCount ?? 0,
       failedShopCount: run?.failedShopCount ?? 0,
+      withDataShopCount: lastSummary?.withDataShopCount ?? 0,
+      confirmedEmptyShopCount: lastSummary?.confirmedEmptyShopCount ?? 0,
+      ambiguousEmptyShopCount: lastSummary?.ambiguousEmptyShopCount ?? 0,
+      partialSuccessShopCount: lastSummary?.partialSuccessShopCount ?? 0,
       failedShops: (() => {
         try {
           return JSON.parse(run?.failedShopsJson || '[]')
@@ -182,6 +213,7 @@ export async function getLuckyGiftSummary(params?: { accountId?: string }) {
         }
       })(),
       newDrawCount: run?.newDrawCount ?? 0,
+      newWinnerCount: lastSummary?.newWinnerCount ?? 0,
       newAddressCount: run?.newAddressCount ?? 0,
       statusChangeCount: run?.statusChangeCount ?? 0,
     },

@@ -73,6 +73,7 @@ const COOLDOWN_MS_BY_API: Record<string, number> = {
   boss_withdraw_flow: 30 * 60 * 1000,
   boss_shop_score: BUSINESS_SYNC_INTERVAL_MS - 10 * 60 * 1000,
   boss_score_rule: BUSINESS_SYNC_INTERVAL_MS - 10 * 60 * 1000,
+  lucky_gift: 2 * 1000,
 }
 
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000

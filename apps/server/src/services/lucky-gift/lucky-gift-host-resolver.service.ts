@@ -39,15 +39,20 @@ function pickLiveMetricValue(raw: Record<string, unknown>, key: string): string 
   return text || null
 }
 
+function isXhsUserId(value: string | null | undefined): value is string {
+  const s = String(value || '').trim()
+  return /^[0-9a-f]{8,}$/i.test(s)
+}
+
 function extractHostIdFromSessionRaw(raw: Record<string, unknown>): string | null {
   const direct = pickLiveMetricValue(raw, 'userId')
-  if (direct && /^\d+$/.test(direct)) return direct
+  if (isXhsUserId(direct)) return direct
   const userBasic = raw.userBasic
   if (userBasic && typeof userBasic === 'object' && !Array.isArray(userBasic) && 'value' in userBasic) {
     const arr = (userBasic as { value?: unknown }).value
     if (Array.isArray(arr) && arr[0] && typeof arr[0] === 'object') {
       const uid = String((arr[0] as Record<string, unknown>).userId ?? '').trim()
-      if (/^\d+$/.test(uid)) return uid
+      if (isXhsUserId(uid)) return uid
     }
   }
   return null
@@ -87,7 +92,7 @@ export async function listLuckyGiftRoomIdsForAccount(liveAccountId: string): Pro
     where: { liveAccountId, liveId: { not: null } },
     orderBy: { startTime: 'desc' },
     select: { liveId: true, rawJson: true },
-    take: 500,
+    take: 200,
   })
   const out: string[] = []
   const seen = new Set<string>()
@@ -103,7 +108,7 @@ export async function listLuckyGiftRoomIdsForAccount(liveAccountId: string): Pro
     ]
     for (const c of candidates) {
       const id = String(c || '').trim()
-      if (!id || !/^\d+$/.test(id) || seen.has(id)) continue
+      if (!id || !/^[0-9a-f]{8,}$/i.test(id) || seen.has(id)) continue
       seen.add(id)
       out.push(id)
     }

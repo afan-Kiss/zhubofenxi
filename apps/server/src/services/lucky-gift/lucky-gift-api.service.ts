@@ -4,7 +4,7 @@ import {
 } from '../../config/good-review-shops.constants'
 import { resolveLiveAccountCookie } from '../qianfan-cookie-resolver.service'
 import { resolveOfficialShopAccountForStatus } from '../official-shop-account.service'
-import { requestXhsJsonWithSyncAudit } from '../sync-request-audit.service'
+import { requestXhsJsonWithSyncAudit, buildXhsRequestHash } from '../sync-request-audit.service'
 import { enqueueXhsRequest } from '../xhs-api-sync/xhs-rate-limiter.service'
 import { parseJsonPreserveLargeIds } from './lucky-gift-json.util'
 import { normalizeLuckyWinnerBoys } from './lucky-gift-normalize.service'
@@ -65,6 +65,16 @@ async function requestLuckyGiftJson<T>(params: {
   trigger?: string
 }): Promise<{ json: T; rawText: string }> {
   let rawText = ''
+  const query: Record<string, string> = {}
+  try {
+    for (const [k, v] of new URL(params.url).searchParams.entries()) query[k] = v
+  } catch {
+    /* ignore */
+  }
+  const requestHash = buildXhsRequestHash({
+    apiName: 'lucky_gift',
+    query,
+  })
   const json = await enqueueXhsRequest(async () =>
     requestXhsJsonWithSyncAudit<T>({
       shopId: params.accountId,
@@ -72,6 +82,7 @@ async function requestLuckyGiftJson<T>(params: {
       apiName: 'lucky_gift',
       method: params.method,
       urlKey: params.url.split('?')[0]!.slice(-80),
+      requestHash,
       trigger: (params.trigger as 'scheduled') ?? 'scheduled',
       options: {
         method: params.method,

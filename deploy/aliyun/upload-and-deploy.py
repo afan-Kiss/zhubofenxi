@@ -410,6 +410,11 @@ preserve_keys = [
     "XHS_SIGN_PYTHON",
     "XHS_SIGNER_PYTHON",
     "XHS_SIGNER_SCRIPT",
+    "SF_PARTNER_ID",
+    "SF_CHECK_WORD",
+    "SF_CHECK_WORD_SANDBOX",
+    "SF_MONTHLY_CARD",
+    "SF_PHONE_LAST4",
 ]
 target = Path("{DEPLOY_DIR}/apps/server/.env")
 merged = load_env(target)

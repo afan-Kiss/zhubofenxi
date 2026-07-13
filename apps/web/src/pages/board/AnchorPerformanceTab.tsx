@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CalendarDays, ChevronDown, Package, PackageCheck, Percent, RotateCcw, TrendingUp, Undo2, Wallet, AlertTriangle, type LucideIcon } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
@@ -288,90 +288,6 @@ export const AnchorPerformanceTab: React.FC = () => {
   const [shipmentPhotos, setShipmentPhotos] = useState<DailyReportImageItem[]>([])
   const [shipmentPhotoDataUrls, setShipmentPhotoDataUrls] = useState<Record<string, string>>({})
   const [reportPhotosStale, setReportPhotosStale] = useState(false)
-  const [realtimeSyncHint, setRealtimeSyncHint] = useState<string | null>(null)
-  const [realtimeSyncPending, setRealtimeSyncPending] = useState(false)
-  const autoSyncFailedRef = useRef(false)
-  const autoSyncTriggeredKeyRef = useRef<string | null>(null)
-  const triggerBusinessSyncRef = useRef(triggerBusinessSync)
-  triggerBusinessSyncRef.current = triggerBusinessSync
-  const REALTIME_SYNC_FAIL_HINT = '自动更新失败，当前先展示本地已有数据。可以稍后刷新。'
-  const REALTIME_SYNC_PENDING_TIMEOUT_MS = 5 * 60 * 1000
-
-  useEffect(() => {
-    autoSyncFailedRef.current = false
-    setRealtimeSyncHint(null)
-    setRealtimeSyncPending(false)
-    autoSyncTriggeredKeyRef.current = null
-  }, [preset, startDate, endDate])
-
-  useEffect(() => {
-    if (preset !== 'today' && preset !== 'yesterday') return
-
-    const rangeKey = `${preset}:${startDate}:${endDate}`
-    if (autoSyncTriggeredKeyRef.current === rangeKey) return
-
-    autoSyncTriggeredKeyRef.current = rangeKey
-
-    const syncing = isBusinessSyncActive(syncMeta?.businessSync?.status)
-    if (syncing || activeSyncJob || triggerSyncBusy) {
-      setRealtimeSyncPending(true)
-      return
-    }
-
-    setRealtimeSyncPending(true)
-    void triggerBusinessSyncRef
-      .current()
-      .then(() => {
-        autoSyncFailedRef.current = false
-      })
-      .catch(() => {
-        autoSyncFailedRef.current = true
-        setRealtimeSyncPending(false)
-        setRealtimeSyncHint(REALTIME_SYNC_FAIL_HINT)
-      })
-    // 仅在切换今日/昨日范围时触发一次；同步状态变化不重复拉单
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- syncMeta/activeSyncJob 仅用于运行中守卫
-  }, [preset, startDate, endDate])
-
-  useEffect(() => {
-    if (!realtimeSyncPending) return
-    if (preset !== 'today' && preset !== 'yesterday') {
-      setRealtimeSyncPending(false)
-      return
-    }
-    const stillBusy =
-      triggerSyncBusy ||
-      isBusinessSyncActive(syncMeta?.businessSync?.status) ||
-      Boolean(activeSyncJob)
-    if (!stillBusy) {
-      setRealtimeSyncPending(false)
-    }
-  }, [
-    realtimeSyncPending,
-    preset,
-    triggerSyncBusy,
-    syncMeta?.businessSync?.status,
-    activeSyncJob,
-  ])
-
-  useEffect(() => {
-    if (!realtimeSyncPending) return
-    const timer = window.setTimeout(() => {
-      setRealtimeSyncPending(false)
-    }, REALTIME_SYNC_PENDING_TIMEOUT_MS)
-    return () => window.clearTimeout(timer)
-  }, [realtimeSyncPending, preset, startDate, endDate])
-
-  useEffect(() => {
-    if (preset !== 'today' && preset !== 'yesterday') return
-    const syncing = isBusinessSyncActive(syncMeta?.businessSync?.status)
-    if (syncing || activeSyncJob || triggerSyncBusy) return
-    if (autoSyncFailedRef.current) return
-    setRealtimeSyncHint((prev) =>
-      prev === REALTIME_SYNC_FAIL_HINT ? prev : null,
-    )
-  }, [preset, syncMeta?.businessSync?.status, activeSyncJob, triggerSyncBusy])
-
   const handleShipmentImagesChange = useCallback((images: DailyReportImageItem[]) => {
     setShipmentPhotos(images)
     setReportPhotosStale(true)
@@ -439,7 +355,9 @@ export const AnchorPerformanceTab: React.FC = () => {
   const showMetrics = hasPerformanceData && boardDataVisible
 
   const isRealtimePreset = preset === 'today' || preset === 'yesterday'
-  const isSyncingNow = isRealtimePreset && realtimeSyncPending
+  const isSyncingNow =
+    isRealtimePreset &&
+    (isBusinessSyncActive(syncMeta?.businessSync?.status) || Boolean(activeSyncJob))
 
   const dataUpdatedLine = useMemo(() => {
     if (isSyncingNow) return null
@@ -583,8 +501,6 @@ export const AnchorPerformanceTab: React.FC = () => {
             <p className="mt-1 text-xs text-rose-600">
               {preset === 'today' ? '正在更新今日数据…' : '正在更新昨日数据…'}
             </p>
-          ) : realtimeSyncHint ? (
-            <p className="mt-1 text-xs text-rose-600">{realtimeSyncHint}</p>
           ) : null}
         </div>
         {(preset === 'today' || preset === 'yesterday') && startDate ? (

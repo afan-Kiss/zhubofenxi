@@ -344,7 +344,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       displaySummary: showSummaryForUi,
       resolvedRange,
       dataDisplayStatus: rangeMatched ? dataDisplayStatus : null,
-      isLoading: status === 'loading',
+      isLoading: status === 'loading' && !showSummaryForUi,
       isDisplayStale,
       boardSyncUiMode,
       lastSyncedAt,

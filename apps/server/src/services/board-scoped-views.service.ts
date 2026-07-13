@@ -3,7 +3,10 @@ import type { DateRangeResolved } from '../utils/date-range'
 import type { UserRole } from '../types/roles'
 import { viewBelongsToAnchor } from './anchor-attribution.util'
 import { buildAnchorPerformanceViewsFromScopedViews } from './anchor-performance-views.service'
-import { getOrBuildBusinessBoardCache } from './business-cache.service'
+import {
+  getOrBuildBusinessBoardCache,
+  getBusinessBoardCache,
+} from './business-cache.service'
 import { filterViewsForStaffScope } from './staff-anchor-scope.service'
 
 export interface BoardScopedViewsBundle {
@@ -17,6 +20,36 @@ export interface BoardScopedViewsBundle {
   source: 'business-cache'
 }
 
+async function resolveBoardCacheWithViews(params: {
+  preset: string
+  startDate: string
+  endDate: string
+  forceRefresh?: boolean
+}) {
+  let boardCache = getBusinessBoardCache(params.preset, params.startDate, params.endDate)
+  if (!boardCache || params.forceRefresh === true) {
+    boardCache = await getOrBuildBusinessBoardCache({
+      preset: params.preset,
+      startDate: params.startDate,
+      endDate: params.endDate,
+      forceRebuild: params.forceRefresh === true,
+    })
+  }
+
+  if (
+    boardCache.views.length === 0 &&
+    (boardCache.orderCount > 0 || boardCache.fallbackReason === 'disk_snapshot')
+  ) {
+    boardCache = await getOrBuildBusinessBoardCache({
+      preset: params.preset,
+      startDate: params.startDate,
+      endDate: params.endDate,
+    })
+  }
+
+  return boardCache
+}
+
 /** 经营看板统一数据源：drill / metric-detail 共用内存缓存（不在读路径强制重建） */
 export async function getBoardScopedViewsForRange(params: {
   preset?: string
@@ -28,11 +61,11 @@ export async function getBoardScopedViewsForRange(params: {
   forceRefresh?: boolean
 }): Promise<BoardScopedViewsBundle> {
   const preset = params.preset ?? 'custom'
-  const boardCache = await getOrBuildBusinessBoardCache({
+  const boardCache = await resolveBoardCacheWithViews({
     preset,
     startDate: params.startDate,
     endDate: params.endDate,
-    forceRebuild: params.forceRefresh === true,
+    forceRefresh: params.forceRefresh,
   })
   const views =
     params.role && params.username

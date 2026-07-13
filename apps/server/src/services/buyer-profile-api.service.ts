@@ -157,11 +157,12 @@ export function buildPaginatedBuyerProfileResponse(
   const pageSize = Math.min(100, Math.max(1, Math.floor(opts.pageSize ?? 20)))
   const rankingTab = String(opts.rankingTab ?? 'highValue').trim() || 'highValue'
 
-  const enrichedAll = profile.items.map((item) => enrichItem(item))
-  const filtered = filterBuyerRankingByTab(enrichedAll, rankingTab) as EnrichedBuyerRankingItem[]
-  const sorted = sortBuyerRankingTabItems(filtered, rankingTab) as EnrichedBuyerRankingItem[]
+  const filtered = filterBuyerRankingByTab(profile.items, rankingTab)
+  const sorted = sortBuyerRankingTabItems(filtered, rankingTab)
   const total = sorted.length
-  const items = sorted.slice((page - 1) * pageSize, page * pageSize)
+  const items = sorted
+    .slice((page - 1) * pageSize, page * pageSize)
+    .map((item) => enrichItem(item))
 
   return {
     ...profile,
@@ -172,7 +173,7 @@ export function buildPaginatedBuyerProfileResponse(
       page,
       pageSize,
       total,
-      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      totalPages: total > 0 ? Math.max(1, Math.ceil(total / pageSize)) : 0,
       rankingTab,
     },
   }

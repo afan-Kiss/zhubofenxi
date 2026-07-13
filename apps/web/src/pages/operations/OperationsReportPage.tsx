@@ -228,15 +228,16 @@ export const OperationsReportPage: React.FC = () => {
       <div className="relative min-h-[20rem]">
         <div key={tab} className="ops-report-tab-panel">
       {tab === 'daily' ? (
-        <OperationsDailyReport dateKey={dailyDate} onLoadingChange={setReportLoading} />
+        <OperationsDailyReport key={dailyDate} dateKey={dailyDate} onLoadingChange={setReportLoading} />
       ) : tab === 'weekly' ? (
         <OperationsWeeklyReport
+          key={`${weekStart}-${weekEnd}`}
           weekStart={weekStart}
           weekEnd={weekEnd}
           onLoadingChange={setReportLoading}
         />
       ) : tab === 'monthly' ? (
-        <OperationsMonthlyReport month={monthKey} onLoadingChange={setReportLoading} />
+        <OperationsMonthlyReport key={monthKey} month={monthKey} onLoadingChange={setReportLoading} />
       ) : (
         <OperationsRankingsTab
           startDate={rankStart}

@@ -12,7 +12,9 @@ import {
   getOrBuildBusinessBoardCache,
   getBusinessBoardCache,
   isBusinessCacheWarmupRunning,
+  isBusinessBoardCachePendingBuild,
   buildBoardSummaryFromViews,
+  type BusinessBoardCacheEntry,
 } from './business-cache.service'
 import {
   getAnchorPerformanceViews,
@@ -92,6 +94,37 @@ async function getTotalOrderCountCached(): Promise<number> {
 
 function buildSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unknown> {
   return buildBoardSummaryFromViews(views)
+}
+
+function resolveDisplayOrderCount(
+  hasAnchorFilter: boolean,
+  performanceViews: AnalyzedOrderView[],
+  scopedAllViews: AnalyzedOrderView[],
+  boardCache: BusinessBoardCacheEntry,
+): number {
+  if (hasAnchorFilter) return performanceViews.length
+  if (scopedAllViews.length > 0) return scopedAllViews.length
+  if (boardCache.orderCount > 0) return boardCache.orderCount
+  return 0
+}
+
+function shouldUseBoardCacheSummary(
+  boardCache: BusinessBoardCacheEntry,
+  scopedViewCount: number,
+  hasAnchorFilter: boolean,
+): boolean {
+  if (hasAnchorFilter || boardCache.stale) return false
+  if (scopedViewCount === boardCache.orderCount) return true
+  // 磁盘快照占位：views 未加载，但 summary/orderCount 仍有效
+  if (
+    scopedViewCount === 0 &&
+    boardCache.orderCount > 0 &&
+    boardCache.summary &&
+    Object.keys(boardCache.summary).length > 0
+  ) {
+    return true
+  }
+  return false
 }
 
 function resolveLocalQueryRange(params: {
@@ -344,24 +377,46 @@ export async function executeBoardLocalQuery(params: {
   const qualityFeedback = await buildQualityFeedbackPublicStatus()
 
   let boardCache = getBusinessBoardCache(params.preset, startDate, endDate)
-  if (!boardCache) {
-    if (queryMode === 'overview' || queryMode === 'anchors') {
-      const snap = await readBoardPresetSnapshot(params.preset, startDate, endDate)
-      if (snap) {
-        boardCache = buildSnapshotBoardCacheStub(snap)
-        void getOrBuildBusinessBoardCache({ preset: params.preset, startDate, endDate })
-      }
+  const canUseSnapshotFastPath =
+    !hasAnchorFilter &&
+    (queryMode === 'overview' || queryMode === 'anchors' || queryMode === 'full')
+
+  if (!boardCache && canUseSnapshotFastPath) {
+    const snap = await readBoardPresetSnapshot(params.preset, startDate, endDate)
+    if (snap) {
+      boardCache = buildSnapshotBoardCacheStub(snap)
+      void getOrBuildBusinessBoardCache({ preset: params.preset, startDate, endDate })
     }
-    if (!boardCache) {
+  }
+
+  if (!boardCache) {
+    try {
       boardCache = await getOrBuildBusinessBoardCache({
         preset: params.preset,
         startDate,
         endDate,
       })
+    } catch (err) {
+      if (canUseSnapshotFastPath) {
+        const snap = await readBoardPresetSnapshot(params.preset, startDate, endDate)
+        if (snap) {
+          boardCache = buildSnapshotBoardCacheStub(snap)
+        }
+      }
+      if (!boardCache) throw err
     }
   }
 
-  const memoryHit = boardCache.fallbackReason !== 'disk_snapshot'
+  if (hasAnchorFilter && boardCache.fallbackReason === 'disk_snapshot') {
+    boardCache = await getOrBuildBusinessBoardCache({
+      preset: params.preset,
+      startDate,
+      endDate,
+    })
+  }
+
+  const isDiskSnapshot = boardCache.fallbackReason === 'disk_snapshot'
+  const memoryHit = !isDiskSnapshot && Boolean(getBusinessBoardCache(params.preset, startDate, endDate))
 
   const allViews = boardCache.views
   const rawByMatch = boardCache.rawByMatch
@@ -386,7 +441,12 @@ export async function executeBoardLocalQuery(params: {
   }
 
   const summarySourceViews = hasAnchorFilter ? performanceViews : scopedAllViews
-  const displayOrderCount = hasAnchorFilter ? performanceViews.length : scopedAllViews.length
+  const displayOrderCount = resolveDisplayOrderCount(
+    hasAnchorFilter,
+    performanceViews,
+    scopedAllViews,
+    boardCache,
+  )
 
   let dataDisplayStatus = resolveBoardDataDisplayStatus({
     orderCountInRange: displayOrderCount,
@@ -417,7 +477,13 @@ export async function executeBoardLocalQuery(params: {
     !AUTO_SYNC_ON_VIEW_MISSING &&
     dataDisplayStatus === 'syncing_no_cache'
   ) {
-    dataDisplayStatus = 'coverage_missing'
+    const cachePreparing =
+      isBusinessCacheWarmupRunning() ||
+      isBusinessBoardCachePendingBuild(params.preset, startDate, endDate) ||
+      isDiskSnapshot
+    if (!cachePreparing) {
+      dataDisplayStatus = 'coverage_missing'
+    }
   } else if (
     !AUTO_SYNC_ON_VIEW_MISSING &&
     displayOrderCount === 0 &&
@@ -425,15 +491,22 @@ export async function executeBoardLocalQuery(params: {
     syncMeta.businessSync.status !== 'running' &&
     syncMeta.businessSync.status !== 'queued'
   ) {
-    dataDisplayStatus = 'coverage_missing'
+    const cachePreparing =
+      isBusinessCacheWarmupRunning() ||
+      isBusinessBoardCachePendingBuild(params.preset, startDate, endDate) ||
+      isDiskSnapshot
+    if (!cachePreparing) {
+      dataDisplayStatus = 'coverage_missing'
+    }
   }
 
-  let recalculatedSummary =
-    !hasAnchorFilter &&
-    scopedAllViews.length === boardCache.orderCount &&
-    !boardCache.stale
-      ? { ...boardCache.summary }
-      : buildSummaryFromViews(summarySourceViews)
+  let recalculatedSummary = shouldUseBoardCacheSummary(
+    boardCache,
+    scopedAllViews.length,
+    hasAnchorFilter,
+  )
+    ? { ...boardCache.summary }
+    : buildSummaryFromViews(summarySourceViews)
 
   const stableApplied = await applyLastMonthStableSummary({
     preset: params.preset,
@@ -498,9 +571,7 @@ export async function executeBoardLocalQuery(params: {
   const blacklistedBuyerIds = boardCache.blacklistedBuyerIds
 
   let progressMessage = boardDataDisplayStatusMessage(dataDisplayStatus)
-  const cacheHit = Boolean(
-    getBusinessBoardCache(params.preset, startDate, endDate) ?? memoryHit,
-  )
+  const cacheHit = memoryHit || isDiskSnapshot
 
   const fullSyncMeta =
     queryMode === 'full' ? await buildBoardSyncMetaForApi() : undefined
@@ -577,7 +648,7 @@ export async function executeBoardLocalQuery(params: {
     resolvedRange,
 
     source: 'local_db',
-    isFromCache: true,
+    isFromCache: cacheHit,
 
     fetchedAt:
 

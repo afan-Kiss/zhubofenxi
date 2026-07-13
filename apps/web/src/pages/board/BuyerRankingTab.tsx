@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { Pagination } from '../../components/ui/Pagination'
 import { OfficialQualitySyncNote } from '../../components/board/OfficialQualitySyncNote'
-import { clearBuyerProfileCache, readBuyerProfileCache, writeBuyerProfileCache } from '../../lib/buyer-profile-cache'
+import { clearBuyerProfileCache, isBuyerProfileCacheFresh, readBuyerProfileCache, writeBuyerProfileCache } from '../../lib/buyer-profile-cache'
+import { BUYER_PROFILE_INVALIDATE_EVENT } from '../../lib/board-live-query-cache'
 import {
   BuyerSummaryDrawer,
   type BuyerSummaryKey,
@@ -30,6 +31,7 @@ import {
   type BuyerProfileSummary,
   type BuyerValueRankingData,
 } from '../../lib/buyer-profile'
+import { fetchBoardSyncMeta } from '../../lib/board-live-query'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
 import { BuyerRankingProgressCard } from '../../components/board/BuyerRankingProgressCard'
 import { useBoardLiveQuery } from '../../providers/BoardLiveQueryProvider'
@@ -153,11 +155,15 @@ export const BuyerRankingTab: React.FC = () => {
 
   const [profile, setProfile] = useState<BuyerProfileData | null>(() => {
     const cached = readBuyerProfileCache()
-    return cached?.data ?? null
+    if (cached && isBuyerProfileCacheFresh(cached)) return cached.data
+    return null
   })
   const [badBuyerData, setBadBuyerData] = useState<BadBuyerRankingData | null>(null)
   const [valueRankingData, setValueRankingData] = useState<BuyerValueRankingData | null>(null)
-  const [loading, setLoading] = useState(() => !readBuyerProfileCache())
+  const [loading, setLoading] = useState(() => {
+    const cached = readBuyerProfileCache()
+    return !(cached && isBuyerProfileCacheFresh(cached))
+  })
   const [error, setError] = useState<string | null>(null)
   const [refreshBusy, setRefreshBusy] = useState(false)
   const [rankingTab, setRankingTab] = useState('highValue')
@@ -176,6 +182,8 @@ export const BuyerRankingTab: React.FC = () => {
   const [wechatToast, setWechatToast] = useState<string | null>(null)
   const [wechatModalText, setWechatModalText] = useState<string | null>(null)
   const wechatTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const autoRebuildRequestedRef = useRef(false)
+  const loadAbortRef = useRef<AbortController | null>(null)
   const [summaryDrawer, setSummaryDrawer] = useState<BuyerSummaryKey | null>(null)
   const [orderDrawerBuyer, setOrderDrawerBuyer] = useState<ReturnType<
     typeof rowToDrawerBuyer
@@ -216,20 +224,21 @@ export const BuyerRankingTab: React.FC = () => {
     setLoading(true)
     setError(null)
 
-    try {
-      const profilePromise = fetchBuyerProfile({
-        rankingTab: profileTab,
-        page: profilePage,
-        pageSize,
-      }).then((data) => {
-        writeBuyerProfileCache(data)
-        setProfile(data)
-        return data
-      })
+    loadAbortRef.current?.abort()
+    const controller = new AbortController()
+    loadAbortRef.current = controller
 
+    try {
       if (tab === 'highValue') {
-        const [, data] = await Promise.all([
-          profilePromise,
+        const [profileData, data] = await Promise.all([
+          fetchBuyerProfile(
+            {
+              rankingTab: profileTab,
+              page: profilePage,
+              pageSize,
+            },
+            controller.signal,
+          ),
           fetchBuyerValueRanking({
             preset: valueRankingPreset,
             startDate: valueRankingPreset === 'custom' ? valueRankingCustomStart : undefined,
@@ -238,25 +247,36 @@ export const BuyerRankingTab: React.FC = () => {
             limit: 50,
           }),
         ])
+        if (controller.signal.aborted) return
+        writeBuyerProfileCache(profileData)
+        setProfile(profileData)
         setValueRankingData(data)
         return
       }
 
       if (tab === 'badBuyer') {
-        const [, data] = await Promise.all([
-          profilePromise,
-          fetchBadBuyerRanking({
-            preset: badBuyerPreset,
-            startDate: badBuyerPreset === 'custom' ? badBuyerCustomStart : undefined,
-            endDate: badBuyerPreset === 'custom' ? badBuyerCustomEnd : undefined,
-            limit: 10,
-          }),
-        ])
+        const data = await fetchBadBuyerRanking({
+          preset: badBuyerPreset,
+          startDate: badBuyerPreset === 'custom' ? badBuyerCustomStart : undefined,
+          endDate: badBuyerPreset === 'custom' ? badBuyerCustomEnd : undefined,
+          limit: 10,
+        })
+        if (controller.signal.aborted) return
         setBadBuyerData(data)
         return
       }
 
-      await profilePromise
+      const profileData = await fetchBuyerProfile(
+        {
+          rankingTab: profileTab,
+          page: profilePage,
+          pageSize,
+        },
+        controller.signal,
+      )
+      if (controller.signal.aborted) return
+      writeBuyerProfileCache(profileData)
+      setProfile(profileData)
     } catch (e) {
       if (tab === 'highValue') {
         setError(e instanceof Error ? e.message : '加载高价值客户榜单失败')
@@ -396,15 +416,41 @@ export const BuyerRankingTab: React.FC = () => {
       (profile?.cacheStale && !cacheCompatible)
     if (!shouldPoll) return
     const timer = window.setInterval(() => {
-      void load(rankingTab, page)
-    }, 3000)
+      void (async () => {
+        try {
+          const meta = await fetchBoardSyncMeta()
+          const rebuilding = meta.buyerProfileStatus?.rebuilding === true
+          if (!rebuilding && (profile?.cacheStale || buyerUiState === 'stuck')) {
+            void load(rankingTab, page)
+          }
+        } catch {
+          /* ignore */
+        }
+      })()
+    }, 5000)
     return () => window.clearInterval(timer)
   }, [isProfileRebuilding, buyerUiState, profile?.cacheStale, cacheCompatible, load, rankingTab, page])
 
   useEffect(() => {
-    if (!shouldAutoRebuildBuyerProfile(profile, buyerProfileStatus)) return
-    void autoRebuildBuyerProfile().catch(() => undefined)
-  }, [profile, buyerProfileStatus])
+    if (!shouldAutoRebuildBuyerProfile(profile, buyerProfileStatus)) {
+      autoRebuildRequestedRef.current = false
+      return
+    }
+    if (autoRebuildRequestedRef.current) return
+    if (buyerProfileStatus?.rebuilding || profile?.rebuilding) return
+    autoRebuildRequestedRef.current = true
+    void autoRebuildBuyerProfile().catch(() => {
+      autoRebuildRequestedRef.current = false
+    })
+  }, [profile?.cacheStale, profile?.cacheCompatible, buyerProfileStatus?.rebuilding, buyerProfileStatus?.cacheCompatible])
+
+  useEffect(() => {
+    const onInvalidate = () => {
+      void load(rankingTab, page)
+    }
+    window.addEventListener(BUYER_PROFILE_INVALIDATE_EVENT, onInvalidate)
+    return () => window.removeEventListener(BUYER_PROFILE_INVALIDATE_EVENT, onInvalidate)
+  }, [load, rankingTab, page])
 
   const summary = summaryProfile?.summary ?? null
   const sampleMeta = summaryProfile?.sampleMeta ?? null

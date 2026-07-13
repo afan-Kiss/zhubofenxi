@@ -64,6 +64,15 @@ let rebuildInProgress = false
 let rebuildStartedAt: Date | null = null
 let rebuildLastError: string | null = null
 let rebuildTask: Promise<void> | null = null
+let pendingRebuildTrigger: string | null = null
+let profileMemoryCache: {
+  updatedAt: string
+  profile: BuyerRankingProfilePayload
+} | null = null
+
+function clearBuyerRankingProfileMemoryCache(): void {
+  profileMemoryCache = null
+}
 
 export function isBuyerRankingCacheVersionCurrent(version: string | null | undefined): boolean {
   const v = String(version ?? '').trim()
@@ -450,6 +459,8 @@ async function executeRebuildBuyerRankingCache(
     `重建完成：${itemsWithShop.length} 位买家，${buyerRankingViews.length} 单，用时 ${Date.now() - started}ms`,
   )
 
+  clearBuyerRankingProfileMemoryCache()
+
   return {
     updatedAt: now.toISOString(),
     buyerCount: sampleMeta.sampleCustomerCount,
@@ -460,7 +471,10 @@ async function executeRebuildBuyerRankingCache(
 /** 异步排队重建（不阻塞 GET）；同一时刻仅一个任务 */
 export function scheduleBuyerRankingCacheRebuild(triggeredBy: string): boolean {
   releaseStaleRebuildIfNeeded()
-  if (rebuildInProgress || rebuildTask) return false
+  if (rebuildInProgress || rebuildTask) {
+    pendingRebuildTrigger = triggeredBy
+    return false
+  }
   rebuildInProgress = true
   rebuildStartedAt = new Date()
   rebuildLastError = null
@@ -478,6 +492,11 @@ export function scheduleBuyerRankingCacheRebuild(triggeredBy: string): boolean {
       rebuildInProgress = false
       rebuildStartedAt = null
       rebuildTask = null
+      const queued = pendingRebuildTrigger
+      pendingRebuildTrigger = null
+      if (queued) {
+        scheduleBuyerRankingCacheRebuild(queued)
+      }
     }
   })()
   return true
@@ -507,6 +526,11 @@ export async function rebuildBuyerRankingCache(
 export async function getBuyerRankingProfile(): Promise<BuyerRankingProfilePayload | null> {
   const row = await prisma.buyerRankingCache.findUnique({ where: { id: CACHE_ID } })
   if (!row) return null
+
+  const rowUpdatedAt = row.updatedAt.toISOString()
+  if (profileMemoryCache && profileMemoryCache.updatedAt === rowUpdatedAt) {
+    return profileMemoryCache.profile
+  }
 
   let items: BuyerRankingItem[] = []
   let summary = {
@@ -578,7 +602,7 @@ export async function getBuyerRankingProfile(): Promise<BuyerRankingProfilePaylo
     blacklistCount: 0,
   }
 
-  return {
+  const profile: BuyerRankingProfilePayload = {
     source: 'buyer_profile_cache',
     cacheVersion: cacheVersion || BUYER_RANKING_CACHE_VERSION,
     expectedCacheVersion: BUYER_RANKING_CACHE_VERSION,
@@ -586,7 +610,7 @@ export async function getBuyerRankingProfile(): Promise<BuyerRankingProfilePaylo
     items: itemsWithNickname,
     summary: cacheReadable ? summary : emptySummary,
     blacklistedBuyerIds: cacheReadable ? blacklistedBuyerIds : [],
-    updatedAt: row.updatedAt.toISOString(),
+    updatedAt: rowUpdatedAt,
     builtAt: row.builtAt.toISOString(),
     orderCount: cacheReadable ? (sampleMeta?.sampleOrderCount ?? row.orderCount) : 0,
     buyerCount: cacheReadable ? (sampleMeta?.sampleCustomerCount ?? row.buyerCount) : 0,
@@ -598,6 +622,9 @@ export async function getBuyerRankingProfile(): Promise<BuyerRankingProfilePaylo
     sampleMeta: cacheReadable ? sampleMeta : undefined,
     highValueCustomerDefinition: buildHighValueCustomerDefinition(),
   }
+
+  profileMemoryCache = { updatedAt: rowUpdatedAt, profile }
+  return profile
 }
 
 export async function ensureBuyerRankingCacheOnBoot(): Promise<void> {
@@ -605,26 +632,25 @@ export async function ensureBuyerRankingCacheOnBoot(): Promise<void> {
   if (existing) {
     try {
       const summaryParsed = JSON.parse(existing.summaryJson) as { cacheVersion?: string }
-      if (summaryParsed.cacheVersion === BUYER_RANKING_CACHE_VERSION) return
+      if (summaryParsed.cacheVersion === BUYER_RANKING_CACHE_VERSION) {
+        const items = JSON.parse(existing.itemsJson) as BuyerRankingItem[]
+        const itemStale = isBuyerRankingCacheStale(items)
+        if (itemStale.stale) {
+          scheduleBuyerRankingCacheRebuild('boot_stale_async')
+        }
+        return
+      }
     } catch {
       /* rebuild */
     }
-  } else if (!existing) {
+  } else {
     const orderCount = await prisma.xhsRawOrder.count()
     if (orderCount === 0) {
       logInfo('买家排行', '无订单，跳过首次构建')
       return
     }
   }
-  try {
-    await rebuildBuyerRankingCache(existing ? 'boot_stale' : 'boot')
-  } catch (err) {
-    logWarn(
-      '买家排行',
-      `启动时构建失败，已排队重试：${err instanceof Error ? err.message : String(err)}`,
-    )
-    scheduleBuyerRankingCacheRebuild(existing ? 'boot_stale_async' : 'boot_async')
-  }
+  scheduleBuyerRankingCacheRebuild(existing ? 'boot_stale_async' : 'boot_async')
 }
 
 /** 官方品退同步后标记买家排行缓存需重建 */
@@ -640,6 +666,7 @@ export async function markBuyerRankingCacheStaleAfterQualitySync(): Promise<void
         data: { summaryJson: JSON.stringify(summaryParsed), updatedAt: new Date() },
       })
       logInfo('买家排行', '品退同步后已标记排行缓存待重建')
+      scheduleBuyerRankingCacheRebuild('quality_sync')
     }
   } catch {
     // ignore

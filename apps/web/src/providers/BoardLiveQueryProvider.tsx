@@ -14,6 +14,7 @@ import { buildBoardRangeKey, resolveBoardRangeDates } from '../lib/board-range'
 import {
   BOARD_LIVE_QUERY_INVALIDATE_EVENT,
   buildLiveQueryCacheKey,
+  invalidateBuyerProfileCache,
   isLiveQueryCacheFresh,
   readLiveQueryCache,
   writeLiveQueryCache,
@@ -56,6 +57,8 @@ interface BoardLiveQueryContextValue {
   resolvedRange: BoardResolvedRange
   dataDisplayStatus: BoardDataDisplayStatus | null
   isLoading: boolean
+  /** 有缓存时后台刷新中 */
+  isRefreshing: boolean
   isDisplayStale: boolean
   boardSyncUiMode: ReturnType<typeof deriveBoardSyncUiMode>
   lastSyncedAt: string | null
@@ -100,6 +103,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null)
   const [syncMeta, setSyncMeta] = useState<BoardSyncMeta | null>(null)
   const [staleMessage, setStaleMessage] = useState<string | null>(null)
+  const [isRefreshing, setIsRefreshing] = useState(false)
   const [triggerSyncBusy, setTriggerSyncBusy] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const requestSeqRef = useRef(0)
@@ -174,6 +178,8 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     const controller = new AbortController()
     abortRef.current = controller
 
+    setStaleMessage(null)
+
     const liveCacheKey = buildLiveQueryCacheKey({
       pageScope,
       preset,
@@ -193,7 +199,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     const hasFreshCache =
       Boolean(
         cachedEntry &&
-          isLiveQueryCacheFresh(cachedEntry) &&
+          isLiveQueryCacheFresh(cachedEntry, Date.now(), preset) &&
           cachedRangeKey === fetchRangeKey &&
           Object.keys(cachedEntry.data.summary ?? {}).length > 0,
       )
@@ -213,10 +219,12 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       )
       setStatus('ready')
       setError(null)
+      setIsRefreshing(true)
       hasLoadedOnceRef.current = true
     } else {
       setStatus('loading')
       setError(null)
+      setIsRefreshing(false)
     }
 
     try {
@@ -283,6 +291,8 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
           setStaleMessage(null)
         } else if (displayStatus === 'failed_with_cache') {
           setStaleMessage('本次更新失败，当前展示上一次成功数据。')
+        } else if (displayStatus === 'coverage_missing') {
+          setStaleMessage('该日期范围本地数据尚未准备完整，请稍后重试或触发同步。')
         } else if (displayStatus === 'empty') {
           setStaleMessage('当前日期范围内暂无订单。')
         } else {
@@ -299,11 +309,13 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       )
       setStatus('ready')
       setError(null)
+      setIsRefreshing(false)
     } catch (e) {
       if (controller.signal.aborted || seq !== requestSeqRef.current) return
       const msg = e instanceof Error ? e.message : '加载失败'
       setError(msg)
       setStatus('failed')
+      setIsRefreshing(false)
     } finally {
       if (abortRef.current === controller) abortRef.current = null
     }
@@ -378,6 +390,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
           wasSyncingRef.current = stillSyncing
           if (syncJustFinished) {
             void loadLocal()
+            invalidateBuyerProfileCache('business-sync-finished')
           }
         } catch {
           /* ignore */
@@ -423,6 +436,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       resolvedRange,
       dataDisplayStatus: rangeMatched ? dataDisplayStatus : null,
       isLoading: status === 'loading' && !showSummaryForUi,
+      isRefreshing,
       isDisplayStale,
       boardSyncUiMode,
       lastSyncedAt,
@@ -468,6 +482,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       rollingDataHealthClose,
       pageFetchedAt,
       staleMessage,
+      isRefreshing,
       startDate,
       endDate,
       qualityFeedback,

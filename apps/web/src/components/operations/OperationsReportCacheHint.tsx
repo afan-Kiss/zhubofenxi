@@ -9,6 +9,9 @@ interface Props {
 
 function resolveHintText(cacheMeta?: OperationsReportCacheMeta | null): string | null {
   if (cacheMeta?.message) return cacheMeta.message
+  if (cacheMeta?.refreshing) {
+    return '正在后台重算，先显示上次算好的数据。'
+  }
   if (cacheMeta?.hit && cacheMeta.stale) {
     return '正在后台更新，当前先显示上次算好的数据。'
   }

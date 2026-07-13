@@ -3,7 +3,7 @@ import { initScheduler } from './scheduler.service'
 import { ensureBuyerRankingCacheOnBoot } from './buyer-ranking-cache.service'
 import { bootstrapQualityBadCaseCache } from './quality-badcase-store.service'
 import { scheduleOfficialQualityBadCaseSyncOnBoot } from './quality-badcase-auto-sync.service'
-import { warmupBusinessCacheOnBoot } from './business-cache.service'
+import { warmupBusinessCacheOnBoot, seedBoardPresetSnapshotsOnBoot } from './business-cache.service'
 import { ensureSqlitePragmas } from '../lib/prisma'
 import { logInfo, logWarn } from '../utils/server-log'
 
@@ -39,7 +39,16 @@ export function startDeferredBootTasks(): void {
       )
     }
 
-    await warmupBusinessCacheOnBoot()
+    try {
+      await seedBoardPresetSnapshotsOnBoot()
+    } catch (err) {
+      logWarn(
+        '经营快照',
+        `启动预载失败：${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+
+    void warmupBusinessCacheOnBoot()
 
     try {
       const snapMod = await import('./board-preset-snapshot.service')
@@ -53,7 +62,7 @@ export function startDeferredBootTasks(): void {
 
     try {
       const opsMod = await import('./operations-report-cache.service')
-      await opsMod.prewarmCommonOperationsReportsOnBoot()
+      void opsMod.prewarmCommonOperationsReportsOnBoot()
     } catch (err) {
       logWarn(
         '运营报表缓存',

@@ -14,6 +14,7 @@ import {
 } from '../utils/business-timezone'
 import { resolveBusinessRange } from '../utils/business-range'
 import { resolveMonthlyReportRange } from './monthly-operations-report.service'
+import { resolveStaffAnchorScope } from './staff-anchor-scope.service'
 import { logInfo, logWarn } from '../utils/server-log'
 
 export type OperationsReportCacheKind = 'daily' | 'weekly' | 'monthly' | 'rankings'
@@ -88,6 +89,11 @@ function normalizeCacheKeyInput(input: OperationsReportCacheKeyInput): Operation
   const role = input.role?.trim()
   const username = input.username?.trim()
   if (role && username) {
+    const scope = resolveStaffAnchorScope(role as UserRole, username)
+    if (scope.kind === 'all') {
+      const identity = getLocalViewerCacheIdentity()
+      return { ...input, role: identity.role, username: identity.username }
+    }
     return { ...input, role, username }
   }
   const identity = getLocalViewerCacheIdentity()
@@ -295,6 +301,8 @@ export function invalidateOperationsReportCache(reason: string): void {
   const count = cache.size
   cache.clear()
   pendingBuilds.clear()
+  prewarmPromise = null
+  prewarmRunning = false
   logInfo('运营报表缓存', `已清空 ${count} 条缓存：${reason}`)
 }
 

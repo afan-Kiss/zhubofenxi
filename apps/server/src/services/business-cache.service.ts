@@ -85,6 +85,9 @@ export interface BusinessBoardCacheEntry {
 
 const cache = new Map<string, BusinessBoardCacheEntry>()
 const pendingBuilds = new Map<string, Promise<BusinessBoardCacheEntry>>()
+/** custom 预设按需驻留，LRU 限制条目数 */
+const CUSTOM_CACHE_MAX = 12
+const customCacheKeyOrder: string[] = []
 let warmupPromise: Promise<void> | null = null
 let warmupRunning = false
 /** 串行化全量重建，避免启动/同步/品退等多处同时重建导致内存峰值或进程异常退出 */
@@ -103,6 +106,45 @@ export function getRecentBusinessCacheRebuilds(withinMs = 86_400_000): Array<{
 
 export function isBusinessCacheWarmupRunning(): boolean {
   return warmupRunning
+}
+
+export function isBusinessBoardCachePendingBuild(
+  preset: string,
+  startDate: string,
+  endDate: string,
+  scope = 'default',
+): boolean {
+  const key = buildBusinessCacheKey(preset, startDate, endDate, scope)
+  return pendingBuilds.has(key)
+}
+
+function rememberCustomCacheKey(key: string): void {
+  const idx = customCacheKeyOrder.indexOf(key)
+  if (idx >= 0) customCacheKeyOrder.splice(idx, 1)
+  customCacheKeyOrder.push(key)
+  while (customCacheKeyOrder.length > CUSTOM_CACHE_MAX) {
+    const oldest = customCacheKeyOrder.shift()
+    if (oldest) cache.delete(oldest)
+  }
+}
+
+/** 启动时从磁盘快照预载标准预设，秒开今日/昨日总览 */
+export async function seedBoardPresetSnapshotsOnBoot(): Promise<number> {
+  const { loadAllBoardPresetSnapshots, buildSnapshotBoardCacheStub } = await import(
+    './board-preset-snapshot.service'
+  )
+  const snaps = await loadAllBoardPresetSnapshots()
+  let seeded = 0
+  for (const snap of snaps) {
+    if (!shouldRetainBusinessBoardCache(snap.preset)) continue
+    if (cache.has(snap.cacheKey)) continue
+    cache.set(snap.cacheKey, buildSnapshotBoardCacheStub(snap))
+    seeded++
+  }
+  if (seeded > 0) {
+    logInfo('经营缓存', `已从磁盘快照预载 ${seeded} 个预设`)
+  }
+  return seeded
 }
 
 export function buildBusinessCacheKey(
@@ -215,12 +257,14 @@ function fallbackFromPreviousCache(
   buildError: unknown,
 ): BusinessBoardCacheEntry {
   const message = buildError instanceof Error ? buildError.message : String(buildError)
-  return {
+  const fallback: BusinessBoardCacheEntry = {
     ...previous,
     stale: true,
     buildError: message,
     fallbackReason: 'build_failed',
   }
+  cache.set(previous.cacheKey, fallback)
+  return fallback
 }
 
 export async function buildAndSetBusinessBoardCache(params: {
@@ -364,8 +408,6 @@ export async function getOrBuildBusinessBoardCache(params: {
   scope?: string
   forceRebuild?: boolean
 }): Promise<BusinessBoardCacheEntry> {
-  await fullRebuildQueue
-
   const range = resolveBusinessRange(
     params.preset as BusinessRangePreset,
     params.startDate,
@@ -374,6 +416,20 @@ export async function getOrBuildBusinessBoardCache(params: {
   const scope = params.scope ?? 'default'
   const key = buildBusinessCacheKey(params.preset, range.startDate, range.endDate, scope)
   const retain = shouldRetainBusinessBoardCache(params.preset)
+
+  if (!BUSINESS_CACHE_ALWAYS_REBUILD && !params.forceRebuild) {
+    const hit = cache.get(key)
+    if (hit && !hit.stale) {
+      const versionStale = hit.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION
+      if (!versionStale) {
+        return hit
+      }
+    }
+    const pendingEarly = pendingBuilds.get(key)
+    if (pendingEarly) return pendingEarly
+  }
+
+  await fullRebuildQueue
 
   if (BUSINESS_CACHE_ALWAYS_REBUILD || params.forceRebuild) {
     const pending = pendingBuilds.get(key)
@@ -407,6 +463,11 @@ export async function getOrBuildBusinessBoardCache(params: {
       } else {
         return hit
       }
+    }
+  } else {
+    const hit = cache.get(key)
+    if (hit && !params.forceRebuild && !hit.stale) {
+      return hit
     }
   }
   const pending = pendingBuilds.get(key)

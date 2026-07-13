@@ -53,6 +53,9 @@ function buildDataVersionText(params: {
   fallbackReason: string | null
   dataDisplayStatus: BoardDataDisplayStatus
 }): string {
+  if (params.fallbackReason === 'disk_snapshot') {
+    return '重启后快速展示磁盘快照，后台正在重算完整数据。'
+  }
   if (params.cacheStale && params.fallbackReason) {
     return `当前展示上一次成功缓存（${params.fallbackReason}），数据可能不是最新。`
   }

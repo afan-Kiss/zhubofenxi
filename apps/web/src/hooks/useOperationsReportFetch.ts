@@ -28,6 +28,7 @@ export function useOperationsReportFetch<T>(
 
     setLoading(true)
     setError(null)
+    setData(null)
 
     try {
       const result = await loader(ac.signal)

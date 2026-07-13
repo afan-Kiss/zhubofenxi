@@ -312,6 +312,11 @@ export const OverviewTab: React.FC = () => {
     dataDisplayStatus === 'empty' &&
     !showProgressCard
 
+  const showCoverageMissing =
+    !ds &&
+    dataDisplayStatus === 'coverage_missing' &&
+    !showProgressCard
+
   const renderStatValue = useMemo(
     () =>
       (card: SummaryCardDef, raw: number): React.ReactNode => {
@@ -452,6 +457,14 @@ export const OverviewTab: React.FC = () => {
       {showRangeEmptyOnly ? (
         <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-8 text-center">
           <p className="text-sm text-slate-600">当前日期范围内暂无订单数据。</p>
+        </div>
+      ) : null}
+
+      {showCoverageMissing ? (
+        <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-50/60 p-8 text-center">
+          <p className="text-sm text-amber-900">
+            该日期范围本地数据尚未准备完整，请稍后重试或前往系统设置触发经营数据同步。
+          </p>
         </div>
       ) : null}
 

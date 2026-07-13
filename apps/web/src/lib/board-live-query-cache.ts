@@ -2,10 +2,15 @@ import type { BoardLiveQueryData } from './board-live-query'
 import type { BoardRangePreset } from './board-range'
 
 export const LIVE_QUERY_CACHE_TTL_MS = 30 * 60 * 1000
+/** 今日/昨日更短 TTL，同步后更快刷新 */
+export const LIVE_QUERY_REALTIME_CACHE_TTL_MS = 90 * 1000
 const STORAGE_KEY = 'board-live-query-cache-v1'
 
 /** 排班变更后广播，经营看板 / 主播业绩应重新拉取 */
 export const BOARD_LIVE_QUERY_INVALIDATE_EVENT = 'board-live-query-invalidate'
+
+/** 经营同步完成后广播，买家排行应重新拉取 */
+export const BUYER_PROFILE_INVALIDATE_EVENT = 'buyer-profile-invalidate'
 
 export type LiveQueryPageScope = 'overview' | 'anchors'
 
@@ -64,6 +69,14 @@ export function invalidateBoardLiveQueryCache(reason?: string): void {
   }
 }
 
+export function invalidateBuyerProfileCache(reason?: string): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent(BUYER_PROFILE_INVALIDATE_EVENT, { detail: { reason } }),
+    )
+  }
+}
+
 export function readLiveQueryCache(key: string): LiveQueryCacheEntry | null {
   return readAll()[key] ?? null
 }
@@ -81,8 +94,18 @@ export function writeLiveQueryCache(key: string, data: BoardLiveQueryData): Live
   return entry
 }
 
-export function isLiveQueryCacheFresh(entry: LiveQueryCacheEntry, now = Date.now()): boolean {
-  return now - entry.savedAt < LIVE_QUERY_CACHE_TTL_MS
+export function resolveLiveQueryCacheTtlMs(preset: string): number {
+  if (preset === 'today' || preset === 'yesterday') return LIVE_QUERY_REALTIME_CACHE_TTL_MS
+  return LIVE_QUERY_CACHE_TTL_MS
+}
+
+export function isLiveQueryCacheFresh(
+  entry: LiveQueryCacheEntry,
+  now = Date.now(),
+  preset?: string,
+): boolean {
+  const ttl = preset ? resolveLiveQueryCacheTtlMs(preset) : LIVE_QUERY_CACHE_TTL_MS
+  return now - entry.savedAt < ttl
 }
 
 export function formatDataUpdatedAt(iso: string | null): string {

@@ -49,10 +49,12 @@ boardRouter.get('/local-data', async (req, res) => {
     const preset = String(req.query.preset ?? 'thisMonth')
     const startDate = req.query.startDate ? String(req.query.startDate) : undefined
     const endDate = req.query.endDate ? String(req.query.endDate) : undefined
+    const includeAnchorLeaderboard = req.query.includeAnchorLeaderboard !== '0'
     const data = await executeBoardLocalQuery({
       preset: preset as import('../services/board-live-query.service').BoardLiveQueryPreset,
       startDate,
       endDate,
+      includeAnchorLeaderboard,
       role: req.user!.role as import('../types/roles').UserRole,
       username: req.user!.username,
     })

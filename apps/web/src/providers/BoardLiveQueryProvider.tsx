@@ -7,10 +7,19 @@ import React, {
   useRef,
   useState,
 } from 'react'
+import { useLocation } from 'react-router-dom'
 import type { BoardRangePreset } from '../lib/board-range'
 import type { BoardResolvedRange } from '../lib/board-live-query'
 import { buildBoardRangeKey, resolveBoardRangeDates } from '../lib/board-range'
-import { BOARD_LIVE_QUERY_INVALIDATE_EVENT } from '../lib/board-live-query-cache'
+import {
+  BOARD_LIVE_QUERY_INVALIDATE_EVENT,
+  buildLiveQueryCacheKey,
+  isLiveQueryCacheFresh,
+  readLiveQueryCache,
+  writeLiveQueryCache,
+  type LiveQueryPageScope,
+} from '../lib/board-live-query-cache'
+import { resolveAppPageScope } from '../lib/app-page-scope'
 import {
   fetchBoardLocalData,
   fetchBoardSyncMeta,
@@ -72,6 +81,11 @@ const BoardLiveQueryContext = createContext<BoardLiveQueryContextValue | null>(n
 export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
+  const location = useLocation()
+  const pageScope: LiveQueryPageScope =
+    resolveAppPageScope(location.pathname) === 'anchors' ? 'anchors' : 'overview'
+  const includeAnchorLeaderboard = pageScope === 'anchors'
+
   const [preset, setPreset] = useState<BoardRangePreset>('thisMonth')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
@@ -155,14 +169,57 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     const controller = new AbortController()
     abortRef.current = controller
 
-    setStatus('loading')
-    setError(null)
+    const liveCacheKey = buildLiveQueryCacheKey({
+      pageScope,
+      preset,
+      startDate,
+      endDate,
+    })
+    const cachedEntry = readLiveQueryCache(liveCacheKey)
+    const cachedRangeKey =
+      cachedEntry?.data?.rangeKey ??
+      (cachedEntry?.data
+        ? buildBoardRangeKey(
+            cachedEntry.data.preset as BoardRangePreset,
+            cachedEntry.data.startDate,
+            cachedEntry.data.endDate,
+          )
+        : null)
+    const hasFreshCache =
+      Boolean(
+        cachedEntry &&
+          isLiveQueryCacheFresh(cachedEntry) &&
+          cachedRangeKey === fetchRangeKey &&
+          Object.keys(cachedEntry.data.summary ?? {}).length > 0,
+      )
+
+    if (hasFreshCache && cachedEntry) {
+      const cached = cachedEntry.data
+      const summary =
+        Object.keys(cached.summary ?? {}).length > 0 ? cached.summary : null
+      setData({ ...cached, rangeKey: fetchRangeKey })
+      setDisplaySummary(summary)
+      setDataDisplayStatus(cached.dataDisplayStatus ?? null)
+      if (cached.syncMeta) setSyncMeta(cached.syncMeta)
+      setLastSyncedAt(
+        cached.overviewMeta?.lastQianfanSyncAt ??
+          cached.syncMeta?.businessSync.lastSuccessAt ??
+          cached.fetchedAt,
+      )
+      setStatus('ready')
+      setError(null)
+      hasLoadedOnceRef.current = true
+    } else {
+      setStatus('loading')
+      setError(null)
+    }
 
     try {
       const result = await fetchBoardLocalData({
         preset,
         startDate,
         endDate,
+        includeAnchorLeaderboard,
         signal: controller.signal,
       })
       if (controller.signal.aborted || seq !== requestSeqRef.current) return
@@ -189,6 +246,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       if (result.syncMeta) {
         setSyncMeta(result.syncMeta)
       }
+      writeLiveQueryCache(liveCacheKey, { ...result, rangeKey: resultRangeKey })
       setLastSyncedAt(
         result.overviewMeta?.lastQianfanSyncAt ??
           result.syncMeta?.businessSync.lastSuccessAt ??
@@ -243,7 +301,16 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     } finally {
       if (abortRef.current === controller) abortRef.current = null
     }
-  }, [preset, customQueried, customStart, customEnd, startDate, endDate])
+  }, [
+    preset,
+    customQueried,
+    customStart,
+    customEnd,
+    startDate,
+    endDate,
+    pageScope,
+    includeAnchorLeaderboard,
+  ])
 
   const triggerBusinessSync = useCallback(async () => {
     setTriggerSyncBusy(true)

@@ -205,6 +205,7 @@ export async function fetchBoardLocalData(params: {
   preset: BoardRangePreset
   startDate?: string
   endDate?: string
+  includeAnchorLeaderboard?: boolean
   signal?: AbortSignal
 }): Promise<BoardLiveQueryData> {
   if (params.signal?.aborted) {
@@ -218,6 +219,7 @@ export async function fetchBoardLocalData(params: {
   const qs = new URLSearchParams({ preset: params.preset })
   if (dates.startDate) qs.set('startDate', dates.startDate)
   if (dates.endDate) qs.set('endDate', dates.endDate)
+  if (params.includeAnchorLeaderboard === false) qs.set('includeAnchorLeaderboard', '0')
   return apiRequest<BoardLiveQueryData>(`/api/board/local-data?${qs}`, {
     signal: params.signal,
   })

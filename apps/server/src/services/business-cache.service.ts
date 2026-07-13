@@ -18,6 +18,9 @@ import { prisma } from '../lib/prisma'
 import { getLatestWorkbenchCacheUpdatedAt } from './xhs-after-sales-workbench.service'
 import { logInfo, logWarn, presetLabel } from '../utils/server-log'
 import { printStartupSummary } from './startup-summary.service'
+import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
+import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
+import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 import { CANONICAL_ATTRIBUTION_VERSION } from './canonical-order-attribution.service'
 
@@ -41,6 +44,9 @@ export interface BusinessBoardCacheEntry {
   range: DateRangeResolved
   summary: Record<string, unknown>
   anchorLeaderboard: Array<Record<string, unknown>>
+  /** 含走势/迟到等展示字段，构建时一次性算好，避免每次 HTTP 重复重算 */
+  enrichedAnchorLeaderboard?: Array<Record<string, unknown>>
+  anchorPerformanceSummary?: Record<string, unknown>
   views: AnalyzedOrderView[]
   rawByMatch: Map<string, Record<string, unknown>>
   /** 构建缓存时的直播场次，供主播品退归属 */
@@ -236,6 +242,24 @@ export async function buildAndSetBusinessBoardCache(params: {
       liveSessions,
       qualityRefundViews: remappedCoreViews,
     })
+    const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
+      anchorLeaderboard as import('./board-metrics.service').BoardAnchorMetrics[],
+      range.endDate,
+    ) as unknown as Array<Record<string, unknown>>
+    const anchorLeaderboardWithLate = await enrichAnchorLeaderboardWithLateStatus(
+      anchorLeaderboardRaw,
+      {
+        startDate: range.startDate,
+        endDate: range.endDate,
+        preset: params.preset,
+      },
+    )
+    const enrichedAnchorLeaderboard = await enrichAnchorLeaderboardWithTrend(
+      anchorLeaderboardWithLate,
+      performanceViews,
+      { preset: params.preset, startDate: range.startDate, endDate: range.endDate },
+    )
+    const anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
     if (
       Number(summary.qualityReturnCount ?? 0) > 0 &&
       liveSessions.length === 0
@@ -259,6 +283,8 @@ export async function buildAndSetBusinessBoardCache(params: {
       range,
       summary,
       anchorLeaderboard: anchorLeaderboard as unknown as Array<Record<string, unknown>>,
+      enrichedAnchorLeaderboard,
+      anchorPerformanceSummary,
       views,
       rawByMatch,
       liveSessions,
@@ -334,45 +360,14 @@ export async function getOrBuildBusinessBoardCache(params: {
   }
 
   const hit = cache.get(key)
-  if (hit && !params.forceRebuild) {
+  if (hit && !params.forceRebuild && !hit.stale) {
     if (hit.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION) {
       logInfo(
         '经营缓存',
         `${presetLabel(params.preset)} 归属算法版本变更（${hit.attributionAlgorithmVersion ?? '—'} → ${CANONICAL_ATTRIBUTION_VERSION}），重建经营缓存`,
       )
     } else {
-    const latestSourceMax = await resolveSourceDataMaxTime()
-    const latestRawMax = await resolveSourceRawMaxUpdatedAt()
-    const latestSyncJobId = await resolveLatestBusinessSyncJobId()
-    if (hit.sourceDataMaxTime !== latestSourceMax) {
-      logInfo(
-        '经营缓存',
-        `${presetLabel(params.preset)} 订单库有更新（${hit.sourceDataMaxTime ?? '—'} → ${latestSourceMax ?? '—'}），重建经营缓存`,
-      )
-    } else if (hit.sourceRawMaxUpdatedAt !== latestRawMax) {
-      logInfo(
-        '经营缓存',
-        `${presetLabel(params.preset)} 原始数据 updatedAt 有更新（${hit.sourceRawMaxUpdatedAt ?? '—'} → ${latestRawMax ?? '—'}），重建经营缓存`,
-      )
-    } else if (hit.sourceSyncJobId !== latestSyncJobId) {
-      logInfo(
-        '经营缓存',
-        `${presetLabel(params.preset)} 同步任务已更新（${hit.sourceSyncJobId ?? '—'} → ${latestSyncJobId ?? '—'}），重建经营缓存`,
-      )
-    } else {
-      const latestWorkbenchAt = await getLatestWorkbenchCacheUpdatedAt()
-      const cachedWorkbenchAt = hit.workbenchCacheMaxUpdatedAt
-        ? Date.parse(hit.workbenchCacheMaxUpdatedAt)
-        : 0
-      const latestMs = latestWorkbenchAt?.getTime() ?? 0
-      if (latestMs <= cachedWorkbenchAt) {
-        return hit
-      }
-      logInfo(
-        '经营缓存',
-        `${presetLabel(params.preset)} 售后工作台已更新，重建经营缓存`,
-      )
-    }
+      return hit
     }
   }
   const pending = pendingBuilds.get(key)

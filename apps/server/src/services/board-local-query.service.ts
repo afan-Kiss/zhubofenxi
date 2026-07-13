@@ -225,6 +225,9 @@ export async function executeBoardLocalQuery(params: {
 
   username?: string
 
+  /** 经营总览仅需 summary，跳过主播排行榜重算以加速响应 */
+  includeAnchorLeaderboard?: boolean
+
 }): Promise<
 
   BoardLiveQueryResult & {
@@ -349,13 +352,13 @@ export async function executeBoardLocalQuery(params: {
 
   const anchorName = forcedAnchor ?? params.anchorName
 
+  const includeAnchorLeaderboard = params.includeAnchorLeaderboard !== false
 
+  const hasAnchorFilter = Boolean(anchorId?.trim() || anchorName?.trim())
 
   let syncMeta = await getBusinessSyncStatus()
 
   const totalOrderCount = await prisma.xhsRawOrder.count()
-
-
 
   const qualityFeedback = await buildQualityFeedbackPublicStatus()
 
@@ -371,14 +374,22 @@ export async function executeBoardLocalQuery(params: {
   const scopedAllViews = filterViewsForCoreMetrics(
     role && username ? filterViewsForStaffScope(allViews, role, username) : allViews,
   )
-  const hasAnchorFilter = Boolean(anchorId?.trim() || anchorName?.trim())
 
-  const performanceViews = await getAnchorPerformanceViews(
-    scopedAllViews,
-    rawByMatch,
-    hasAnchorFilter ? anchorId : undefined,
-    hasAnchorFilter ? anchorName : undefined,
-  )
+  let performanceViews: AnalyzedOrderView[] = []
+  let anchorPerformanceSummary: Record<string, unknown> = {}
+  let anchorLeaderboard: Array<Record<string, unknown>> = []
+
+  const needsPerformanceViews = includeAnchorLeaderboard || hasAnchorFilter
+
+  if (needsPerformanceViews) {
+    performanceViews = await getAnchorPerformanceViews(
+      scopedAllViews,
+      rawByMatch,
+      hasAnchorFilter ? anchorId : undefined,
+      hasAnchorFilter ? anchorName : undefined,
+    )
+  }
+
   const summarySourceViews = hasAnchorFilter ? performanceViews : scopedAllViews
   const displayOrderCount = hasAnchorFilter ? performanceViews.length : scopedAllViews.length
 
@@ -436,44 +447,58 @@ export async function executeBoardLocalQuery(params: {
   })
   const summary = stableApplied.summary
 
-  const anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
+  if (includeAnchorLeaderboard) {
+    if (
+      !hasAnchorFilter &&
+      boardCache.enrichedAnchorLeaderboard &&
+      boardCache.enrichedAnchorLeaderboard.length > 0
+    ) {
+      anchorLeaderboard = boardCache.enrichedAnchorLeaderboard
+      anchorPerformanceSummary =
+        boardCache.anchorPerformanceSummary ?? buildSummaryFromViews(performanceViews)
+    } else {
+      anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
+      const cacheLiveSessions = boardCache.liveSessions ?? []
+      const remappedCoreViewsForQuality = await remapViewsWithScheduleOverlay(
+        attachRawByMatchToViews(scopedAllViews, rawByMatch),
+      )
+      const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
+        aggregateAnchorLeaderboard(
+          performanceViews,
+          {
+            scope: 'local-query-anchor-performance',
+            dateRange: { startDate, endDate, preset: params.preset },
+          },
+          { liveSessions: cacheLiveSessions, qualityRefundViews: remappedCoreViewsForQuality },
+        ) as import('./board-metrics.service').BoardAnchorMetrics[],
+        endDate,
+      ) as unknown as Array<Record<string, unknown>>
 
-  const cacheLiveSessions = boardCache.liveSessions ?? []
-  const remappedCoreViewsForQuality = await remapViewsWithScheduleOverlay(
-    attachRawByMatchToViews(scopedAllViews, rawByMatch),
-  )
-  const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
-    aggregateAnchorLeaderboard(
-      performanceViews,
-      {
-        scope: 'local-query-anchor-performance',
-        dateRange: { startDate, endDate, preset: params.preset },
-      },
-      { liveSessions: cacheLiveSessions, qualityRefundViews: remappedCoreViewsForQuality },
-    ) as import('./board-metrics.service').BoardAnchorMetrics[],
-    endDate,
-  ) as unknown as Array<Record<string, unknown>>
+      const anchorLeaderboardWithLate = await enrichAnchorLeaderboardWithLateStatus(
+        anchorLeaderboardRaw,
+        {
+          startDate,
+          endDate,
+          preset: params.preset,
+        },
+      )
 
-  const anchorLeaderboardWithLate = await enrichAnchorLeaderboardWithLateStatus(anchorLeaderboardRaw, {
-    startDate,
-    endDate,
-    preset: params.preset,
-  })
+      anchorLeaderboard = await enrichAnchorLeaderboardWithTrend(
+        anchorLeaderboardWithLate,
+        performanceViews,
+        { preset: params.preset, startDate, endDate },
+      )
+    }
 
-  const anchorLeaderboard = await enrichAnchorLeaderboardWithTrend(
-    anchorLeaderboardWithLate,
-    performanceViews,
-    { preset: params.preset, startDate, endDate },
-  )
-
-  logAnchorLeaderboardReconcile(
-    anchorPerformanceSummary,
-    anchorLeaderboard,
-    params.preset,
-    startDate,
-    endDate,
-    cacheLiveSessions,
-  )
+    logAnchorLeaderboardReconcile(
+      anchorPerformanceSummary,
+      anchorLeaderboard,
+      params.preset,
+      startDate,
+      endDate,
+      boardCache.liveSessions ?? [],
+    )
+  }
 
   const blacklistedBuyerIds = boardCache.blacklistedBuyerIds
 

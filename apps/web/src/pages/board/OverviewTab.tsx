@@ -29,6 +29,7 @@ import {
   useBoardLiveQuery,
 } from '../../providers/BoardLiveQueryProvider'
 import { resolveProgressCardVariant } from '../../lib/business-sync-ui'
+import { boardSummaryHasOrderData } from '../../lib/board-summary.util'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
 import { apiRequest } from '../../lib/api'
@@ -264,7 +265,7 @@ export const OverviewTab: React.FC = () => {
     boardSyncUiMode === 'syncing_with_data' ||
     boardSyncUiMode === 'loading_range'
   const isLoadingRange = isDisplayStale && isLoading
-  const hasMetrics = Boolean(ds)
+  const hasMetrics = boardSummaryHasOrderData(ds)
   const showMetrics = hasMetrics && boardDataVisible
   const qualityNote = qualityReturnCardNote(qualityFeedback)
   const stableWarning = overviewMeta?.stableVsLatest?.needsManualUpdate
@@ -307,9 +308,9 @@ export const OverviewTab: React.FC = () => {
     boardSyncUiMode === 'empty_failed'
 
   const showRangeEmptyOnly =
-    !ds &&
+    !hasMetrics &&
     boardSyncUiMode === 'synced_idle' &&
-    dataDisplayStatus === 'empty' &&
+    (dataDisplayStatus === 'empty' || dataDisplayStatus === 'ready') &&
     !showProgressCard
 
   const showCoverageMissing =

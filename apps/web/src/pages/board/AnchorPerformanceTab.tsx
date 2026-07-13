@@ -26,6 +26,7 @@ import {
   useBoardLiveQuery,
 } from '../../providers/BoardLiveQueryProvider'
 import { showLongPeriodRates } from '../../lib/board-rate-display'
+import { boardSummaryHasOrderData } from '../../lib/board-summary.util'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
 import { DailyReportPreviewButton, prefetchShipmentPhotoDataUrls } from '../../components/board/DailyReportPreviewButton'
 import {
@@ -331,7 +332,8 @@ export const AnchorPerformanceTab: React.FC = () => {
   }, [anchorFilter, allAnchors])
   const blacklistedBuyerIds = data?.blacklistedBuyerIds ?? []
   const hasPerformanceData =
-    Boolean(filteredPerformanceSummary) && Object.keys(filteredPerformanceSummary ?? {}).length > 0
+    boardSummaryHasOrderData(filteredPerformanceSummary as Record<string, unknown>) ||
+    (anchorFilter === '全部' && (data?.anchorLeaderboard?.length ?? 0) > 0)
   const cards = filteredPerformanceSummary ?? {}
   const showLivePeriod = isSingleDayPreset(preset, startDate, endDate)
   const showRates = showLongPeriodRates(preset, startDate, endDate)
@@ -429,7 +431,7 @@ export const AnchorPerformanceTab: React.FC = () => {
   const showRangeEmptyOnly =
     !hasPerformanceData &&
     boardSyncUiMode === 'synced_idle' &&
-    dataDisplayStatus === 'empty' &&
+    (dataDisplayStatus === 'empty' || dataDisplayStatus === 'ready') &&
     !showProgressCard
 
   const showCoverageMissing =

@@ -33,6 +33,7 @@ import {
 } from '../lib/board-live-query'
 import { apiRequest } from '../lib/api'
 import { deriveBoardSyncUiMode, isBusinessSyncActive } from '../lib/business-sync-ui'
+import { boardSummaryHasOrderData } from '../lib/board-summary.util'
 import type { CookieHealthPayload } from '../lib/live-account'
 import type { QualityFeedbackStatus } from '../components/board/OfficialQualitySyncNote'
 
@@ -206,8 +207,15 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
 
     if (hasFreshCache && cachedEntry) {
       const cached = cachedEntry.data
-      const summary =
+      const rawCachedSummary =
         Object.keys(cached.summary ?? {}).length > 0 ? cached.summary : null
+      const summary =
+        rawCachedSummary &&
+        (cached.dataDisplayStatus !== 'empty' || boardSummaryHasOrderData(rawCachedSummary))
+          ? rawCachedSummary
+          : boardSummaryHasOrderData(rawCachedSummary)
+            ? rawCachedSummary
+            : null
       setData({ ...cached, rangeKey: fetchRangeKey })
       setDisplaySummary(summary)
       setDataDisplayStatus(cached.dataDisplayStatus ?? null)
@@ -251,8 +259,15 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
 
       hasLoadedOnceRef.current = true
 
-      const summary =
+      const rawSummary =
         Object.keys(result.summary).length > 0 ? result.summary : null
+      const summary =
+        rawSummary &&
+        (result.dataDisplayStatus !== 'empty' || boardSummaryHasOrderData(rawSummary))
+          ? rawSummary
+          : boardSummaryHasOrderData(rawSummary)
+            ? rawSummary
+            : null
 
       setData({ ...result, rangeKey: resultRangeKey })
       setDisplaySummary(summary)

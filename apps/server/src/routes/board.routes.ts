@@ -44,6 +44,44 @@ const auditCtx = (req: import('express').Request) => ({
 
 boardRouter.use(attachRequestUser, requireAuth)
 
+boardRouter.get('/overview-data', async (req, res) => {
+  try {
+    const preset = String(req.query.preset ?? 'thisMonth')
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined
+    const { executeBoardOverviewQuery } = await import('../services/board-local-query.service')
+    const data = await executeBoardOverviewQuery({
+      preset: preset as import('../services/board-live-query.service').BoardLiveQueryPreset,
+      startDate,
+      endDate,
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '加载经营总览失败', 500)
+  }
+})
+
+boardRouter.get('/anchors-data', async (req, res) => {
+  try {
+    const preset = String(req.query.preset ?? 'thisMonth')
+    const startDate = req.query.startDate ? String(req.query.startDate) : undefined
+    const endDate = req.query.endDate ? String(req.query.endDate) : undefined
+    const { executeBoardAnchorsQuery } = await import('../services/board-local-query.service')
+    const data = await executeBoardAnchorsQuery({
+      preset: preset as import('../services/board-live-query.service').BoardLiveQueryPreset,
+      startDate,
+      endDate,
+      role: req.user!.role as import('../types/roles').UserRole,
+      username: req.user!.username,
+    })
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '加载主播业绩失败', 500)
+  }
+})
+
 boardRouter.get('/local-data', async (req, res) => {
   try {
     const preset = String(req.query.preset ?? 'thisMonth')
@@ -55,6 +93,7 @@ boardRouter.get('/local-data', async (req, res) => {
       startDate,
       endDate,
       includeAnchorLeaderboard,
+      queryMode: 'full',
       role: req.user!.role as import('../types/roles').UserRole,
       username: req.user!.username,
     })

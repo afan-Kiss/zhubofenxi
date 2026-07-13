@@ -12,6 +12,7 @@ import {
   getOrBuildBusinessBoardCache,
   getBusinessBoardCache,
   isBusinessCacheWarmupRunning,
+  buildBoardSummaryFromViews,
 } from './business-cache.service'
 import {
   getAnchorPerformanceViews,
@@ -23,7 +24,7 @@ import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.ser
 import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
-import { calculateBusinessMetrics } from './business-metrics.service'
+import { readBoardPresetSnapshot, buildSnapshotBoardCacheStub } from './board-preset-snapshot.service'
 
 import { AMOUNT_FORMULA_VERSION } from './order-amount-metrics.service'
 
@@ -74,6 +75,24 @@ import { getAllShopCookieHealth } from './shop-cookie-health.service'
 
 const AUTO_SYNC_ON_VIEW_MISSING = process.env.AUTO_SYNC_ON_VIEW_MISSING === 'true'
 /** GET /api/board/local-data 默认不自动触发同步；仅当 AUTO_SYNC_ON_VIEW_MISSING=true 时排队经营同步任务（不直接请求平台 API） */
+
+export type BoardLocalQueryMode = 'overview' | 'anchors' | 'full'
+
+let cachedTotalOrderCount: { at: number; count: number } | null = null
+
+async function getTotalOrderCountCached(): Promise<number> {
+  const now = Date.now()
+  if (cachedTotalOrderCount && now - cachedTotalOrderCount.at < 60_000) {
+    return cachedTotalOrderCount.count
+  }
+  const count = await prisma.xhsRawOrder.count()
+  cachedTotalOrderCount = { at: now, count }
+  return count
+}
+
+function buildSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unknown> {
+  return buildBoardSummaryFromViews(views)
+}
 
 function resolveLocalQueryRange(params: {
   preset: BoardLiveQueryPreset
@@ -140,70 +159,26 @@ function logAnchorLeaderboardReconcile(
   }
 }
 
-function buildSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unknown> {
-  const m = calculateBusinessMetrics(views)
-
-  return {
-
-    metricsVersion: m.version,
-
-    productGmv: m.totalGmv,
-
-    totalGmv: m.totalGmv,
-
-    gmv: m.totalGmv,
-
-    effectiveGmv: m.validSalesAmount,
-
-    validSalesAmount: m.validSalesAmount,
-
-    actualSignedAmount: m.actualSignedAmount,
-
-    orderCount: m.orderCount,
-
-    paidOrderCount: m.orderCount,
-
-    periodOrderCount: m.periodOrderCount,
-
-    signRate: m.signRate,
-
-    returnRate: m.refundRate,
-
-    afterSaleRecordCount: m.afterSaleRecordCount,
-
-    returnRefundCount: m.returnOrderCount,
-
-    returnRefundRate: m.returnRate,
-
-    refundOnlyCount: m.refundOnlyOrderCount,
-
-    unknownRefundTypeCount: m.unknownRefundTypeOrderCount,
-
-    returnRefundTypeIncomplete: m.returnRefundTypeIncomplete,
-
-    qualityReturnRate: m.qualityRefundRate,
-
-    signedOrderCount: m.signedOrderCount,
-
-    actualSignedCount: m.signedOrderCount,
-
-    returnCount: m.refundOrderCount,
-
-    refundWithAmountOrderCount: m.refundWithAmountOrderCount,
-
-    qualityReturnCount: m.qualityRefundOrderCount,
-
-    returnAmount: m.refundAmount,
-
-    productRefundAmount: m.refundAmount,
-
-    freightRefundAmount: m.freightRefundAmount,
-
-  }
-
+function resolveQueryMode(params: {
+  queryMode?: BoardLocalQueryMode
+  includeAnchorLeaderboard?: boolean
+}): BoardLocalQueryMode {
+  if (params.queryMode) return params.queryMode
+  if (params.includeAnchorLeaderboard === false) return 'overview'
+  return 'full'
 }
 
+export async function executeBoardOverviewQuery(
+  params: Omit<Parameters<typeof executeBoardLocalQuery>[0], 'queryMode' | 'includeAnchorLeaderboard'>,
+) {
+  return executeBoardLocalQuery({ ...params, queryMode: 'overview' })
+}
 
+export async function executeBoardAnchorsQuery(
+  params: Omit<Parameters<typeof executeBoardLocalQuery>[0], 'queryMode' | 'includeAnchorLeaderboard'>,
+) {
+  return executeBoardLocalQuery({ ...params, queryMode: 'anchors' })
+}
 
 export async function executeBoardLocalQuery(params: {
 
@@ -227,6 +202,9 @@ export async function executeBoardLocalQuery(params: {
 
   /** 经营总览仅需 summary，跳过主播排行榜重算以加速响应 */
   includeAnchorLeaderboard?: boolean
+
+  /** overview=总览轻量 / anchors=主播页 / full=兼容 local-data */
+  queryMode?: BoardLocalQueryMode
 
 }): Promise<
 
@@ -353,20 +331,37 @@ export async function executeBoardLocalQuery(params: {
   const anchorName = forcedAnchor ?? params.anchorName
 
   const includeAnchorLeaderboard = params.includeAnchorLeaderboard !== false
+  const queryMode = resolveQueryMode(params)
+  const needsAnchorPayload = queryMode === 'anchors' || queryMode === 'full'
+  const includeAnchors = needsAnchorPayload && includeAnchorLeaderboard
 
   const hasAnchorFilter = Boolean(anchorId?.trim() || anchorName?.trim())
 
   let syncMeta = await getBusinessSyncStatus()
 
-  const totalOrderCount = await prisma.xhsRawOrder.count()
+  const totalOrderCount = await getTotalOrderCountCached()
 
   const qualityFeedback = await buildQualityFeedbackPublicStatus()
 
-  const boardCache = await getOrBuildBusinessBoardCache({
-    preset: params.preset,
-    startDate,
-    endDate,
-  })
+  let boardCache = getBusinessBoardCache(params.preset, startDate, endDate)
+  if (!boardCache) {
+    if (queryMode === 'overview' || queryMode === 'anchors') {
+      const snap = await readBoardPresetSnapshot(params.preset, startDate, endDate)
+      if (snap) {
+        boardCache = buildSnapshotBoardCacheStub(snap)
+        void getOrBuildBusinessBoardCache({ preset: params.preset, startDate, endDate })
+      }
+    }
+    if (!boardCache) {
+      boardCache = await getOrBuildBusinessBoardCache({
+        preset: params.preset,
+        startDate,
+        endDate,
+      })
+    }
+  }
+
+  const memoryHit = boardCache.fallbackReason !== 'disk_snapshot'
 
   const allViews = boardCache.views
   const rawByMatch = boardCache.rawByMatch
@@ -379,7 +374,7 @@ export async function executeBoardLocalQuery(params: {
   let anchorPerformanceSummary: Record<string, unknown> = {}
   let anchorLeaderboard: Array<Record<string, unknown>> = []
 
-  const needsPerformanceViews = includeAnchorLeaderboard || hasAnchorFilter
+  const needsPerformanceViews = includeAnchors || hasAnchorFilter
 
   if (needsPerformanceViews) {
     performanceViews = await getAnchorPerformanceViews(
@@ -447,7 +442,7 @@ export async function executeBoardLocalQuery(params: {
   })
   const summary = stableApplied.summary
 
-  if (includeAnchorLeaderboard) {
+  if (includeAnchors) {
     if (
       !hasAnchorFilter &&
       boardCache.enrichedAnchorLeaderboard &&
@@ -504,21 +499,25 @@ export async function executeBoardLocalQuery(params: {
 
   let progressMessage = boardDataDisplayStatusMessage(dataDisplayStatus)
   const cacheHit = Boolean(
-    getBusinessBoardCache(params.preset, startDate, endDate),
+    getBusinessBoardCache(params.preset, startDate, endDate) ?? memoryHit,
   )
 
-  const fullSyncMeta = await buildBoardSyncMetaForApi()
+  const fullSyncMeta =
+    queryMode === 'full' ? await buildBoardSyncMetaForApi() : undefined
 
-  const overviewMeta = await buildOverviewMeta({
-    preset: params.preset,
-    startDate,
-    endDate,
-    boardCache,
-    businessCacheHit: cacheHit,
-    dataDisplayStatus,
-    lastQianfanSyncAt: fullSyncMeta.businessSync.lastSuccessAt,
-    stableContext: stableApplied.stableContext,
-  })
+  const overviewMeta =
+    queryMode === 'anchors'
+      ? undefined
+      : await buildOverviewMeta({
+          preset: params.preset,
+          startDate,
+          endDate,
+          boardCache,
+          businessCacheHit: cacheHit,
+          dataDisplayStatus,
+          lastQianfanSyncAt: syncMeta.businessSync.lastSuccessAt,
+          stableContext: stableApplied.stableContext,
+        })
   if (
     isBusinessCacheWarmupRunning() &&
     !cacheHit &&
@@ -636,9 +635,9 @@ export async function executeBoardLocalQuery(params: {
 
     qualityFeedback,
 
-    syncMeta: fullSyncMeta,
+    ...(fullSyncMeta ? { syncMeta: fullSyncMeta } : {}),
 
-    overviewMeta,
+    ...(overviewMeta ? { overviewMeta } : {}),
 
     ...(forcedAnchor ? { forcedAnchorName: forcedAnchor } : {}),
 

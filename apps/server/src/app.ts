@@ -3,6 +3,8 @@ import compression from 'compression'
 import cors from 'cors'
 import express from 'express'
 import { getCorsOrigin, getDataDir } from './config/env'
+import { ensureSqlitePragmas } from './lib/prisma'
+import { getBusinessCacheHealthStats } from './services/business-cache.service'
 import { accessLogMiddleware } from './middleware/access-log.middleware'
 import { auditMiddleware } from './middleware/audit.middleware'
 import { perfLogMiddleware } from './middleware/perf-log.middleware'
@@ -65,6 +67,7 @@ export function createApp() {
   app.use(auditMiddleware)
 
   getDataDir()
+  void ensureSqlitePragmas()
 
   app.get('/api/health', (_req, res) => {
     const meta = resolveReportBuildMeta(false)
@@ -73,6 +76,7 @@ export function createApp() {
       service: 'live-business-api',
       appVersion: meta.appVersion,
       gitCommit: meta.gitCommit,
+      cache: getBusinessCacheHealthStats(),
     })
   })
 

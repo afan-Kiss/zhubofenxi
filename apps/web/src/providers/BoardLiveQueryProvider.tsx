@@ -21,7 +21,8 @@ import {
 } from '../lib/board-live-query-cache'
 import { resolveAppPageScope } from '../lib/app-page-scope'
 import {
-  fetchBoardLocalData,
+  fetchBoardAnchorsData,
+  fetchBoardOverview,
   fetchBoardSyncMeta,
   type BoardActiveSyncJob,
   type BoardLiveQueryData,
@@ -82,9 +83,10 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   children,
 }) => {
   const location = useLocation()
-  const pageScope: LiveQueryPageScope =
-    resolveAppPageScope(location.pathname) === 'anchors' ? 'anchors' : 'overview'
-  const includeAnchorLeaderboard = pageScope === 'anchors'
+  const appPage = resolveAppPageScope(location.pathname)
+  const pageScope: LiveQueryPageScope | null =
+    appPage === 'anchors' ? 'anchors' : appPage === 'overview' ? 'overview' : null
+  const shouldLoadBoardData = pageScope != null
 
   const [preset, setPreset] = useState<BoardRangePreset>('thisMonth')
   const [customStart, setCustomStart] = useState('')
@@ -153,6 +155,9 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   }, [])
 
   const loadLocal = useCallback(async () => {
+    if (!shouldLoadBoardData || !pageScope) {
+      return
+    }
     if (preset === 'custom' && (!customQueried || !customStart || !customEnd)) {
       setStatus('idle')
       setData(null)
@@ -215,11 +220,12 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     }
 
     try {
-      const result = await fetchBoardLocalData({
+      const fetchBoard =
+        pageScope === 'anchors' ? fetchBoardAnchorsData : fetchBoardOverview
+      const result = await fetchBoard({
         preset,
         startDate,
         endDate,
-        includeAnchorLeaderboard,
         signal: controller.signal,
       })
       if (controller.signal.aborted || seq !== requestSeqRef.current) return
@@ -309,8 +315,12 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     startDate,
     endDate,
     pageScope,
-    includeAnchorLeaderboard,
+    shouldLoadBoardData,
   ])
+
+  useEffect(() => {
+    void refreshSyncMeta()
+  }, [refreshSyncMeta])
 
   const triggerBusinessSync = useCallback(async () => {
     setTriggerSyncBusy(true)
@@ -326,8 +336,9 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   }, [refreshSyncMeta])
 
   useEffect(() => {
+    if (!shouldLoadBoardData) return
     void loadLocal()
-  }, [loadLocal, rangeKey])
+  }, [loadLocal, rangeKey, shouldLoadBoardData])
 
   useEffect(() => {
     const onInvalidate = () => {

@@ -201,13 +201,16 @@ export interface BoardResolvedRange {
   endDate: string
 }
 
-export async function fetchBoardLocalData(params: {
-  preset: BoardRangePreset
-  startDate?: string
-  endDate?: string
-  includeAnchorLeaderboard?: boolean
-  signal?: AbortSignal
-}): Promise<BoardLiveQueryData> {
+async function fetchBoardRangeData(
+  path: 'overview-data' | 'anchors-data' | 'local-data',
+  params: {
+    preset: BoardRangePreset
+    startDate?: string
+    endDate?: string
+    includeAnchorLeaderboard?: boolean
+    signal?: AbortSignal
+  },
+): Promise<BoardLiveQueryData> {
   if (params.signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError')
   }
@@ -219,10 +222,40 @@ export async function fetchBoardLocalData(params: {
   const qs = new URLSearchParams({ preset: params.preset })
   if (dates.startDate) qs.set('startDate', dates.startDate)
   if (dates.endDate) qs.set('endDate', dates.endDate)
-  if (params.includeAnchorLeaderboard === false) qs.set('includeAnchorLeaderboard', '0')
-  return apiRequest<BoardLiveQueryData>(`/api/board/local-data?${qs}`, {
+  if (path === 'local-data' && params.includeAnchorLeaderboard === false) {
+    qs.set('includeAnchorLeaderboard', '0')
+  }
+  return apiRequest<BoardLiveQueryData>(`/api/board/${path}?${qs}`, {
     signal: params.signal,
   })
+}
+
+export async function fetchBoardOverview(params: {
+  preset: BoardRangePreset
+  startDate?: string
+  endDate?: string
+  signal?: AbortSignal
+}): Promise<BoardLiveQueryData> {
+  return fetchBoardRangeData('overview-data', params)
+}
+
+export async function fetchBoardAnchorsData(params: {
+  preset: BoardRangePreset
+  startDate?: string
+  endDate?: string
+  signal?: AbortSignal
+}): Promise<BoardLiveQueryData> {
+  return fetchBoardRangeData('anchors-data', params)
+}
+
+export async function fetchBoardLocalData(params: {
+  preset: BoardRangePreset
+  startDate?: string
+  endDate?: string
+  includeAnchorLeaderboard?: boolean
+  signal?: AbortSignal
+}): Promise<BoardLiveQueryData> {
+  return fetchBoardRangeData('local-data', params)
 }
 
 /** @deprecated 使用 fetchBoardLocalData */

@@ -5,8 +5,6 @@ import { viewBelongsToAnchor } from './anchor-attribution.util'
 import { buildAnchorPerformanceViewsFromScopedViews } from './anchor-performance-views.service'
 import { getOrBuildBusinessBoardCache } from './business-cache.service'
 import { filterViewsForStaffScope } from './staff-anchor-scope.service'
-import { isRealtimeBoardPreset } from '../utils/board-realtime-refresh.util'
-import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 
 export interface BoardScopedViewsBundle {
   views: AnalyzedOrderView[]
@@ -19,26 +17,22 @@ export interface BoardScopedViewsBundle {
   source: 'business-cache'
 }
 
-/** 经营看板统一数据源：local-data / anchor-drill / metric-detail 共用 */
+/** 经营看板统一数据源：drill / metric-detail 共用内存缓存（不在读路径强制重建） */
 export async function getBoardScopedViewsForRange(params: {
   preset?: string
   startDate: string
   endDate: string
   role?: UserRole
   username?: string
-  /** 今日/昨日每次打开强制重读订单；也可显式传入 */
+  /** 仅数据维护/验收可显式 true 强制重建 */
   forceRefresh?: boolean
 }): Promise<BoardScopedViewsBundle> {
   const preset = params.preset ?? 'custom'
-  const forceRefresh = params.forceRefresh ?? isRealtimeBoardPreset(preset)
-  if (forceRefresh) {
-    clearScheduleAttributionCache()
-  }
   const boardCache = await getOrBuildBusinessBoardCache({
     preset,
     startDate: params.startDate,
     endDate: params.endDate,
-    forceRebuild: forceRefresh,
+    forceRebuild: params.forceRefresh === true,
   })
   const views =
     params.role && params.username

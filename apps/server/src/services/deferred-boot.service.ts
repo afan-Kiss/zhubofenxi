@@ -4,6 +4,7 @@ import { ensureBuyerRankingCacheOnBoot } from './buyer-ranking-cache.service'
 import { bootstrapQualityBadCaseCache } from './quality-badcase-store.service'
 import { scheduleOfficialQualityBadCaseSyncOnBoot } from './quality-badcase-auto-sync.service'
 import { warmupBusinessCacheOnBoot } from './business-cache.service'
+import { ensureSqlitePragmas } from '../lib/prisma'
 import { logInfo, logWarn } from '../utils/server-log'
 
 let deferredBootStarted = false
@@ -14,6 +15,12 @@ export function startDeferredBootTasks(): void {
   deferredBootStarted = true
 
   void (async () => {
+    try {
+      await ensureSqlitePragmas()
+    } catch (err) {
+      logWarn('数据库', `PRAGMA 初始化失败：${err instanceof Error ? err.message : String(err)}`)
+    }
+
     try {
       await initScheduler()
     } catch (err) {

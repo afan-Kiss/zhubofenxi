@@ -32,6 +32,14 @@ export const BUSINESS_CACHE_PRESETS: BusinessRangePreset[] = [
   'lastMonth',
 ]
 
+/** 经营同步完成后优先重建的范围（上月延后，降低同步后阻塞） */
+export const BUSINESS_CACHE_SYNC_REBUILD_PRESETS: BusinessRangePreset[] = [
+  'today',
+  'yesterday',
+  'thisWeek',
+  'thisMonth',
+]
+
 /** 同步/维护后会 invalidate；日常请求复用内存缓存，避免阻塞 HTTP */
 export const BUSINESS_CACHE_ALWAYS_REBUILD = false
 
@@ -106,6 +114,10 @@ export function getBusinessBoardCache(
   scope = 'default',
 ): BusinessBoardCacheEntry | null {
   return cache.get(buildBusinessCacheKey(preset, startDate, endDate, scope)) ?? null
+}
+
+export function buildBoardSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unknown> {
+  return buildSummaryFromViews(views)
 }
 
 function buildSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unknown> {
@@ -307,6 +319,20 @@ export async function buildAndSetBusinessBoardCache(params: {
       '经营缓存',
       `${presetLabel(params.preset)} 重新构建完成：${views.length} 单，用时 ${entry.buildDurationMs}ms，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
     )
+    void import('./board-preset-snapshot.service').then((m) =>
+      m.persistBoardPresetSnapshot({
+        preset: entry.preset,
+        startDate: entry.startDate,
+        endDate: entry.endDate,
+        summary: entry.summary,
+        anchorPerformanceSummary: entry.anchorPerformanceSummary,
+        enrichedAnchorLeaderboard: entry.enrichedAnchorLeaderboard,
+        blacklistedBuyerIds: entry.blacklistedBuyerIds,
+        orderCount: entry.orderCount,
+        lastBuiltAt: entry.lastBuiltAt,
+        sourceSyncJobId: entry.sourceSyncJobId,
+      }),
+    )
     return entry
   } catch (e) {
     if (previous) {
@@ -443,29 +469,52 @@ function isPostBusinessSyncRebuildReason(reason: string): boolean {
   return /经营同步完成|API 同步完成|API 同步无订单/.test(reason)
 }
 
-function enqueueFullBusinessCacheRebuild(
+function enqueueBusinessCacheRebuild(
   reason: string,
+  presets: BusinessRangePreset[],
   options?: { invalidateFirst?: boolean; allowSnapshotUpdate?: boolean },
 ): Promise<void> {
   const invalidateFirst = options?.invalidateFirst ?? true
   const allowSnapshotUpdate =
     options?.allowSnapshotUpdate ?? isPostBusinessSyncRebuildReason(reason)
+  const uniquePresets = [...new Set(presets)]
   const task = async (): Promise<void> => {
     if (invalidateFirst) {
-      invalidateBusinessBoardCache()
-      logInfo('经营缓存', `因「${reason}」触发全量重建`)
+      invalidateBusinessBoardCacheForPresets(uniquePresets)
+      logInfo('经营缓存', `因「${reason}」触发重建：${uniquePresets.join(', ')}`)
     } else {
       logInfo('经营缓存', reason)
     }
-    await rebuildBusinessCacheForPresets(BUSINESS_CACHE_PRESETS, { allowSnapshotUpdate })
-    rebuildLog.unshift({ at: new Date().toISOString(), reason, presetCount: BUSINESS_CACHE_PRESETS.length })
+    await rebuildBusinessCacheForPresets(uniquePresets, { allowSnapshotUpdate })
+    rebuildLog.unshift({
+      at: new Date().toISOString(),
+      reason,
+      presetCount: uniquePresets.length,
+    })
     if (rebuildLog.length > 50) rebuildLog.length = 50
+    if (
+      isPostBusinessSyncRebuildReason(reason) &&
+      !reason.includes('延后上月') &&
+      !uniquePresets.includes('lastMonth')
+    ) {
+      void enqueueBusinessCacheRebuild(`${reason}（延后上月）`, ['lastMonth'], {
+        invalidateFirst: true,
+        allowSnapshotUpdate,
+      })
+    }
   }
   const queued = fullRebuildQueue.then(task, task)
   fullRebuildQueue = queued.catch(() => {
     /* 队列继续，单次失败不阻断后续重建 */
   })
   return queued
+}
+
+function enqueueFullBusinessCacheRebuild(
+  reason: string,
+  options?: { invalidateFirst?: boolean; allowSnapshotUpdate?: boolean },
+): Promise<void> {
+  return enqueueBusinessCacheRebuild(reason, BUSINESS_CACHE_PRESETS, options)
 }
 
 export function getBusinessCacheWarmupPromise(): Promise<void> | null {
@@ -512,11 +561,41 @@ export function getBusinessCacheDebugInfo(
   }
 }
 
+export function invalidateBusinessBoardCacheForPresets(
+  presets: BusinessRangePreset[],
+): void {
+  const presetSet = new Set(presets)
+  for (const key of [...cache.keys()]) {
+    const parts = key.split('|')
+    const preset = parts[1]
+    if (preset && presetSet.has(preset as BusinessRangePreset)) {
+      cache.delete(key)
+      pendingBuilds.delete(key)
+    }
+  }
+  clearScheduleAttributionCache()
+  logInfo('经营缓存', `已清理预设缓存：${presets.join(', ')}`)
+}
+
 export function invalidateBusinessBoardCache(): void {
   cache.clear()
   pendingBuilds.clear()
   clearScheduleAttributionCache()
   logInfo('经营缓存', '已清空全部缓存条目')
+}
+
+export function getBusinessCacheHealthStats(): {
+  memoryEntries: number
+  warmupRunning: boolean
+  pendingBuilds: number
+  recentRebuilds: Array<{ at: string; reason: string; presetCount: number }>
+} {
+  return {
+    memoryEntries: cache.size,
+    warmupRunning,
+    pendingBuilds: pendingBuilds.size,
+    recentRebuilds: getRecentBusinessCacheRebuilds(3_600_000),
+  }
 }
 
 function prewarmOperationsReportsAfterRebuild(reason: string): void {
@@ -533,16 +612,21 @@ function prewarmOperationsReportsAfterRebuild(reason: string): void {
   })
 }
 
-/** 数据同步 / 维护后：先清空再按常用范围重建（与其他重建请求串行执行） */
+/** 数据同步 / 维护后：按范围重建（同步后仅 today~thisMonth，上月延后） */
 export async function invalidateAndRebuildBusinessBoardCache(reason: string): Promise<void> {
-  await enqueueFullBusinessCacheRebuild(reason)
+  const presets = isPostBusinessSyncRebuildReason(reason)
+    ? BUSINESS_CACHE_SYNC_REBUILD_PRESETS
+    : BUSINESS_CACHE_PRESETS
+  await enqueueBusinessCacheRebuild(reason, presets)
   prewarmOperationsReportsAfterRebuild(reason)
 }
 
-/** 排班保存等场景：立即清空缓存，全量重建放入后台队列，避免 HTTP 超时 */
+/** 排班保存等场景：仅清理近期预设并后台重建，避免 HTTP 超时 */
 export function scheduleBusinessBoardCacheRebuild(reason: string): void {
-  invalidateBusinessBoardCache()
-  logInfo('经营缓存', `因「${reason}」触发后台全量重建`)
-  void enqueueFullBusinessCacheRebuild(reason, { invalidateFirst: false })
+  invalidateBusinessBoardCacheForPresets(BUSINESS_CACHE_SYNC_REBUILD_PRESETS)
+  logInfo('经营缓存', `因「${reason}」触发后台增量重建`)
+  void enqueueBusinessCacheRebuild(reason, BUSINESS_CACHE_SYNC_REBUILD_PRESETS, {
+    invalidateFirst: false,
+  })
   prewarmOperationsReportsAfterRebuild(reason)
 }

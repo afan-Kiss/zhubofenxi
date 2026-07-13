@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckSquare, ChevronDown, Copy, ExternalLink, Gift, Info, Loader2, RefreshCw, Square, Truck, X } from 'lucide-react'
+import { CheckSquare, Copy, ExternalLink, Gift, Info, Loader2, RefreshCw, Square, Truck, X } from 'lucide-react'
 import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { apiRequest } from '../../lib/api'
 import { openQianfanLuckyGift } from '../../lib/lucky-gift-qianfan'
@@ -94,11 +94,6 @@ interface LuckyGiftItem {
   anchorName: string | null
   anchorId: string | null
   anchorAttributionSource: string
-  sfMonthlyFeeYuan: number | null
-  sfFeeStatus: string
-  sfFeeQueriedAt: string | null
-  sfFeeError: string | null
-  isSfTracking: boolean
 }
 
 const SHOP_ORDER = ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu'] as const
@@ -135,7 +130,7 @@ function resolveSummaryView(
   status: StatusFilter,
   dateRange: DateRange,
 ): SummaryViewKey {
-  if (dateRange === 'today') return 'todayNew'
+  if (dateRange === 'today' && status === 'all') return 'todayNew'
   if (status === 'all') return 'allWinners'
   if (status === 'pending') return 'pending'
   if (status === 'no_address') return 'no_address'
@@ -170,46 +165,28 @@ function anchorLabel(item: LuckyGiftItem): string {
   return formatAnchorDisplayName(null)
 }
 
-function sfFeeDisplay(item: LuckyGiftItem): string | null {
-  if (!item.isSfTracking || !item.trackingNo) return null
-  if (item.sfFeeStatus === 'querying') return '顺丰费用查询中…'
-  if (item.sfFeeStatus === 'available' && item.sfMonthlyFeeYuan != null) {
-    return `顺丰月结：¥${item.sfMonthlyFeeYuan.toFixed(2)}`
-  }
-  if (item.sfFeeStatus === 'not_billed') return '顺丰费用：暂未出账'
-  if (item.sfFeeStatus === 'failed') return '顺丰费用暂时查不到'
-  return null
+function trackingLine(item: LuckyGiftItem): string | null {
+  if (!item.trackingNo) return null
+  const company = item.courierCompany || '物流'
+  return `${company} ${item.trackingNo}`
 }
 
 function LuckyGiftRow(props: {
   item: LuckyGiftItem
   checked: boolean
   onToggle: () => void
-  logisticsOpen: boolean
-  onToggleLogistics: () => void
-  canViewPii: boolean
   canMutate: boolean
   isSuperAdmin: boolean
   onCopy: () => void
   onOpenQianfan: () => void
   openingQianfan: boolean
   onUndo: () => void
-  onRefreshSfFee?: () => void
 }) {
   const { item } = props
   const isNoAddress = item.shipmentStatus === 'no_address' || item.shipmentStatus === 'incomplete_address'
   const isPending = item.shipmentStatus === 'pending'
   const isShipped = item.shipmentStatus === 'shipped'
-  const sfFee = sfFeeDisplay(item)
-  const trackingText =
-    item.trackingNo && item.isSfTracking
-      ? `顺丰 ${item.trackingNo}`
-      : item.trackingNo
-        ? `${item.courierCompany || '物流'} ${item.trackingNo}`
-        : null
-  const hasLogisticsDetail =
-    (isShipped || isPending) &&
-    (item.courierCompany || item.trackingNo || item.markedShippedAt || sfFee || item.shipmentNote)
+  const trackingText = trackingLine(item)
 
   return (
     <article
@@ -286,7 +263,6 @@ function LuckyGiftRow(props: {
                   <p className="text-xs text-slate-400">中奖人 {item.winnerNickname}</p>
                 ) : null}
                 {trackingText ? <p className="text-slate-600">{trackingText}</p> : null}
-                {sfFee ? <p className="text-sky-700">{sfFee}</p> : null}
               </div>
             ) : (
               <div className="space-y-1 text-sm text-slate-800">
@@ -296,10 +272,8 @@ function LuckyGiftRow(props: {
                   {item.recipientPhone || '—'}
                 </p>
                 <p className="break-all leading-relaxed">{item.fullAddress || '—'}</p>
-                {(item.courierCompany || item.trackingNo) && (
-                  <p className="text-slate-600">{trackingText || `${item.courierCompany || '物流'} ${item.trackingNo || '单号待补'}`}</p>
-                )}
-                {sfFee ? <p className="text-sky-700">{sfFee}</p> : null}
+                {trackingText ? <p className="text-slate-600">{trackingText}</p> : null}
+                {item.shipmentNote ? <p className="text-xs text-slate-500">备注：{item.shipmentNote}</p> : null}
               </div>
             )}
 
@@ -311,39 +285,6 @@ function LuckyGiftRow(props: {
                 <span>已发货：{formatDateTime(item.markedShippedAt)}</span>
               )}
             </div>
-
-            {hasLogisticsDetail && (
-              <button
-                type="button"
-                onClick={props.onToggleLogistics}
-                className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600"
-              >
-                <ChevronDown
-                  className={`h-3.5 w-3.5 transition-transform ${props.logisticsOpen ? 'rotate-180' : ''}`}
-                />
-                {props.logisticsOpen ? '收起物流详情' : '物流详情'}
-              </button>
-            )}
-
-            {props.logisticsOpen && hasLogisticsDetail && (
-              <div className="space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                {item.courierCompany && <p>物流公司：{item.courierCompany}</p>}
-                {item.trackingNo && <p>运单号：{item.trackingNo}</p>}
-                {item.markedShippedAt && <p>已发货时间：{formatDateTime(item.markedShippedAt)}</p>}
-                {sfFee && <p>{sfFee}</p>}
-                {item.sfFeeQueriedAt && <p>费用查询于 {formatDateTime(item.sfFeeQueriedAt)}</p>}
-                {item.shipmentNote && <p>发货备注：{item.shipmentNote}</p>}
-                {props.isSuperAdmin && item.sfFeeStatus === 'failed' && props.onRefreshSfFee && (
-                  <button
-                    type="button"
-                    onClick={props.onRefreshSfFee}
-                    className="mt-1 text-sky-600 hover:underline"
-                  >
-                    重新查询
-                  </button>
-                )}
-              </div>
-            )}
           </div>
 
           <div className="flex shrink-0 flex-row items-center gap-2 sm:w-28 sm:flex-col sm:justify-center">
@@ -449,17 +390,6 @@ export const LuckyGiftsPage: React.FC = () => {
   const [courier, setCourier] = useState('')
   const [trackingNo, setTrackingNo] = useState('')
   const [note, setNote] = useState('')
-  const [expandedDetails, setExpandedDetails] = useState<Set<string>>(new Set())
-
-  async function refreshSfFee(id: string) {
-    try {
-      await apiRequest(`/api/board/lucky-gifts/winners/${id}/sf-fee/refresh`, { method: 'POST' })
-      setMessage('已重新查询顺丰费用')
-      await load()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '查询失败')
-    }
-  }
 
   const listCacheKey = useMemo(
     () =>
@@ -658,6 +588,10 @@ export const LuckyGiftsPage: React.FC = () => {
           const it = items.find((x) => x.id === id)
           return it?.shipmentStatus === 'pending' && it.addressComplete
         })
+        if (ids.length === 0) {
+          setError('请先选择可标记的待发货记录')
+          return
+        }
         await apiRequest('/api/board/lucky-gifts/shipments/batch', {
           method: 'POST',
           body: JSON.stringify({
@@ -821,7 +755,7 @@ export const LuckyGiftsPage: React.FC = () => {
           >
             <span className="text-sm font-medium leading-tight">{s.shopName}</span>
             <span className={`mt-0.5 text-[11px] leading-snug ${shopKey === s.shopKey ? 'text-slate-200' : 'text-slate-500'}`}>
-              活动 {s.drawCount}｜待发 {s.pending}｜缺地址 {s.noAddress}
+              活动 {s.drawCount}｜待发 {s.pending}｜缺地址 {s.noAddress + s.incompleteAddress}
             </span>
           </button>
         ))}
@@ -964,23 +898,12 @@ export const LuckyGiftsPage: React.FC = () => {
                   return next
                 })
               }}
-              logisticsOpen={expandedDetails.has(item.id)}
-              onToggleLogistics={() => {
-                setExpandedDetails((prev) => {
-                  const next = new Set(prev)
-                  if (next.has(item.id)) next.delete(item.id)
-                  else next.add(item.id)
-                  return next
-                })
-              }}
-              canViewPii={canViewPii}
               canMutate={canMutate}
               isSuperAdmin={isSuperAdmin}
               onCopy={() => void handleCopyOne(item)}
               onOpenQianfan={() => void handleOpenQianfan(item.id)}
               openingQianfan={openingQianfanId === item.id}
               onUndo={() => void undoShip(item.id)}
-              onRefreshSfFee={() => void refreshSfFee(item.id)}
             />
           ))
         )}

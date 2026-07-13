@@ -298,18 +298,21 @@ export async function listLuckyGifts(params: {
       sfFeeQueriedAt: w.shipment?.sfFeeQueriedAt ?? null,
       sfFeeTrackingNo: w.shipment?.sfFeeTrackingNo ?? null,
     }))
-  try {
-    await ensureSfFeesForShipments(sfCandidates, { maxQueries: 8 })
-  } catch (err) {
-    console.warn(
-      '[lucky-gift] batch sf fee refresh skipped:',
-      err instanceof Error ? err.message : err,
-    )
+  const sfFeeUiEnabled = process.env.LUCKY_GIFT_SF_FEE_UI === '1'
+  if (sfFeeUiEnabled) {
+    try {
+      await ensureSfFeesForShipments(sfCandidates, { maxQueries: 8 })
+    } catch (err) {
+      console.warn(
+        '[lucky-gift] batch sf fee refresh skipped:',
+        err instanceof Error ? err.message : err,
+      )
+    }
   }
 
   const shipmentIds = rows.map((w) => w.shipment?.id).filter(Boolean) as string[]
   const refreshedShipments =
-    shipmentIds.length > 0
+    sfFeeUiEnabled && shipmentIds.length > 0
       ? await prisma.luckyGiftShipment.findMany({ where: { id: { in: shipmentIds } } })
       : []
   const shipmentById = new Map(refreshedShipments.map((s) => [s.id, s]))

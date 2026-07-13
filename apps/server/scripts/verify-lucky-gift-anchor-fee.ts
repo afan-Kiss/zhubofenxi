@@ -165,11 +165,13 @@ async function main() {
   }
   assert(pageSrc.includes('formatAnchorDisplayName'), 'anchor display helper', issues)
   assert(pageSrc.includes('anchorLabel(item)'), 'anchor label on card', issues)
-  assert(pageSrc.includes('物流详情'), 'shipped logistics detail entry', issues)
 
   assert(pageSrc.includes('跳转千帆'), 'qianfan jump button on card', issues)
   assert(pageSrc.includes('openQianfanLuckyGift'), 'qianfan open helper', issues)
   assert(!pageSrc.includes('onShip'), 'row must not use ship modal trigger', issues)
+  assert(!pageSrc.includes('顺丰费用'), 'sf fee query ui hidden', issues)
+  assert(!pageSrc.includes('物流详情'), 'logistics expand ui hidden', issues)
+  assert(!pageSrc.includes('refreshSfFee'), 'sf fee refresh hidden', issues)
 
   assert(pageSrc.includes('福袋 ID'), 'lucky draw id visible on card', issues)
   assert(pageSrc.includes('luckyDrawId'), 'lucky draw id field on card', issues)

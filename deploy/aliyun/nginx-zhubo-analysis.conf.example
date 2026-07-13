@@ -6,7 +6,7 @@
 
 server {
     listen 80;
-    server_name 8.137.126.18 xiangyuzhubao.xyz www.xiangyuzhubao.xyz;
+    server_name 47.108.21.50 xiangyuzhubao.xyz www.xiangyuzhubao.xyz;
 
     client_max_body_size 20m;
 

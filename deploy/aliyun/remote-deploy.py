@@ -8,7 +8,12 @@ import time
 
 import paramiko
 
-HOST = os.environ.get("DEPLOY_HOST", "8.137.126.18")
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+from target import resolve_deploy_host
+
+HOST = resolve_deploy_host()
 USER = os.environ.get("DEPLOY_USER", "root")
 PASSWORD = os.environ.get("SSH_PASS", "")
 PORT = int(os.environ.get("DEPLOY_SSH_PORT", "22"))

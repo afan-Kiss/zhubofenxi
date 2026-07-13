@@ -39,7 +39,7 @@ alwaysApply: true
 ## 交付与部署（每次改完必做）
 
 - 代码改动完成后 **自动** `git commit` + `git push origin main`，无需用户提醒。
-- 随后 **自动** `npm run deploy:aliyun` 部署到阿里云（`8.137.126.18`）。
+- 随后 **自动** `npm run deploy:aliyun` 部署到阿里云（`47.108.21.50`）。
 - 部署后确认健康检查 `GET /api/health` 正常；有专项验收脚本则一并跑。
 - 仅本地调试脚本、临时排查文件、secrets 不入库；`tsconfig.tsbuildinfo` 不提交。
 

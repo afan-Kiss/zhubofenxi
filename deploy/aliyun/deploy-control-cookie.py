@@ -11,9 +11,14 @@ from pathlib import Path
 
 import paramiko
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from target import control_server_url, resolve_deploy_host
+
 ROOT = Path(__file__).resolve().parents[2]
 CONTROL_ROOT = Path(r"e:\我的软件源码\总控台")
-HOST = "8.137.126.18"
+HOST = resolve_deploy_host()
 DEPLOY_DIR = "/www/wwwroot/zhubo-analysis"
 SKIP_DIRS = {"node_modules", ".git", "dist", "release", "out", "build", ".vite", "reports", "debug", "打包输出"}
 
@@ -95,7 +100,7 @@ import re
 from pathlib import Path
 p = Path('{DEPLOY_DIR}/apps/server/.env')
 lines = p.read_text(encoding='utf-8').splitlines() if p.exists() else []
-kv = {{'CONTROL_SERVER_URL': 'http://8.137.126.18/control', 'CONTROL_SERVICE_TOKEN': {token!r}}}
+kv = {{'CONTROL_SERVER_URL': '{control_server_url(HOST)}', 'CONTROL_SERVICE_TOKEN': {token!r}}}
 out, seen = [], set()
 for line in lines:
     m = re.match(r'^([A-Z0-9_]+)=', line)

@@ -10,8 +10,14 @@ from pathlib import Path
 
 import paramiko
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+import sys
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from target import resolve_deploy_host
+
 ROOT = Path(__file__).resolve().parents[2]
-HOST = "8.137.126.18"
+HOST = resolve_deploy_host()
 USER = "root"
 ENV_PATH = "/www/wwwroot/zhubo-analysis/apps/server/.env"
 

@@ -3,7 +3,7 @@
 set -euo pipefail
 
 DEPLOY_DIR="/www/wwwroot/zhubo-analysis"
-ORIGINS="http://8.137.126.18,http://xiangyuzhubao.xyz,http://www.xiangyuzhubao.xyz"
+ORIGINS="http://47.108.21.50,http://xiangyuzhubao.xyz,http://www.xiangyuzhubao.xyz"
 ENV_FILE="$DEPLOY_DIR/apps/server/.env"
 NGINX_CONF="/etc/aa_nginx/conf.d/zhubo-analysis.conf"
 
@@ -11,7 +11,7 @@ echo "[apply-domains] update nginx server_name"
 if [[ -f "$DEPLOY_DIR/deploy/aliyun/nginx-zhubo-analysis.conf.example" ]]; then
   cp "$DEPLOY_DIR/deploy/aliyun/nginx-zhubo-analysis.conf.example" "$NGINX_CONF"
 else
-  sed -i 's/^\s*server_name .*/    server_name 8.137.126.18 xiangyuzhubao.xyz www.xiangyuzhubao.xyz;/' "$NGINX_CONF"
+  sed -i 's/^\s*server_name .*/    server_name 47.108.21.50 xiangyuzhubao.xyz www.xiangyuzhubao.xyz;/' "$NGINX_CONF"
 fi
 
 echo "[apply-domains] update CORS / WEB_ORIGIN in .env"
@@ -35,7 +35,7 @@ sleep 5
 
 for url in \
   "http://127.0.0.1:4723/api/health" \
-  "http://8.137.126.18/api/health" \
+  "http://47.108.21.50/api/health" \
   "http://xiangyuzhubao.xyz/api/health" \
   "http://www.xiangyuzhubao.xyz/api/health"
 do

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { getDataDir } from '../config/env'
-import { buildBusinessCacheKey } from './business-cache.service'
+import { buildBusinessCacheKey, shouldRetainBusinessBoardCache } from './business-cache.service'
 import { resolveBusinessRange, type BusinessRangePreset } from '../utils/business-range'
 import { logInfo, logWarn } from '../utils/server-log'
 
@@ -39,6 +39,7 @@ export async function persistBoardPresetSnapshot(input: {
   lastBuiltAt: string
   sourceSyncJobId: string | null
 }): Promise<void> {
+  if (!shouldRetainBusinessBoardCache(input.preset)) return
   const cacheKey = buildBusinessCacheKey(input.preset, input.startDate, input.endDate)
   const record: BoardPresetSnapshotRecord = {
     cacheKey,
@@ -144,5 +145,34 @@ export async function loadAllBoardPresetSnapshots(): Promise<BoardPresetSnapshot
       `加载失败：${err instanceof Error ? err.message : String(err)}`,
     )
     return []
+  }
+}
+
+/** 清理非标准预设的快照文件（历史月报逐日构建遗留） */
+export async function cleanupNonStandardBoardPresetSnapshots(): Promise<number> {
+  try {
+    await fs.mkdir(SNAPSHOT_DIR(), { recursive: true })
+    const files = await fs.readdir(SNAPSHOT_DIR())
+    let removed = 0
+    for (const file of files) {
+      if (!file.endsWith('.json')) continue
+      if (!file.includes('_custom_')) continue
+      try {
+        await fs.unlink(path.join(SNAPSHOT_DIR(), file))
+        removed += 1
+      } catch {
+        /* skip */
+      }
+    }
+    if (removed > 0) {
+      logInfo('经营快照', `已清理 ${removed} 个非标准预设快照`)
+    }
+    return removed
+  } catch (err) {
+    logWarn(
+      '经营快照',
+      `清理非标准快照失败：${err instanceof Error ? err.message : String(err)}`,
+    )
+    return 0
   }
 }

@@ -8,10 +8,15 @@ from pathlib import Path
 
 import paramiko
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from target import domain_origins, public_health_url, resolve_deploy_host
+
 ROOT = Path(__file__).resolve().parents[2]
-HOST = os.environ.get("DEPLOY_HOST", "8.137.126.18")
+HOST = resolve_deploy_host()
 PASSWORD = os.environ.get("SSH_PASS", "")
-ORIGINS = "http://8.137.126.18,http://xiangyuzhubao.xyz,http://www.xiangyuzhubao.xyz"
+ORIGINS = domain_origins(HOST)
 
 
 def safe_print(text: str) -> None:
@@ -76,7 +81,7 @@ PYEOF""",
         run(client, "sleep 6")
         for url in [
             "http://127.0.0.1:4723/api/health",
-            "http://8.137.126.18/api/health",
+            public_health_url(HOST),
             "http://xiangyuzhubao.xyz/api/health",
             "http://www.xiangyuzhubao.xyz/api/health",
         ]:

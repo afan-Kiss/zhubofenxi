@@ -41,14 +41,25 @@ export function startDeferredBootTasks(): void {
 
     await warmupBusinessCacheOnBoot()
 
-    void import('./operations-report-cache.service').then((m) =>
-      m.prewarmCommonOperationsReportsOnBoot().catch((err) => {
-        logWarn(
-          '运营报表缓存',
-          `提前计算失败：${err instanceof Error ? err.message : String(err)}`,
-        )
-      }),
-    )
+    try {
+      const snapMod = await import('./board-preset-snapshot.service')
+      await snapMod.cleanupNonStandardBoardPresetSnapshots()
+    } catch (err) {
+      logWarn(
+        '经营快照',
+        `启动清理失败：${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+
+    try {
+      const opsMod = await import('./operations-report-cache.service')
+      await opsMod.prewarmCommonOperationsReportsOnBoot()
+    } catch (err) {
+      logWarn(
+        '运营报表缓存',
+        `提前计算失败：${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
 
     try {
       await ensureBuyerRankingCacheOnBoot()

@@ -32,6 +32,13 @@ export const BUSINESS_CACHE_PRESETS: BusinessRangePreset[] = [
   'lastMonth',
 ]
 
+const BUSINESS_CACHE_PRESET_SET = new Set<string>(BUSINESS_CACHE_PRESETS)
+
+/** 仅标准预设驻留内存；custom 等按需构建，避免月报逐日汇总撑爆内存 */
+export function shouldRetainBusinessBoardCache(preset: string): boolean {
+  return BUSINESS_CACHE_PRESET_SET.has(preset)
+}
+
 /** 经营同步完成后优先重建的范围（上月延后，降低同步后阻塞） */
 export const BUSINESS_CACHE_SYNC_REBUILD_PRESETS: BusinessRangePreset[] = [
   'today',
@@ -314,24 +321,27 @@ export async function buildAndSetBusinessBoardCache(params: {
       fallbackReason: null,
     }
 
-    cache.set(entry.cacheKey, entry)
+    const retain = shouldRetainBusinessBoardCache(params.preset)
+    if (retain) {
+      cache.set(entry.cacheKey, entry)
+      void import('./board-preset-snapshot.service').then((m) =>
+        m.persistBoardPresetSnapshot({
+          preset: entry.preset,
+          startDate: entry.startDate,
+          endDate: entry.endDate,
+          summary: entry.summary,
+          anchorPerformanceSummary: entry.anchorPerformanceSummary,
+          enrichedAnchorLeaderboard: entry.enrichedAnchorLeaderboard,
+          blacklistedBuyerIds: entry.blacklistedBuyerIds,
+          orderCount: entry.orderCount,
+          lastBuiltAt: entry.lastBuiltAt,
+          sourceSyncJobId: entry.sourceSyncJobId,
+        }),
+      )
+    }
     logInfo(
       '经营缓存',
-      `${presetLabel(params.preset)} 重新构建完成：${views.length} 单，用时 ${entry.buildDurationMs}ms，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
-    )
-    void import('./board-preset-snapshot.service').then((m) =>
-      m.persistBoardPresetSnapshot({
-        preset: entry.preset,
-        startDate: entry.startDate,
-        endDate: entry.endDate,
-        summary: entry.summary,
-        anchorPerformanceSummary: entry.anchorPerformanceSummary,
-        enrichedAnchorLeaderboard: entry.enrichedAnchorLeaderboard,
-        blacklistedBuyerIds: entry.blacklistedBuyerIds,
-        orderCount: entry.orderCount,
-        lastBuiltAt: entry.lastBuiltAt,
-        sourceSyncJobId: entry.sourceSyncJobId,
-      }),
+      `${presetLabel(params.preset)} 重新构建完成：${views.length} 单，用时 ${entry.buildDurationMs}ms，${retain ? '已驻留' : '按需（不驻留）'}，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
     )
     return entry
   } catch (e) {
@@ -363,6 +373,7 @@ export async function getOrBuildBusinessBoardCache(params: {
   )
   const scope = params.scope ?? 'default'
   const key = buildBusinessCacheKey(params.preset, range.startDate, range.endDate, scope)
+  const retain = shouldRetainBusinessBoardCache(params.preset)
 
   if (BUSINESS_CACHE_ALWAYS_REBUILD || params.forceRebuild) {
     const pending = pendingBuilds.get(key)
@@ -385,15 +396,17 @@ export async function getOrBuildBusinessBoardCache(params: {
     return buildPromise
   }
 
-  const hit = cache.get(key)
-  if (hit && !params.forceRebuild && !hit.stale) {
-    if (hit.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION) {
-      logInfo(
-        '经营缓存',
-        `${presetLabel(params.preset)} 归属算法版本变更（${hit.attributionAlgorithmVersion ?? '—'} → ${CANONICAL_ATTRIBUTION_VERSION}），重建经营缓存`,
-      )
-    } else {
-      return hit
+  if (retain) {
+    const hit = cache.get(key)
+    if (hit && !params.forceRebuild && !hit.stale) {
+      if (hit.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION) {
+        logInfo(
+          '经营缓存',
+          `${presetLabel(params.preset)} 归属算法版本变更（${hit.attributionAlgorithmVersion ?? '—'} → ${CANONICAL_ATTRIBUTION_VERSION}），重建经营缓存`,
+        )
+      } else {
+        return hit
+      }
     }
   }
   const pending = pendingBuilds.get(key)

@@ -1,4 +1,5 @@
-import React, { useEffect, useId, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Clock3 } from 'lucide-react'
 import {
   formatScheduleTime,
@@ -39,19 +40,57 @@ export const ScheduleTimePicker: React.FC<ScheduleTimePickerProps> = ({
   'aria-label': ariaLabel,
 }) => {
   const listId = useId()
-  const rootRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const [open, setOpen] = useState(false)
+  const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({})
   const normalized = normalizeScheduleTimeInput(value, allowMidnight)
   const parts = parseScheduleTime(normalized) ?? { hour: 9, minute: 0 }
   const quickPresets =
     presets ?? (allowMidnight ? SCHEDULE_END_PRESETS : SCHEDULE_START_PRESETS)
 
+  const updatePanelPosition = useCallback(() => {
+    const btn = buttonRef.current
+    if (!btn) return
+    const rect = btn.getBoundingClientRect()
+    const panelWidth = 248
+    const panelHeight = panelRef.current?.offsetHeight ?? 300
+    const left = Math.min(Math.max(8, rect.left), window.innerWidth - panelWidth - 8)
+    const spaceBelow = window.innerHeight - rect.bottom
+    const spaceAbove = rect.top
+    const placeBelow = spaceBelow >= panelHeight || spaceBelow >= spaceAbove
+
+    setPanelStyle({
+      position: 'fixed',
+      left,
+      width: panelWidth,
+      zIndex: 9999,
+      ...(placeBelow
+        ? { top: rect.bottom + 6 }
+        : { top: Math.max(8, rect.top - panelHeight - 6) }),
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    updatePanelPosition()
+    const raf = window.requestAnimationFrame(() => updatePanelPosition())
+    window.addEventListener('resize', updatePanelPosition)
+    window.addEventListener('scroll', updatePanelPosition, true)
+    return () => {
+      window.cancelAnimationFrame(raf)
+      window.removeEventListener('resize', updatePanelPosition)
+      window.removeEventListener('scroll', updatePanelPosition, true)
+    }
+  }, [open, updatePanelPosition, parts.hour, parts.minute, allowMidnight])
+
   useEffect(() => {
     if (!open) return
     const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
+      const target = e.target as Node
+      if (buttonRef.current?.contains(target)) return
+      if (panelRef.current?.contains(target)) return
+      setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
@@ -74,9 +113,107 @@ export const ScheduleTimePicker: React.FC<ScheduleTimePickerProps> = ({
 
   const hourOptions = allowMidnight ? [...SCHEDULE_HOUR_OPTIONS, 24] : SCHEDULE_HOUR_OPTIONS
 
+  const panel = open ? (
+    <div
+      ref={panelRef}
+      id={listId}
+      role="dialog"
+      aria-label="选择时间"
+      style={panelStyle}
+      className="rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-200/60"
+    >
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-400">常用</p>
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {quickPresets.map((preset) => {
+          const active = normalized === preset
+          return (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => {
+                onChange(preset)
+                setOpen(false)
+              }}
+              className={[
+                'rounded-md px-2 py-1 text-xs font-medium tabular-nums transition-colors',
+                active
+                  ? 'bg-sky-600 text-white shadow-sm'
+                  : 'bg-slate-100 text-slate-700 hover:bg-sky-100 hover:text-sky-900',
+              ].join(' ')}
+            >
+              {preset}
+            </button>
+          )
+        })}
+      </div>
+
+      <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-400">小时</p>
+      <div className="mb-3 grid grid-cols-6 gap-1">
+        {hourOptions.map((hour) => {
+          const active = parts.hour === hour
+          const label = hour === 24 ? '24' : String(hour).padStart(2, '0')
+          return (
+            <button
+              key={hour}
+              type="button"
+              onClick={() => {
+                if (hour === 24) {
+                  onChange('24:00')
+                  setOpen(false)
+                  return
+                }
+                applyParts(hour, parts.hour === 24 ? 0 : parts.minute)
+              }}
+              className={[
+                'rounded-md py-1 text-xs font-medium tabular-nums transition-colors',
+                active
+                  ? 'bg-sky-600 text-white'
+                  : 'bg-slate-50 text-slate-700 hover:bg-sky-100',
+              ].join(' ')}
+            >
+              {label}
+            </button>
+          )
+        })}
+      </div>
+
+      {parts.hour !== 24 ? (
+        <>
+          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-400">分钟</p>
+          <div className="grid grid-cols-6 gap-1">
+            {SCHEDULE_MINUTE_OPTIONS.map((minute) => {
+              const active = parts.minute === minute
+              return (
+                <button
+                  key={minute}
+                  type="button"
+                  onClick={() => {
+                    applyParts(parts.hour, minute)
+                    setOpen(false)
+                  }}
+                  className={[
+                    'rounded-md py-1 text-xs font-medium tabular-nums transition-colors',
+                    active
+                      ? 'bg-sky-600 text-white'
+                      : 'bg-slate-50 text-slate-700 hover:bg-sky-100',
+                  ].join(' ')}
+                >
+                  {String(minute).padStart(2, '0')}
+                </button>
+              )
+            })}
+          </div>
+        </>
+      ) : (
+        <p className="text-xs text-slate-500">已选至当天 24:00（午夜）</p>
+      )}
+    </div>
+  ) : null
+
   return (
-    <div ref={rootRef} className={`relative inline-block ${className}`}>
+    <div className={`relative inline-block ${className}`}>
       <button
+        ref={buttonRef}
         type="button"
         disabled={disabled}
         aria-label={ariaLabel ?? `选择时间，当前 ${displayLabel(normalized)}`}
@@ -97,100 +234,7 @@ export const ScheduleTimePicker: React.FC<ScheduleTimePickerProps> = ({
         {displayLabel(normalized)}
       </button>
 
-      {open ? (
-        <div
-          id={listId}
-          role="dialog"
-          aria-label="选择时间"
-          className="absolute left-0 top-[calc(100%+6px)] z-50 w-[15.5rem] rounded-xl border border-slate-200 bg-white p-3 shadow-xl shadow-slate-200/60"
-        >
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-400">常用</p>
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            {quickPresets.map((preset) => {
-              const active = normalized === preset
-              return (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => {
-                    onChange(preset)
-                    setOpen(false)
-                  }}
-                  className={[
-                    'rounded-md px-2 py-1 text-xs font-medium tabular-nums transition-colors',
-                    active
-                      ? 'bg-sky-600 text-white shadow-sm'
-                      : 'bg-slate-100 text-slate-700 hover:bg-sky-100 hover:text-sky-900',
-                  ].join(' ')}
-                >
-                  {preset}
-                </button>
-              )
-            })}
-          </div>
-
-          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-400">小时</p>
-          <div className="mb-3 grid grid-cols-6 gap-1">
-            {hourOptions.map((hour) => {
-              const active = parts.hour === hour
-              const label = hour === 24 ? '24' : String(hour).padStart(2, '0')
-              return (
-                <button
-                  key={hour}
-                  type="button"
-                  onClick={() => {
-                    if (hour === 24) {
-                      onChange('24:00')
-                      setOpen(false)
-                      return
-                    }
-                    applyParts(hour, parts.hour === 24 ? 0 : parts.minute)
-                  }}
-                  className={[
-                    'rounded-md py-1 text-xs font-medium tabular-nums transition-colors',
-                    active
-                      ? 'bg-sky-600 text-white'
-                      : 'bg-slate-50 text-slate-700 hover:bg-sky-100',
-                  ].join(' ')}
-                >
-                  {label}
-                </button>
-              )
-            })}
-          </div>
-
-          {parts.hour !== 24 ? (
-            <>
-              <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-slate-400">分钟</p>
-              <div className="grid grid-cols-6 gap-1">
-                {SCHEDULE_MINUTE_OPTIONS.map((minute) => {
-                  const active = parts.minute === minute
-                  return (
-                    <button
-                      key={minute}
-                      type="button"
-                      onClick={() => {
-                        applyParts(parts.hour, minute)
-                        setOpen(false)
-                      }}
-                      className={[
-                        'rounded-md py-1 text-xs font-medium tabular-nums transition-colors',
-                        active
-                          ? 'bg-sky-600 text-white'
-                          : 'bg-slate-50 text-slate-700 hover:bg-sky-100',
-                      ].join(' ')}
-                    >
-                      {String(minute).padStart(2, '0')}
-                    </button>
-                  )
-                })}
-              </div>
-            </>
-          ) : (
-            <p className="text-xs text-slate-500">已选至当天 24:00（午夜）</p>
-          )}
-        </div>
-      ) : null}
+      {typeof document !== 'undefined' && panel ? createPortal(panel, document.body) : null}
     </div>
   )
 }

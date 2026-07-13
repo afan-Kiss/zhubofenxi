@@ -364,7 +364,10 @@ function prewarmIdentity(): { role: UserRole; username: string } {
   return getLocalViewerCacheIdentity()
 }
 
-async function buildPrewarmTasks(forceRebuild: boolean): Promise<PrewarmTask[]> {
+async function buildPrewarmTasks(
+  forceRebuild: boolean,
+  options?: { bootMode?: boolean },
+): Promise<PrewarmTask[]> {
   const { buildDailyOperationsReport } = await import('./daily-operations-report.service')
   const { buildWeeklyOperationsReport } = await import('./weekly-operations-report.service')
   const { getMonthlyOperationsReport } = await import('./monthly-operations-report.service')
@@ -489,21 +492,29 @@ async function buildPrewarmTasks(forceRebuild: boolean): Promise<PrewarmTask[]> 
     wrapDaily(today, '今日日报'),
     wrapDaily(yesterday, '昨日日报'),
     wrapWeekly(thisWeekStart, today, '本周周报'),
-    wrapWeekly(lastWeekStart, lastWeekEnd, '上周周报'),
-    wrapMonthly(thisMonth.startDate.slice(0, 7), '本月月报'),
-    wrapMonthly(lastMonth.startDate.slice(0, 7), '上月月报'),
+    ...(options?.bootMode
+      ? []
+      : [
+          wrapWeekly(lastWeekStart, lastWeekEnd, '上周周报'),
+          wrapMonthly(thisMonth.startDate.slice(0, 7), '本月月报'),
+          wrapMonthly(lastMonth.startDate.slice(0, 7), '上月月报'),
+        ]),
     wrapRankings(today, today, 'today', 'daily', '榜单中心（今日）'),
     wrapRankings(yesterday, yesterday, 'yesterday', 'daily', '榜单中心（昨日）'),
     wrapRankings(thisWeekStart, today, 'thisWeek', 'weekly', '榜单中心（本周）'),
-    wrapRankings(lastWeekStart, lastWeekEnd, 'lastWeek', 'custom', '榜单中心（上周）'),
-    wrapRankings(thisMonth.startDate, thisMonth.endDate, 'thisMonth', 'custom', '榜单中心（本月）'),
-    wrapRankings(lastMonth.startDate, lastMonth.endDate, 'lastMonth', 'custom', '榜单中心（上月）'),
+    ...(options?.bootMode
+      ? []
+      : [
+          wrapRankings(lastWeekStart, lastWeekEnd, 'lastWeek', 'custom', '榜单中心（上周）'),
+          wrapRankings(thisMonth.startDate, thisMonth.endDate, 'thisMonth', 'custom', '榜单中心（本月）'),
+          wrapRankings(lastMonth.startDate, lastMonth.endDate, 'lastMonth', 'custom', '榜单中心（上月）'),
+        ]),
   ]
 }
 
 export async function prewarmOperationsReportCache(
   reason: string,
-  options?: { forceRebuild?: boolean },
+  options?: { forceRebuild?: boolean; bootMode?: boolean },
 ): Promise<{ warmed: number; failed: number; totalMs: number }> {
   if (prewarmPromise && !options?.forceRebuild) return prewarmPromise
 
@@ -513,7 +524,7 @@ export async function prewarmOperationsReportCache(
 
   prewarmPromise = (async () => {
     logInfo('运营报表缓存', `开始提前计算常用报表（${reason}）`)
-    const tasks = await buildPrewarmTasks(forceRebuild)
+    const tasks = await buildPrewarmTasks(forceRebuild, options)
     let warmed = 0
     let failed = 0
 
@@ -548,7 +559,7 @@ export async function prewarmOperationsReportCache(
 }
 
 export async function prewarmCommonOperationsReportsOnBoot(): Promise<void> {
-  await prewarmOperationsReportCache('服务启动')
+  await prewarmOperationsReportCache('服务启动', { bootMode: true })
 }
 
 export async function prewarmCommonOperationsReportsAfterBusinessSync(): Promise<void> {

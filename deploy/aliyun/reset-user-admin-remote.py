@@ -9,7 +9,7 @@ import uuid
 
 import paramiko
 
-HOST = os.environ.get("DEPLOY_HOST", "8.137.126.18")
+HOST = os.environ.get("DEPLOY_HOST", "47.108.21.50")
 PASSWORD = os.environ.get("SSH_PASS", "")
 DB = "/www/wwwroot/zhubo-analysis/apps/server/data/app.db"
 USERNAME = sys.argv[1] if len(sys.argv) > 1 else "fanfan"

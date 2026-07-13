@@ -8,8 +8,13 @@ from pathlib import Path
 
 import paramiko
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPT_DIR))
+from target import public_health_url, resolve_deploy_host
+
 ROOT = Path(__file__).resolve().parents[2]
-HOST = os.environ.get("DEPLOY_HOST", "8.137.126.18")
+HOST = resolve_deploy_host()
 PASSWORD = os.environ.get("SSH_PASS", "")
 DEPLOY_DIR = "/www/wwwroot/zhubo-analysis"
 
@@ -70,7 +75,7 @@ ss -lntp | grep ':80 '
         run(client, "pm2 save")
         run(client, "curl -i --max-time 10 http://127.0.0.1:4723/api/health")
         run(client, "curl -i --max-time 10 http://127.0.0.1/api/health")
-        run(client, "curl -i --max-time 15 http://8.137.126.18/api/health")
+        run(client, f"curl -i --max-time 15 {public_health_url(HOST)}")
         run(client, "pm2 status")
     finally:
         client.close()

@@ -322,8 +322,8 @@ function main(): void {
     packageId: 'PKG-REAL-AFTERSALE-PANEL-VERIFY',
     includedInGmv: true,
     isFreightRefundOnly: false,
-    productRefundAmountCent: 1800,
-    realAfterSaleAmountCent: 1800,
+    productRefundAmountCent: 5000,
+    realAfterSaleAmountCent: 5000,
     afterSaleStatusText: '退款成功',
   } as AnalyzedOrderView
 
@@ -356,7 +356,7 @@ function main(): void {
   } else {
     fail('真实售后未识别为售后/退款')
   }
-  if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
+  if (resolveViewRefundAmountCent(realView) === 5000) ok('真实售后 resolveViewRefundAmountCent=5000')
   else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
 
   console.log('\n=== API 字段冒烟 ===')

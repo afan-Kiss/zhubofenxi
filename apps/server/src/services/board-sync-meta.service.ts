@@ -160,6 +160,17 @@ function toRollingDataHealthCloseSummary(
   report: RollingDataHealthCloseReport | null,
 ): RollingDataHealthCloseSummary | null {
   if (!report) return null
+  const returnRefundOrderCount = report.returnRefundOrderCount ?? 0
+  const refundOnlyOrderCount = report.refundOnlyOrderCount ?? 0
+  const unknownRefundTypeOrderCount = report.unknownRefundTypeOrderCount ?? 0
+  const classifiedRefundOrderCount =
+    report.classifiedRefundOrderCount ?? returnRefundOrderCount + refundOnlyOrderCount
+  const returnRefundTypeIncomplete =
+    report.returnRefundTypeIncomplete ??
+    (report.refundOrderCount > 0 &&
+      returnRefundOrderCount === 0 &&
+      refundOnlyOrderCount === 0 &&
+      unknownRefundTypeOrderCount === 0)
   return {
     generatedAt: report.generatedAt,
     startDate: report.startDate,
@@ -182,11 +193,11 @@ function toRollingDataHealthCloseSummary(
     afterSaleCacheRecordScope: report.afterSaleCacheRecordScope,
     unassignedOrderCount: report.unassignedOrderCount,
     duplicateOrderCount: report.duplicateOrderCount,
-    returnRefundOrderCount: report.returnRefundOrderCount,
-    refundOnlyOrderCount: report.refundOnlyOrderCount,
-    unknownRefundTypeOrderCount: report.unknownRefundTypeOrderCount,
-    classifiedRefundOrderCount: report.classifiedRefundOrderCount,
-    returnRefundTypeIncomplete: report.returnRefundTypeIncomplete,
+    returnRefundOrderCount,
+    refundOnlyOrderCount,
+    unknownRefundTypeOrderCount,
+    classifiedRefundOrderCount,
+    returnRefundTypeIncomplete,
     warnings: report.warnings,
   }
 }

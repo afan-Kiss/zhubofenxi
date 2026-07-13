@@ -591,8 +591,8 @@ async function main(): Promise<void> {
     packageId: 'PKG-REAL-AFTERSALE-ROLLING-VERIFY',
     includedInGmv: true,
     isFreightRefundOnly: false,
-    productRefundAmountCent: 1800,
-    realAfterSaleAmountCent: 1800,
+    productRefundAmountCent: 5000,
+    realAfterSaleAmountCent: 5000,
     afterSaleStatusText: '退款成功',
   } as AnalyzedOrderView
 
@@ -623,7 +623,7 @@ async function main(): Promise<void> {
   else fail('真实售后 viewInvolvesRefundAfterSale 未识别')
   if (viewCountsAsRefundOrder(realView)) ok('真实售后 viewCountsAsRefundOrder=true')
   else fail('真实售后 viewCountsAsRefundOrder 未识别')
-  if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
+  if (resolveViewRefundAmountCent(realView) === 5000) ok('真实售后 resolveViewRefundAmountCent=5000')
   else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
 
   console.log('\n=== 运行时冒烟 ===')

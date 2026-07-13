@@ -216,6 +216,44 @@ function summarizeAfterSaleRecords(records: Record<string, unknown>[]): {
     else hasNonQualityReason = true
   }
 
+  if (successful.length === 0) {
+    let pendingQualityReason = ''
+    let pendingFallbackReason = ''
+    for (const rec of records) {
+      const reason = extractAfterSaleReasonText(rec)
+      if (reason) {
+        if (matchPlatformReturnReason(reason).isQualityReturn) {
+          pendingQualityReason = reason
+        } else if (!pendingFallbackReason) {
+          pendingFallbackReason = reason
+        }
+      }
+      if (!bestStatus) {
+        bestStatus = [
+          rec.refund_status_name,
+          rec.refundStatusName,
+          rec.status_name,
+          rec.statusName,
+        ]
+          .filter(Boolean)
+          .map(String)
+          .join(' ')
+      }
+      if (!bestType) bestType = pickAfterSaleType(rec)
+    }
+    bestReason = pendingQualityReason || pendingFallbackReason
+  }
+
+  if (!bestReason && hasQualityReason) {
+    for (const rec of records) {
+      const reason = extractAfterSaleReasonText(rec)
+      if (reason && matchPlatformReturnReason(reason).isQualityReturn) {
+        bestReason = reason
+        break
+      }
+    }
+  }
+
   if (!bestReason && strictAgg.finalAfterSaleReason) {
     bestReason = strictAgg.finalAfterSaleReason
   }
@@ -235,6 +273,27 @@ function summarizeAfterSaleRecords(records: Record<string, unknown>[]): {
     successTime: bestTime,
     returnsId: pickReturnsIdFromRecords(records),
   }
+}
+
+/** 售后工作台/视图侧退货理由补入售后记录（查售后单时用于品退判定） */
+export function mergeAfterSaleRecordsForQualityResolution(
+  records: Record<string, unknown>[],
+  opts?: {
+    afterSaleReason?: string | null
+    afterSaleStatus?: string | null
+  },
+): Record<string, unknown>[] {
+  const reason = (opts?.afterSaleReason ?? '').trim()
+  if (!reason) return records
+  const alreadyHas = records.some((rec) => extractAfterSaleReasonText(rec) === reason)
+  if (alreadyHas) return records
+  return [
+    ...records,
+    {
+      reason_name_zh: reason,
+      refund_status_name: (opts?.afterSaleStatus ?? '').trim() || '售后中',
+    },
+  ]
 }
 
 export function qualityVerifyDisplayLabel(
@@ -267,7 +326,18 @@ export function resolveQualityRefundCrossVerify(params: {
   verifySource?: 'after_sale_time_search' | 'after_sale_workbench'
 }): QualityRefundCrossVerify {
   const { view: v, matchedOfficialPackageIds, officialCase } = params
-  let afterSaleRecords = params.afterSaleRecords ?? []
+  let afterSaleRecords = mergeAfterSaleRecordsForQualityResolution(
+    params.afterSaleRecords ?? [],
+    {
+      afterSaleReason:
+        v.afterSalesWorkbenchReason ??
+        v.reasonText ??
+        v.finalAfterSaleReason ??
+        officialCase?.afterSaleReason,
+      afterSaleStatus:
+        v.afterSaleStatusText ?? v.finalAfterSaleStatus ?? officialCase?.afterSaleStatus,
+    },
+  )
   if (afterSaleRecords.length === 0) {
     afterSaleRecords = buildAfterSaleRecordsFromOfficialCase(officialCase, v)
   }
@@ -292,9 +362,12 @@ export function resolveQualityRefundCrossVerify(params: {
 
   const afterSale = summarizeAfterSaleRecords(afterSaleRecords)
   const afterSaleQualityCandidate =
-    afterSale.hasSuccessful &&
     afterSale.hasQualityReason &&
-    matchPlatformReturnReason(afterSale.reasonText).isQualityReturn
+    (matchPlatformReturnReason(afterSale.reasonText).isQualityReturn ||
+      afterSaleRecords.some(
+        (rec) =>
+          matchPlatformReturnReason(extractAfterSaleReasonText(rec)).isQualityReturn,
+      ))
   const strictQualityRefund = v.strictQualityRefund === true
 
   let qualityVerifyStatus: QualityVerifyStatus = 'none'

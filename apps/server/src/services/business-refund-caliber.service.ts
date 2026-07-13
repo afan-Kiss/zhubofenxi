@@ -13,6 +13,47 @@ import { extractAfterSaleReasonText } from './strict-after-sale-metrics.service'
 
 export const FREIGHT_REFUND_CENT = 1800
 
+/** 退款金额 ≤ 此值（分）一律视为运费补偿，不计入退款单/商品退款 */
+export const FREIGHT_COMPENSATION_MAX_CENT = 2000
+
+export function isFreightCompensationByAmountCent(cent: number): boolean {
+  return cent > 0 && cent <= FREIGHT_COMPENSATION_MAX_CENT
+}
+
+/** 将小额退款重分类为运费补偿（商品退款归零） */
+export function reclassifySmallRefundAsFreightCompensation(
+  productRefundCent: number,
+  freightRefundCent = 0,
+): {
+  productRefundCent: number
+  freightRefundCent: number
+  isFreightRefundOnly: boolean
+} {
+  if (productRefundCent > 0 && freightRefundCent === 0 && isFreightCompensationByAmountCent(productRefundCent)) {
+    return {
+      productRefundCent: 0,
+      freightRefundCent: productRefundCent,
+      isFreightRefundOnly: true,
+    }
+  }
+  if (freightRefundCent > 0 && productRefundCent === 0) {
+    return {
+      productRefundCent: 0,
+      freightRefundCent,
+      isFreightRefundOnly: true,
+    }
+  }
+  const total = productRefundCent + freightRefundCent
+  if (total > 0 && productRefundCent === total && isFreightCompensationByAmountCent(total)) {
+    return {
+      productRefundCent: 0,
+      freightRefundCent: total,
+      isFreightRefundOnly: true,
+    }
+  }
+  return { productRefundCent, freightRefundCent, isFreightRefundOnly: false }
+}
+
 const FREIGHT_TEXT_KEYWORDS = [
   '运费',
   '邮费',
@@ -221,6 +262,7 @@ export function isFreightOnlyRefund(
 export function resolveBusinessProductRefundAmountCent(raw: Record<string, unknown>): number {
   let cent = resolveBusinessRefundAmountCent(raw)
   if (cent <= 0) return 0
+  if (isFreightCompensationByAmountCent(cent)) return 0
   if (isFreightOnlyRefund(raw, cent)) return 0
 
   const shipFee = yuanApiAmountToCent(

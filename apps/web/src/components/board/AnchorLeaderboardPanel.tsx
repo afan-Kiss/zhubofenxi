@@ -239,7 +239,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                           }`}
                           title={
                             anchorRowReturnRefundCountDisplay(a) == null
-                              ? '部分售后类型尚未同步，暂不能准确区分退货退款与仅退款。'
+                              ? '售后明细尚未完整同步，暂不能区分退货退款与仅退款；退款单数仍可参考。'
                               : undefined
                           }
                           onClick={

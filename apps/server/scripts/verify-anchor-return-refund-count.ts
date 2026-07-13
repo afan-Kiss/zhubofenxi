@@ -154,6 +154,80 @@ function main() {
   assert.equal(dupSets.returnOrderCount, 1)
   console.log('✓ 同一订单多条售后按订单号只计1单')
 
+  const pendingReturnRefund = baseView({
+    displayOrderNo: 'P-PEND',
+    officialOrderNo: 'P-PEND',
+    matchOrderId: 'P-PEND',
+    orderId: 'P-PEND',
+    packageId: 'P-PEND',
+    afterSaleStatusText: '待买家退货',
+    productRefundAmountCent: 0,
+    returnAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    isReturnRefundOrder: false,
+    isRefundOnlyOrder: false,
+    isRefundTypeUnknown: false,
+  })
+  const pendingSets = buildOrderMetricSets([pendingReturnRefund])
+  assert.equal(pendingSets.refundOrderCount, 1)
+  assert.equal(pendingSets.returnOrderCount, 0)
+  console.log('✓ 待买家退货申请计入退款单数，不计入退货退款完成单数')
+
+  const cancelled = baseView({
+    displayOrderNo: 'P-CAN',
+    officialOrderNo: 'P-CAN',
+    matchOrderId: 'P-CAN',
+    orderId: 'P-CAN',
+    packageId: 'P-CAN',
+    afterSaleStatusText: '买家取消售后',
+    productRefundAmountCent: 0,
+    returnAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    afterSaleCancelled: true,
+  })
+  const cancelledSets = buildOrderMetricSets([cancelled])
+  assert.equal(cancelledSets.refundOrderCount, 0)
+  console.log('✓ 买家取消售后不计入退款单数')
+
+  const cancelledWithStaleRefund = baseView({
+    displayOrderNo: 'P-CAN2',
+    officialOrderNo: 'P-CAN2',
+    matchOrderId: 'P-CAN2',
+    orderId: 'P-CAN2',
+    packageId: 'P-CAN2',
+    afterSaleStatusText: '买家取消售后',
+    productRefundAmountCent: 9900,
+    returnAmountCent: 9900,
+    realAfterSaleAmountCent: 9900,
+    afterSaleCancelled: true,
+    isReturnRefundOrder: true,
+    isReturnRefund: true,
+    hasReturnRefundApplication: true,
+  })
+  const cancelledStaleSets = buildOrderMetricSets([cancelledWithStaleRefund])
+  assert.equal(cancelledStaleSets.refundOrderCount, 0)
+  console.log('✓ 取消售后即使有历史退款缓存也不计入退款单数')
+
+  const cancelledAfterReturnApply = baseView({
+    displayOrderNo: 'P-CAN3',
+    officialOrderNo: 'P-CAN3',
+    matchOrderId: 'P-CAN3',
+    orderId: 'P-CAN3',
+    packageId: 'P-CAN3',
+    afterSaleStatusText: '买家取消售后',
+    afterSaleStatusLabel: '售后已取消',
+    productRefundAmountCent: 0,
+    returnAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    isReturnRefund: true,
+    hasReturnRefundApplication: false,
+    afterSaleCancelled: true,
+  })
+  const cancelledApplySets = buildOrderMetricSets([cancelledAfterReturnApply])
+  assert.equal(cancelledApplySets.refundOrderCount, 0)
+  assert.equal(cancelledApplySets.returnOrderCount, 0)
+  console.log('✓ 申请退货退款后又取消：不计入退款单/退货退款单')
+
   console.log('\nverify:anchor-return-refund-count PASS')
 }
 

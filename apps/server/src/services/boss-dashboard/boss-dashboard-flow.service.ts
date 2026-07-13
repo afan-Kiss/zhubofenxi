@@ -2,6 +2,7 @@ import { prisma } from '../../lib/prisma'
 import type { GoodReviewShopDefinition } from '../../config/good-review-shops.constants'
 import {
   BOSS_FLOW_MAX_PAGES_FIRST_SYNC,
+  BOSS_FLOW_MIN_PAGES_INCREMENTAL,
   BOSS_FLOW_PAGE_SIZE,
   BOSS_INCOME_MONTHS,
 } from '../../config/boss-dashboard.constants'
@@ -95,7 +96,7 @@ export async function syncBossAccountFlowsForShop(params: {
     const result = await upsertFlowRows(params.shop, params.liveAccountId, parsed.rows)
     inserted += result.inserted
 
-    if (!firstSync) {
+    if (!firstSync && pageNum >= BOSS_FLOW_MIN_PAGES_INCREMENTAL) {
       const pageAllKnown = parsed.rows.length > 0 && result.knownHits === parsed.rows.length
       if (result.inserted === 0 && pageAllKnown && localLatest) {
         const pageMax = pageMaxOccurredAt(parsed.rows)

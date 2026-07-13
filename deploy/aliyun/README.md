@@ -1,8 +1,9 @@
 # 阿里云轻量 · 主播分析部署指南
 
-公网 IP：**8.137.126.18**  
+公网 IP：**47.108.21.50**（2026-07 起生产机，原 `8.137.126.18` 已停用）  
+域名：**http://xiangyuzhubao.xyz/zhubofenxi/**  
 部署目录：**/www/wwwroot/zhubo-analysis**  
-访问地址：**http://8.137.126.18**
+访问地址：**http://47.108.21.50/zhubofenxi/** 或域名入口
 
 不使用 Sakura Frp、不使用 SSH 反向隧道。公网只开放 **80**，业务进程监听 **127.0.0.1:4723**。
 
@@ -43,7 +44,7 @@
 
 - `COOKIE_ENCRYPTION_KEY`（必填，≥32 字符）
 - `SESSION_SECRET`（必填）
-- `CORS_ORIGIN` / `WEB_ORIGIN` = `http://8.137.126.18`
+- `CORS_ORIGIN` / `WEB_ORIGIN` = `http://47.108.21.50`
 - `HOST=127.0.0.1`、`PORT=4723`
 - `XHS_SIGNER_ENABLED=true`
 - `XHS_SIGNER_PYTHON=tools/xhs_signer/.venv/bin/python`
@@ -74,7 +75,7 @@ cd /www/wwwroot/zhubo-analysis
 ## 四、方式 A：Git 部署（推荐）
 
 ```bash
-ssh root@8.137.126.18
+ssh root@47.108.21.50
 
 # 安装 Node 20 / pm2（若宝塔未装，可用 nvm 或宝塔 Node 版本管理）
 node -v   # 建议 v20.x
@@ -85,7 +86,7 @@ mkdir -p /www/wwwroot/zhubo-analysis/logs
 cd /www/wwwroot/zhubo-analysis
 
 # 首次：复制 env（在本地填好密钥后 scp 上传，或在服务器 vi 编辑）
-# scp apps/server/.env root@8.137.126.18:/www/wwwroot/zhubo-analysis/apps/server/.env
+# scp apps/server/.env root@47.108.21.50:/www/wwwroot/zhubo-analysis/apps/server/.env
 
 bash deploy/aliyun/deploy.sh
 ```
@@ -106,10 +107,10 @@ Compress-Archive -Path @(
   "$root\apps", "$root\deploy", "$root\scripts", "$root\package.json", "$root\package-lock.json"
 ) -DestinationPath $dest -Force
 
-scp $dest root@8.137.126.18:/tmp/zhubo-analysis.zip
-scp "$root\apps\server\.env" root@8.137.126.18:/tmp/zhubo-server.env
+scp $dest root@47.108.21.50:/tmp/zhubo-analysis.zip
+scp "$root\apps\server\.env" root@47.108.21.50:/tmp/zhubo-server.env
 # 若有数据库：
-# scp "$root\apps\server\data\app.db" root@8.137.126.18:/tmp/app.db
+# scp "$root\apps\server\data\app.db" root@47.108.21.50:/tmp/app.db
 ```
 
 在 **服务器**：
@@ -129,7 +130,7 @@ USE_GIT=0 bash deploy/aliyun/deploy.sh
 
 ## 六、Nginx（宝塔）
 
-1. 宝塔 → **网站** → 添加站点 → 域名填 `8.137.126.18`（或纯 IP 站点）
+1. 宝塔 → **网站** → 添加站点 → 域名填 `47.108.21.50`（或纯 IP 站点）
 2. 站点 **配置文件** 参考 `deploy/aliyun/nginx-zhubo-analysis.conf.example`
 3. 保存后 **nginx -t** → **重载**
 4. 确认 **4723 不对公网开放**，仅 `127.0.0.1:4723`
@@ -137,7 +138,7 @@ USE_GIT=0 bash deploy/aliyun/deploy.sh
 ```bash
 ss -lntp | grep -E '4723|:80'
 curl -i http://127.0.0.1/api/health
-curl -i http://8.137.126.18/api/health
+curl -i http://47.108.21.50/api/health
 ```
 
 ---
@@ -178,8 +179,8 @@ bash deploy/aliyun/rollback.sh
 
 - [ ] `curl http://127.0.0.1:4723/api/health` → ok:true
 - [ ] `curl http://127.0.0.1/api/health` → ok:true
-- [ ] 浏览器打开 http://8.137.126.18
-- [ ] http://8.137.126.18/operations-report
+- [ ] 浏览器打开 http://47.108.21.50
+- [ ] http://47.108.21.50/operations-report
 - [ ] 系统设置里 Cookie 测试通过
 - [ ] pm2 `zhubo-analysis` 为 online
 - [ ] `ss -lntp` 中 4723 为 127.0.0.1，80 为 nginx
@@ -197,13 +198,22 @@ bash deploy/aliyun/rollback.sh
 
 ## 日常发布（本地改完代码后）
 
-在项目根目录执行（需设置环境变量 `SSH_PASS` 为服务器 root 密码）：
+在项目根目录执行（需设置环境变量 `SSH_PASS` 为服务器 root 密码，可复制 `secrets/deploy.env.example` 为 `secrets/deploy.env`）：
 
 ```bash
 npm run deploy:aliyun
 ```
 
-脚本会：打包代码 → 上传到 `8.137.126.18` → 构建 → pm2 重启 → 健康检查。  
+默认目标服务器见 `deploy/aliyun/target.py`（当前 **47.108.21.50**）。临时切回其他机器可设：
+
+```bash
+# PowerShell
+$env:DEPLOY_HOST="47.108.21.50"
+$env:SSH_PASS="你的密码"
+npm run deploy:aliyun
+```
+
+脚本会：打包代码 → 上传到生产机 → 构建 → pm2 重启 → 健康检查。  
 本地 `apps/server/data/app.db` 若存在会一并上传覆盖服务器数据库（请谨慎）。
 
 ---
@@ -214,14 +224,3 @@ npm run deploy:aliyun
 - 经营数据敏感，务必加 Basic Auth 或项目登录  
 - 不要对公网开放 4723、数据库、维护接口  
 
----
-
-## 当前阻塞项
-
-**需要您提供 SSH 登录方式**（root 密码或密钥），我才能替您在 `8.137.126.18` 上执行 `deploy.sh`、配置 Nginx 并完成公网验收。
-
-请同时准备：
-
-1. `apps/server/.env` 中的 `SESSION_SECRET`、`COOKIE_ENCRYPTION_KEY`（随机长字符串）
-2. 系统设置用的 **小红书/千帆 Cookie**（部署后在 Web 界面填写）
-3. （可选）Basic Auth 用户名密码

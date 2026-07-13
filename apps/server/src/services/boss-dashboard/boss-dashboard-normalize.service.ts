@@ -120,9 +120,17 @@ export interface ParsedBossFlowRow {
 export function classifyBossFlow(row: Record<string, unknown>): BossFlowKind {
   const type = String(row.type ?? '').trim()
   const typeDesc = String(row.typeDesc ?? '').trim()
+  const remark = String(row.remark ?? '').trim()
   const income = yuanStringToCent(row.incomeAmount, 'incomeAmount') ?? 0
   const outcome = yuanStringToCent(row.outcomeAmount, 'outcomeAmount') ?? 0
-  if (type === 'PAY_SUCCESS' || typeDesc === '提现') return BOSS_FLOW_KIND.withdrawSuccess
+  if (
+    type === 'PAY_SUCCESS' ||
+    typeDesc === '提现' ||
+    typeDesc.includes('提现') ||
+    (outcome > 0 && /货款提现|提现[:：]/.test(remark))
+  ) {
+    return BOSS_FLOW_KIND.withdrawSuccess
+  }
   if (
     (type === 'STATEMENT_IN' || typeDesc === '结算入账') &&
     income > 0

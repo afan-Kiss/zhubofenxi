@@ -315,6 +315,15 @@ export function buildAfterSaleByOrderNo(
       map.set(rec.orderNo, agg)
     }
 
+    if (rec.reason && !agg.reasons.includes(rec.reason)) agg.reasons.push(rec.reason)
+    if (isQualityRefundAfterSaleRecord(rec)) agg.hasProductQualityRefund = true
+    const stPending = rec.statusName || rec.refundStatusName
+    if (stPending && !agg.statuses.includes(stPending)) agg.statuses.push(stPending)
+    if (rec.returnId && !agg.returnIds.includes(rec.returnId)) {
+      agg.returnIds.push(rec.returnId)
+    }
+    if (isReturnRefundAfterSaleRecord(rec)) agg.hasReturnRefund = true
+
     if (!isSuccessfulAfterSale(rec.raw)) continue
 
     agg.afterSaleCount += 1
@@ -343,6 +352,55 @@ export function buildAfterSaleByOrderNo(
   return map
 }
 
+/** 从 liveAccountId::orderNo 或 orderNo 索引的 raw 售后重建聚合（含时间范围查询合并结果） */
+export function buildAfterSaleAggregatesByOrderKey(
+  rawByOrderKey: Map<string, Record<string, unknown>[]>,
+  paidOrderNos: Set<string>,
+): Map<string, AfterSaleOrderAggregate> {
+  const out = new Map<string, AfterSaleOrderAggregate>()
+  for (const [key, raws] of rawByOrderKey) {
+    if (!raws.length) continue
+    const orderNo = key.includes('::') ? key.split('::').slice(1).join('::') : key
+    if (!paidOrderNos.has(orderNo)) continue
+    const norms: NormalizedAfterSaleRecord[] = []
+    for (const raw of raws) {
+      const norm = normalizeAfterSaleRecord(raw)
+      if (norm) norms.push(norm)
+    }
+    const built = buildAfterSaleByOrderNo(norms, paidOrderNos)
+    const agg = built.get(orderNo)
+    if (agg) out.set(key, agg)
+  }
+  return out
+}
+
+export function mergeAfterSaleAggregateMaps(
+  base: Map<string, AfterSaleOrderAggregate>,
+  extra: Map<string, AfterSaleOrderAggregate>,
+): Map<string, AfterSaleOrderAggregate> {
+  const out = new Map(base)
+  for (const [key, agg] of extra) {
+    const prev = out.get(key)
+    if (!prev) {
+      out.set(key, agg)
+      continue
+    }
+    out.set(key, {
+      ...prev,
+      refundAmountCent: Math.max(prev.refundAmountCent, agg.refundAmountCent),
+      returnRefundAmountCent: Math.max(prev.returnRefundAmountCent, agg.returnRefundAmountCent),
+      afterSaleCount: Math.max(prev.afterSaleCount, agg.afterSaleCount),
+      hasRefund: prev.hasRefund || agg.hasRefund,
+      hasReturnRefund: prev.hasReturnRefund || agg.hasReturnRefund,
+      hasProductQualityRefund: prev.hasProductQualityRefund || agg.hasProductQualityRefund,
+      returnIds: [...new Set([...prev.returnIds, ...agg.returnIds])],
+      reasons: [...new Set([...prev.reasons, ...agg.reasons])],
+      statuses: [...new Set([...prev.statuses, ...agg.statuses])],
+    })
+  }
+  return out
+}
+
 /** 将范围售后合并进工作台内存缓存，供 buildViews 使用 */
 export function mergeAfterSaleAggregatesIntoWorkbench(
   aggregates: Map<string, AfterSaleOrderAggregate>,
@@ -362,7 +420,12 @@ export function mergeAfterSaleAggregatesIntoWorkbench(
       ...wb,
       liveAccountId,
       officialRefundAmountCent: Math.max(wb.officialRefundAmountCent, agg.refundAmountCent),
-      fetchStatus: agg.hasRefund ? 'success' : 'empty',
+      hasReturnRefund: Boolean(wb.hasReturnRefund || agg.hasReturnRefund),
+      hasRefundOnly: Boolean(
+        wb.hasRefundOnly || (agg.hasRefund && !agg.hasReturnRefund && agg.refundAmountCent > 0),
+      ),
+      returnRefundCount: Math.max(wb.returnRefundCount ?? 0, agg.hasReturnRefund ? 1 : 0),
+      fetchStatus: agg.hasRefund || wb.officialRefundAmountCent > 0 ? 'success' : 'empty',
       fetchError: null,
       fetchedAt: new Date(),
     }

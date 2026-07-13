@@ -188,6 +188,9 @@ function buildOrderStatusLabel(v: AnalyzedOrderView): string {
   if (v.afterSaleClosedNoRefund && (isStatusSignedView(v) || text.includes('已完成'))) {
     return '已完成'
   }
+  if (v.afterSaleCancelled && (isStatusSignedView(v) || text.includes('已完成'))) {
+    return '已完成'
+  }
   if (v.isReturnRefund || v.isRealProductRefund) return '售后关闭'
   if (
     ['已发货', '待收货', '运输中', '派送中', '待签收'].some((k) => text.includes(k))
@@ -198,6 +201,7 @@ function buildOrderStatusLabel(v: AnalyzedOrderView): string {
 }
 
 function buildAfterSaleStatusLabel(v: AnalyzedOrderView): string {
+  if (v.afterSaleCancelled) return '售后已取消'
   const displayType =
     (v as AnalyzedOrderView & { afterSaleDisplayType?: string }).afterSaleDisplayType ?? '—'
   return displayType !== '—' ? displayType : v.afterSaleStatusLabel || '—'

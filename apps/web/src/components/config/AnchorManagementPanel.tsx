@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
+import { ScheduleTimePicker } from '../ui/ScheduleTimePicker'
 
 interface TimeRule {
   id: string
@@ -418,22 +419,17 @@ export const AnchorManagementPanel: React.FC = () => {
                 ) : (
                   a.timeRules.map((r, idx) => (
                     <div key={r.id} className="flex flex-wrap items-center gap-2 text-xs">
-                      <input
-                        type="time"
+                      <ScheduleTimePicker
                         value={r.startTime}
-                        onChange={(e) =>
-                          updateTimeRule(a.id, idx, { startTime: e.target.value })
-                        }
-                        className="rounded border border-slate-200 px-1 py-0.5"
+                        onChange={(startTime) => updateTimeRule(a.id, idx, { startTime })}
+                        aria-label="开始时间"
                       />
-                      <span>至</span>
-                      <input
-                        type="time"
+                      <span className="text-slate-400">至</span>
+                      <ScheduleTimePicker
                         value={r.endTime}
-                        onChange={(e) =>
-                          updateTimeRule(a.id, idx, { endTime: e.target.value })
-                        }
-                        className="rounded border border-slate-200 px-1 py-0.5"
+                        onChange={(endTime) => updateTimeRule(a.id, idx, { endTime })}
+                        allowMidnight
+                        aria-label="结束时间"
                       />
                       <label className="flex items-center gap-1">
                         <input

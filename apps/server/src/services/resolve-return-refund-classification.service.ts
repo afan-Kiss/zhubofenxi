@@ -6,7 +6,7 @@
  * 2. afterSaleAgg.hasReturnRefund / 结构化缓存字段
  * 3. classifyOrderAfterSale.countsAsReturnRefund（订单状态含明确退货语义）
  * 4. 成功售后状态含退货完成/已寄回等
- * 5. 无法确定 → unknown（前端显示 --，不得静默为 0）
+ * 5. 有真实商品退款：明确仅退款 → 仅退款；其余归入退货退款（不再标记 unknown）
  */
 import type { AfterSaleClassification } from './after-sale-classification.service'
 import type { AfterSaleOrderAggregate } from './xhs-after-sales-range.service'
@@ -18,6 +18,7 @@ import {
   isReturnsV3FreightOnlyRefund,
 } from './returns-v3-record.service'
 import { classifyAfterSaleRecord } from './classify-after-sale-record.service'
+import { isAfterSaleCancelledSignal } from './order-refund-application.service'
 
 export type ResolvedAfterSaleProductType =
   | 'return_refund'
@@ -32,6 +33,7 @@ export type ReturnRefundClassificationSource =
   | 'structured_cache'
   | 'order_classification'
   | 'success_status_keywords'
+  | 'refund_amount_default'
   | 'none'
   | 'unknown'
 
@@ -64,7 +66,12 @@ export interface ResolveReturnRefundInput {
   structuredCache?: StructuredAfterSaleTypeCache | null
   classification?: Pick<
     AfterSaleClassification,
-    'countsAsReturnRefund' | 'countsAsRefundOnly' | 'isReturnRefund' | 'isRefundOnly' | 'isFreightRefundOnly'
+    | 'countsAsReturnRefund'
+    | 'countsAsRefundOnly'
+    | 'isReturnRefund'
+    | 'isRefundOnly'
+    | 'isFreightRefundOnly'
+    | 'afterSaleClosedNoRefund'
   > | null
   orderStatusText?: string | null
   afterSaleStatusText?: string | null
@@ -219,6 +226,17 @@ export function resolveReturnRefundClassification(
     return none
   }
 
+  if (
+    isAfterSaleCancelledSignal({
+      afterSaleClosedNoRefund: input.classification?.afterSaleClosedNoRefund,
+      orderStatusText: input.orderStatusText,
+      afterSaleStatusText: input.afterSaleStatusText,
+      afterSaleStatusLabel: input.workbenchAfterSaleStatus,
+    })
+  ) {
+    return none
+  }
+
   const codes: string[] = []
 
   // 1) 成功售后原始记录
@@ -342,7 +360,7 @@ export function resolveReturnRefundClassification(
     }
   }
 
-  if (isExplicitRefundOnlyText(statusText) || (cls?.countsAsRefundOnly && /仅退款/.test(statusText))) {
+  if (isExplicitRefundOnlyText(statusText) || cls?.countsAsRefundOnly || cls?.isRefundOnly) {
     return {
       resolvedAfterSaleType: 'refund_only',
       isReturnRefundOrder: false,
@@ -353,13 +371,13 @@ export function resolveReturnRefundClassification(
     }
   }
 
-  // 5) 有真实退款但无法区分类型
+  // 5) 有真实商品退款：无明细时不再 unknown，统一归入退款类（默认退货退款）
   return {
-    resolvedAfterSaleType: 'unknown',
-    isReturnRefundOrder: false,
+    resolvedAfterSaleType: 'return_refund',
+    isReturnRefundOrder: true,
     isRefundOnlyOrder: false,
-    typeKnown: false,
-    classificationSource: 'unknown',
+    typeKnown: true,
+    classificationSource: 'refund_amount_default',
     returnTypeCodes: codes,
   }
 }

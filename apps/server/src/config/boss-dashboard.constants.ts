@@ -89,6 +89,8 @@ export const BOSS_SCORE_TREND_DAYS = 14
 export const BOSS_INCOME_MONTHS = 12
 export const BOSS_FLOW_PAGE_SIZE = 50
 export const BOSS_FLOW_MAX_PAGES_FIRST_SYNC = 200
+/** 增量同步至少翻页数，避免新提现流水落在第 2 页以后时被过早停止 */
+export const BOSS_FLOW_MIN_PAGES_INCREMENTAL = 3
 
 export const BOSS_FLOW_KIND = {
   statementIn: 'statement_in',

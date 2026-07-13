@@ -165,8 +165,8 @@ function main(): void {
     packageId: 'PKG-REAL-AFTERSALE-SYSTEM-VERIFY',
     includedInGmv: true,
     isFreightRefundOnly: false,
-    productRefundAmountCent: 1800,
-    realAfterSaleAmountCent: 1800,
+    productRefundAmountCent: 5000,
+    realAfterSaleAmountCent: 5000,
     afterSaleStatusText: '退款成功',
   } as AnalyzedOrderView
 
@@ -197,7 +197,7 @@ function main(): void {
   } else {
     fail('真实售后未识别')
   }
-  if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
+  if (resolveViewRefundAmountCent(realView) === 5000) ok('真实售后 resolveViewRefundAmountCent=5000')
   else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
 
   const freightValidView = {
@@ -215,7 +215,7 @@ function main(): void {
     ...realView,
     orderStatusText: '已完成',
     effectiveGmvCent: 50000,
-    returnAmountCent: 1800,
+    returnAmountCent: 5000,
   } as AnalyzedOrderView
   if (!isValidRevenueOrder(realValidView)) ok('真实商品退款 isValidRevenueOrder=false')
   else fail('真实商品退款 isValidRevenueOrder 误判')
@@ -227,7 +227,7 @@ function main(): void {
     {
       packageId: orderNo,
       includedInGmv: true,
-      productRefundAmountCent: 1800,
+      productRefundAmountCent: 5000,
       afterSaleStatusText: '退款成功',
     } as AnalyzedOrderView,
   ]

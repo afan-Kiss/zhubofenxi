@@ -1,5 +1,16 @@
 import type { AnalyzedOrderView } from '../types/analysis'
+import { isFreightCompensationByAmountCent } from './business-refund-caliber.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
+import {
+  viewAfterSaleCancelled,
+  viewHasActiveAfterSaleApplication,
+} from './order-refund-application.service'
+
+export {
+  viewAfterSaleCancelled,
+  viewHasActiveAfterSaleApplication,
+  viewHasActiveReturnRefundApplication,
+} from './order-refund-application.service'
 
 function viewIsPaid(v: AnalyzedOrderView): boolean {
   return v.includedInGmv === true
@@ -21,13 +32,18 @@ export function resolveViewRefundAmountCent(v: AnalyzedOrderView): number {
   const realAfterSale = v.realAfterSaleAmountCent ?? 0
   const base = Math.max(board, buyer, workbench, realAfterSale)
   const inRange = v.statRangeRefundAmountCent ?? 0
-  return Math.max(base, inRange)
+  const merged = Math.max(base, inRange)
+  if (isFreightCompensationByAmountCent(merged)) return 0
+  return merged
 }
 
-/** 退款订单：本期已支付且真实退款金额 > 0（按 P 订单号去重） */
+/** 退款订单：已支付且（真实退款金额>0 或 已申请售后未取消）；取消售后不计入；≤¥20 运费补偿不计入 */
 export function viewCountsAsRefundOrder(v: AnalyzedOrderView): boolean {
   if (!viewIsPaid(v)) return false
-  return resolveViewRefundAmountCent(v) > 0
+  if (v.isFreightRefundOnly) return false
+  if (viewAfterSaleCancelled(v)) return false
+  if (resolveViewRefundAmountCent(v) > 0) return true
+  return viewHasActiveAfterSaleApplication(v)
 }
 
 export function aggregateRefundAmountCentByOrderNo(

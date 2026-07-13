@@ -34,6 +34,16 @@ export function lookupWorkbenchRefund<T>(
   return map.get(liveAccountOrderKey(liveAccountId, no))
 }
 
+export function lookupLiveAccountScopedMap<T>(
+  map: Map<string, T> | undefined,
+  liveAccountId: string | undefined | null,
+  orderNo: string | undefined | null,
+): T | undefined {
+  const no = orderNo?.trim()
+  if (!map || !no) return undefined
+  return map.get(liveAccountOrderKey(liveAccountId, no)) ?? map.get(no)
+}
+
 export function buildLiveAccountOrderQueries(
   orders: Array<{
     liveAccountId?: string | null

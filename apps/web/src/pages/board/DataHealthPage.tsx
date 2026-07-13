@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react'
 import { ApiError, apiRequest } from '../../lib/api'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { useAuth } from '../../providers/AuthProvider'
+import { formatDataHealthWarning, resolvePendingRefundTypeCount } from '../../lib/data-health-warning'
 
 interface DirectRequestFinding {
   file: string
@@ -453,7 +454,7 @@ export const DataHealthPage: React.FC = () => {
               <h3 className="text-sm font-semibold text-amber-950">需要留意</h3>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
                 {report.warnings.map((w) => (
-                  <li key={w}>{w}</li>
+                  <li key={w}>{formatDataHealthWarning(w)}</li>
                 ))}
               </ul>
             </section>
@@ -476,6 +477,19 @@ export const DataHealthPage: React.FC = () => {
               />
               <MetricCard label="退款金额" value={formatMoney(report.refundAmountYuan)} />
               <MetricCard label="退款订单数" value={formatCount(report.refundOrderCount)} />
+              <MetricCard
+                label="退货退款单数"
+                value={formatCount(report.returnRefundOrderCount ?? 0)}
+              />
+              <MetricCard
+                label="仅退款单数"
+                value={formatCount(report.refundOnlyOrderCount ?? 0)}
+              />
+              <MetricCard
+                label="退款类型待确认"
+                value={formatCount(resolvePendingRefundTypeCount(report))}
+                danger={resolvePendingRefundTypeCount(report) > 0}
+              />
               <MetricCard
                 label="退款率"
                 value={formatRateValue(report.refundRate, formatRate)}

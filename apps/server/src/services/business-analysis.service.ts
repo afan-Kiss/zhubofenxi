@@ -46,6 +46,7 @@ import { classifyOrderAfterSale } from './after-sale-classification.service'
 import type { AfterSaleOrderAggregate } from './xhs-after-sales-range.service'
 import { resolveReturnRefundClassification } from './resolve-return-refund-classification.service'
 import { resolveViewRefundAmountCent } from './order-refund-metrics.service'
+import { viewAfterSaleCancelled } from './order-refund-application.service'
 import { isStatusSignedOrder } from './order-sign-status.service'
 import { computeStrictOrderViewFields } from './strict-after-sale-metrics.service'
 import {
@@ -62,11 +63,14 @@ import {
   getQualityBadCasesSync,
 } from './quality-badcase-store.service'
 import { applyOfficialQualityToView, resolveQualityRefundInfo } from './quality-refund-resolution.service'
+import { mergeAfterSaleRecordsForQualityResolution } from './quality-refund-cross-verify.service'
 import { resolveOrderProductRefund } from './order-product-refund.service'
+import { reclassifySmallRefundAsFreightCompensation } from './business-refund-caliber.service'
 import { isShopOrInvalidAnchorLabel } from '../utils/anchor-label'
 import {
   liveAccountOrderKey,
   liveAccountPackageKey,
+  lookupLiveAccountScopedMap,
 } from '../utils/live-account-cache-key.util'
 import type { DateRangeResolved } from '../utils/date-range'
 import { aggregateSuccessfulRefundCentInRange } from './strict-after-sale-metrics.service'
@@ -126,8 +130,8 @@ function buildViews(
 
     const displayNo = (o.displayOrderNo || o.officialOrderNo || '').trim()
     const accountCacheKey = displayNo ? liveAccountOrderKey(o.liveAccountId, displayNo) : ''
-    const workbench = accountCacheKey ? workbenchByOrderNo.get(accountCacheKey) : undefined
-    const afterSaleAgg = accountCacheKey ? afterSaleByOrderNo?.get(accountCacheKey) : undefined
+    const workbench = lookupLiveAccountScopedMap(workbenchByOrderNo, o.liveAccountId, displayNo)
+    const afterSaleAgg = lookupLiveAccountScopedMap(afterSaleByOrderNo, o.liveAccountId, displayNo)
     const workbenchReason =
       workbench?.afterSaleReason?.trim() || afterSaleAgg?.reasons[0] || undefined
 
@@ -157,34 +161,53 @@ function buildViews(
       workbench,
       { buyerStrict: true },
     )
-    const returnAmountCent = classification.isFreightRefundOnly
-      ? classification.freightRefundAmountCent
-      : classification.productRefundAmountCent + classification.freightRefundAmountCent
     // returnAmountCent = 售后总金额展示字段，可能含运费，不得用于核心退款/有效成交口径
     // productRefundAmountCent = 商品退款金额（分），不含纯运费补偿
 
-    const afterSaleRecords = accountCacheKey
-      ? rawAfterSalesByOrderNo?.get(accountCacheKey) ?? []
-      : []
+    const afterSaleRecords = mergeAfterSaleRecordsForQualityResolution(
+      displayNo
+        ? lookupLiveAccountScopedMap(rawAfterSalesByOrderNo, o.liveAccountId, displayNo) ?? []
+        : [],
+      {
+        afterSaleReason: workbenchReason,
+        afterSaleStatus: workbench?.afterSaleStatus ?? o.afterSaleStatusText,
+      },
+    )
     let boardRefundCent = boardRefundResolved.productRefundAmountCent
+    let isFreightRefundOnly = classification.isFreightRefundOnly
+    let freightRefundAmountCent =
+      classification.freightRefundAmountCent || boardRefundResolved.freightRefundAmountCent
     if (
-      !classification.isFreightRefundOnly &&
+      !isFreightRefundOnly &&
       afterSaleAgg &&
       afterSaleAgg.refundAmountCent > 0
     ) {
       boardRefundCent = afterSaleAgg.refundAmountCent
     }
-    if (classification.isFreightRefundOnly) {
+    if (!isFreightRefundOnly) {
+      const freightAdjusted = reclassifySmallRefundAsFreightCompensation(
+        boardRefundCent,
+        freightRefundAmountCent,
+      )
+      if (freightAdjusted.isFreightRefundOnly) {
+        isFreightRefundOnly = true
+        boardRefundCent = 0
+        freightRefundAmountCent = freightAdjusted.freightRefundCent
+      }
+    } else {
       boardRefundCent = 0
     }
+    const returnAmountCent = isFreightRefundOnly
+      ? freightRefundAmountCent
+      : classification.productRefundAmountCent + classification.freightRefundAmountCent
     const strictFields = computeStrictOrderViewFields({
       order: o,
       includedInGmv: metrics.includedInGmv,
       paymentBaseCent: metrics.paymentBaseCent,
       boardRefundAmountCent: boardRefundCent,
       afterSaleRecords,
-      isFreightRefundOnly: classification.isFreightRefundOnly,
-      freightRefundAmountCent: classification.freightRefundAmountCent,
+      isFreightRefundOnly,
+      freightRefundAmountCent,
       afterSaleClosedNoRefund: classification.afterSaleClosedNoRefund,
       resolvedRefundSource: boardRefundResolved.refundAmountSource,
     })
@@ -249,7 +272,7 @@ function buildViews(
       finalAfterSaleReason: strictFields.finalAfterSaleReason || undefined,
       finalAfterSaleStatus: strictFields.finalAfterSaleStatus || undefined,
       returnAmountCent,
-      productRefundAmountCent: classification.isFreightRefundOnly
+      productRefundAmountCent: isFreightRefundOnly
         ? 0
         : strictFields.successfulRefundAmountCent || boardRefundCent,
       buyerProductRefundAmountCent: buyerRefundResolved.productRefundAmountCent,
@@ -259,11 +282,11 @@ function buildViews(
         boardRefundResolved.afterSalesWorkbenchRefundAmountCent ??
         buyerRefundResolved.afterSalesWorkbenchRefundAmountCent,
       refundIncludesFreight: buyerRefundResolved.refundIncludesFreight,
-      freightRefundAmountCent: classification.freightRefundAmountCent,
-      realAfterSaleAmountCent: classification.isFreightRefundOnly
+      freightRefundAmountCent,
+      realAfterSaleAmountCent: isFreightRefundOnly
         ? 0
         : classification.realAfterSaleAmountCent,
-      isFreightRefundOnly: classification.isFreightRefundOnly,
+      isFreightRefundOnly,
       afterSaleClosedNoRefund: classification.afterSaleClosedNoRefund,
       isReturnRefund: classification.isReturnRefund,
       isRefundOnly: classification.isRefundOnly,
@@ -303,8 +326,8 @@ function buildViews(
       resolveViewRefundAmountCent(view),
     )
     const returnRefundResolved = resolveReturnRefundClassification({
-      hasSuccessfulProductRefund: productRefundCent > 0 && !classification.isFreightRefundOnly,
-      isFreightRefundOnly: classification.isFreightRefundOnly,
+      hasSuccessfulProductRefund: productRefundCent > 0 && !isFreightRefundOnly,
+      isFreightRefundOnly,
       rawAfterSales: afterSaleRecords,
       afterSaleAgg,
       structuredCache: workbench
@@ -327,6 +350,19 @@ function buildViews(
     view.isRefundOnlyOrder = returnRefundResolved.isRefundOnlyOrder
     view.isRefundTypeUnknown = !returnRefundResolved.typeKnown && productRefundCent > 0
     view.returnRefundClassificationSource = returnRefundResolved.classificationSource
+    view.hasReturnRefundApplication =
+      Boolean(afterSaleAgg?.hasReturnRefund || workbench?.hasReturnRefund) &&
+      !viewAfterSaleCancelled(view)
+    view.hasRefundOnlyApplication =
+      Boolean(workbench?.hasRefundOnly) && !viewAfterSaleCancelled(view)
+    view.afterSaleCancelled = viewAfterSaleCancelled(view)
+    if (view.afterSaleCancelled) {
+      view.isReturnRefundOrder = false
+      view.isRefundOnlyOrder = false
+      view.isRefundTypeUnknown = false
+      view.hasReturnRefundApplication = false
+      view.hasRefundOnlyApplication = false
+    }
 
     const packageCacheKey = displayNo ? liveAccountPackageKey(o.liveAccountId, displayNo) : ''
     if (packageCacheKey && officialByPackage.has(packageCacheKey)) {

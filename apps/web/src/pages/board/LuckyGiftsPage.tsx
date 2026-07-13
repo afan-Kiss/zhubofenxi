@@ -4,6 +4,13 @@ import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { apiRequest } from '../../lib/api'
 import { useAuth } from '../../providers/AuthProvider'
 import {
+  buildLuckyGiftListCacheKey,
+  readLuckyGiftListCache,
+  readLuckyGiftSummaryCache,
+  writeLuckyGiftListCache,
+  writeLuckyGiftSummaryCache,
+} from '../../lib/lucky-gift-cache'
+import {
   buildLuckyGiftAuditCopyText,
   buildLuckyGiftShipCopyText,
   copyTextToClipboard,
@@ -321,10 +328,43 @@ export const LuckyGiftsPage: React.FC = () => {
   const canViewPii =
     user?.role === 'super_admin' || user?.role === 'boss' || user?.role === 'staff'
 
-  const [summary, setSummary] = useState<SummaryPayload | null>(null)
-  const [items, setItems] = useState<LuckyGiftItem[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
+  const [summary, setSummary] = useState<SummaryPayload | null>(() =>
+    readLuckyGiftSummaryCache<SummaryPayload>(),
+  )
+  const [items, setItems] = useState<LuckyGiftItem[]>(() => {
+    const key = buildLuckyGiftListCacheKey({
+      shopKey: 'all',
+      status: 'todo',
+      dateRange: 'all',
+      startDate: '',
+      endDate: '',
+      keyword: '',
+    })
+    return readLuckyGiftListCache<LuckyGiftItem>(key)?.items ?? []
+  })
+  const [total, setTotal] = useState(() => {
+    const key = buildLuckyGiftListCacheKey({
+      shopKey: 'all',
+      status: 'todo',
+      dateRange: 'all',
+      startDate: '',
+      endDate: '',
+      keyword: '',
+    })
+    return readLuckyGiftListCache<LuckyGiftItem>(key)?.total ?? 0
+  })
+  const [loading, setLoading] = useState(() => {
+    const key = buildLuckyGiftListCacheKey({
+      shopKey: 'all',
+      status: 'todo',
+      dateRange: 'all',
+      startDate: '',
+      endDate: '',
+      keyword: '',
+    })
+    return !readLuckyGiftSummaryCache() && !readLuckyGiftListCache(key)
+  })
+  const [refreshing, setRefreshing] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -354,42 +394,78 @@ export const LuckyGiftsPage: React.FC = () => {
     }
   }
 
-  const load = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const qs = new URLSearchParams()
-      if (shopKey !== 'all') qs.set('accountId', shopKey)
-      qs.set('status', status)
-      qs.set('dateRange', dateRange)
-      if (dateRange === 'custom') {
-        if (startDate) qs.set('startDate', startDate)
-        if (endDate) qs.set('endDate', endDate)
-      }
-      if (keyword.trim()) qs.set('keyword', keyword.trim())
-      qs.set('page', '1')
-      qs.set('pageSize', '100')
+  const listCacheKey = useMemo(
+    () =>
+      buildLuckyGiftListCacheKey({
+        shopKey,
+        status,
+        dateRange,
+        startDate,
+        endDate,
+        keyword,
+      }),
+    [shopKey, status, dateRange, startDate, endDate, keyword],
+  )
 
-      const [sum, list] = await Promise.all([
-        apiRequest<SummaryPayload>('/api/board/lucky-gifts/summary'),
-        apiRequest<{ items: LuckyGiftItem[]; total: number; canViewPii: boolean }>(
-          `/api/board/lucky-gifts?${qs.toString()}`,
-        ),
-      ])
-      setSummary(sum)
-      setItems(list.items)
-      setTotal(list.total)
-      setSelected(new Set())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [shopKey, status, dateRange, startDate, endDate, keyword])
+  const load = useCallback(
+    async (opts?: { background?: boolean }) => {
+      if (opts?.background) {
+        setRefreshing(true)
+      } else {
+        setLoading(true)
+      }
+      setError(null)
+      try {
+        const qs = new URLSearchParams()
+        if (shopKey !== 'all') qs.set('accountId', shopKey)
+        qs.set('status', status)
+        qs.set('dateRange', dateRange)
+        if (dateRange === 'custom') {
+          if (startDate) qs.set('startDate', startDate)
+          if (endDate) qs.set('endDate', endDate)
+        }
+        if (keyword.trim()) qs.set('keyword', keyword.trim())
+        qs.set('page', '1')
+        qs.set('pageSize', '100')
+
+        const [sum, list] = await Promise.all([
+          apiRequest<SummaryPayload>('/api/board/lucky-gifts/summary'),
+          apiRequest<{ items: LuckyGiftItem[]; total: number; canViewPii: boolean }>(
+            `/api/board/lucky-gifts?${qs.toString()}`,
+          ),
+        ])
+        setSummary(sum)
+        setItems(list.items)
+        setTotal(list.total)
+        setSelected(new Set())
+        writeLuckyGiftSummaryCache(sum)
+        writeLuckyGiftListCache(listCacheKey, { items: list.items, total: list.total })
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '加载失败')
+      } finally {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    },
+    [shopKey, status, dateRange, startDate, endDate, keyword, listCacheKey],
+  )
 
   useEffect(() => {
+    const cachedList = readLuckyGiftListCache<LuckyGiftItem>(listCacheKey)
+    const cachedSummary = readLuckyGiftSummaryCache<SummaryPayload>()
+    const hasCache = Boolean(cachedSummary || cachedList?.items.length)
+    if (cachedSummary) setSummary(cachedSummary)
+    if (cachedList) {
+      setItems(cachedList.items)
+      setTotal(cachedList.total)
+    }
+    if (hasCache) {
+      setLoading(false)
+      void load({ background: true })
+      return
+    }
     void load()
-  }, [load])
+  }, [listCacheKey, load])
 
   const pendingCopyItems = useMemo(
     () => items.filter((i) => i.shipmentStatus === 'pending' && i.addressComplete),
@@ -585,9 +661,10 @@ export const LuckyGiftsPage: React.FC = () => {
             )}
             <button
               type="button"
-              onClick={() => void load()}
+              onClick={() => void load({ background: Boolean(summary || items.length) })}
               className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-700 hover:bg-slate-50"
             >
+              {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               刷新本地
             </button>
           </div>
@@ -790,7 +867,10 @@ export const LuckyGiftsPage: React.FC = () => {
       {/* 5. 列表区 */}
       <section className="space-y-3">
         {!loading && items.length > 0 && (
-          <p className="text-xs text-slate-400">当前 {total} 条记录</p>
+          <p className="text-xs text-slate-400">
+            当前 {total} 条记录
+            {refreshing ? ' · 正在后台更新…' : ''}
+          </p>
         )}
 
         {loading ? (

@@ -780,7 +780,9 @@ export const AnchorPerformanceTab: React.FC = () => {
             Number(filteredPerformanceSummary?.refundOnlyCount ?? 0) === 0 &&
             Number(filteredPerformanceSummary?.unknownRefundTypeCount ?? 0) > 0) ? (
             <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] leading-relaxed text-amber-800">
-              部分售后类型尚未同步，暂不能准确区分退货退款与仅退款。退货退款单数暂显示为「—」。
+              {Number(filteredPerformanceSummary?.returnRefundCount ?? 0) > 0
+                ? '部分退款单尚未同步售后明细，退货退款/仅退款分类可能仍不完整；「退款单数」仍可参考。'
+                : '售后明细尚未完整同步，暂不能区分「退货退款」与「仅退款」。「退款单数」「退款金额」仍可参考；仅「退货退款单数」暂显示为「—」。'}
             </p>
           ) : null}
           <div className="rounded-2xl border border-rose-100/50 bg-white p-4 shadow-sm">

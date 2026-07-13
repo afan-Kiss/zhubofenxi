@@ -7,6 +7,7 @@ import { matchPlatformReturnReason } from '../utils/quality-return'
 import {
   resolveBusinessProductRefundAmountCent,
   resolveBusinessRefundAmountCent,
+  FREIGHT_COMPENSATION_MAX_CENT,
 } from './business-refund-caliber.service'
 import {
   pickReturnsV3BuyerUserId,
@@ -257,6 +258,7 @@ export function aggregateStrictAfterSaleForOrder(
     const reason = extractAfterSaleReasonText(rec)
     if (reason && matchPlatformReturnReason(reason).isQualityReturn) {
       hasHistoricalQualityReason = true
+      strictQualityRefund = true
     }
     if (!isSuccessfulAfterSale(rec)) continue
     const split = splitReturnsV3RefundCent(rec)
@@ -267,9 +269,6 @@ export function aggregateStrictAfterSaleForOrder(
       timeMs: pickAfterSaleRecordTimeMs(rec),
       status: afterSaleStatusText(rec),
     })
-    if (matchPlatformReturnReason(reason).isQualityReturn) {
-      strictQualityRefund = true
-    }
   }
 
   successful.sort((a, b) => b.timeMs - a.timeMs)
@@ -329,8 +328,8 @@ export function getActualSignAmountCent(params: {
   return Math.max(0, params.paymentBaseCent - params.successfulRefundAmountCent)
 }
 
-/** 实际签收允许的最大商品退款（分），超过则不计入实际签收 */
-export const ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT = 2000
+/** 实际签收允许的最大商品退款（分），超过则不计入实际签收；与运费补偿上限一致 */
+export { FREIGHT_COMPENSATION_MAX_CENT as ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT } from './business-refund-caliber.service'
 
 const PENDING_AFTER_SALE_STATUS_KEYWORDS = [
   '售后中',
@@ -415,11 +414,11 @@ export function orderQualifiesForActualSignedAfterSale(params: {
     return true
   }
 
-  if (refundCent > ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT) {
+  if (refundCent > FREIGHT_COMPENSATION_MAX_CENT) {
     return false
   }
 
-  if (refundCent > 0 && refundCent <= ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT) {
+  if (refundCent > 0 && refundCent <= FREIGHT_COMPENSATION_MAX_CENT) {
     return true
   }
 

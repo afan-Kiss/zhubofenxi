@@ -148,7 +148,7 @@ function main() {
     ok('rawDetail缺失但结构化分类字段存在时仍能统计')
   }
 
-  // 8 unknown
+  // 8 有退款 + 订单侧仅退款语义 → 仅退款（不再 unknown）
   {
     const r = resolveReturnRefundClassification({
       hasSuccessfulProductRefund: true,
@@ -161,10 +161,43 @@ function main() {
         isFreightRefundOnly: false,
       },
     })
-    assert.equal(r.typeKnown, false)
-    assert.equal(r.resolvedAfterSaleType, 'unknown')
+    assert.equal(r.typeKnown, true)
+    assert.equal(r.resolvedAfterSaleType, 'refund_only')
+    assert.equal(r.isRefundOnlyOrder, true)
+    ok('有退款金额且订单侧为仅退款时归入仅退款')
+  }
+
+  // 9 售后完成 + 有退款无明细 → 默认退货退款
+  {
+    const r = resolveReturnRefundClassification({
+      hasSuccessfulProductRefund: true,
+      afterSaleStatusText: '售后完成',
+      orderStatusText: '已关闭',
+    })
+    assert.equal(r.typeKnown, true)
+    assert.equal(r.isReturnRefundOrder, true)
+    assert.equal(r.classificationSource, 'refund_amount_default')
+    ok('售后完成+有退款无明细时默认归入退货退款')
+  }
+
+  // 10 申请退货退款后又取消 → 不算退款类
+  {
+    const r = resolveReturnRefundClassification({
+      hasSuccessfulProductRefund: true,
+      afterSaleStatusText: '买家取消售后',
+      classification: {
+        countsAsReturnRefund: true,
+        countsAsRefundOnly: false,
+        isReturnRefund: true,
+        isRefundOnly: false,
+        isFreightRefundOnly: false,
+        afterSaleClosedNoRefund: true,
+      },
+    })
     assert.equal(r.isReturnRefundOrder, false)
-    ok('有退款金额但分类未知时标记 unknown（不显示为退货退款0的假可信）')
+    assert.equal(r.isRefundOnlyOrder, false)
+    assert.equal(r.resolvedAfterSaleType, 'none')
+    ok('申请退货退款后又取消：不归类为退款')
   }
 
   // derive structured

@@ -1,5 +1,6 @@
 import type { NormalizedOrder } from '../types/analysis'
 import { isOrderCancelled, isOrderUnpaid } from './order-amount-metrics.service'
+import { isFreightCompensationByAmountCent } from './business-refund-caliber.service'
 import { matchPlatformReturnReason, normalizePlatformReason, NON_QUALITY_RETURN_REASONS } from '../utils/quality-return'
 
 /** 售后关闭且无实际退款 */
@@ -223,6 +224,18 @@ export function classifyOrderAfterSale(
     base.afterSaleClosedNoRefund = true
     base.afterSaleStatusLabel = '售后关闭无退款'
     base.afterSaleDisplayType = '售后关闭无退款'
+    base.countsForSigned = isCompleted
+    return base
+  }
+
+  // 1b. 退款金额 ≤ ¥20：一律视为运费补偿，不计入退款单
+  if (isFreightCompensationByAmountCent(refundCent)) {
+    base.category = 'freight_only'
+    base.isFreightRefundOnly = true
+    base.freightRefundAmountCent = refundCent
+    base.countsAsFreightRefund = true
+    base.afterSaleStatusLabel = '运费补偿'
+    base.afterSaleDisplayType = '运费补偿'
     base.countsForSigned = isCompleted
     return base
   }

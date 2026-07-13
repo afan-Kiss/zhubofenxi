@@ -274,6 +274,12 @@ export interface AnalyzedOrderView {
   realAfterSaleAmountCent: number
   isFreightRefundOnly: boolean
   afterSaleClosedNoRefund: boolean
+  /** 申请售后后又取消 / 关闭无退款 */
+  afterSaleCancelled?: boolean
+  /** 售后工作台/聚合：存在退货退款申请（含处理中） */
+  hasReturnRefundApplication?: boolean
+  /** 工作台/聚合识别到仅退款申请（含处理中，不要求已退款） */
+  hasRefundOnlyApplication?: boolean
   isReturnRefund: boolean
   isRefundOnly: boolean
   isRealProductRefund: boolean

@@ -47,6 +47,10 @@ import {
   loadAfterSalesTimeSearchByOrderNo,
   mergeAfterSaleRecordMaps,
 } from '../xhs-after-sales-time-search.service'
+import {
+  buildAfterSaleAggregatesByOrderKey,
+  mergeAfterSaleAggregateMaps,
+} from '../xhs-after-sales-range.service'
 import { bootstrapQualityBadCaseCache } from '../quality-badcase-store.service'
 
 function orderInRange(order: NormalizedOrder, range: DateRangeResolved): boolean {
@@ -129,6 +133,10 @@ export async function buildRawAnalyzeBundle(
     afterSales.rawAfterSalesByOrderNo,
     timeSearchMap,
   )
+  const mergedAfterSaleByOrderNo = mergeAfterSaleAggregateMaps(
+    afterSales.afterSaleByOrderNo,
+    buildAfterSaleAggregatesByOrderKey(mergedAfterSales, paidOrderNos),
+  )
 
   return {
     orders,
@@ -138,7 +146,7 @@ export async function buildRawAnalyzeBundle(
     hasPending: pendingRecords.length > 0,
     hasSettled: settledRecords.length > 0,
     warnings,
-    afterSaleByOrderNo: afterSales.afterSaleByOrderNo,
+    afterSaleByOrderNo: mergedAfterSaleByOrderNo,
     rawAfterSalesByOrderNo: mergedAfterSales,
   }
 }

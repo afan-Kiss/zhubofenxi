@@ -82,6 +82,17 @@ async function main() {
   if (withdrawRow && isWithdrawSuccessRow(withdrawRow)) ok('PAY_SUCCESS 识别为提现成功')
   else fail('PAY_SUCCESS 应识别为提现成功')
 
+  const remarkWithdraw = parseBossFlowRow({
+    tradeNo: 'T2',
+    createdTime: '2026-07-10 12:00:00',
+    type: 'OTHER',
+    typeDesc: '出账',
+    remark: '货款提现:W202607100001',
+    outcomeAmount: '70000.00',
+  })
+  if (remarkWithdraw?.flowKind === 'withdraw_success') ok('remark 货款提现 识别为提现成功')
+  else fail('remark 货款提现 未识别为提现成功')
+
   const incomeRow = parseBossFlowRow({
     tradeNo: 'T2',
     createdTime: '2026-07-11 10:56:31',

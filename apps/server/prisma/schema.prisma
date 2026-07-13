@@ -810,6 +810,7 @@ model DailyReportImage {
 }
 
 /// 未归属订单手动指定主播（按 P 单号持久化）
+/// @deprecated 新写入请用 OrderAttributionDisposition；本表保留供历史兼容读取
 model OrderAnchorManualOverride {
   id          String   @id @default(cuid())
   orderKey    String   @unique
@@ -820,6 +821,42 @@ model OrderAnchorManualOverride {
   updatedAt   DateTime @updatedAt
 
   @@index([anchorName])
+}
+
+/// 订单归属人工处置（指定主播 / 确认非直播成交），按 P 单号持久化
+model OrderAttributionDisposition {
+  id                String    @id @default(cuid())
+  orderKey          String    @unique
+  /// anchor | non_live（pending 不落库）
+  disposition       String
+  anchorName        String?
+  anchorId          String?
+  /// offline_communication | private_domain | customer_service | owner_sale | other
+  nonLiveReason     String?
+  nonLiveReasonText String?
+  confirmedBy       String?
+  confirmedAt       DateTime?
+  confirmNote       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([disposition])
+  @@index([confirmedAt])
+}
+
+/// 订单归属处置操作记录
+model OrderAttributionDispositionLog {
+  id        String   @id @default(cuid())
+  orderKey  String
+  action    String
+  fromJson  String?
+  toJson    String?
+  operator  String?
+  note      String?
+  createdAt DateTime @default(now())
+
+  @@index([orderKey, createdAt])
+  @@index([createdAt])
 }
 
 /// 老板看板：店铺资金快照（金额均为分）

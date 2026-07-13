@@ -9,6 +9,7 @@ import { pickPaymentBaseCent } from './order-amount-metrics.service'
 import {
   FREIGHT_REFUND_CENT,
   isFreightOnlyRefund,
+  reclassifySmallRefundAsFreightCompensation,
 } from './business-refund-caliber.service'
 import { parseMoneyToCent } from '../utils/money'
 import {
@@ -345,12 +346,26 @@ export function resolveOrderProductRefund(
     finalProductCent = 0
   }
 
+  const freightSplit = reclassifySmallRefundAsFreightCompensation(
+    finalProductCent,
+    refundIncludesFreight && workbench && workbench.appliedShipFeeAmountCent > 0
+      ? workbench.appliedShipFeeAmountCent
+      : 0,
+  )
+  if (freightSplit.isFreightRefundOnly) {
+    return {
+      productRefundAmountCent: 0,
+      freightRefundAmountCent: freightSplit.freightRefundCent,
+      refundAmountSource: capped.source,
+      refundAmountWarning: warning,
+      refundIncludesFreight: false,
+      afterSalesWorkbenchRefundAmountCent: workbenchCent > 0 ? workbenchCent : undefined,
+    }
+  }
+
   return {
-    productRefundAmountCent: finalProductCent,
-    freightRefundAmountCent:
-      refundIncludesFreight && workbench && workbench.appliedShipFeeAmountCent > 0
-        ? workbench.appliedShipFeeAmountCent
-        : 0,
+    productRefundAmountCent: freightSplit.productRefundCent,
+    freightRefundAmountCent: freightSplit.freightRefundCent,
     refundAmountSource: capped.source,
     refundAmountWarning: warning,
     refundIncludesFreight,

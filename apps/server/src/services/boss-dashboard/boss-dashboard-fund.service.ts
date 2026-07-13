@@ -100,13 +100,11 @@ export async function syncBossFundForShop(shop: GoodReviewShopDefinition): Promi
   ])
 
   try {
-    if (aggregateOk) {
-      await syncBossAccountFlowsForShop({
-        shop,
-        liveAccountId: account.id,
-        firstSync: false,
-      })
-    }
+    await syncBossAccountFlowsForShop({
+      shop,
+      liveAccountId: account.id,
+      firstSync: false,
+    })
   } catch (err) {
     const flowMsg = err instanceof Error ? err.message : String(err)
     logWarn('老板同步', `${shop.shopName} 流水同步失败：${flowMsg}`)

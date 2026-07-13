@@ -9,6 +9,7 @@ import {
 } from '../../lib/anchor-schedule-conflicts'
 import { invalidateBoardLiveQueryCache } from '../../lib/board-live-query-cache'
 import { useBoardLiveQuery } from '../../providers/BoardLiveQueryProvider'
+import { ScheduleTimeRangePicker } from '../../components/ui/ScheduleTimePicker'
 
 function afterScheduleMutation(): void {
   invalidateBoardLiveQueryCache('anchor-schedule')
@@ -530,8 +531,7 @@ export const AnchorSchedulePage: React.FC = () => {
             <tr>
               <th className="px-3 py-2">主播</th>
               <th className="px-3 py-2">店铺/直播间</th>
-              <th className="px-3 py-2">开始</th>
-              <th className="px-3 py-2">结束</th>
+              <th className="px-3 py-2">时段</th>
               <th className="px-3 py-2">来源</th>
               <th className="px-3 py-2">备注</th>
               <th className="px-3 py-2">操作</th>
@@ -574,24 +574,12 @@ export const AnchorSchedulePage: React.FC = () => {
                     </select>
                   </td>
                   <td className="px-3 py-2">
-                    <input
-                      type="time"
-                      value={row.startTime}
-                      onChange={(e) => updateRow(index, { startTime: e.target.value })}
-                      className="rounded border border-slate-200 px-2 py-1"
+                    <ScheduleTimeRangePicker
+                      startTime={row.startTime}
+                      endTime={row.endTime}
+                      onStartChange={(startTime) => updateRow(index, { startTime })}
+                      onEndChange={(endTime) => updateRow(index, { endTime })}
                     />
-                  </td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="time"
-                      value={row.endTime === '24:00' ? '23:59' : row.endTime}
-                      onChange={(e) => {
-                        const v = e.target.value === '23:59' ? '24:00' : e.target.value
-                        updateRow(index, { endTime: v })
-                      }}
-                      className="rounded border border-slate-200 px-2 py-1"
-                    />
-                    {row.endTime === '24:00' ? <span className="ml-1 text-xs text-slate-500">24:00</span> : null}
                   </td>
                   <td className="px-3 py-2 text-slate-500">{sourceLabel(row.source)}</td>
                   <td className="px-3 py-2" title={tip || undefined}>
@@ -618,7 +606,7 @@ export const AnchorSchedulePage: React.FC = () => {
             })}
             {!loading && rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
                   当天暂无排班，可点「更多 → 生成默认排班」或「新增」
                 </td>
               </tr>

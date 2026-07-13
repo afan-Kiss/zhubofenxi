@@ -17,7 +17,7 @@ loadDotenv({ path: path.join(ROOT, '.env') })
 async function main() {
   const lines: string[] = []
   const token = String(process.env.CONTROL_SERVICE_TOKEN || '').trim()
-  const base = process.env.CONTROL_SERVER_URL || 'http://8.137.126.18/control'
+  const base = process.env.CONTROL_SERVER_URL || 'http://47.108.21.50/control'
 
   lines.push(`CONTROL_SERVER_URL=${base}`)
   lines.push(`CONTROL_SERVICE_TOKEN configured=${Boolean(token)}`)

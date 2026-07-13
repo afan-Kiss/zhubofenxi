@@ -15,6 +15,7 @@ import {
   resolveReadingStepLabel,
   type BoardSyncUiMode,
 } from '../../lib/business-sync-ui'
+import { formatDataHealthWarning, formatRollingRefundBreakdown } from '../../lib/data-health-warning'
 
 interface Props {
   boardSyncUiMode: BoardSyncUiMode
@@ -182,9 +183,7 @@ function RollingCloseSection({ report }: { report: RollingDataHealthCloseSummary
           退款订单数：{(report.refundOrderCount ?? 0).toLocaleString('zh-CN')} 单
         </div>
         <div className="text-[11px] text-slate-600">
-          退货退款：{(report.returnRefundOrderCount ?? 0).toLocaleString('zh-CN')} 单
-          ｜仅退款：{(report.refundOnlyOrderCount ?? 0).toLocaleString('zh-CN')} 单
-          ｜未识别：{(report.unknownRefundTypeOrderCount ?? 0).toLocaleString('zh-CN')} 单
+          {formatRollingRefundBreakdown(report)}
         </div>
         <div className="text-[11px] text-slate-600">
           品退单数：{report.qualityRefundOrderCount.toLocaleString('zh-CN')} 单
@@ -208,7 +207,7 @@ function RollingCloseSection({ report }: { report: RollingDataHealthCloseSummary
         <div className="mt-1.5 space-y-0.5">
           {report.warnings.slice(0, 2).map((warning) => (
             <p key={warning} className="text-[11px] leading-relaxed text-amber-800">
-              {warning}
+              {formatDataHealthWarning(warning)}
             </p>
           ))}
         </div>

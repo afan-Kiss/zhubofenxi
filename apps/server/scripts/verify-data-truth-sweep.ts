@@ -31,11 +31,15 @@ import {
   resolveViewRefundAmountCent,
   viewCountsAsRefundOrder,
 } from '../src/services/order-refund-metrics.service'
+import { viewAfterSaleCancelled } from '../src/services/order-refund-application.service'
 import {
   calculateBusinessMetrics,
   viewInvolvesRefundAfterSale,
 } from '../src/services/business-metrics.service'
 import { isEffectiveSignedView } from '../src/services/strict-after-sale-metrics.service'
+import { resolveQualityRefundInfo } from '../src/services/quality-refund-resolution.service'
+import { mergeAfterSaleRecordsForQualityResolution } from '../src/services/quality-refund-cross-verify.service'
+import { aggregateStrictAfterSaleForOrder } from '../src/services/strict-after-sale-metrics.service'
 import { buildOrderMetricSets } from '../src/services/order-metric-sets.service'
 import {
   resolveMetricOrderNo,
@@ -1208,10 +1212,57 @@ function checkRefundOrderVsAfterSaleSignalRuntime(): void {
   } as AnalyzedOrderView
   if (viewHasAfterSaleStatusSignal(pendingView)) ok('售后中+0元 有售后相关信号')
   else fail('售后中+0元 未识别售后相关信号')
-  if (!viewCountsAsRefundOrder(pendingView)) ok('售后中+0元 不算退款单数')
-  else fail('售后中+0元 误计退款单数')
+  if (viewCountsAsRefundOrder(pendingView)) ok('售后中+0元 算退款单数（已申请售后）')
+  else fail('售后中+0元 未计退款单数')
   if (resolveViewRefundAmountCent(pendingView) === 0) ok('售后中+0元 退款金额=0')
   else fail('售后中+0元 退款金额非 0')
+
+  const pendingRefundOnlyView = {
+    includedInGmv: true,
+    afterSaleStatusText: '仅退款 售后中',
+    productRefundAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    returnAmountCent: 0,
+    isFreightRefundOnly: false,
+  } as AnalyzedOrderView
+  if (viewCountsAsRefundOrder(pendingRefundOnlyView)) ok('仅退款售后中+0元 算退款单数')
+  else fail('仅退款售后中+0元 未计退款单数')
+
+  const pendingReturnRefundView = {
+    includedInGmv: true,
+    afterSaleStatusText: '待买家退货',
+    productRefundAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    returnAmountCent: 0,
+    isFreightRefundOnly: false,
+  } as AnalyzedOrderView
+  if (viewCountsAsRefundOrder(pendingReturnRefundView)) ok('待买家退货+0元 算退款单数')
+  else fail('待买家退货+0元 未计退款单数')
+
+  const cancelledView = {
+    includedInGmv: true,
+    afterSaleStatusText: '买家取消售后',
+    productRefundAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    returnAmountCent: 0,
+    afterSaleClosedNoRefund: false,
+  } as AnalyzedOrderView
+  if (!viewCountsAsRefundOrder(cancelledView)) ok('买家取消售后 不算退款单数')
+  else fail('买家取消售后 误计退款单数')
+  if (viewAfterSaleCancelled(cancelledView)) ok('买家取消售后 识别为售后已取消')
+  else fail('买家取消售后 未识别为售后已取消')
+
+  const cancelledStaleRefundView = {
+    includedInGmv: true,
+    afterSaleStatusText: '买家取消售后',
+    productRefundAmountCent: 5000,
+    realAfterSaleAmountCent: 5000,
+    returnAmountCent: 5000,
+    isReturnRefundOrder: true,
+    hasReturnRefundApplication: true,
+  } as AnalyzedOrderView
+  if (!viewCountsAsRefundOrder(cancelledStaleRefundView)) ok('取消售后+历史退款缓存 不算退款单数')
+  else fail('取消售后+历史退款缓存 误计退款单数')
 
   const closedView = {
     includedInGmv: true,
@@ -1309,21 +1360,56 @@ function mockFreightOnlyView(): AnalyzedOrderView {
   } as AnalyzedOrderView
 }
 
-function mockRealAfterSale18View(): AnalyzedOrderView {
+function mockRealAfterSaleView(): AnalyzedOrderView {
   return {
     packageId: 'PKG-REAL-AFTERSALE-VERIFY',
     includedInGmv: true,
     isFreightRefundOnly: false,
-    productRefundAmountCent: 1800,
-    realAfterSaleAmountCent: 1800,
+    productRefundAmountCent: 5000,
+    realAfterSaleAmountCent: 5000,
     afterSaleStatusText: '退款成功',
   } as AnalyzedOrderView
+}
+
+function mockSmallRefundUnmarkedView(): AnalyzedOrderView {
+  return {
+    packageId: 'PKG-SMALL-REFUND-UNMARKED',
+    includedInGmv: true,
+    isFreightRefundOnly: false,
+    productRefundAmountCent: 1500,
+    realAfterSaleAmountCent: 1500,
+    afterSaleStatusText: '退款成功',
+  } as AnalyzedOrderView
+}
+
+function checkQualityRefundPendingReasonRuntime(): void {
+  console.log('\n=== 0g2. 售后处理中+品退退货理由 ===')
+  const pendingRecords = mergeAfterSaleRecordsForQualityResolution([], {
+    afterSaleReason: '质量问题',
+    afterSaleStatus: '售后处理中: 待商家收货',
+  })
+  const strictAgg = aggregateStrictAfterSaleForOrder(pendingRecords)
+  if (strictAgg.strictQualityRefund) ok('处理中品退理由 strictQualityRefund=true')
+  else fail('处理中品退理由 strictQualityRefund 未识别')
+
+  const pendingQualityView = {
+    includedInGmv: true,
+    afterSalesWorkbenchReason: '质量问题',
+    afterSaleStatusText: '售后处理中: 待商家收货',
+  } as import('../src/types/analysis').AnalyzedOrderView
+  const info = resolveQualityRefundInfo({
+    view: pendingQualityView,
+    afterSaleRecords: [],
+  })
+  if (info.isQualityRefund) ok('处理中+工作台品退理由 计入品退')
+  else fail('处理中+工作台品退理由 未计入品退')
 }
 
 function checkFreightRefundOnlyRuntime(): void {
   console.log('\n=== 0g. 纯运费补偿(18元)运行时断言 ===')
   const freightView = mockFreightOnlyView()
-  const realView = mockRealAfterSale18View()
+  const realView = mockRealAfterSaleView()
+  const smallUnmarkedView = mockSmallRefundUnmarkedView()
 
   if (!viewInvolvesRefundAfterSale(freightView)) ok('纯运费 viewInvolvesRefundAfterSale=false')
   else fail('纯运费 viewInvolvesRefundAfterSale 误判为 true')
@@ -1356,8 +1442,12 @@ function checkFreightRefundOnlyRuntime(): void {
   else fail('真实售后 viewInvolvesRefundAfterSale 未识别')
   if (viewCountsAsRefundOrder(realView)) ok('真实售后 viewCountsAsRefundOrder=true')
   else fail('真实售后 viewCountsAsRefundOrder 未识别')
-  if (resolveViewRefundAmountCent(realView) === 1800) ok('真实售后 resolveViewRefundAmountCent=1800')
+  if (resolveViewRefundAmountCent(realView) === 5000) ok('真实售后 resolveViewRefundAmountCent=5000')
   else fail(`真实售后 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(realView)}`)
+  if (!viewCountsAsRefundOrder(smallUnmarkedView)) ok('≤20元未标记运费补偿不计入退款单')
+  else fail('≤20元未标记仍计入退款单')
+  if (resolveViewRefundAmountCent(smallUnmarkedView) === 0) ok('≤20元 resolveViewRefundAmountCent=0')
+  else fail(`≤20元 resolveViewRefundAmountCent=${resolveViewRefundAmountCent(smallUnmarkedView)}`)
 
   if (resolveValidRevenueRefundAmountCent(freightView) === 0) {
     ok('纯运费 resolveValidRevenueRefundAmountCent=0')
@@ -1376,12 +1466,12 @@ function checkFreightRefundOnlyRuntime(): void {
     ...realView,
     orderStatusText: '已完成',
     effectiveGmvCent: 50000,
-    returnAmountCent: 1800,
+    returnAmountCent: 5000,
   } as AnalyzedOrderView
-  if (resolveValidRevenueRefundAmountCent(realValidView) === 1800) {
-    ok('真实商品退款 resolveValidRevenueRefundAmountCent=1800')
+  if (resolveValidRevenueRefundAmountCent(realValidView) === 5000) {
+    ok('真实商品退款 resolveValidRevenueRefundAmountCent=5000')
   } else {
-    fail('真实商品退款 resolveValidRevenueRefundAmountCent 非 1800')
+    fail('真实商品退款 resolveValidRevenueRefundAmountCent 非 5000')
   }
   if (!isValidRevenueOrder(realValidView)) ok('真实商品退款 isValidRevenueOrder=false')
   else fail('真实商品退款 isValidRevenueOrder 误判为 true')
@@ -1403,7 +1493,7 @@ function checkOperationsRefundDedupeRuntime(): void {
   const viewSecond = {
     packageId: orderNo,
     includedInGmv: true,
-    productRefundAmountCent: 1800,
+    productRefundAmountCent: 5000,
     afterSaleStatusText: '退款成功',
     orderStatusText: '已完成',
   } as AnalyzedOrderView
@@ -1578,6 +1668,7 @@ async function main(): Promise<void> {
   checkNoAfterSaleTextRuntime()
   checkOperationalAfterSaleRuntime()
   checkRefundOrderVsAfterSaleSignalRuntime()
+  checkQualityRefundPendingReasonRuntime()
   checkFreightRefundOnlyRuntime()
   checkOperationsRefundDedupeRuntime()
   checkFreightDrawerDedupeRuntime()

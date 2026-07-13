@@ -60,6 +60,18 @@ function countUnassignedOrders(views: AnalyzedOrderView[]): number {
   return dedupeViewsByMetricOrderNo(unassigned).length
 }
 
+function resolveUnclassifiedRefundOrderCount(input: {
+  refundOrderCount: number
+  returnRefundOrderCount: number
+  refundOnlyOrderCount: number
+  unknownRefundTypeOrderCount: number
+}): number {
+  return Math.max(
+    input.unknownRefundTypeOrderCount,
+    input.refundOrderCount - input.returnRefundOrderCount - input.refundOnlyOrderCount,
+  )
+}
+
 function buildWarnings(input: {
   afterSaleRelatedOrderCount: number
   afterSaleSignalRecordCount: number
@@ -88,7 +100,9 @@ function buildWarnings(input: {
     warnings.push('官方品退可能未同步')
   }
   if (input.unassignedOrderCount > 0) {
-    warnings.push(`有 ${input.unassignedOrderCount} 单暂未归到主播，请检查主播归属`)
+    warnings.push(
+      `有 ${input.unassignedOrderCount} 单为自然流散客（未能匹配直播场次），请检查排班与直播号配置。`,
+    )
   }
   if (input.duplicateOrderCount > 0) {
     warnings.push(`发现 ${input.duplicateOrderCount} 条重复订单风险`)
@@ -98,12 +112,16 @@ function buildWarnings(input: {
     input.returnRefundOrderCount === 0 &&
     input.refundOnlyOrderCount === 0
   ) {
+    const pendingCount = resolveUnclassifiedRefundOrderCount(input)
     warnings.push(
-      '存在真实退款金额，但退款类型未正确识别，主播退货退款单数暂不可信。',
+      pendingCount > 0
+        ? `有 ${pendingCount} 单退款待确认类型，多因售后明细未同步完整，退货退款/仅退款单数暂不可信。`
+        : '存在真实退款金额，但退款类型未正确识别，退货退款/仅退款单数暂不可信。',
     )
   } else if (input.returnRefundTypeIncomplete || input.unknownRefundTypeOrderCount > 0) {
+    const pendingCount = resolveUnclassifiedRefundOrderCount(input)
     warnings.push(
-      `有 ${input.unknownRefundTypeOrderCount} 单退款类型未识别，退货退款/仅退款区分暂不完整。`,
+      `有 ${pendingCount} 单退款待确认类型，多因售后明细未同步完整。`,
     )
   }
   return warnings

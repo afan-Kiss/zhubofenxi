@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { loadEnv } from '../config/env'
 
 const THREE_HOURS_MS = 3 * 60 * 60 * 1000
-const DEFAULT_BASE = 'http://8.137.126.18/control'
+const DEFAULT_BASE = 'http://47.108.21.50/control'
 const PROJECT_NAME = 'zhubo-analysis'
 
 export interface ControlCookieResult {

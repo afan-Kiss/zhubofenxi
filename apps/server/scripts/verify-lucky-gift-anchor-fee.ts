@@ -171,6 +171,11 @@ async function main() {
   assert(pageSrc.includes('openQianfanLuckyGift'), 'qianfan open helper', issues)
   assert(!pageSrc.includes('onShip'), 'row must not use ship modal trigger', issues)
 
+  assert(pageSrc.includes('福袋 ID'), 'lucky draw id visible on card', issues)
+  assert(pageSrc.includes('luckyDrawId'), 'lucky draw id field on card', issues)
+  assert(pageSrc.includes('liveAccountName'), 'shop name field on card', issues)
+  assert(pageSrc.includes('店铺'), 'shop label on card', issues)
+
   if (issues.length) {
     console.error('[verify:lucky-gift-anchor-fee] FAILED')
     for (const i of issues) console.error(' -', i)

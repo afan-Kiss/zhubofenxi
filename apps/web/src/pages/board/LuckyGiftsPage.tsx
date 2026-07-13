@@ -246,6 +246,25 @@ function LuckyGiftRow(props: {
               ) : null}
             </div>
 
+            {(item.liveAccountName || item.luckyDrawId) ? (
+              <p className="text-xs text-slate-400">
+                {item.liveAccountName ? (
+                  <>
+                    店铺 <span className="text-slate-600">{item.liveAccountName}</span>
+                  </>
+                ) : null}
+                {item.liveAccountName && item.luckyDrawId ? (
+                  <span className="mx-2 text-slate-300">·</span>
+                ) : null}
+                {item.luckyDrawId ? (
+                  <>
+                    福袋 ID{' '}
+                    <span className="font-mono text-slate-500 break-all select-all">{item.luckyDrawId}</span>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+
             {isNoAddress ? (
               <div className="space-y-1 text-sm text-slate-700">
                 <p>中奖人：{item.winnerNickname || '—'}</p>

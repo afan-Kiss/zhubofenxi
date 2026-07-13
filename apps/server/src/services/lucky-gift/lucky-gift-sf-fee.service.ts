@@ -64,20 +64,11 @@ export async function queryAndCacheSfFeeForShipment(
   const tracking = trackingNo.trim().toUpperCase()
 
   if (!cfg) {
-    await prisma.luckyGiftShipment.update({
-      where: { id: shipmentId },
-      data: {
-        sfFeeStatus: 'failed',
-        sfFeeError: '顺丰月结配置未就绪',
-        sfFeeQueriedAt: new Date(),
-        sfFeeTrackingNo: tracking,
-      },
-    })
     return {
-      sfFeeStatus: 'failed',
+      sfFeeStatus: 'unknown',
       sfMonthlyFeeYuan: null,
-      sfFeeQueriedAt: new Date().toISOString(),
-      sfFeeError: '顺丰月结配置未就绪',
+      sfFeeQueriedAt: null,
+      sfFeeError: null,
     }
   }
 
@@ -86,7 +77,29 @@ export async function queryAndCacheSfFeeForShipment(
     data: { sfFeeStatus: 'querying', sfFeeTrackingNo: tracking },
   })
 
-  const result = await querySfWaybillFee(tracking, cfg)
+  let result: Awaited<ReturnType<typeof querySfWaybillFee>>
+  try {
+    result = await querySfWaybillFee(tracking, cfg)
+  } catch (err) {
+    const now = new Date()
+    const message = err instanceof Error ? err.message : '顺丰费用查询异常'
+    await prisma.luckyGiftShipment.update({
+      where: { id: shipmentId },
+      data: {
+        sfFeeStatus: 'failed',
+        sfFeeQueriedAt: now,
+        sfFeeError: message,
+        sfFeeTrackingNo: tracking,
+        sfMonthlyFeeCent: null,
+      },
+    })
+    return {
+      sfFeeStatus: 'failed',
+      sfMonthlyFeeYuan: null,
+      sfFeeQueriedAt: now.toISOString(),
+      sfFeeError: message,
+    }
+  }
   const now = new Date()
 
   if (result.ok && result.totalFeeYuan != null) {
@@ -139,6 +152,8 @@ export async function ensureSfFeesForShipments(
   }>,
   options?: { force?: boolean; maxQueries?: number },
 ): Promise<void> {
+  if (!loadSfWaybillConfigFromEnv()) return
+
   const max = options?.maxQueries ?? 5
   let queried = 0
   for (const s of shipments) {
@@ -155,8 +170,15 @@ export async function ensureSfFeesForShipments(
     ) {
       continue
     }
-    await queryAndCacheSfFeeForShipment(s.shipmentId, s.trackingNo!, options?.force)
-    queried += 1
+    try {
+      await queryAndCacheSfFeeForShipment(s.shipmentId, s.trackingNo!, options?.force)
+      queried += 1
+    } catch (err) {
+      console.warn(
+        `[lucky-gift] sf fee query failed shipment=${s.shipmentId}:`,
+        err instanceof Error ? err.message : err,
+      )
+    }
     await new Promise((r) => setTimeout(r, 80))
   }
 }

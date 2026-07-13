@@ -288,7 +288,14 @@ export async function listLuckyGifts(params: {
       sfFeeQueriedAt: w.shipment?.sfFeeQueriedAt ?? null,
       sfFeeTrackingNo: w.shipment?.sfFeeTrackingNo ?? null,
     }))
-  await ensureSfFeesForShipments(sfCandidates, { maxQueries: 8 })
+  try {
+    await ensureSfFeesForShipments(sfCandidates, { maxQueries: 8 })
+  } catch (err) {
+    console.warn(
+      '[lucky-gift] batch sf fee refresh skipped:',
+      err instanceof Error ? err.message : err,
+    )
+  }
 
   const shipmentIds = rows.map((w) => w.shipment?.id).filter(Boolean) as string[]
   const refreshedShipments =

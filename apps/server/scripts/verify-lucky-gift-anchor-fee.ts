@@ -15,6 +15,10 @@ import {
 } from '../src/services/lucky-gift/lucky-gift-freight.util'
 import { shouldQuerySfFee, isSfTrackingNo } from '../src/services/lucky-gift/lucky-gift-sf-fee.service'
 import { querySfWaybillFee } from '../src/services/sf-waybill-fee.service'
+import {
+  matchScheduleAnchor,
+  matchSessionByTime,
+} from '../src/services/lucky-gift/lucky-gift-anchor-attribution.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -63,6 +67,47 @@ async function main() {
   assert(!shouldQuerySfFee({ trackingNo: 'SF1234567890123', shipmentStatus: 'pending', sfFeeStatus: null, sfFeeQueriedAt: null, sfFeeTrackingNo: null }), 'pending no query', issues)
   assert(isSfTrackingNo('SF1234567890123'), 'SF tracking regex', issues)
 
+  const schedRows = [
+    {
+      anchorName: '小红',
+      shopName: '和田玉韵',
+      liveRoomName: '和田玉韵',
+      startAt: new Date('2026-07-08T19:00:00+08:00'),
+      endAt: new Date('2026-07-08T23:00:00+08:00'),
+    },
+  ]
+  assert(
+    matchScheduleAnchor('和田玉韵', new Date('2026-07-08T20:00:00+08:00'), schedRows) === '小红',
+    'schedule anchor match',
+    issues,
+  )
+  const sessions = [
+    {
+      liveAccountId: 'acc-a',
+      liveId: 'room-1',
+      anchorName: '小艺',
+      startTime: new Date('2026-07-08T18:00:00+08:00'),
+      endTime: new Date('2026-07-08T22:00:00+08:00'),
+    },
+    {
+      liveAccountId: 'acc-a',
+      liveId: 'room-2',
+      anchorName: '飞云',
+      startTime: new Date('2026-07-08T22:30:00+08:00'),
+      endTime: new Date('2026-07-09T01:00:00+08:00'),
+    },
+  ]
+  assert(
+    matchSessionByTime('acc-a', new Date('2026-07-08T21:00:00+08:00'), sessions) === '小艺',
+    'session_time fallback match',
+    issues,
+  )
+  assert(
+    matchSessionByTime('acc-a', new Date('2026-07-08T23:00:00+08:00'), sessions) === '飞云',
+    'session_time picks correct overlapping session',
+    issues,
+  )
+
   const cachedRecent = shouldQuerySfFee({
     trackingNo: 'SF1234567890123',
     shipmentStatus: 'shipped',
@@ -94,7 +139,8 @@ async function main() {
   ]) {
     assert(!pageSrc.includes(banned), `page must not contain banned text: ${banned}`, issues)
   }
-  assert(pageSrc.includes('主播待确认'), 'unresolved anchor label', issues)
+  assert(pageSrc.includes('formatAnchorDisplayName'), 'anchor display helper', issues)
+  assert(pageSrc.includes('anchorLabel(item)'), 'anchor label on card', issues)
   assert(pageSrc.includes('物流详情'), 'shipped logistics detail entry', issues)
 
   if (issues.length) {

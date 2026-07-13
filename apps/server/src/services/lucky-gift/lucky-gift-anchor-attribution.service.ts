@@ -38,7 +38,7 @@ async function loadScheduleByDate(dateKey: string) {
   return getEffectiveSchedulesForDate(dateKey)
 }
 
-function matchScheduleAnchor(
+export function matchScheduleAnchor(
   liveAccountName: string,
   winTime: Date,
   rows: Array<{
@@ -59,7 +59,7 @@ function matchScheduleAnchor(
   return null
 }
 
-function matchSessionByTime(
+export function matchSessionByTime(
   liveAccountId: string,
   winTime: Date,
   sessions: Array<{
@@ -135,6 +135,27 @@ export async function resolveLuckyGiftAnchorsBatch(
 
   const scheduleCache = new Map<string, Awaited<ReturnType<typeof loadScheduleByDate>>>()
 
+  async function resolveFromSchedule(w: WinnerRow): Promise<string | null> {
+    if (!w.winTime) return null
+    const dateKey = shanghaiDateKey(w.winTime)
+    let sched = scheduleCache.get(dateKey)
+    if (!sched) {
+      sched = await loadScheduleByDate(dateKey)
+      scheduleCache.set(dateKey, sched)
+    }
+    return matchScheduleAnchor(
+      w.liveAccountName,
+      w.winTime,
+      [...sched.manual, ...sched.generated, ...sched.virtual].map((r) => ({
+        anchorName: r.anchorName,
+        shopName: r.shopName,
+        liveRoomName: r.liveRoomName,
+        startAt: r.startAt,
+        endAt: r.endAt,
+      })),
+    )
+  }
+
   for (const w of winners) {
     const roomId = w.draw?.roomId?.trim() ?? ''
     let anchorName: string | null = null
@@ -144,33 +165,19 @@ export async function resolveLuckyGiftAnchorsBatch(
     if (exact?.anchorName?.trim()) {
       anchorName = exact.anchorName.trim()
       source = 'room_exact'
+    } else if (exact) {
+      const fromSchedule = await resolveFromSchedule(w)
+      if (fromSchedule) {
+        anchorName = fromSchedule
+        source = 'schedule'
+      }
     } else if (w.winTime) {
       const byTime = matchSessionByTime(w.liveAccountId, w.winTime, timeFallbackSessions)
       if (byTime) {
         anchorName = byTime
         source = 'session_time'
       } else {
-        const dateKey = shanghaiDateKey(w.winTime)
-        let sched = scheduleCache.get(dateKey)
-        if (!sched) {
-          sched = await loadScheduleByDate(dateKey)
-          scheduleCache.set(dateKey, sched)
-        }
-        const fromSchedule = matchScheduleAnchor(
-          w.liveAccountName,
-          w.winTime,
-          [
-            ...sched.manual,
-            ...sched.generated,
-            ...sched.virtual,
-          ].map((r) => ({
-            anchorName: r.anchorName,
-            shopName: r.shopName,
-            liveRoomName: r.liveRoomName,
-            startAt: r.startAt,
-            endAt: r.endAt,
-          })),
-        )
+        const fromSchedule = await resolveFromSchedule(w)
         if (fromSchedule) {
           anchorName = fromSchedule
           source = 'schedule'

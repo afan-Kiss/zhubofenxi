@@ -78,6 +78,9 @@ function statusWhere(status: LuckyGiftListStatusFilter | undefined): Record<stri
   if (status === 'todo') {
     return { shipmentStatus: { in: ['no_address', 'incomplete_address', 'pending'] } }
   }
+  if (status === 'no_address') {
+    return { shipmentStatus: { in: ['no_address', 'incomplete_address'] } }
+  }
   return { shipmentStatus: status }
 }
 

@@ -16,8 +16,9 @@ import {
   copyTextToClipboard,
 } from '../../lib/lucky-gift-copy'
 
-type StatusFilter = 'todo' | 'pending' | 'no_address' | 'incomplete_address' | 'shipped' | 'all'
+type StatusFilter = 'pending' | 'no_address' | 'incomplete_address' | 'shipped' | 'all'
 type DateRange = 'today' | '7d' | '30d' | 'custom' | 'all'
+type SummaryViewKey = 'pending' | 'no_address' | 'shipped' | 'todayNew' | 'allWinners'
 
 interface ShopStat {
   shopKey: string
@@ -104,6 +105,10 @@ const FILTER_BTN =
   'inline-flex h-9 items-center rounded-lg border px-3 text-sm transition-colors'
 const FILTER_BTN_ACTIVE = 'border-slate-800 bg-slate-800 text-white'
 const FILTER_BTN_IDLE = 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+const SUMMARY_CARD =
+  'flex min-h-[5.5rem] flex-col justify-center rounded-2xl border bg-white px-4 py-3 text-left shadow-sm transition'
+const SUMMARY_CARD_ACTIVE = 'border-slate-800 ring-1 ring-slate-800'
+const SUMMARY_CARD_IDLE = 'border-slate-100 hover:border-slate-300'
 const ACTION_BTN =
   'inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50'
 const ACTION_BTN_PRIMARY = 'inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm text-white hover:bg-emerald-700'
@@ -122,6 +127,33 @@ function statusTone(status: string): string {
     return 'bg-amber-50 text-amber-800 border-amber-200'
   if (status === 'shipped') return 'bg-emerald-50 text-emerald-700 border-emerald-200'
   return 'bg-slate-50 text-slate-600 border-slate-200'
+}
+
+function resolveSummaryView(
+  status: StatusFilter,
+  dateRange: DateRange,
+): SummaryViewKey {
+  if (dateRange === 'today') return 'todayNew'
+  if (status === 'all') return 'allWinners'
+  if (status === 'pending') return 'pending'
+  if (status === 'no_address') return 'no_address'
+  if (status === 'shipped') return 'shipped'
+  return 'pending'
+}
+
+function summaryViewLabel(view: SummaryViewKey): string {
+  switch (view) {
+    case 'pending':
+      return '待发货'
+    case 'no_address':
+      return '未填地址'
+    case 'shipped':
+      return '已发货'
+    case 'todayNew':
+      return '今日新同步'
+    case 'allWinners':
+      return '全部中奖记录'
+  }
 }
 
 function shopPillClass(active: boolean): string {
@@ -337,7 +369,7 @@ export const LuckyGiftsPage: React.FC = () => {
   const [items, setItems] = useState<LuckyGiftItem[]>(() => {
     const key = buildLuckyGiftListCacheKey({
       shopKey: 'all',
-      status: 'todo',
+      status: 'pending',
       dateRange: 'all',
       startDate: '',
       endDate: '',
@@ -348,7 +380,7 @@ export const LuckyGiftsPage: React.FC = () => {
   const [total, setTotal] = useState(() => {
     const key = buildLuckyGiftListCacheKey({
       shopKey: 'all',
-      status: 'todo',
+      status: 'pending',
       dateRange: 'all',
       startDate: '',
       endDate: '',
@@ -359,7 +391,7 @@ export const LuckyGiftsPage: React.FC = () => {
   const [loading, setLoading] = useState(() => {
     const key = buildLuckyGiftListCacheKey({
       shopKey: 'all',
-      status: 'todo',
+      status: 'pending',
       dateRange: 'all',
       startDate: '',
       endDate: '',
@@ -374,7 +406,7 @@ export const LuckyGiftsPage: React.FC = () => {
   const [showSyncDetails, setShowSyncDetails] = useState(false)
 
   const [shopKey, setShopKey] = useState<string>('all')
-  const [status, setStatus] = useState<StatusFilter>('todo')
+  const [status, setStatus] = useState<StatusFilter>('pending')
   const [dateRange, setDateRange] = useState<DateRange>('all')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
@@ -627,14 +659,30 @@ export const LuckyGiftsPage: React.FC = () => {
     }
   }
 
-  const summaryCards: Array<{ key: StatusFilter | 'todayNew' | 'allWinners'; label: string; value: number }> =
-    [
-      { key: 'pending', label: '待发货', value: summary?.pending ?? 0 },
-      { key: 'no_address', label: '未填地址', value: summary?.noAddress ?? 0 },
-      { key: 'shipped', label: '已发货', value: summary?.shipped ?? 0 },
-      { key: 'todayNew', label: '今日新同步', value: summary?.todayNew ?? 0 },
-      { key: 'allWinners', label: '全部中奖记录', value: summary?.totalWinners ?? 0 },
-    ]
+  const summaryCards: Array<{ key: SummaryViewKey; label: string; value: number }> = [
+    { key: 'pending', label: '待发货', value: summary?.pending ?? 0 },
+    { key: 'no_address', label: '未填地址', value: (summary?.noAddress ?? 0) + (summary?.incompleteAddress ?? 0) },
+    { key: 'shipped', label: '已发货', value: summary?.shipped ?? 0 },
+    { key: 'todayNew', label: '今日新同步', value: summary?.todayNew ?? 0 },
+    { key: 'allWinners', label: '全部中奖记录', value: summary?.totalWinners ?? 0 },
+  ]
+
+  const activeSummaryView = resolveSummaryView(status, dateRange)
+
+  function applySummaryView(view: SummaryViewKey) {
+    if (view === 'todayNew') {
+      setDateRange('today')
+      setStatus('all')
+      return
+    }
+    if (view === 'allWinners') {
+      setStatus('all')
+      setDateRange('all')
+      return
+    }
+    setDateRange('all')
+    setStatus(view)
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6 pb-8" data-testid="lucky-gifts-page">
@@ -700,18 +748,8 @@ export const LuckyGiftsPage: React.FC = () => {
           <button
             key={c.key}
             type="button"
-            onClick={() => {
-              if (c.key === 'todayNew') {
-                setDateRange('today')
-                setStatus('all')
-              } else if (c.key === 'allWinners') {
-                setStatus('all')
-                setDateRange('all')
-              } else {
-                setStatus(c.key)
-              }
-            }}
-            className="flex min-h-[5.5rem] flex-col justify-center rounded-2xl border border-slate-100 bg-white px-4 py-3 text-left shadow-sm transition hover:border-slate-300"
+            onClick={() => applySummaryView(c.key)}
+            className={`${SUMMARY_CARD} ${activeSummaryView === c.key ? SUMMARY_CARD_ACTIVE : SUMMARY_CARD_IDLE}`}
           >
             <div className="text-xs text-slate-500">{c.label}</div>
             <div className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{c.value}</div>
@@ -746,27 +784,6 @@ export const LuckyGiftsPage: React.FC = () => {
 
       {/* 4. 筛选 / 操作区 */}
       <section className="space-y-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              ['todo', '待处理'],
-              ['pending', '待发货'],
-              ['no_address', '未填地址'],
-              ['shipped', '已发货'],
-              ['all', '全部'],
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => setStatus(k)}
-              className={`${FILTER_BTN} ${status === k ? FILTER_BTN_ACTIVE : FILTER_BTN_IDLE}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
           <input
             value={keyword}
@@ -869,12 +886,15 @@ export const LuckyGiftsPage: React.FC = () => {
 
       {/* 5. 列表区 */}
       <section className="space-y-3">
-        {!loading && items.length > 0 && (
-          <p className="text-xs text-slate-400">
-            当前 {total} 条记录
-            {refreshing ? ' · 正在后台更新…' : ''}
-          </p>
-        )}
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-base font-semibold text-slate-900">{summaryViewLabel(activeSummaryView)}</h2>
+          {!loading && items.length > 0 && (
+            <p className="text-xs text-slate-400">
+              当前 {total} 条记录
+              {refreshing ? ' · 正在后台更新…' : ''}
+            </p>
+          )}
+        </div>
 
         {loading ? (
           <div className="flex items-center justify-center gap-2 rounded-2xl border border-slate-100 bg-white px-4 py-16 text-sm text-slate-500">

@@ -28,9 +28,9 @@ export function shouldQuerySfFee(input: {
   sfFeeTrackingNo: string | null | undefined
   force?: boolean
 }): boolean {
-  if (input.shipmentStatus !== 'shipped') return false
   const tracking = String(input.trackingNo || '').trim().toUpperCase()
   if (!isSfTrackingNo(tracking)) return false
+  if (input.shipmentStatus !== 'shipped' && input.shipmentStatus !== 'pending') return false
   if (input.force) return true
 
   if (input.sfFeeTrackingNo && input.sfFeeTrackingNo !== tracking) return true

@@ -137,7 +137,7 @@ function anchorLabel(item: LuckyGiftItem): string {
 }
 
 function sfFeeDisplay(item: LuckyGiftItem): string | null {
-  if (item.shipmentStatus !== 'shipped' || !item.isSfTracking) return null
+  if (!item.isSfTracking || !item.trackingNo) return null
   if (item.sfFeeStatus === 'querying') return '顺丰费用查询中…'
   if (item.sfFeeStatus === 'available' && item.sfMonthlyFeeYuan != null) {
     return `顺丰月结：¥${item.sfMonthlyFeeYuan.toFixed(2)}`
@@ -166,8 +166,14 @@ function LuckyGiftRow(props: {
   const isPending = item.shipmentStatus === 'pending'
   const isShipped = item.shipmentStatus === 'shipped'
   const sfFee = sfFeeDisplay(item)
+  const trackingText =
+    item.trackingNo && item.isSfTracking
+      ? `顺丰 ${item.trackingNo}`
+      : item.trackingNo
+        ? `${item.courierCompany || '物流'} ${item.trackingNo}`
+        : null
   const hasLogisticsDetail =
-    isShipped &&
+    (isShipped || isPending) &&
     (item.courierCompany || item.trackingNo || item.markedShippedAt || sfFee || item.shipmentNote)
 
   return (
@@ -207,10 +213,7 @@ function LuckyGiftRow(props: {
 
             {isNoAddress ? (
               <div className="space-y-1 text-sm text-slate-700">
-                <p>
-                  中奖人：{item.winnerNickname || '—'}
-                  {item.redId ? <span className="ml-2 text-slate-500">小红书号 {item.redId}</span> : null}
-                </p>
+                <p>中奖人：{item.winnerNickname || '—'}</p>
                 <p className="text-amber-800">
                   {item.shipmentStatus === 'incomplete_address'
                     ? `地址不完整：${item.addressMissing.join('、')}`
@@ -228,6 +231,8 @@ function LuckyGiftRow(props: {
                 {item.winnerNickname ? (
                   <p className="text-xs text-slate-400">中奖人 {item.winnerNickname}</p>
                 ) : null}
+                {trackingText ? <p className="text-slate-600">{trackingText}</p> : null}
+                {sfFee ? <p className="text-sky-700">{sfFee}</p> : null}
               </div>
             ) : (
               <div className="space-y-1 text-sm text-slate-800">
@@ -238,9 +243,7 @@ function LuckyGiftRow(props: {
                 </p>
                 <p className="break-all leading-relaxed">{item.fullAddress || '—'}</p>
                 {(item.courierCompany || item.trackingNo) && (
-                  <p className="text-slate-600">
-                    {item.courierCompany || '物流'} {item.trackingNo || '单号待补'}
-                  </p>
+                  <p className="text-slate-600">{trackingText || `${item.courierCompany || '物流'} ${item.trackingNo || '单号待补'}`}</p>
                 )}
                 {sfFee ? <p className="text-sky-700">{sfFee}</p> : null}
               </div>

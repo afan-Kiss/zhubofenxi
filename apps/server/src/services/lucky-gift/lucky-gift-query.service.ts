@@ -10,12 +10,14 @@ import {
   computeAddressDeadlineAt,
   computeDeadlineStatus,
   computeShipDeadlineAt,
+  formatAddressExpiryLabel,
   formatDeadlineLabel,
 } from './lucky-gift-deadline.util'
 import { resolveLuckyGiftAnchorsBatch } from './lucky-gift-anchor-attribution.service'
 import { resolveFreightLabelForDisplay } from './lucky-gift-freight.util'
 import {
   ensureSfFeesForShipments,
+  isSfTrackingNo,
   mapSfFeeForApi,
 } from './lucky-gift-sf-fee.service'
 
@@ -279,7 +281,12 @@ export async function listLuckyGifts(params: {
   const anchorMap = await resolveLuckyGiftAnchorsBatch(rows)
 
   const sfCandidates = rows
-    .filter((w) => (w.shipment?.shipmentStatus || 'no_address') === 'shipped')
+    .filter((w) => {
+      const status = w.shipment?.shipmentStatus || 'no_address'
+      const tracking = w.shipment?.trackingNo ?? w.officialTrackingNo
+      if (status === 'shipped') return true
+      return status === 'pending' && isSfTrackingNo(tracking)
+    })
     .map((w) => ({
       shipmentId: w.shipment!.id,
       trackingNo: w.shipment?.trackingNo ?? w.officialTrackingNo,
@@ -327,7 +334,7 @@ export async function listLuckyGifts(params: {
       const st = computeDeadlineStatus(deadline, now)
       addressDeadlineAt = deadline.toISOString()
       addressDeadlineStatus = st
-      addressDeadlineLabel = formatDeadlineLabel(deadline, '填写地址截止', st)
+      addressDeadlineLabel = formatAddressExpiryLabel(deadline, now)
     }
 
     if (

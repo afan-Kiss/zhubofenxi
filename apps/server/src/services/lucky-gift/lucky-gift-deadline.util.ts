@@ -45,11 +45,27 @@ export function formatDeadlineLabel(
   status: DeadlineStatus,
 ): string {
   if (status === 'overdue') {
-    if (prefix.includes('填写地址')) return '已超过填写地址截止时间'
+    if (prefix.includes('填写地址') || prefix.includes('领奖')) return '已超过领奖失效时间'
     return '已超过发货截止时间'
   }
   const d = deadlineAt
   const pad = (n: number) => String(n).padStart(2, '0')
   const label = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
   return `${prefix}：${label}`
+}
+
+/** 未填地址：用相对时间表达「多久后领奖失效」 */
+export function formatAddressExpiryLabel(deadlineAt: Date, now = new Date()): string {
+  const status = computeDeadlineStatus(deadlineAt, now)
+  if (status === 'overdue') return '已超过领奖失效时间'
+
+  const msLeft = Math.max(0, deadlineAt.getTime() - now.getTime())
+  const totalHours = Math.max(1, Math.ceil(msLeft / 3_600_000))
+  const days = Math.floor(totalHours / 24)
+  const hours = totalHours % 24
+
+  if (days >= 1) {
+    return hours > 0 ? `${days}天${hours}小时后领奖失效` : `${days}天后领奖失效`
+  }
+  return `${totalHours}小时后领奖失效`
 }

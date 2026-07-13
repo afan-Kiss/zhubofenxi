@@ -1,10 +1,35 @@
 import { prisma } from '../../lib/prisma'
-import { findAnchorByName } from '../anchor-rules.service'
+import { findAnchorByName, matchTimeRule } from '../anchor-rules.service'
 import { getAnchorConfigSync } from '../anchor.service'
 import { getEffectiveSchedulesForDate } from '../anchor-daily-schedule.service'
-import { orderLiveRoomMatchesSchedule } from '../../utils/shop-name-normalize.util'
+import {
+  normalizeShopName,
+  orderLiveRoomMatchesSchedule,
+  shopNamesMatch,
+} from '../../utils/shop-name-normalize.util'
 
-export type LuckyGiftAnchorSource = 'room_exact' | 'session_time' | 'schedule' | 'unresolved'
+export type LuckyGiftAnchorSource =
+  | 'room_exact'
+  | 'session_time'
+  | 'schedule'
+  | 'time_rule'
+  | 'unresolved'
+
+function isShopLikeName(name: string, liveAccountName: string): boolean {
+  const trimmed = name.trim()
+  if (!trimmed) return true
+  if (shopNamesMatch(trimmed, liveAccountName)) return true
+  return normalizeShopName(trimmed) != null
+}
+
+export function sanitizeLuckyGiftAnchorName(
+  name: string | null | undefined,
+  liveAccountName: string,
+): string | null {
+  const trimmed = String(name || '').trim()
+  if (!trimmed || isShopLikeName(trimmed, liveAccountName)) return null
+  return trimmed
+}
 
 export type LuckyGiftAnchorAttribution = {
   anchorName: string | null
@@ -162,26 +187,45 @@ export async function resolveLuckyGiftAnchorsBatch(
     let source: LuckyGiftAnchorSource = 'unresolved'
 
     const exact = roomId ? exactMap.get(sessionKey(w.liveAccountId, roomId)) : null
-    if (exact?.anchorName?.trim()) {
-      anchorName = exact.anchorName.trim()
+    const roomExact = sanitizeLuckyGiftAnchorName(exact?.anchorName, w.liveAccountName)
+    if (roomExact) {
+      anchorName = roomExact
       source = 'room_exact'
     } else if (exact) {
-      const fromSchedule = await resolveFromSchedule(w)
+      const fromSchedule = sanitizeLuckyGiftAnchorName(
+        await resolveFromSchedule(w),
+        w.liveAccountName,
+      )
       if (fromSchedule) {
         anchorName = fromSchedule
         source = 'schedule'
       }
     } else if (w.winTime) {
-      const byTime = matchSessionByTime(w.liveAccountId, w.winTime, timeFallbackSessions)
+      const byTime = sanitizeLuckyGiftAnchorName(
+        matchSessionByTime(w.liveAccountId, w.winTime, timeFallbackSessions),
+        w.liveAccountName,
+      )
       if (byTime) {
         anchorName = byTime
         source = 'session_time'
       } else {
-        const fromSchedule = await resolveFromSchedule(w)
+        const fromSchedule = sanitizeLuckyGiftAnchorName(
+          await resolveFromSchedule(w),
+          w.liveAccountName,
+        )
         if (fromSchedule) {
           anchorName = fromSchedule
           source = 'schedule'
         }
+      }
+    }
+
+    if (!anchorName && w.winTime) {
+      const ruleMatch = matchTimeRule(w.winTime, getAnchorConfigSync())
+      const fromRule = sanitizeLuckyGiftAnchorName(ruleMatch?.anchor.name, w.liveAccountName)
+      if (fromRule) {
+        anchorName = fromRule
+        source = 'time_rule'
       }
     }
 

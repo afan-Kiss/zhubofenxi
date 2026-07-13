@@ -5,6 +5,7 @@ import {
   computeAddressDeadlineAt,
   computeShipDeadlineAt,
   computeDeadlineStatus,
+  formatAddressExpiryLabel,
   formatDeadlineLabel,
 } from '../src/services/lucky-gift/lucky-gift-deadline.util'
 import { extractAddressSubmittedAt } from '../src/services/lucky-gift/lucky-gift-address-time.util'
@@ -18,6 +19,7 @@ import { querySfWaybillFee } from '../src/services/sf-waybill-fee.service'
 import {
   matchScheduleAnchor,
   matchSessionByTime,
+  sanitizeLuckyGiftAnchorName,
 } from '../src/services/lucky-gift/lucky-gift-anchor-attribution.service'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
@@ -34,8 +36,9 @@ async function main() {
     `address deadline should be Jul 14, got ${addrDeadline.toISOString()}`,
     issues,
   )
-  const addrLabel = formatDeadlineLabel(addrDeadline, '填写地址截止', computeDeadlineStatus(addrDeadline))
-  assert(addrLabel.includes('填写地址截止'), 'address label prefix', issues)
+  const addrLabel = formatAddressExpiryLabel(addrDeadline)
+  assert(addrLabel.includes('领奖失效'), 'address expiry label', issues)
+  assert(!addrLabel.includes('填写地址截止'), 'no legacy address deadline prefix', issues)
   assert(!addrLabel.includes('15'), 'no-address label must not mention 15-day ship rule', issues)
 
   const addrSubmit = new Date('2026-07-10T10:00:00+08:00')
@@ -64,7 +67,8 @@ async function main() {
   assert(resolveFreightForCopy('时尚手镯（运费自理）') === '运费自理', 'copy freight from name', issues)
 
   assert(!shouldQuerySfFee({ trackingNo: 'YT123', shipmentStatus: 'shipped', sfFeeStatus: null, sfFeeQueriedAt: null, sfFeeTrackingNo: null }), 'non-SF no query', issues)
-  assert(!shouldQuerySfFee({ trackingNo: 'SF1234567890123', shipmentStatus: 'pending', sfFeeStatus: null, sfFeeQueriedAt: null, sfFeeTrackingNo: null }), 'pending no query', issues)
+  assert(!shouldQuerySfFee({ trackingNo: 'SF1234567890123', shipmentStatus: 'no_address', sfFeeStatus: null, sfFeeQueriedAt: null, sfFeeTrackingNo: null }), 'no_address no query', issues)
+  assert(shouldQuerySfFee({ trackingNo: 'SF1234567890123', shipmentStatus: 'pending', sfFeeStatus: null, sfFeeQueriedAt: null, sfFeeTrackingNo: null }), 'pending SF tracking may query fee', issues)
   assert(isSfTrackingNo('SF1234567890123'), 'SF tracking regex', issues)
 
   const schedRows = [
@@ -108,6 +112,17 @@ async function main() {
     issues,
   )
 
+  assert(
+    sanitizeLuckyGiftAnchorName('和田雅玉', '和田雅玉') == null,
+    'shop name must not pass as anchor',
+    issues,
+  )
+  assert(
+    sanitizeLuckyGiftAnchorName('小红', '和田雅玉') === '小红',
+    'real anchor name kept',
+    issues,
+  )
+
   const cachedRecent = shouldQuerySfFee({
     trackingNo: 'SF1234567890123',
     shipmentStatus: 'shipped',
@@ -136,6 +151,8 @@ async function main() {
     '中奖第',
     '距离7天还剩',
     '平台要求填写地址后15日内发货',
+    '小红书号',
+    '填写地址截止',
   ]) {
     assert(!pageSrc.includes(banned), `page must not contain banned text: ${banned}`, issues)
   }

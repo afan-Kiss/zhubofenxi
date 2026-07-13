@@ -2,6 +2,17 @@
 
 export const LUCKY_GIFT_REFERER = 'https://ark.xiaohongshu.com/live_lottery'
 export const LUCKY_GIFT_ORIGIN = 'https://ark.xiaohongshu.com'
+export const LUCKY_GIFT_ARK_PAGE = LUCKY_GIFT_REFERER
+
+/** 千帆福袋页 service URL；带 lucky_draw_id 便于打开后定位到对应福袋 */
+export function buildLuckyGiftArkServiceUrl(luckyDrawId?: string | null): string {
+  const base = LUCKY_GIFT_ARK_PAGE
+  const id = String(luckyDrawId || '').trim()
+  if (!id) return base
+  const u = new URL(base)
+  u.searchParams.set('lucky_draw_id', id)
+  return u.toString()
+}
 
 export const LUCKY_GIFT_API = {
   /** GET params: hostId, page, pageSize（当前/在播福袋，无 room_id 时常为空） */

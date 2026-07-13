@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { CheckSquare, ChevronDown, Copy, Gift, Info, Loader2, RefreshCw, Square, Truck, X } from 'lucide-react'
+import { CheckSquare, ChevronDown, Copy, ExternalLink, Gift, Info, Loader2, RefreshCw, Square, Truck, X } from 'lucide-react'
 import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { apiRequest } from '../../lib/api'
+import { openQianfanLuckyGift } from '../../lib/lucky-gift-qianfan'
 import { useAuth } from '../../providers/AuthProvider'
 import {
   buildLuckyGiftListCacheKey,
@@ -68,6 +69,7 @@ interface LuckyGiftItem {
   id: string
   liveAccountId: string
   liveAccountName: string
+  luckyDrawId: string | null
   giftName: string
   winnerNickname: string
   redId: string | null
@@ -189,7 +191,8 @@ function LuckyGiftRow(props: {
   canMutate: boolean
   isSuperAdmin: boolean
   onCopy: () => void
-  onShip: () => void
+  onOpenQianfan: () => void
+  openingQianfan: boolean
   onUndo: () => void
   onRefreshSfFee?: () => void
 }) {
@@ -330,9 +333,18 @@ function LuckyGiftRow(props: {
               复制
             </button>
             {props.canMutate && isPending && item.addressComplete && (
-              <button type="button" onClick={props.onShip} className={`${ACTION_BTN_PRIMARY} w-full justify-center`}>
-                <Truck className="h-3.5 w-3.5" />
-                标记已发
+              <button
+                type="button"
+                onClick={props.onOpenQianfan}
+                disabled={props.openingQianfan}
+                className={`${ACTION_BTN_PRIMARY} w-full justify-center disabled:opacity-60`}
+              >
+                {props.openingQianfan ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <ExternalLink className="h-3.5 w-3.5" />
+                )}
+                跳转千帆
               </button>
             )}
             {props.canMutate &&
@@ -413,6 +425,7 @@ export const LuckyGiftsPage: React.FC = () => {
   const [keyword, setKeyword] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [shipModalId, setShipModalId] = useState<string | null>(null)
+  const [openingQianfanId, setOpeningQianfanId] = useState<string | null>(null)
   const [batchShip, setBatchShip] = useState(false)
   const [courier, setCourier] = useState('')
   const [trackingNo, setTrackingNo] = useState('')
@@ -602,6 +615,19 @@ export const LuckyGiftsPage: React.FC = () => {
       setError(err instanceof Error ? err.message : '单店同步失败')
     } finally {
       setSyncing(false)
+    }
+  }
+
+  async function handleOpenQianfan(id: string) {
+    if (!canMutate || openingQianfanId) return
+    setOpeningQianfanId(id)
+    setError(null)
+    try {
+      await openQianfanLuckyGift(id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '打开千帆福袋页失败')
+    } finally {
+      setOpeningQianfanId(null)
     }
   }
 
@@ -932,10 +958,8 @@ export const LuckyGiftsPage: React.FC = () => {
               canMutate={canMutate}
               isSuperAdmin={isSuperAdmin}
               onCopy={() => void handleCopyOne(item)}
-              onShip={() => {
-                setBatchShip(false)
-                setShipModalId(item.id)
-              }}
+              onOpenQianfan={() => void handleOpenQianfan(item.id)}
+              openingQianfan={openingQianfanId === item.id}
               onUndo={() => void undoShip(item.id)}
               onRefreshSfFee={() => void refreshSfFee(item.id)}
             />

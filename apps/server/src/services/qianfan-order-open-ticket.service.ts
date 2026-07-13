@@ -315,10 +315,21 @@ async function fetchTicketWithCookieDetailed(
   cookie: string,
   serviceUrl: string,
   candidate: CookieCandidate,
+  options?: { preferReferer?: string },
 ): Promise<{ ticket: string; attempts: QianfanTicketAttempt[] }> {
   const attempts: QianfanTicketAttempt[] = []
   const bodySpecs = buildTicketRequestBodies(serviceUrl, cookie)
   const headerVariants = buildHeaderVariants(cookie)
+  const preferReferer = String(options?.preferReferer || '').trim()
+  if (preferReferer) {
+    const arkAuth = extractAuthorizationFromCookie(cookie)
+    headerVariants.unshift({
+      tag: 'ark-prefer',
+      origin: ARK_ROOT,
+      referer: preferReferer,
+      authorization: arkAuth,
+    })
+  }
 
   for (const hv of headerVariants) {
     if (hv.tag === 'walle' && !hv.authorization) continue
@@ -569,6 +580,79 @@ export async function resolveQianfanOrderDetail(params: {
   }
 }
 
+function storeQianfanOpenTicket(redirectUrl: string): {
+  ticket: string
+  expiresInSeconds: number
+  openUrl: string
+} {
+  const ticket = `qf-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  ticketStore.set(ticket, {
+    redirectUrl,
+    createdAt: Date.now(),
+    used: false,
+  })
+  return {
+    ticket,
+    expiresInSeconds: 60,
+    openUrl: `/api/board/qianfan-order-detail/open?ticket=${encodeURIComponent(ticket)}`,
+  }
+}
+
+export async function createQianfanArkServiceOpenTicket(params: {
+  serviceUrl: string
+  liveAccountId: string
+  referer?: string
+}): Promise<{
+  ticket: string
+  expiresInSeconds: number
+  openUrl: string
+  hasTicket: boolean
+  fallbackToBaseUrl: boolean
+}> {
+  const serviceUrl = String(params.serviceUrl || '').trim()
+  const liveAccountId = String(params.liveAccountId || '').trim()
+  if (!serviceUrl) {
+    throw new QianfanOrderOpenTicketError('缺少目标页面')
+  }
+  if (!liveAccountId) {
+    throw new QianfanOrderOpenTicketError('缺少直播号信息')
+  }
+
+  const cookie = (await getDecryptedCookieByAccountId(liveAccountId)) ?? ''
+  const accounts = await listEnabledLiveAccountsWithCookie()
+  const accountName = accounts.find((a) => a.id === liveAccountId)?.name || '直播号'
+
+  if (!cookie.trim()) {
+    throw new QianfanOrderOpenTicketError('平台登录信息过期了，请到系统设置重新粘贴 Cookie。')
+  }
+
+  const candidate: CookieCandidate = {
+    cookie,
+    accountName,
+    accountId: liveAccountId,
+    cookieSource: 'live_account',
+  }
+
+  const { ticket: stTicket } = await fetchTicketWithCookieDetailed(cookie, serviceUrl, candidate, {
+    preferReferer: params.referer,
+  })
+
+  const finalOpenUrl = stTicket
+    ? buildArkUrlWithTicketDirect(serviceUrl, stTicket)
+    : serviceUrl
+
+  if (!finalOpenUrl) {
+    throw new QianfanOrderOpenTicketError('暂时无法打开千帆页面')
+  }
+
+  const stored = storeQianfanOpenTicket(finalOpenUrl)
+  return {
+    ...stored,
+    hasTicket: Boolean(stTicket),
+    fallbackToBaseUrl: !stTicket,
+  }
+}
+
 export async function createQianfanOrderOpenTicket(
   orderNo: string,
   options?: { shop?: string; source?: QianfanOrderTicketSource },
@@ -593,17 +677,9 @@ export async function createQianfanOrderOpenTicket(
     throw new QianfanOrderOpenTicketError(resolved.error || '暂时无法打开订单详情')
   }
 
-  const ticket = `qf-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-  ticketStore.set(ticket, {
-    redirectUrl: resolved.finalOpenUrl,
-    createdAt: Date.now(),
-    used: false,
-  })
-
+  const stored = storeQianfanOpenTicket(resolved.finalOpenUrl)
   return {
-    ticket,
-    expiresInSeconds: 60,
-    openUrl: `/api/board/qianfan-order-detail/open?ticket=${encodeURIComponent(ticket)}`,
+    ...stored,
     hasTicket: resolved.hasTicket,
     fallbackToBaseUrl: resolved.fallbackToBaseUrl,
   }

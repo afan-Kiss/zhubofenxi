@@ -21,6 +21,7 @@ import {
   matchSessionByTime,
   sanitizeLuckyGiftAnchorName,
 } from '../src/services/lucky-gift/lucky-gift-anchor-attribution.service'
+import { buildLuckyGiftArkServiceUrl } from '../src/services/lucky-gift/lucky-gift.types'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -123,6 +124,12 @@ async function main() {
     issues,
   )
 
+  assert(
+    buildLuckyGiftArkServiceUrl('138008565063504647').includes('lucky_draw_id=138008565063504647'),
+    'lucky gift ark url includes draw id',
+    issues,
+  )
+
   const cachedRecent = shouldQuerySfFee({
     trackingNo: 'SF1234567890123',
     shipmentStatus: 'shipped',
@@ -159,6 +166,10 @@ async function main() {
   assert(pageSrc.includes('formatAnchorDisplayName'), 'anchor display helper', issues)
   assert(pageSrc.includes('anchorLabel(item)'), 'anchor label on card', issues)
   assert(pageSrc.includes('物流详情'), 'shipped logistics detail entry', issues)
+
+  assert(pageSrc.includes('跳转千帆'), 'qianfan jump button on card', issues)
+  assert(pageSrc.includes('openQianfanLuckyGift'), 'qianfan open helper', issues)
+  assert(!pageSrc.includes('onShip'), 'row must not use ship modal trigger', issues)
 
   if (issues.length) {
     console.error('[verify:lucky-gift-anchor-fee] FAILED')

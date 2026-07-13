@@ -372,6 +372,7 @@ export async function listLuckyGifts(params: {
       id: w.id,
       liveAccountId: w.liveAccountId,
       liveAccountName: w.liveAccountName,
+      luckyDrawId: w.luckyDrawId,
       giftName,
       winnerNickname: w.winnerNickname,
       redId: w.redId,

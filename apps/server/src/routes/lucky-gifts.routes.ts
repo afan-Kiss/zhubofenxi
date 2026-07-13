@@ -23,6 +23,10 @@ import {
   buildLuckyGiftShipCopyText,
 } from '../services/lucky-gift/lucky-gift-copy.util'
 import { canViewLuckyGiftPii } from '../services/lucky-gift/lucky-gift-query.service'
+import {
+  createLuckyGiftQianfanOpenTicket,
+  QianfanOrderOpenTicketError,
+} from '../services/lucky-gift/lucky-gift-qianfan-ticket.service'
 
 export const luckyGiftsRouter = Router()
 
@@ -138,6 +142,32 @@ luckyGiftsRouter.post(
       const data = await queryAndCacheSfFeeForShipment(winner.shipment.id, tracking, true)
       sendOk(res, data)
     } catch (err) {
+      next(err)
+    }
+  },
+)
+
+luckyGiftsRouter.post(
+  '/qianfan-ticket',
+  requireRole('super_admin', 'boss', 'staff'),
+  async (req, res, next) => {
+    try {
+      if (!canViewLuckyGiftPii(req.user?.role)) {
+        sendFail(res, '当前账号无权操作', 403)
+        return
+      }
+      const winnerId = String(req.body?.winnerId ?? '').trim()
+      if (!winnerId) {
+        sendFail(res, '缺少中奖记录 ID', 400)
+        return
+      }
+      const data = await createLuckyGiftQianfanOpenTicket(winnerId)
+      sendOk(res, data)
+    } catch (err) {
+      if (err instanceof QianfanOrderOpenTicketError) {
+        sendFail(res, err.message, 400)
+        return
+      }
       next(err)
     }
   },

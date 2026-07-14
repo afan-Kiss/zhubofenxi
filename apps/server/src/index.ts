@@ -20,7 +20,10 @@ import {
   ensureDefaultLiveAccount,
   refreshLiveAccountRowMapperContext,
 } from './services/live-account.service'
-import { refreshAnchorConfigCache } from './services/anchor.service'
+import {
+  initializeSystemAnchors,
+  refreshAnchorConfigCache,
+} from './services/anchor.service'
 import { startDeferredBootTasks } from './services/deferred-boot.service'
 import { assertYoudaoLiveAnalysisLicense } from './services/youdao-license.service'
 import { logError, logInfo } from './utils/server-log'
@@ -85,6 +88,7 @@ async function main() {
   await ensureDefaultLiveAccount()
   await refreshLiveAccountRowMapperContext()
   await migrateLegacyDownloadModes()
+  await initializeSystemAnchors()
   await refreshAnchorConfigCache()
 
   const { app, webMounted } = createApp()

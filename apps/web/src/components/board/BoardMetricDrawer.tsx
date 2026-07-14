@@ -97,11 +97,15 @@ export const BoardMetricDrawer: React.FC<Props> = ({
 
   const {
     anchorOptions,
+    optionsError,
+    reloadOptions,
     assigningOrderNo,
     assignError,
+    assignSuccess,
     handleManualAssign,
     handleClearManualOverride,
     clearAssignError,
+    clearAssignSuccess,
   } = useManualOrderAnchorAssign({
     enabled: open,
     onAssigned: () => {
@@ -159,7 +163,8 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     setData(null)
     setError(null)
     clearAssignError()
-  }, [metric, startDate, endDate, open, anchorId, anchorName, preset, overviewStableSnapshot, clearAssignError])
+    clearAssignSuccess()
+  }, [metric, startDate, endDate, open, anchorId, anchorName, preset, overviewStableSnapshot, clearAssignError, clearAssignSuccess])
 
   const isRefundMetric = metric === 'returnAmount' || metric === 'returnCount'
   const isQualityMetric = metric === 'qualityReturnCount' || metric === 'qualityReturnRate'
@@ -355,7 +360,20 @@ export const BoardMetricDrawer: React.FC<Props> = ({
               },
             }}
           />
+          {optionsError ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs text-red-600">
+              <span>主播选项加载失败：{optionsError}</span>
+              <button
+                type="button"
+                onClick={() => reloadOptions()}
+                className="rounded border border-red-200 bg-white px-2 py-0.5 text-red-700 hover:bg-red-50"
+              >
+                重新加载
+              </button>
+            </div>
+          ) : null}
           {assignError ? <p className="text-xs text-red-600">{assignError}</p> : null}
+          {assignSuccess ? <p className="text-xs text-emerald-700">{assignSuccess}</p> : null}
         </div>
       ) : null}
     </BoardDrawerShell>

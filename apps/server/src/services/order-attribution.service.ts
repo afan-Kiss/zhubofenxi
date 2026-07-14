@@ -40,9 +40,12 @@ export function attributeOrder(
 
   const fromOrder = resolveAnchorFromOrderFields(order, config)
   if (fromOrder) {
-    return {
-      ...fromOrder,
-      attributionType: 'order_anchor_field',
+    const modeAnchor = config.anchors.find((a) => a.id === fromOrder.anchorId)
+    if (modeAnchor?.attributionMode !== 'manual') {
+      return {
+        ...fromOrder,
+        attributionType: 'order_anchor_field',
+      }
     }
   }
 
@@ -64,7 +67,7 @@ export function attributeOrder(
     if (session.anchorId || session.anchorName) {
       if (session.anchorId) {
         const anchor = config.anchors.find((a) => a.id === session.anchorId)
-        if (anchor) {
+        if (anchor && anchor.attributionMode !== 'manual') {
           return {
             anchorId: anchor.id,
             anchorName: anchor.name,
@@ -81,7 +84,7 @@ export function attributeOrder(
           const mapped = mapLiveNickToKnownAnchor(trimmed)
           const lookupName = mapped ?? trimmed
           const found = findAnchorByName(config, lookupName)
-          if (found) {
+          if (found && found.attributionMode !== 'manual') {
             return {
               anchorId: found.id,
               anchorName: found.name,

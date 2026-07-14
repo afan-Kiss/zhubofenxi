@@ -11,7 +11,7 @@
  */
 import type { AnalyzedOrderView } from '../types/analysis'
 import { findAnchorByName } from './anchor-rules.service'
-import { getAnchorConfigSync } from './anchor.service'
+import { getAnchorConfigSync, isAutoAttributableAnchorName } from './anchor.service'
 import {
   resolveManualAnchorOverrideForView,
 } from './order-anchor-manual-override.service'
@@ -332,7 +332,10 @@ async function resolveByLiveSession(
 
   if (!hits.length) return { hit: null, conflict: null, hasShopSessions: true }
 
-  const anchors = new Set(hits.map((h) => h.anchorName))
+  const autoHits = hits.filter((h) => isAutoAttributableAnchorName(h.anchorName))
+  if (!autoHits.length) return { hit: null, conflict: null, hasShopSessions: true }
+
+  const anchors = new Set(autoHits.map((h) => h.anchorName))
   if (anchors.size > 1) {
     return {
       hit: null,
@@ -341,8 +344,8 @@ async function resolveByLiveSession(
     }
   }
 
-  hits.sort((a, b) => a.spanMs - b.spanMs || b.startMs - a.startMs)
-  const best = hits[0]!
+  autoHits.sort((a, b) => a.spanMs - b.spanMs || b.startMs - a.startMs)
+  const best = autoHits[0]!
   const startHm = new Date(best.startMs).toLocaleTimeString('zh-CN', {
     timeZone: 'Asia/Shanghai',
     hour: '2-digit',
@@ -386,14 +389,16 @@ async function resolveByConfirmedSchedule(
     return createMs >= row.startAt.getTime() && createMs < row.endAt.getTime()
   })
   if (!matched.length) return { hit: null, conflict: null }
-  const anchors = new Set(matched.map((m) => m.anchorName))
+  const autoMatched = matched.filter((m) => isAutoAttributableAnchorName(m.anchorName))
+  if (!autoMatched.length) return { hit: null, conflict: null }
+  const anchors = new Set(autoMatched.map((m) => m.anchorName))
   if (anchors.size > 1) {
     return {
       hit: null,
       conflict: `同一直播号同一时间已确认排班存在多个主播（${[...anchors].join('、')}），订单暂不能归属`,
     }
   }
-  const best = matched[0]!
+  const best = autoMatched[0]!
   return {
     hit: {
       id: best.id,

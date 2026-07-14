@@ -50,7 +50,10 @@ export function matchTimeRule(
     if (!isTimeRuleEffectiveAt(rule, date)) continue
     if (!isMinuteInRule(minutes, rule)) continue
     const anchor = config.anchors.find((a) => a.id === rule.anchorId && a.enabled)
-    if (anchor) return { rule, anchor }
+    if (!anchor) continue
+    // 仅手动归属主播不参与时段自动匹配
+    if (anchor.attributionMode === 'manual') continue
+    return { rule, anchor }
   }
   return null
 }

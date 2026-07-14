@@ -11,6 +11,8 @@ import { logInfo } from '../utils/server-log'
 export interface ManualAnchorOverrideEntry {
   anchorId: string
   anchorName: string
+  assignedBy?: string | null
+  updatedAt?: string | null
 }
 
 let cachedOverrideMap: Map<string, ManualAnchorOverrideEntry> | null = null
@@ -78,25 +80,43 @@ export function resolveManualAssignAnchorIdentity(anchorName: string): {
   throw new Error(`主播「${name}」不存在`)
 }
 
-/** 抽屉手动指定：固定场次主播 + 后台启用主播（与业绩页一致） */
+/** 抽屉手动指定：固定场次主播 + 后台启用主播（含仅手动归属） */
 export async function listOrderAnchorAssignOptions(): Promise<
-  Array<{ id: string; name: string }>
+  Array<{ id: string; name: string; attributionMode?: string; systemKey?: string | null }>
 > {
   await refreshAnchorConfigCache()
   const config = getAnchorConfigSync()
   const fixedNames = Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613)
-  const byName = new Map<string, { id: string; name: string }>()
+  const byName = new Map<
+    string,
+    { id: string; name: string; attributionMode?: string; systemKey?: string | null }
+  >()
 
   for (const name of fixedNames) {
     const found = findAnchorByName(config, name)
-    byName.set(name, { id: found?.id ?? `extra-${name}`, name })
+    byName.set(name, {
+      id: found?.id ?? `extra-${name}`,
+      name,
+      attributionMode: found?.attributionMode ?? 'schedule',
+      systemKey: found?.systemKey ?? null,
+    })
   }
   for (const anchor of config.anchors) {
     if (!anchor.enabled || !anchor.name.trim()) continue
-    byName.set(anchor.name, { id: anchor.id, name: anchor.name })
+    byName.set(anchor.name, {
+      id: anchor.id,
+      name: anchor.name,
+      attributionMode: anchor.attributionMode ?? 'schedule',
+      systemKey: anchor.systemKey ?? null,
+    })
   }
 
-  const result: Array<{ id: string; name: string }> = []
+  const result: Array<{
+    id: string
+    name: string
+    attributionMode?: string
+    systemKey?: string | null
+  }> = []
   const seen = new Set<string>()
   for (const name of fixedNames) {
     const hit = byName.get(name)
@@ -107,7 +127,12 @@ export async function listOrderAnchorAssignOptions(): Promise<
   for (const anchor of config.anchors) {
     if (!anchor.enabled || seen.has(anchor.name)) continue
     seen.add(anchor.name)
-    result.push({ id: anchor.id, name: anchor.name })
+    result.push({
+      id: anchor.id,
+      name: anchor.name,
+      attributionMode: anchor.attributionMode ?? 'schedule',
+      systemKey: anchor.systemKey ?? null,
+    })
   }
   return result
 }
@@ -148,7 +173,7 @@ export async function assignOrderAnchorManualOverride(params: {
   if (!anchorName || anchorName === '未归属') throw new Error('请选择有效主播')
 
   const { anchorId, anchorName: resolvedName } = resolveManualAssignAnchorIdentity(anchorName)
-  await prisma.orderAnchorManualOverride.upsert({
+  const row = await prisma.orderAnchorManualOverride.upsert({
     where: { orderKey },
     create: {
       orderKey,
@@ -168,7 +193,12 @@ export async function assignOrderAnchorManualOverride(params: {
   logInfo('订单归属', `手动指定 ${orderKey} → ${resolvedName}`)
   await invalidateAndRebuildBusinessBoardCache(`order-anchor-manual:${orderKey}`)
 
-  return { anchorId, anchorName: resolvedName }
+  return {
+    anchorId,
+    anchorName: resolvedName,
+    assignedBy: row.assignedBy,
+    updatedAt: row.updatedAt?.toISOString?.() ?? String(row.updatedAt),
+  }
 }
 
 export async function removeOrderAnchorManualOverride(orderKey: string): Promise<void> {

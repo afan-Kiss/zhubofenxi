@@ -349,17 +349,26 @@ model XhsRawPendingSettlement {
 }
 
 model Anchor {
-  id                  String           @id @default(cuid())
-  name                String           @unique
+  id                  String                 @id @default(cuid())
+  name                String                 @unique
   externalId          String?
   defaultLiveRoomName String?
   color               String?
-  enabled             Boolean          @default(true)
-  sortOrder           Int              @default(0)
+  enabled             Boolean                @default(true)
+  sortOrder           Int                    @default(0)
+  /** 系统主播稳定身份，如 YIFAN_MANUAL；普通主播为 null */
+  systemKey           String?                @unique
+  /** schedule=场次/排班/时段；manual=仅订单手动指定 */
+  attributionMode     AnchorAttributionMode  @default(schedule)
   deletedAt           DateTime?
-  createdAt           DateTime         @default(now())
-  updatedAt           DateTime         @updatedAt
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
   timeRules           AnchorTimeRule[]
+}
+
+enum AnchorAttributionMode {
+  schedule
+  manual
 }
 
 model AnchorTimeRule {

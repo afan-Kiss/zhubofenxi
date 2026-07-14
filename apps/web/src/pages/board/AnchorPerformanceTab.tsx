@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { CalendarDays, ChevronDown, Package, PackageCheck, Percent, RotateCcw, TrendingUp, Undo2, Wallet, AlertTriangle, type LucideIcon } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
@@ -44,6 +44,7 @@ import {
   resolveBoardDataUpdatedAt,
 } from '../../lib/data-freshness'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
+import { apiRequest } from '../../lib/api'
 
 type AnchorSummaryCardType = 'money' | 'count' | 'rate'
 
@@ -300,14 +301,63 @@ export const AnchorPerformanceTab: React.FC = () => {
     [data?.anchorLeaderboard],
   )
 
+  const [configAnchors, setConfigAnchors] = useState<
+    Array<{ id: string; name: string; attributionMode?: string; systemKey?: string | null }>
+  >([])
+
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiRequest<{
+          anchors: Array<{
+            id: string
+            name: string
+            attributionMode?: string
+            systemKey?: string | null
+          }>
+          filterNames?: string[]
+        }>('/api/anchors/options')
+        if (!cancelled) setConfigAnchors(res.anchors ?? [])
+      } catch {
+        if (!cancelled) setConfigAnchors([])
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const handleOrderAnchorAssigned = useCallback(() => {
     void reload()
   }, [reload])
 
-  const options = allAnchors.map((a) => ({
-    id: String(a.anchorId ?? a.anchorName),
-    name: String(a.anchorName),
-  }))
+  const filterOptions = useMemo(() => {
+    const byName = new Map<string, { id: string; name: string }>()
+    for (const a of configAnchors) {
+      if (!a.name.trim()) continue
+      byName.set(a.name, { id: a.id, name: a.name })
+    }
+    for (const a of allAnchors) {
+      const name = String(a.anchorName ?? '').trim()
+      if (!name || name === '未归属') continue
+      if (!byName.has(name)) {
+        byName.set(name, { id: String(a.anchorId ?? name), name })
+      }
+    }
+    return Array.from(byName.values())
+  }, [configAnchors, allAnchors])
+
+  const options = filterOptions
+
+  const selectedConfigAnchor = useMemo(() => {
+    if (anchorFilter === '全部') return null
+    return configAnchors.find((a) => a.name === anchorFilter) ?? null
+  }, [anchorFilter, configAnchors])
+
+  const selectedIsManual =
+    selectedConfigAnchor?.attributionMode === 'manual' ||
+    Boolean(selectedConfigAnchor?.systemKey)
 
   const anchors = useMemo(() => {
     if (anchorFilter === '全部') return allAnchors
@@ -500,7 +550,12 @@ export const AnchorPerformanceTab: React.FC = () => {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">主播业绩</h2>
-          <p className="mt-0.5 text-sm text-slate-500">按归属时段汇总各主播经营表现</p>
+          <p className="mt-0.5 text-sm text-slate-500">按订单归属汇总各主播经营表现</p>
+          {selectedIsManual ? (
+            <p className="mt-1 text-xs text-indigo-700">
+              该主播仅统计订单明细里手动指定的归属，不受场次和排班影响。
+            </p>
+          ) : null}
           {!dataFreshnessLoading && !isSyncingNow && freshnessLine ? (
             <p className="mt-1 text-xs text-slate-400">{freshnessLine}</p>
           ) : null}
@@ -510,7 +565,7 @@ export const AnchorPerformanceTab: React.FC = () => {
             </p>
           ) : null}
         </div>
-        {(preset === 'today' || preset === 'yesterday') && startDate ? (
+        {(preset === 'today' || preset === 'yesterday') && startDate && !selectedIsManual ? (
           <Link
             to={`/anchor-schedules?date=${encodeURIComponent(startDate)}`}
             className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm hover:bg-slate-50"

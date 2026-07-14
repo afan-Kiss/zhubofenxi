@@ -3,8 +3,8 @@ import type { AnchorConfig } from '../types/analysis'
 export function createDefaultAnchorConfig(): AnchorConfig {
   return {
     anchors: [
-      { id: 'anchor-zijie', name: '子杰', color: '#FF2442', enabled: true },
-      { id: 'anchor-feiyun', name: '飞云', color: '#FF8A3D', enabled: true },
+      { id: 'anchor-zijie', name: '子杰', color: '#FF2442', enabled: true, attributionMode: 'schedule' },
+      { id: 'anchor-feiyun', name: '飞云', color: '#FF8A3D', enabled: true, attributionMode: 'schedule' },
     ],
     timeRules: [
       {

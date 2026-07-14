@@ -49,6 +49,10 @@ anchorRouter.post('/', async (req, res) => {
       sortOrder: body.sortOrder != null ? Number(body.sortOrder) : undefined,
       manualOnly: body.manualOnly === true || body.manualOnly === '1' || body.manualOnly === 1,
       timeRules: Array.isArray(body.timeRules) ? body.timeRules : undefined,
+      attributionMode:
+        body.attributionMode === 'manual' || body.attributionMode === 'schedule'
+          ? body.attributionMode
+          : undefined,
     })
     sendOk(res, anchor)
   } catch (err) {
@@ -121,6 +125,10 @@ anchorRouter.patch('/:id', async (req, res) => {
       color: req.body?.color != null ? String(req.body.color) : undefined,
       enabled: req.body?.enabled !== undefined ? Boolean(req.body.enabled) : undefined,
       sortOrder: req.body?.sortOrder != null ? Number(req.body.sortOrder) : undefined,
+      attributionMode:
+        req.body?.attributionMode === 'manual' || req.body?.attributionMode === 'schedule'
+          ? req.body.attributionMode
+          : undefined,
       timeRules: Array.isArray(req.body?.timeRules) ? req.body.timeRules : undefined,
     })
     sendOk(res, anchor)

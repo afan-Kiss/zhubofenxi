@@ -122,11 +122,15 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
 
   const {
     anchorOptions,
+    optionsError,
+    reloadOptions,
     assigningOrderNo,
     assignError,
+    assignSuccess,
     handleManualAssign,
     handleClearManualOverride,
     clearAssignError,
+    clearAssignSuccess,
   } = useManualOrderAnchorAssign({
     enabled: open,
     onAssigned: () => {
@@ -149,7 +153,8 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
     setLiveSessionsOpen(false)
     setOrderTab('all')
     clearAssignError()
-  }, [open, anchorName, anchorId, startDate, endDate, preset, clearAssignError])
+    clearAssignSuccess()
+  }, [open, anchorName, anchorId, startDate, endDate, preset, clearAssignError, clearAssignSuccess])
 
   useEffect(() => {
     return () => {
@@ -423,7 +428,20 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
               },
             }}
           />
+          {optionsError ? (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-red-600">
+              <span>主播选项加载失败：{optionsError}</span>
+              <button
+                type="button"
+                onClick={() => reloadOptions()}
+                className="rounded border border-red-200 bg-white px-2 py-0.5 text-red-700 hover:bg-red-50"
+              >
+                重新加载
+              </button>
+            </div>
+          ) : null}
           {assignError ? <p className="mt-2 text-xs text-red-600">{assignError}</p> : null}
+          {assignSuccess ? <p className="mt-2 text-xs text-emerald-700">{assignSuccess}</p> : null}
           {summaryText ? (
             <div
               className={`mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-rose-100/80 bg-rose-50/40 px-4 py-3 ${DRAWER_STAT_FONT}`}

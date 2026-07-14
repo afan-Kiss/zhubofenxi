@@ -337,11 +337,16 @@ export function ensureAnchorPerformanceLeaderboardSlots(
     fixedNames.push('小白')
   }
 
-  const enabledRuleAnchorIds = new Set(
-    config.timeRules.filter((r) => r.enabled).map((r) => r.anchorId),
-  )
   const manualOnlyNames = config.anchors
-    .filter((a) => a.enabled && a.name.trim() && !enabledRuleAnchorIds.has(a.id))
+    .filter(
+      (a) =>
+        a.enabled &&
+        a.name.trim() &&
+        (a.attributionMode === 'manual' ||
+          // 兼容未写 attributionMode 的缓存：无任何启用时段 → 手动槽位
+          (!a.attributionMode &&
+            !config.timeRules.some((r) => r.enabled && r.anchorId === a.id))),
+    )
     .map((a) => a.name.trim())
 
   const slotNames = [...fixedNames]

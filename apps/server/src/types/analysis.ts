@@ -153,6 +153,10 @@ export interface Anchor {
   enabled: boolean
   /** 主播登录账号绑定（与系统 username 匹配） */
   externalId?: string | null
+  /** 系统主播稳定身份，如 YIFAN_MANUAL */
+  systemKey?: string | null
+  /** schedule | manual */
+  attributionMode?: 'schedule' | 'manual'
 }
 
 export interface TimeRule {

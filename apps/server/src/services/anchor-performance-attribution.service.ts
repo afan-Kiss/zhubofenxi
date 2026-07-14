@@ -10,6 +10,8 @@ import {
   SHOP_SESSION_ANCHOR_CUTOFF_MS,
   XIAOBAI_ANCHOR_CUTOFF_MS,
 } from './anchor-session-cutoff.util'
+import { resolveXiaoBaiSlotMinutesForDate } from './anchor-xiaobai-slot.util'
+import { resolveCanonicalShopName } from '../utils/shop-name-normalize.util'
 import {
   aggregateViewsMetrics,
   type BoardAnchorMetrics,
@@ -70,12 +72,15 @@ export function isReportDateOnOrAfterXiaoBaiCutoff(startDate: string): boolean {
   return Number.isFinite(ms) && ms >= XIAOBAI_ANCHOR_CUTOFF_MS
 }
 
-/** 6.18 起：14:30–18:00 且来源直播号为祥钰系 → 归小白（不含拾玉居/和田雅玉等） */
+/**
+ * 6.18 起：祥钰系午场 → 小白（不含拾玉居/和田雅玉）。
+ * 第二参应对应为下单时间 ms（正式归属走 canonical；本函数供兼容/边界验收）。
+ */
 export function isXiaoBaiOrderAttribution(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
-  payMs: number,
+  orderCreateMs: number,
 ): boolean {
-  if (!isXiaoBaiAttributionActive(payMs)) return false
+  if (!isXiaoBaiAttributionActive(orderCreateMs)) return false
   const liveAccountName =
     (view.liveAccountName ?? '').trim() || pickLiveAccountFromRaw(view.raw)
   return normalizeShopSessionKey(liveAccountName) === 'xiangyu'
@@ -89,16 +94,18 @@ export function isXiaoBaiSessionStart(sessionStartMs: number): boolean {
   )
 }
 
-/** 直播场次与当日 14:30–18:00 时段有交集（6.18 起用于场次归属小白） */
+function pad2(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+/** 直播场次与当日小白午场有交集（6月 14:30–18:00 / 7月起 14:00–18:30） */
 export function sessionOverlapsXiaoBaiSlot(startMs: number, endMs: number): boolean {
   if (!Number.isFinite(startMs) || startMs < XIAOBAI_ANCHOR_CUTOFF_MS) return false
-  const dateKey = formatDateKeyShanghai(new Date(startMs))
-  const slotStartMs = Date.parse(`${dateKey}T14:30:00+08:00`)
-  const slotEndMs = Date.parse(`${dateKey}T18:00:00+08:00`)
+  const { slotStartMs, slotEndMs } = resolveXiaoBaiSlotBoundsMs(startMs)
   let effectiveEnd = endMs
   if (!Number.isFinite(effectiveEnd)) effectiveEnd = startMs
   if (effectiveEnd < startMs) effectiveEnd += 86_400_000
-  return startMs <= slotEndMs && effectiveEnd >= slotStartMs
+  return startMs < slotEndMs && effectiveEnd > slotStartMs
 }
 
 export function resolveXiaoBaiSlotBoundsMs(sessionStartMs: number): {
@@ -106,9 +113,14 @@ export function resolveXiaoBaiSlotBoundsMs(sessionStartMs: number): {
   slotEndMs: number
 } {
   const dateKey = formatDateKeyShanghai(new Date(sessionStartMs))
+  const { startMinutes, endMinutes } = resolveXiaoBaiSlotMinutesForDate(dateKey)
+  const startH = Math.floor(startMinutes / 60)
+  const startM = startMinutes % 60
+  const endH = Math.floor(endMinutes / 60)
+  const endM = endMinutes % 60
   return {
-    slotStartMs: Date.parse(`${dateKey}T14:30:00+08:00`),
-    slotEndMs: Date.parse(`${dateKey}T18:00:00+08:00`),
+    slotStartMs: Date.parse(`${dateKey}T${pad2(startH)}:${pad2(startM)}:00+08:00`),
+    slotEndMs: Date.parse(`${dateKey}T${pad2(endH)}:${pad2(endM)}:00+08:00`),
   }
 }
 
@@ -194,6 +206,11 @@ export function resolveLiveSessionPeriod(date: Date): LiveSessionPeriod | null {
 export function normalizeShopSessionKey(liveAccountName: string): ShopSessionKey | null {
   const n = (liveAccountName ?? '').trim()
   if (!n) return null
+  const canonical = resolveCanonicalShopName(n)
+  if (canonical === 'XY祥钰珠宝' || canonical === '祥钰珠宝') return 'xiangyu'
+  if (canonical === '拾玉居和田玉') return 'shiyu'
+  if (canonical === '和田雅玉') return 'hetian'
+  // 兜底：未进 canonical 表但标签含关键店铺关键字
   if (n.includes('祥钰')) return 'xiangyu'
   if (n.includes('拾玉居')) return 'shiyu'
   if (n.includes('和田雅玉')) return 'hetian'
@@ -264,16 +281,22 @@ export function resolveShopSessionAnchorFromLiveAccount(
   return { anchorId: `extra-${anchorName}`, anchorName }
 }
 
+/**
+ * @deprecated 正式业绩/品退/明细请用 resolveCanonicalOrderAttribution（下单时间 + 有效排班）。
+ * 本函数仅作同步兼容路径：优先下单时间判定小白午场，其余仍按支付时间回落旧规则。
+ */
 export function resolveAnchorForPerformanceAttribution(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
   config: AnchorConfig = getAnchorConfigSync(),
 ): { anchorId: string; anchorName: string } {
+  const createMs = parseLegacyOrderCreateTimeMs(view)
   const payMs = parseViewPayTimeMs(view)
-  if (payMs == null || payMs < SHOP_SESSION_ANCHOR_CUTOFF_MS) {
+  const anchorMs = createMs ?? payMs
+  if (anchorMs == null || anchorMs < SHOP_SESSION_ANCHOR_CUTOFF_MS) {
     return { anchorId: view.anchorId, anchorName: view.anchorName }
   }
 
-  if (isXiaoBaiOrderAttribution(view, payMs)) {
+  if (isXiaoBaiOrderAttribution(view, createMs ?? payMs!)) {
     return resolveXiaoBaiAnchor(config)
   }
 
@@ -281,11 +304,42 @@ export function resolveAnchorForPerformanceAttribution(
     (view.liveAccountName ?? '').trim() || pickLiveAccountFromRaw(view.raw)
   const resolved = resolveShopSessionAnchorFromLiveAccount(
     liveAccountName,
-    new Date(payMs),
+    new Date(anchorMs),
     config,
   )
   if (resolved) return resolved
   return { anchorId: '', anchorName: '未归属' }
+}
+
+/** 避免与 canonical 循环依赖：仅读取常见下单时间字段 */
+function parseLegacyOrderCreateTimeMs(
+  view: AnalyzedOrderView & { raw?: Record<string, unknown> },
+): number | null {
+  const raw = view.raw
+  if (!raw || typeof raw !== 'object') return null
+  for (const k of [
+    'orderedAt',
+    'ordered_at',
+    'createTime',
+    'create_time',
+    'orderCreateTime',
+    'order_create_time',
+  ] as const) {
+    const v = raw[k]
+    if (v == null || v === '') continue
+    if (v instanceof Date && Number.isFinite(v.getTime())) return v.getTime()
+    const text = String(v).trim()
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/.exec(text)
+    if (m) {
+      const ms = Date.parse(
+        `${m[1]}-${m[2]}-${m[3]}T${m[4] ?? '00'}:${m[5] ?? '00'}:${m[6] ?? '00'}+08:00`,
+      )
+      if (Number.isFinite(ms)) return ms
+    }
+    const t = Date.parse(text)
+    if (Number.isFinite(t)) return t
+  }
+  return null
 }
 
 export function remapViewsForAnchorPerformance(

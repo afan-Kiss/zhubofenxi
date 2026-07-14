@@ -11,6 +11,8 @@ export type ScheduleAttributionSource =
   | 'manual_schedule'
   | 'default_schedule'
   | 'template_virtual'
+  | 'generated_default'
+  | 'virtual_template'
   | 'legacy_rule'
   | 'manual_override'
   | 'offline_manual'

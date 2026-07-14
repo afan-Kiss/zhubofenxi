@@ -53,7 +53,13 @@ async function findRawOrder(orderNo: string) {
 
 function mapAttributionSource(source: ScheduleAttributionSource): string {
   if (source === 'live_session') return 'live_session'
-  if (source === 'manual_schedule' || source === 'default_schedule' || source === 'template_virtual') {
+  if (
+    source === 'manual_schedule' ||
+    source === 'default_schedule' ||
+    source === 'template_virtual' ||
+    source === 'generated_default' ||
+    source === 'virtual_template'
+  ) {
     return 'effective_schedule'
   }
   if (source === 'manual_override') return 'manual_override'
@@ -62,6 +68,8 @@ function mapAttributionSource(source: ScheduleAttributionSource): string {
     manual_schedule: 'effective_schedule',
     default_schedule: 'effective_schedule',
     template_virtual: 'effective_schedule',
+    generated_default: 'effective_schedule',
+    virtual_template: 'effective_schedule',
     legacy_rule: 'legacy_rule',
     manual_override: 'manual_override',
     offline_manual: 'offline_manual',

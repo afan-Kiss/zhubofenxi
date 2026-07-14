@@ -2,9 +2,9 @@
  * 订单唯一归属主播 — 全系统唯一事实来源
  *
  * 规则：
- * 1. 人工指定
+ * 1. 人工指定 / 线下手动
  * 2. 下单时间 + 同源直播号命中真实直播场次（左闭右开）
- * 3. 下单时间 + 同源直播号命中已确认每日排班
+ * 3. 下单时间 + 同源直播号命中有效排班（已确认 / 默认生成 / 模板虚排，含未人工确认）
  * 4. 未归属 / 冲突
  *
  * 禁止用 paymentTime 决定主播。品退必须继承本结果。
@@ -21,11 +21,13 @@ import {
   clearLiveSessionOrderAttributionCache,
 } from './anchor-live-session-order-attribution.service'
 import { resolveDailyReportLiveSessionAssignments } from './daily-report-live-sessions.service'
-import { prisma } from '../lib/prisma'
+import {
+  getEffectiveScheduleTableForDate,
+  type EffectiveScheduleSource,
+} from './anchor-daily-schedule.service'
 import {
   buildScheduleBounds,
   scheduleDateFromPayMs,
-  isPayTimeInSchedule,
 } from '../utils/anchor-schedule-time.util'
 import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
 import { parseDateTime } from '../utils/time'
@@ -33,14 +35,16 @@ import { formatDateKeyShanghai } from '../utils/business-timezone'
 import { parseViewPayTimeMs } from './anchor-performance-attribution.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
 
-/** 归属算法版本，写入缓存指纹 */
-export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v1-order-create-time'
+/** 归属算法版本，写入缓存指纹；变更后自动重建经营缓存 */
+export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v2-effective-schedule-2026-07-14'
 
 export type CanonicalAttributionType =
   | 'offline_manual'
   | 'manual_override'
   | 'live_session'
   | 'confirmed_schedule'
+  | 'generated_default'
+  | 'virtual_template'
   | 'unassigned'
   | 'conflict'
 
@@ -80,22 +84,20 @@ const assignmentCacheByDate = new Map<
   Promise<Awaited<ReturnType<typeof resolveDailyReportLiveSessionAssignments>>>
 >()
 
-const confirmedScheduleCache = new Map<
-  string,
-  Promise<
-    Array<{
-      id: string
-      anchorName: string
-      shopName: string
-      liveRoomName: string
-      startAt: Date
-      endAt: Date
-      confirmed: boolean
-    }>
-  >
->()
+type EffectiveScheduleCacheRow = {
+  id: string
+  anchorName: string
+  shopName: string
+  liveRoomName: string
+  startAt: Date
+  endAt: Date
+  confirmed: boolean
+  source: EffectiveScheduleSource
+}
 
-/** 单元测试夹具：跳过 DB，注入真实场次 / 已确认排班 */
+const effectiveScheduleCache = new Map<string, Promise<EffectiveScheduleCacheRow[]>>()
+
+/** 单元测试夹具：跳过 DB，注入真实场次 / 有效排班（含模板/默认） */
 export type CanonicalAttributionTestFixtures = {
   liveSessions?: Array<{
     liveId: string
@@ -105,6 +107,7 @@ export type CanonicalAttributionTestFixtures = {
     startMs: number
     endMs: number
   }>
+  /** @deprecated 使用 effectiveSchedules；仍兼容旧夹具 */
   confirmedSchedules?: Array<{
     id: string
     anchorName: string
@@ -113,6 +116,17 @@ export type CanonicalAttributionTestFixtures = {
     startAt: Date
     endAt: Date
     confirmed?: boolean
+    source?: EffectiveScheduleSource
+  }>
+  effectiveSchedules?: Array<{
+    id: string
+    anchorName: string
+    shopName: string
+    liveRoomName: string
+    startAt: Date
+    endAt: Date
+    confirmed?: boolean
+    source?: EffectiveScheduleSource
   }>
 }
 
@@ -127,8 +141,25 @@ export function setCanonicalAttributionTestFixtures(
 
 export function clearCanonicalAttributionCache(): void {
   assignmentCacheByDate.clear()
-  confirmedScheduleCache.clear()
+  effectiveScheduleCache.clear()
   clearLiveSessionOrderAttributionCache()
+}
+
+function scheduleSourceToAttributionType(
+  source: EffectiveScheduleSource,
+): Extract<
+  CanonicalAttributionType,
+  'confirmed_schedule' | 'generated_default' | 'virtual_template'
+> {
+  if (source === 'virtual_template') return 'virtual_template'
+  if (source === 'generated_default') return 'generated_default'
+  return 'confirmed_schedule'
+}
+
+function scheduleSourceLabel(source: EffectiveScheduleSource): string {
+  if (source === 'virtual_template') return '模板虚排'
+  if (source === 'generated_default') return '默认生成排班'
+  return '排班'
 }
 
 function resolveAnchorId(anchorName: string): string {
@@ -228,26 +259,24 @@ async function loadAssignment(dateKey: string) {
   return pending
 }
 
-async function loadConfirmedSchedules(dateKey: string) {
-  let pending = confirmedScheduleCache.get(dateKey)
+async function loadEffectiveSchedules(dateKey: string): Promise<EffectiveScheduleCacheRow[]> {
+  let pending = effectiveScheduleCache.get(dateKey)
   if (!pending) {
-    pending = prisma.anchorDailySchedule
-      .findMany({
-        where: { scheduleDate: dateKey, enabled: true, confirmed: true },
-        orderBy: { startAt: 'asc' },
-      })
-      .then((rows) =>
-        rows.map((r) => ({
-          id: r.id,
+    pending = getEffectiveScheduleTableForDate(dateKey).then((table) =>
+      table.rows
+        .filter((r) => r.enabled)
+        .map((r) => ({
+          id: r.rowId,
           anchorName: r.anchorName,
           shopName: r.shopName,
           liveRoomName: r.liveRoomName,
-          startAt: r.startAt,
-          endAt: r.endAt,
+          startAt: new Date(r.startAt),
+          endAt: new Date(r.endAt),
           confirmed: r.confirmed,
+          source: r.source,
         })),
-      )
-    confirmedScheduleCache.set(dateKey, pending)
+    )
+    effectiveScheduleCache.set(dateKey, pending)
   }
   return pending
 }
@@ -373,21 +402,39 @@ async function resolveByLiveSession(
   }
 }
 
-async function resolveByConfirmedSchedule(
+async function resolveByEffectiveSchedule(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
   createMs: number,
   liveAccountName: string,
 ): Promise<{
-  hit: { id: string; anchorName: string; explain: string } | null
+  hit: {
+    id: string
+    anchorName: string
+    explain: string
+    attributionType: Extract<
+      CanonicalAttributionType,
+      'confirmed_schedule' | 'generated_default' | 'virtual_template'
+    >
+  } | null
   conflict: string | null
 }> {
   const dateKey = scheduleDateFromPayMs(createMs)
-  const rows = testFixtures?.confirmedSchedules
-    ? testFixtures.confirmedSchedules.filter((r) => r.confirmed !== false)
-    : await loadConfirmedSchedules(dateKey)
+  const fixtureRows = testFixtures?.effectiveSchedules ?? testFixtures?.confirmedSchedules
+  const rows: EffectiveScheduleCacheRow[] = fixtureRows
+    ? fixtureRows.map((r) => ({
+        id: r.id,
+        anchorName: r.anchorName,
+        shopName: r.shopName,
+        liveRoomName: r.liveRoomName,
+        startAt: r.startAt,
+        endAt: r.endAt,
+        confirmed: r.confirmed !== false,
+        source: r.source ?? 'manual',
+      }))
+    : await loadEffectiveSchedules(dateKey)
   const matched = rows.filter((row) => {
     if (!orderLiveRoomMatchesSchedule(liveAccountName, row.shopName, row.liveRoomName)) return false
-    // 排班区间改为左闭右开：endAt 瞬间不归属本场
+    // 排班区间左闭右开：endAt 瞬间不归属本场
     return createMs >= row.startAt.getTime() && createMs < row.endAt.getTime()
   })
   if (!matched.length) return { hit: null, conflict: null }
@@ -397,15 +444,17 @@ async function resolveByConfirmedSchedule(
   if (anchors.size > 1) {
     return {
       hit: null,
-      conflict: `同一直播号同一时间已确认排班存在多个主播（${[...anchors].join('、')}），订单暂不能归属`,
+      conflict: `同一直播号同一时间有效排班存在多个主播（${[...anchors].join('、')}），订单暂不能归属`,
     }
   }
   const best = autoMatched[0]!
+  const attributionType = scheduleSourceToAttributionType(best.source)
   return {
     hit: {
       id: best.id,
       anchorName: best.anchorName,
-      explain: `命中 ${dateKey} 已确认排班：${best.liveRoomName} → ${best.anchorName}`,
+      attributionType,
+      explain: `命中 ${dateKey} ${scheduleSourceLabel(best.source)}：${best.liveRoomName} → ${best.anchorName}`,
     },
     conflict: null,
   }
@@ -516,8 +565,8 @@ export async function resolveCanonicalOrderAttribution(
     }
   }
 
-  // 仅当该店当日有真实场次数据但未命中时，仍可排班兜底；场次完全缺失时也用已确认排班
-  const scheduleHit = await resolveByConfirmedSchedule(view, create.ms, live.name)
+  // 场次未命中或完全缺失时，用有效排班兜底（含默认生成 / 模板虚排，不要求人工确认）
+  const scheduleHit = await resolveByEffectiveSchedule(view, create.ms, live.name)
   if (scheduleHit.conflict) {
     return unassignedResult(
       live,
@@ -531,7 +580,7 @@ export async function resolveCanonicalOrderAttribution(
     return {
       canonicalAnchorId: resolveAnchorId(scheduleHit.hit.anchorName),
       canonicalAnchorName: scheduleHit.hit.anchorName,
-      attributionType: 'confirmed_schedule',
+      attributionType: scheduleHit.hit.attributionType,
       attributionTime: formatAttributionTime(create.ms, create.text),
       attributionTimeMs: create.ms,
       liveAccountId: live.id,
@@ -549,8 +598,8 @@ export async function resolveCanonicalOrderAttribution(
     create.text,
     create.ms,
     liveHit.hasShopSessions
-      ? '下单时间未命中该直播号真实场次，且无已确认排班可兜底'
-      : '无真实场次且无已确认排班可归属',
+      ? '下单时间未命中该直播号真实场次，且无有效排班可兜底'
+      : '无真实场次且无有效排班可归属',
   )
 }
 
@@ -564,6 +613,10 @@ export function canonicalAttributionLabel(type: CanonicalAttributionType): strin
       return '真实场次归属'
     case 'confirmed_schedule':
       return '已确认排班归属'
+    case 'generated_default':
+      return '默认生成排班归属'
+    case 'virtual_template':
+      return '模板虚排归属'
     case 'conflict':
       return '归属冲突'
     default:
@@ -620,6 +673,3 @@ export function probeHalfOpenSchedule(
 export function todayShanghai(): string {
   return formatDateKeyShanghai(new Date())
 }
-
-// silence unused if tree-shaken
-void isPayTimeInSchedule

@@ -268,14 +268,41 @@ async function main(): Promise<void> {
     )
     assert.equal(morningHit.canonicalAnchorName, '小白')
     assert.equal(morningHit.attributionType, 'confirmed_schedule')
-    const afternoonMiss = await resolveCanonicalOrderAttribution(
+    // 未人工确认的有效排班仍应归属（不再要求 confirmed=true）
+    const afternoonHit = await resolveCanonicalOrderAttribution(
       stubView({
         liveAccountName: '和田雅玉',
         raw: { orderedAt: '2026-07-11 15:00:00', createTime: '2026-07-11 15:00:00' },
       }),
     )
-    assert.equal(afternoonMiss.canonicalAnchorName, '未归属')
-    assert.equal(afternoonMiss.attributionType, 'unassigned')
+    assert.equal(afternoonHit.canonicalAnchorName, '小红')
+    assert.equal(afternoonHit.attributionType, 'confirmed_schedule')
+  }
+
+  // 模板虚排：无真实场次时祥钰午场 → 小白
+  setCanonicalAttributionTestFixtures({
+    liveSessions: [],
+    effectiveSchedules: [
+      {
+        id: 'tpl-xb',
+        anchorName: '小白',
+        shopName: 'XY祥钰珠宝',
+        liveRoomName: 'XY祥钰珠宝',
+        startAt: new Date(ms('2026-06-20 14:30:00')),
+        endAt: new Date(ms('2026-06-20 18:00:00')),
+        source: 'virtual_template',
+      },
+    ],
+  })
+  {
+    const r = await resolveCanonicalOrderAttribution(
+      stubView({
+        liveAccountName: 'XY祥钰珠宝',
+        raw: { orderedAt: '2026-06-20 16:00:00', createTime: '2026-06-20 16:00:00' },
+      }),
+    )
+    assert.equal(r.canonicalAnchorName, '小白')
+    assert.equal(r.attributionType, 'virtual_template')
   }
 
   setCanonicalAttributionTestFixtures({

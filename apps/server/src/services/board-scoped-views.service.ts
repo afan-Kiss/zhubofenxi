@@ -44,7 +44,9 @@ async function resolveBoardCacheWithViews(params: {
       forceRebuild: params.forceRefresh === true,
     })
   }
-
+  if (!boardCache) {
+    throw new Error('经营缓存不可用')
+  }
   return boardCache
 }
 

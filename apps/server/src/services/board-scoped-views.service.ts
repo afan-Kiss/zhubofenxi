@@ -27,27 +27,24 @@ async function resolveBoardCacheWithViews(params: {
   endDate: string
   forceRefresh?: boolean
 }) {
-  let boardCache = getBusinessBoardCache(params.preset, params.startDate, params.endDate)
+  const existing = getBusinessBoardCache(params.preset, params.startDate, params.endDate)
   const needsRebuild =
     params.forceRefresh === true ||
-    !boardCache ||
-    boardCache.stale ||
-    boardCache.fallbackReason === 'disk_snapshot' ||
-    boardCache.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION ||
-    (boardCache.views.length === 0 && boardCache.orderCount > 0)
+    !existing ||
+    existing.stale ||
+    existing.fallbackReason === 'disk_snapshot' ||
+    existing.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION ||
+    (existing.views.length === 0 && existing.orderCount > 0)
 
   if (needsRebuild) {
-    boardCache = await getOrBuildBusinessBoardCache({
+    return getOrBuildBusinessBoardCache({
       preset: params.preset,
       startDate: params.startDate,
       endDate: params.endDate,
       forceRebuild: params.forceRefresh === true,
     })
   }
-  if (!boardCache) {
-    throw new Error('经营缓存不可用')
-  }
-  return boardCache
+  return existing
 }
 
 /** 经营看板统一数据源：drill / metric-detail 共用内存缓存（不在读路径强制重建） */

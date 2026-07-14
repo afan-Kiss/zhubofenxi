@@ -1,11 +1,14 @@
 /**
  * 订单唯一归属主播 — 全系统唯一事实来源
  *
- * 规则：
+ * 优先级：
  * 1. 人工指定 / 线下手动
- * 2. 下单时间 + 同源直播号命中真实直播场次（左闭右开）
- * 3. 下单时间 + 同源直播号命中有效排班（已确认 / 默认生成 / 模板虚排，含未人工确认）
- * 4. 未归属 / 冲突
+ * 2. 人工手动排班（source=manual，无需真实场次）
+ * 3. 真实直播场次（按有效排班切段）
+ * 4. 已确认 / 默认生成 / 模板虚排
+ * 5. 6.18 起小白固定午场 + 其他店铺场次规则
+ * 6. 仅 dateKey < 2026-06-13 可用 legacy 原主播 / 旧时段规则
+ * 7. 未归属 / 冲突
  *
  * 禁止用 paymentTime 决定主播。品退必须继承本结果。
  */
@@ -42,11 +45,12 @@ import {
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
 
 /** 归属算法版本，写入缓存指纹；变更后自动重建经营缓存 */
-export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v3-legacy-pre613-2026-07-14'
+export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v4-manual-schedule-2026-07-14'
 
 export type CanonicalAttributionType =
   | 'offline_manual'
   | 'manual_override'
+  | 'manual_schedule'
   | 'live_session'
   | 'confirmed_schedule'
   | 'generated_default'
@@ -152,21 +156,40 @@ export function clearCanonicalAttributionCache(): void {
   clearLiveSessionOrderAttributionCache()
 }
 
-function scheduleSourceToAttributionType(
-  source: EffectiveScheduleSource,
-): Extract<
+type ScheduleCanonicalType = Extract<
   CanonicalAttributionType,
-  'confirmed_schedule' | 'generated_default' | 'virtual_template'
-> {
+  'manual_schedule' | 'confirmed_schedule' | 'generated_default' | 'virtual_template'
+>
+
+const SCHEDULE_SOURCE_PRIORITY: Record<EffectiveScheduleSource, number> = {
+  manual: 0,
+  generated_default: 1,
+  virtual_template: 2,
+}
+
+function scheduleSourceToAttributionType(source: EffectiveScheduleSource): ScheduleCanonicalType {
+  if (source === 'manual') return 'manual_schedule'
   if (source === 'virtual_template') return 'virtual_template'
   if (source === 'generated_default') return 'generated_default'
   return 'confirmed_schedule'
 }
 
 function scheduleSourceLabel(source: EffectiveScheduleSource): string {
+  if (source === 'manual') return '人工排班'
   if (source === 'virtual_template') return '模板虚排'
   if (source === 'generated_default') return '默认生成排班'
   return '排班'
+}
+
+function pickBestMatchedSchedule(
+  matched: EffectiveScheduleCacheRow[],
+): EffectiveScheduleCacheRow | null {
+  if (!matched.length) return null
+  const sorted = [...matched].sort(
+    (a, b) =>
+      (SCHEDULE_SOURCE_PRIORITY[a.source] ?? 99) - (SCHEDULE_SOURCE_PRIORITY[b.source] ?? 99),
+  )
+  return sorted[0] ?? null
 }
 
 function resolveAnchorId(anchorName: string): string {
@@ -413,21 +436,19 @@ async function resolveByEffectiveSchedule(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
   createMs: number,
   liveAccountName: string,
+  opts?: { onlySources?: EffectiveScheduleSource[]; excludeSources?: EffectiveScheduleSource[] },
 ): Promise<{
   hit: {
     id: string
     anchorName: string
     explain: string
-    attributionType: Extract<
-      CanonicalAttributionType,
-      'confirmed_schedule' | 'generated_default' | 'virtual_template'
-    >
+    attributionType: ScheduleCanonicalType
   } | null
   conflict: string | null
 }> {
   const dateKey = scheduleDateFromPayMs(createMs)
   const fixtureRows = testFixtures?.effectiveSchedules ?? testFixtures?.confirmedSchedules
-  const rows: EffectiveScheduleCacheRow[] = fixtureRows
+  let rows: EffectiveScheduleCacheRow[] = fixtureRows
     ? fixtureRows.map((r) => ({
         id: r.id,
         anchorName: r.anchorName,
@@ -439,6 +460,14 @@ async function resolveByEffectiveSchedule(
         source: r.source ?? 'manual',
       }))
     : await loadEffectiveSchedules(dateKey)
+  if (opts?.onlySources?.length) {
+    const allow = new Set(opts.onlySources)
+    rows = rows.filter((r) => allow.has(r.source))
+  }
+  if (opts?.excludeSources?.length) {
+    const deny = new Set(opts.excludeSources)
+    rows = rows.filter((r) => !deny.has(r.source))
+  }
   const matched = rows.filter((row) => {
     if (!orderLiveRoomMatchesSchedule(liveAccountName, row.shopName, row.liveRoomName)) return false
     // 排班区间左闭右开：endAt 瞬间不归属本场
@@ -454,7 +483,8 @@ async function resolveByEffectiveSchedule(
       conflict: `同一直播号同一时间有效排班存在多个主播（${[...anchors].join('、')}），订单暂不能归属`,
     }
   }
-  const best = autoMatched[0]!
+  const best = pickBestMatchedSchedule(autoMatched)
+  if (!best) return { hit: null, conflict: null }
   const attributionType = scheduleSourceToAttributionType(best.source)
   return {
     hit: {
@@ -551,6 +581,41 @@ export async function resolveCanonicalOrderAttribution(
     return unassignedResult(live, create.text, null, '缺少下单时间，无法归属')
   }
 
+  const dateKey = scheduleDateFromPayMs(create.ms)
+  const onOrAfterShopSessionRules = dateKey >= ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE
+  const legacyPre613Allowed = dateKey < ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE
+
+  // 2) 人工手动排班：明确值班事实，优先于真实场次与旧 view.anchorName
+  const manualScheduleHit = await resolveByEffectiveSchedule(view, create.ms, live.name, {
+    onlySources: ['manual'],
+  })
+  if (manualScheduleHit.conflict) {
+    return unassignedResult(
+      live,
+      create.text,
+      create.ms,
+      manualScheduleHit.conflict,
+      manualScheduleHit.conflict,
+    )
+  }
+  if (manualScheduleHit.hit) {
+    return {
+      canonicalAnchorId: resolveAnchorId(manualScheduleHit.hit.anchorName),
+      canonicalAnchorName: manualScheduleHit.hit.anchorName,
+      attributionType: 'manual_schedule',
+      attributionTime: formatAttributionTime(create.ms, create.text),
+      attributionTimeMs: create.ms,
+      liveAccountId: live.id,
+      liveAccountName: live.name,
+      matchedLiveSessionId: null,
+      matchedScheduleId: manualScheduleHit.hit.id,
+      manualOverrideId: null,
+      attributionExplain: manualScheduleHit.hit.explain,
+      conflictReason: null,
+    }
+  }
+
+  // 3) 真实直播场次
   const liveHit = await resolveByLiveSession(view, create.ms, live.name)
   if (liveHit.conflict) {
     return unassignedResult(live, create.text, create.ms, liveHit.conflict, liveHit.conflict)
@@ -572,11 +637,10 @@ export async function resolveCanonicalOrderAttribution(
     }
   }
 
-  const dateKey = scheduleDateFromPayMs(create.ms)
-  const onOrAfterShopSessionRules = dateKey >= ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE
-
-  // 场次未命中或完全缺失时，用当日有效排班兜底（模板 effectiveFrom 已限制，不会用 6.13 后规则反推 6.13 前）
-  const scheduleHit = await resolveByEffectiveSchedule(view, create.ms, live.name)
+  // 4–6) 非人工有效排班（已确认日仍保留 generated / virtual 源类型）
+  const scheduleHit = await resolveByEffectiveSchedule(view, create.ms, live.name, {
+    excludeSources: ['manual'],
+  })
   if (scheduleHit.conflict) {
     return unassignedResult(
       live,
@@ -603,15 +667,7 @@ export async function resolveCanonicalOrderAttribution(
     }
   }
 
-  // 历史兼容：原订单已用旧链路解析出有效主播时不得覆盖成「未归属」
-  const legacyFromView = resolveLegacyKeepableViewAnchor(view, create.ms, create.text, live)
-  if (legacyFromView) return legacyFromView
-
-  // 历史时段规则（创建时间）
-  const legacyFromTimeRule = resolveLegacyTimeRuleAnchor(create.ms, create.text, live)
-  if (legacyFromTimeRule) return legacyFromTimeRule
-
-  // 6.13 起店铺+场次历史规则（含小白午场）
+  // 7–8) 小白固定午场 + 其他店铺场次规则（6.13 起；小白另有入职日起限制）
   if (onOrAfterShopSessionRules) {
     if (isXiaoBaiOrderAttribution(view, create.ms)) {
       const xb = findAnchorByName(getAnchorConfigSync(), '小白')
@@ -627,7 +683,7 @@ export async function resolveCanonicalOrderAttribution(
           matchedLiveSessionId: null,
           matchedScheduleId: null,
           manualOverrideId: null,
-          attributionExplain: `历史规则归属：祥钰午场 → ${xb.name}`,
+          attributionExplain: `固定场次归属：祥钰午场 → ${xb.name}`,
           conflictReason: null,
         }
       }
@@ -645,10 +701,19 @@ export async function resolveCanonicalOrderAttribution(
         matchedLiveSessionId: null,
         matchedScheduleId: null,
         manualOverrideId: null,
-        attributionExplain: `历史规则归属：店铺场次 → ${shopHit.anchorName}`,
+        attributionExplain: `固定场次归属：店铺场次 → ${shopHit.anchorName}`,
         conflictReason: null,
       }
     }
+  }
+
+  // 9) 仅 2026-06-13 之前：legacy 原订单主播 / 旧时段规则
+  if (legacyPre613Allowed) {
+    const legacyFromView = resolveLegacyKeepableViewAnchor(view, create.ms, create.text, live)
+    if (legacyFromView) return legacyFromView
+
+    const legacyFromTimeRule = resolveLegacyTimeRuleAnchor(create.ms, create.text, live)
+    if (legacyFromTimeRule) return legacyFromTimeRule
   }
 
   return unassignedResult(
@@ -656,8 +721,8 @@ export async function resolveCanonicalOrderAttribution(
     create.text,
     create.ms,
     liveHit.hasShopSessions
-      ? '下单时间未命中该直播号真实场次，且无有效排班/历史规则可归属'
-      : '无真实场次且无有效排班/历史规则可归属',
+      ? '下单时间未命中该直播号真实场次，且无有效排班/固定场次可归属'
+      : '无真实场次且无有效排班/固定场次可归属',
   )
 }
 
@@ -719,6 +784,8 @@ export function canonicalAttributionLabel(type: CanonicalAttributionType): strin
       return '线下手动归属'
     case 'manual_override':
       return '手动指定'
+    case 'manual_schedule':
+      return '人工排班归属'
     case 'live_session':
       return '真实场次归属'
     case 'confirmed_schedule':
@@ -760,7 +827,9 @@ export async function remapViewsWithCanonicalAttribution(
       anchorName: resolved.canonicalAnchorName,
       scheduleAttributionExplain: resolved.attributionExplain,
       scheduleAttributionSource: resolved.attributionType,
-      scheduleConfirmed: resolved.attributionType === 'confirmed_schedule',
+      scheduleConfirmed:
+        resolved.attributionType === 'confirmed_schedule' ||
+        resolved.attributionType === 'manual_schedule',
       canonicalAttributionType: resolved.attributionType,
       matchedLiveSessionId: resolved.matchedLiveSessionId,
       matchedScheduleId: resolved.matchedScheduleId,

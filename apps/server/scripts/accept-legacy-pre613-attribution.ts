@@ -10,6 +10,7 @@ import {
   setCanonicalAttributionTestFixtures,
   CANONICAL_ATTRIBUTION_VERSION,
 } from '../src/services/canonical-order-attribution.service'
+import { refreshAnchorConfigCache } from '../src/services/anchor.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
 function stubView(
@@ -28,6 +29,7 @@ function stubView(
 }
 
 async function main(): Promise<void> {
+  await refreshAnchorConfigCache()
   clearCanonicalAttributionCache()
   setCanonicalAttributionTestFixtures({ liveSessions: [], effectiveSchedules: [] })
 
@@ -53,7 +55,7 @@ async function main(): Promise<void> {
   // 至少不应崩溃；若配置有时段规则则应命中
   assert.notEqual(noOrig.attributionType, 'conflict')
 
-  assert.match(CANONICAL_ATTRIBUTION_VERSION, /legacy-pre613/)
+  assert.match(CANONICAL_ATTRIBUTION_VERSION, /canonical-v4/)
   setCanonicalAttributionTestFixtures(null)
   clearCanonicalAttributionCache()
   console.log('PASS: accept-legacy-pre613-attribution')

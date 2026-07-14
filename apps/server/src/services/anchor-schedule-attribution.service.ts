@@ -96,8 +96,13 @@ export async function resolveAnchorWithScheduleOverlay(
   const canonical = await resolveCanonicalOrderAttribution(view)
   const sourceMap: Record<string, ScheduleAttributionSource> = {
     manual_override: 'manual_override',
+    manual_schedule: 'manual_schedule',
     live_session: 'live_session',
     confirmed_schedule: 'confirmed_schedule',
+    generated_default: 'generated_default',
+    virtual_template: 'virtual_template',
+    legacy_attribution: 'legacy_attribution',
+    offline_manual: 'offline_manual',
     unassigned: 'unmatched',
     conflict: 'conflict',
   }
@@ -106,7 +111,9 @@ export async function resolveAnchorWithScheduleOverlay(
     anchorName: canonical.canonicalAnchorName,
     attributionSource: sourceMap[canonical.attributionType] ?? 'unmatched',
     attributionExplain: canonical.attributionExplain,
-    scheduleConfirmed: canonical.attributionType === 'confirmed_schedule',
+    scheduleConfirmed:
+      canonical.attributionType === 'confirmed_schedule' ||
+      canonical.attributionType === 'manual_schedule',
     matchedScheduleRowId: canonical.matchedScheduleId ?? undefined,
   }
 }

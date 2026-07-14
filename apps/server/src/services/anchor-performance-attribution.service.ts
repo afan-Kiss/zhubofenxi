@@ -322,7 +322,7 @@ function createEmptyAnchorLeaderboardRow(
   }
 }
 
-/** 6.13 起主播业绩固定展示四人，无订单时也保留空行（如小红早场暂无单） */
+/** 6.13 起主播业绩固定展示场次主播；另补「无时间段」手动归属主播空卡（如逸凡） */
 export function ensureAnchorPerformanceLeaderboardSlots(
   rows: BoardAnchorMetrics[],
   endDate: string,
@@ -336,10 +336,23 @@ export function ensureAnchorPerformanceLeaderboardSlots(
   if (isReportDateOnOrAfterXiaoBaiCutoff(endDate)) {
     fixedNames.push('小白')
   }
+
+  const enabledRuleAnchorIds = new Set(
+    config.timeRules.filter((r) => r.enabled).map((r) => r.anchorId),
+  )
+  const manualOnlyNames = config.anchors
+    .filter((a) => a.enabled && a.name.trim() && !enabledRuleAnchorIds.has(a.id))
+    .map((a) => a.name.trim())
+
+  const slotNames = [...fixedNames]
+  for (const name of manualOnlyNames) {
+    if (!slotNames.includes(name)) slotNames.push(name)
+  }
+
   const byName = new Map(rows.map((r) => [r.anchorName, r]))
   const merged: BoardAnchorMetrics[] = [...rows]
 
-  for (const anchorName of fixedNames) {
+  for (const anchorName of slotNames) {
     if (byName.has(anchorName)) continue
     const found = findAnchorByName(config, anchorName)
     merged.push(

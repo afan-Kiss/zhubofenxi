@@ -52,6 +52,7 @@ export async function ensureAnchorsSeeded(): Promise<void> {
 
 export async function refreshAnchorConfigCache(): Promise<AnchorConfig> {
   await ensureAnchorsSeeded()
+  await ensureYifanManualAnchor({ skipCacheRefresh: true })
   const rows = await prisma.anchor.findMany({
     where: { deletedAt: null, enabled: true },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -137,7 +138,10 @@ export async function createAnchor(input: {
   defaultLiveRoomName?: string
   color?: string
   sortOrder?: number
+  /** 传空数组 = 仅手动归属（不匹配时段）；省略则默认 00:00–23:59 */
   timeRules?: Array<{ startTime: string; endTime: string; enabled?: boolean }>
+  /** true = 不创建时间段，仅通过订单抽屉手动指定计入业绩 */
+  manualOnly?: boolean
 }) {
   const name = input.name.trim()
   if (!name) throw new Error('主播名称不能为空')
@@ -145,8 +149,10 @@ export async function createAnchor(input: {
     where: { deletedAt: null },
     _max: { sortOrder: true },
   })
-  const timeRules =
-    input.timeRules && input.timeRules.length > 0
+  const manualOnly = Boolean(input.manualOnly) || (Array.isArray(input.timeRules) && input.timeRules.length === 0)
+  const timeRules = manualOnly
+    ? []
+    : input.timeRules && input.timeRules.length > 0
       ? normalizeTimeRulesInput(input.timeRules)
       : [{ startTime: '00:00', endTime: '23:59', enabled: true, sortOrder: 0 }]
   const ruleEffectiveFrom = new Date()
@@ -160,15 +166,18 @@ export async function createAnchor(input: {
       color: input.color ?? '#94a3b8',
       enabled: true,
       sortOrder: input.sortOrder ?? (maxOrder._max.sortOrder ?? 0) + 1,
-      timeRules: {
-        create: timeRules.map((r, i) => ({
-          startTime: r.startTime,
-          endTime: r.endTime,
-          enabled: r.enabled ?? true,
-          sortOrder: r.sortOrder ?? i,
-          effectiveFrom: ruleEffectiveFrom,
-        })),
-      },
+      timeRules:
+        timeRules.length > 0
+          ? {
+              create: timeRules.map((r, i) => ({
+                startTime: r.startTime,
+                endTime: r.endTime,
+                enabled: r.enabled ?? true,
+                sortOrder: r.sortOrder ?? i,
+                effectiveFrom: ruleEffectiveFrom,
+              })),
+            }
+          : undefined,
     },
     include: { timeRules: true },
     })
@@ -180,6 +189,56 @@ export async function createAnchor(input: {
   }
   await refreshAnchorConfigCache()
   return anchor
+}
+
+/** 仅手动归属主播：无启用时间段，不进场次/排班自动匹配 */
+export function isManualOnlyAnchor(anchor: {
+  timeRules?: Array<{ enabled?: boolean | null }> | null
+}): boolean {
+  const rules = anchor.timeRules ?? []
+  return rules.filter((r) => r.enabled !== false).length === 0
+}
+
+/**
+ * 确保「逸凡」存在：无直播间/时段，仅靠订单抽屉手动指定计入业绩。
+ * skipCacheRefresh：由 refreshAnchorConfigCache 内部调用时避免递归。
+ */
+export async function ensureYifanManualAnchor(options?: {
+  skipCacheRefresh?: boolean
+}): Promise<void> {
+  await ensureAnchorsSeeded()
+  const existing = await prisma.anchor.findFirst({
+    where: { name: '逸凡', deletedAt: null },
+    include: { timeRules: true },
+  })
+  if (!existing) {
+    const maxOrder = await prisma.anchor.aggregate({
+      where: { deletedAt: null },
+      _max: { sortOrder: true },
+    })
+    await prisma.anchor.create({
+      data: {
+        name: '逸凡',
+        color: '#6366f1',
+        enabled: true,
+        defaultLiveRoomName: null,
+        sortOrder: (maxOrder._max.sortOrder ?? 0) + 1,
+      },
+    })
+  } else {
+    const patch: { enabled?: boolean; defaultLiveRoomName?: string | null } = {}
+    if (!existing.enabled) patch.enabled = true
+    if (existing.defaultLiveRoomName) patch.defaultLiveRoomName = null
+    if (Object.keys(patch).length > 0) {
+      await prisma.anchor.update({ where: { id: existing.id }, data: patch })
+    }
+    if (existing.timeRules.some((r) => r.enabled)) {
+      await prisma.anchorTimeRule.deleteMany({ where: { anchorId: existing.id } })
+    }
+  }
+  if (!options?.skipCacheRefresh) {
+    await refreshAnchorConfigCache()
+  }
 }
 
 export async function updateAnchor(

@@ -70,6 +70,7 @@ export const AnchorManagementPanel: React.FC = () => {
   const [newColor, setNewColor] = useState('#94a3b8')
   const [newExternalId, setNewExternalId] = useState('')
   const [newLiveRoom, setNewLiveRoom] = useState('')
+  const [newManualOnly, setNewManualOnly] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -105,13 +106,17 @@ export const AnchorManagementPanel: React.FC = () => {
           name,
           color: newColor,
           externalId: newExternalId.trim() || undefined,
-          defaultLiveRoomName: newLiveRoom.trim() || undefined,
-          timeRules: [{ startTime: '00:00', endTime: '23:59', enabled: true }],
+          defaultLiveRoomName: newManualOnly ? undefined : newLiveRoom.trim() || undefined,
+          manualOnly: newManualOnly || undefined,
+          timeRules: newManualOnly
+            ? []
+            : [{ startTime: '00:00', endTime: '23:59', enabled: true }],
         }),
       })
       setNewName('')
       setNewExternalId('')
       setNewLiveRoom('')
+      setNewManualOnly(false)
       await load()
       setMessage({ type: 'success', text: '已新增主播' })
     } catch (err) {
@@ -261,7 +266,7 @@ export const AnchorManagementPanel: React.FC = () => {
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <h3 className="text-sm font-semibold text-slate-900">主播管理</h3>
       <p className="mt-1 text-xs text-slate-500">
-        配置主播名称、ID、默认直播间与归属时间段。首页/BI/统计均读取此处配置，不写死主播名。
+        配置主播名称、ID、默认直播间与归属时间段。无时间段的主播仅通过订单抽屉「手动指定」计入业绩（如逸凡）。
       </p>
 
       {message && (
@@ -310,6 +315,15 @@ export const AnchorManagementPanel: React.FC = () => {
             onChange={(e) => setNewColor(e.target.value)}
             className="mt-0.5 block h-8 w-12 cursor-pointer"
           />
+        </label>
+        <label className="inline-flex items-center gap-1.5 pb-1 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={newManualOnly}
+            onChange={(e) => setNewManualOnly(e.target.checked)}
+            className="h-3.5 w-3.5 rounded border-slate-300"
+          />
+          仅手动归属（不匹配场次/时段）
         </label>
         <button
           type="button"
@@ -415,7 +429,9 @@ export const AnchorManagementPanel: React.FC = () => {
               <div className="mt-2 space-y-1">
                 <p className="text-xs font-medium text-slate-600">默认归属时间段</p>
                 {a.timeRules.length === 0 ? (
-                  <p className="text-[11px] text-slate-400">暂无时间段，请添加后保存</p>
+                  <p className="text-[11px] text-slate-400">
+                    暂无时间段：该主播不会自动匹配场次，仅在订单抽屉里手动指定后计入业绩
+                  </p>
                 ) : (
                   a.timeRules.map((r, idx) => (
                     <div key={r.id} className="flex flex-wrap items-center gap-2 text-xs">

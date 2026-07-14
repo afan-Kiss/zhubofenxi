@@ -47,6 +47,7 @@ anchorRouter.post('/', async (req, res) => {
         body.defaultLiveRoomName != null ? String(body.defaultLiveRoomName) : undefined,
       color: body.color ? String(body.color) : undefined,
       sortOrder: body.sortOrder != null ? Number(body.sortOrder) : undefined,
+      manualOnly: body.manualOnly === true || body.manualOnly === '1' || body.manualOnly === 1,
       timeRules: Array.isArray(body.timeRules) ? body.timeRules : undefined,
     })
     sendOk(res, anchor)

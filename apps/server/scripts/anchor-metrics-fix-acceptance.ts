@@ -231,7 +231,13 @@ function testShopSessionAnchorRules(issues: string[]) {
   const emptySlots = ensureAnchorPerformanceLeaderboardSlots([], '2026-06-13')
   assert(emptySlots.some((r) => r.anchorName === '小红'), '6.13 起应展示小红空行', issues)
   assert(emptySlots.some((r) => r.anchorName === '小艺'), '6.13 起应展示小艺空行', issues)
-  assert(emptySlots.length === 4, '6.13 起应固定展示四人', issues)
+  assert(emptySlots.some((r) => r.anchorName === '子杰'), '6.13 起应展示子杰空行', issues)
+  assert(emptySlots.some((r) => r.anchorName === '飞云'), '6.13 起应展示飞云空行', issues)
+  assert(
+    emptySlots.filter((r) => ['子杰', '小红', '飞云', '小艺'].includes(r.anchorName)).length === 4,
+    '6.13 起应固定展示四人场次主播',
+    issues,
+  )
 
   const emptySlots618 = ensureAnchorPerformanceLeaderboardSlots([], '2026-06-18')
   assert(
@@ -241,7 +247,13 @@ function testShopSessionAnchorRules(issues: string[]) {
   )
 
   assert(emptySlots618.some((r) => r.anchorName === '小白'), '6.18 起应展示小白空行', issues)
-  assert(emptySlots618.length === 5, '6.18 起应固定展示五人', issues)
+  assert(
+    emptySlots618.filter((r) =>
+      ['子杰', '小红', '飞云', '小艺', '小白'].includes(r.anchorName),
+    ).length === 5,
+    '6.18 起应固定展示五人场次主播',
+    issues,
+  )
 
   assert(
     isReportDateOnOrAfterXiaoBaiCutoff('2026-06-18'),

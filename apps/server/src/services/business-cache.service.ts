@@ -139,7 +139,8 @@ export async function seedBoardPresetSnapshotsOnBoot(): Promise<number> {
   for (const snap of snaps) {
     if (!shouldRetainBusinessBoardCache(snap.preset)) continue
     if (cache.has(snap.cacheKey)) continue
-    cache.set(snap.cacheKey, buildSnapshotBoardCacheStub(snap))
+    // 快照不含当前归属算法版本：标记 stale，首请求必须重建，禁止当主播业绩事实
+    cache.set(snap.cacheKey, { ...buildSnapshotBoardCacheStub(snap), stale: true })
     seeded++
   }
   if (seeded > 0) {

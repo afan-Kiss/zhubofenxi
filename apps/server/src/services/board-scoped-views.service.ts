@@ -7,6 +7,7 @@ import {
   getOrBuildBusinessBoardCache,
   getBusinessBoardCache,
 } from './business-cache.service'
+import { CANONICAL_ATTRIBUTION_VERSION } from './canonical-order-attribution.service'
 import { filterViewsForStaffScope } from './staff-anchor-scope.service'
 
 export interface BoardScopedViewsBundle {
@@ -27,23 +28,20 @@ async function resolveBoardCacheWithViews(params: {
   forceRefresh?: boolean
 }) {
   let boardCache = getBusinessBoardCache(params.preset, params.startDate, params.endDate)
-  if (!boardCache || params.forceRefresh === true) {
+  const needsRebuild =
+    params.forceRefresh === true ||
+    !boardCache ||
+    boardCache.stale ||
+    boardCache.fallbackReason === 'disk_snapshot' ||
+    boardCache.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION ||
+    (boardCache.views.length === 0 && boardCache.orderCount > 0)
+
+  if (needsRebuild) {
     boardCache = await getOrBuildBusinessBoardCache({
       preset: params.preset,
       startDate: params.startDate,
       endDate: params.endDate,
       forceRebuild: params.forceRefresh === true,
-    })
-  }
-
-  if (
-    boardCache.views.length === 0 &&
-    (boardCache.orderCount > 0 || boardCache.fallbackReason === 'disk_snapshot')
-  ) {
-    boardCache = await getOrBuildBusinessBoardCache({
-      preset: params.preset,
-      startDate: params.startDate,
-      endDate: params.endDate,
     })
   }
 

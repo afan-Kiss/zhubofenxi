@@ -27,6 +27,7 @@ import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-at
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { readBoardPresetSnapshot, buildSnapshotBoardCacheStub } from './board-preset-snapshot.service'
+import { CANONICAL_ATTRIBUTION_VERSION } from './canonical-order-attribution.service'
 
 import { AMOUNT_FORMULA_VERSION } from './order-amount-metrics.service'
 
@@ -381,15 +382,23 @@ export async function executeBoardLocalQuery(params: {
     !hasAnchorFilter &&
     (queryMode === 'overview' || queryMode === 'anchors' || queryMode === 'full')
 
+  /** 磁盘快照 / 旧归属算法版本不得直接作为主播业绩事实来源 */
+  const isAttributionStale = (entry: BusinessBoardCacheEntry | null | undefined): boolean => {
+    if (!entry || entry.stale) return true
+    if (entry.fallbackReason === 'disk_snapshot') return true
+    return entry.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION
+  }
+
   if (!boardCache && canUseSnapshotFastPath) {
     const snap = await readBoardPresetSnapshot(params.preset, startDate, endDate)
     if (snap) {
+      // 仅作瞬时占位；下方对归属过期快照会 await 重建
       boardCache = buildSnapshotBoardCacheStub(snap)
       void getOrBuildBusinessBoardCache({ preset: params.preset, startDate, endDate })
     }
   }
 
-  if (!boardCache) {
+  if (!boardCache || isAttributionStale(boardCache)) {
     try {
       boardCache = await getOrBuildBusinessBoardCache({
         preset: params.preset,
@@ -405,14 +414,6 @@ export async function executeBoardLocalQuery(params: {
       }
       if (!boardCache) throw err
     }
-  }
-
-  if (hasAnchorFilter && boardCache.fallbackReason === 'disk_snapshot') {
-    boardCache = await getOrBuildBusinessBoardCache({
-      preset: params.preset,
-      startDate,
-      endDate,
-    })
   }
 
   const isDiskSnapshot = boardCache.fallbackReason === 'disk_snapshot'

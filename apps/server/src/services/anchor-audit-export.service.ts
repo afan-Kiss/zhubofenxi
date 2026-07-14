@@ -118,6 +118,7 @@ const SOURCE_LABEL: Record<ScheduleAttributionSource, string> = {
   generated_default: '默认生成排班',
   virtual_template: '模板虚排',
   legacy_rule: '旧规则',
+  legacy_attribution: '历史规则归属',
   manual_override: '手动指定',
   offline_manual: '线下手动归属',
   unassigned: '未归属',

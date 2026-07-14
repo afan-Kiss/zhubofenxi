@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react'
-import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
+import {
+  formatAnchorDisplayName,
+  isUnassignedAnchorName,
+  UNASSIGNED_ANCHOR_HINT,
+} from '../../lib/anchor-display-name'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import {
   anchorRowGmv,
@@ -169,19 +173,38 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                 const qualityCount = anchorRowNum(a, 'qualityReturnCount')
                 const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
                 const livePeriodMultiline = liveLines.primary?.includes('\n') ?? false
+                const isUnassigned = isUnassignedAnchorName(String(a.anchorName ?? ''))
                 return (
                   <tr
                     key={String(a.anchorId ?? a.anchorName ?? idx)}
                     data-testid={anchorCardTestId(String(a.anchorName))}
                     style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
-                    className={`board-list-row-enter border-t border-rose-50/80 transition hover:bg-rose-50/40 ${
-                      onRowClick ? 'cursor-pointer' : ''
-                    }`}
+                    className={`board-list-row-enter border-t transition ${
+                      isUnassigned
+                        ? 'border-amber-200/80 bg-amber-50/50 hover:bg-amber-50/80'
+                        : 'border-rose-50/80 hover:bg-rose-50/40'
+                    } ${onRowClick ? 'cursor-pointer' : ''}`}
                     onClick={onRowClick ? () => onRowClick(a) : undefined}
                   >
                     <td className="py-2.5 pl-4">
                       <div className="flex flex-col gap-1">
-                        <span className="font-medium text-rose-800">{formatAnchorDisplayName(String(a.anchorName))}</span>
+                        <span
+                          className={`font-medium ${isUnassigned ? 'text-amber-900' : 'text-rose-800'}`}
+                        >
+                          {formatAnchorDisplayName(String(a.anchorName))}
+                        </span>
+                        {isUnassigned ? (
+                          <>
+                            <span className="text-[11px] leading-snug text-amber-800/90">
+                              {UNASSIGNED_ANCHOR_HINT}
+                            </span>
+                            {onRowClick ? (
+                              <span className="text-[11px] font-medium text-amber-700 underline-offset-2 hover:underline">
+                                查看归属异常明细
+                              </span>
+                            ) : null}
+                          </>
+                        ) : null}
                         {showLivePeriod && liveLines.primary ? (
                           <span
                             className={`text-[12px] ${

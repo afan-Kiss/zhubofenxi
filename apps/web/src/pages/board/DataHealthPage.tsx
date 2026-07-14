@@ -280,7 +280,7 @@ export const DataHealthPage: React.FC = () => {
                   0,
               )}
             </p>
-            <p>自然流散客订单数：{formatCount(attributionHealth.unassignedOrderCount)}</p>
+            <p>归属异常订单数：{formatCount(attributionHealth.unassignedOrderCount)}</p>
             <p>跨直播号异常归属数：{formatCount(attributionHealth.crossShopAbnormalAttributionCount)}</p>
             <p>
               品退跨主播重复数：
@@ -511,7 +511,7 @@ export const DataHealthPage: React.FC = () => {
                 value={formatCount(report.afterSaleCacheRecordCount)}
               />
               <MetricCard
-                label="自然流散客订单数"
+                label="归属异常订单数"
                 value={formatCount(report.unassignedOrderCount)}
                 danger={report.unassignedOrderCount > 0}
               />

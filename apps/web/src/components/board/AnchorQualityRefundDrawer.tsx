@@ -232,7 +232,7 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
                     ) : null}
                     {row.qualityUnassignedReason ? (
                       <p className="mt-1 text-amber-700">
-                        自然流散客原因：{row.qualityUnassignedReason}
+                        归属异常原因：{row.qualityUnassignedReason}
                       </p>
                     ) : null}
                   </li>

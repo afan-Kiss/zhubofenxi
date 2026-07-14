@@ -1,5 +1,9 @@
 import React, { useState } from 'react'
-import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
+import {
+  formatAnchorDisplayName,
+  isUnassignedAnchorName,
+  UNASSIGNED_ANCHOR_HINT,
+} from '../../lib/anchor-display-name'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import {
   anchorRowGmv,
@@ -114,6 +118,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
     <div className={`space-y-3 ${className}`}>
       {rows.map((a, idx) => {
         const name = formatAnchorDisplayName(String(a.anchorName ?? ''))
+        const isUnassigned = isUnassignedAnchorName(String(a.anchorName ?? ''))
         const rowKey = String(a.anchorId ?? name ?? idx)
         const refundRate = anchorRowRate(a, 'returnRate')
         const signRate = anchorRowRate(a, 'signRate')
@@ -138,15 +143,25 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   }
                 : undefined
             }
-            className={`board-list-row-enter rounded-2xl border border-rose-100 bg-white p-4 shadow-sm shadow-rose-100/40 ${
-              onSelect ? 'cursor-pointer transition active:scale-[0.99] hover:shadow-md' : ''
-            }`}
+            className={`board-list-row-enter rounded-2xl border p-4 shadow-sm ${
+              isUnassigned
+                ? 'border-amber-200 bg-amber-50/60 shadow-amber-100/40'
+                : 'border-rose-100 bg-white shadow-rose-100/40'
+            } ${onSelect ? 'cursor-pointer transition active:scale-[0.99] hover:shadow-md' : ''}`}
             style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] text-slate-500">主播</p>
-                <p className="text-lg font-semibold text-rose-800">{name}</p>
+                <p className={`text-lg font-semibold ${isUnassigned ? 'text-amber-900' : 'text-rose-800'}`}>
+                  {name}
+                </p>
+                {isUnassigned ? (
+                  <p className="mt-1 text-[11px] leading-snug text-amber-800/90">{UNASSIGNED_ANCHOR_HINT}</p>
+                ) : null}
+                {isUnassigned && onSelect ? (
+                  <p className="mt-0.5 text-[11px] font-medium text-amber-700">查看归属异常明细</p>
+                ) : null}
                 {showLivePeriod && liveLines.primary ? (
                   <p
                     className={`mt-1 text-[12px] ${

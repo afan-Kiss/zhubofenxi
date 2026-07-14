@@ -10,7 +10,8 @@
  * 禁止用 paymentTime 决定主播。品退必须继承本结果。
  */
 import type { AnalyzedOrderView } from '../types/analysis'
-import { findAnchorByName } from './anchor-rules.service'
+import { ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE } from '../config/anchor-schedule.constants'
+import { findAnchorByName, matchTimeRule } from './anchor-rules.service'
 import { getAnchorConfigSync, isAutoAttributableAnchorName } from './anchor.service'
 import { isOfflineDealView } from './offline-deal.service'
 import {
@@ -30,13 +31,18 @@ import {
   scheduleDateFromPayMs,
 } from '../utils/anchor-schedule-time.util'
 import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
+import { isShopOrInvalidAnchorLabel } from '../utils/anchor-label'
 import { parseDateTime } from '../utils/time'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
-import { parseViewPayTimeMs } from './anchor-performance-attribution.service'
+import {
+  isXiaoBaiOrderAttribution,
+  parseViewPayTimeMs,
+  resolveShopSessionAnchorFromLiveAccount,
+} from './anchor-performance-attribution.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
 
 /** 归属算法版本，写入缓存指纹；变更后自动重建经营缓存 */
-export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v2-effective-schedule-2026-07-14'
+export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v3-legacy-pre613-2026-07-14'
 
 export type CanonicalAttributionType =
   | 'offline_manual'
@@ -45,6 +51,7 @@ export type CanonicalAttributionType =
   | 'confirmed_schedule'
   | 'generated_default'
   | 'virtual_template'
+  | 'legacy_attribution'
   | 'unassigned'
   | 'conflict'
 
@@ -565,7 +572,10 @@ export async function resolveCanonicalOrderAttribution(
     }
   }
 
-  // 场次未命中或完全缺失时，用有效排班兜底（含默认生成 / 模板虚排，不要求人工确认）
+  const dateKey = scheduleDateFromPayMs(create.ms)
+  const onOrAfterShopSessionRules = dateKey >= ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE
+
+  // 场次未命中或完全缺失时，用当日有效排班兜底（模板 effectiveFrom 已限制，不会用 6.13 后规则反推 6.13 前）
   const scheduleHit = await resolveByEffectiveSchedule(view, create.ms, live.name)
   if (scheduleHit.conflict) {
     return unassignedResult(
@@ -593,14 +603,114 @@ export async function resolveCanonicalOrderAttribution(
     }
   }
 
+  // 历史兼容：原订单已用旧链路解析出有效主播时不得覆盖成「未归属」
+  const legacyFromView = resolveLegacyKeepableViewAnchor(view, create.ms, create.text, live)
+  if (legacyFromView) return legacyFromView
+
+  // 历史时段规则（创建时间）
+  const legacyFromTimeRule = resolveLegacyTimeRuleAnchor(create.ms, create.text, live)
+  if (legacyFromTimeRule) return legacyFromTimeRule
+
+  // 6.13 起店铺+场次历史规则（含小白午场）
+  if (onOrAfterShopSessionRules) {
+    if (isXiaoBaiOrderAttribution(view, create.ms)) {
+      const xb = findAnchorByName(getAnchorConfigSync(), '小白')
+      if (xb && isAutoAttributableAnchorName(xb.name)) {
+        return {
+          canonicalAnchorId: xb.id,
+          canonicalAnchorName: xb.name,
+          attributionType: 'legacy_attribution',
+          attributionTime: formatAttributionTime(create.ms, create.text),
+          attributionTimeMs: create.ms,
+          liveAccountId: live.id,
+          liveAccountName: live.name,
+          matchedLiveSessionId: null,
+          matchedScheduleId: null,
+          manualOverrideId: null,
+          attributionExplain: `历史规则归属：祥钰午场 → ${xb.name}`,
+          conflictReason: null,
+        }
+      }
+    }
+    const shopHit = resolveShopSessionAnchorFromLiveAccount(live.name, new Date(create.ms))
+    if (shopHit && isAutoAttributableAnchorName(shopHit.anchorName)) {
+      return {
+        canonicalAnchorId: shopHit.anchorId,
+        canonicalAnchorName: shopHit.anchorName,
+        attributionType: 'legacy_attribution',
+        attributionTime: formatAttributionTime(create.ms, create.text),
+        attributionTimeMs: create.ms,
+        liveAccountId: live.id,
+        liveAccountName: live.name,
+        matchedLiveSessionId: null,
+        matchedScheduleId: null,
+        manualOverrideId: null,
+        attributionExplain: `历史规则归属：店铺场次 → ${shopHit.anchorName}`,
+        conflictReason: null,
+      }
+    }
+  }
+
   return unassignedResult(
     live,
     create.text,
     create.ms,
     liveHit.hasShopSessions
-      ? '下单时间未命中该直播号真实场次，且无有效排班可兜底'
-      : '无真实场次且无有效排班可归属',
+      ? '下单时间未命中该直播号真实场次，且无有效排班/历史规则可归属'
+      : '无真实场次且无有效排班/历史规则可归属',
   )
+}
+
+function resolveLegacyKeepableViewAnchor(
+  view: AnalyzedOrderView & { raw?: Record<string, unknown> },
+  createMs: number,
+  createText: string,
+  live: { id: string; name: string },
+): CanonicalOrderAttribution | null {
+  const name = (view.anchorName ?? '').trim()
+  if (!name || name === '未归属') return null
+  if (isShopOrInvalidAnchorLabel(name)) return null
+  if (!isAutoAttributableAnchorName(name)) return null
+  const found = findAnchorByName(getAnchorConfigSync(), name)
+  if (!found?.enabled) return null
+  return {
+    canonicalAnchorId: found.id,
+    canonicalAnchorName: found.name,
+    attributionType: 'legacy_attribution',
+    attributionTime: formatAttributionTime(createMs, createText),
+    attributionTimeMs: createMs,
+    liveAccountId: live.id,
+    liveAccountName: live.name,
+    matchedLiveSessionId: null,
+    matchedScheduleId: null,
+    manualOverrideId: null,
+    attributionExplain: `历史规则归属：原订单主播 → ${found.name}`,
+    conflictReason: null,
+  }
+}
+
+function resolveLegacyTimeRuleAnchor(
+  createMs: number,
+  createText: string,
+  live: { id: string; name: string },
+): CanonicalOrderAttribution | null {
+  const hit = matchTimeRule(new Date(createMs), getAnchorConfigSync())
+  if (!hit) return null
+  if (!isAutoAttributableAnchorName(hit.anchor.name)) return null
+  return {
+    canonicalAnchorId: hit.anchor.id,
+    canonicalAnchorName: hit.anchor.name,
+    attributionType: 'legacy_attribution',
+    attributionTime: formatAttributionTime(createMs, createText),
+    attributionTimeMs: createMs,
+    liveAccountId: live.id,
+    liveAccountName: live.name,
+    matchedLiveSessionId: null,
+    matchedScheduleId: null,
+    manualOverrideId: null,
+    attributionExplain: `历史规则归属：时段规则 → ${hit.anchor.name}`,
+    conflictReason: null,
+  }
 }
 
 export function canonicalAttributionLabel(type: CanonicalAttributionType): string {
@@ -617,6 +727,8 @@ export function canonicalAttributionLabel(type: CanonicalAttributionType): strin
       return '默认生成排班归属'
     case 'virtual_template':
       return '模板虚排归属'
+    case 'legacy_attribution':
+      return '历史规则归属'
     case 'conflict':
       return '归属冲突'
     default:

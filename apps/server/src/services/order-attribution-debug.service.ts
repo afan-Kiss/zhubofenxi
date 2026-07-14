@@ -71,6 +71,7 @@ function mapAttributionSource(source: ScheduleAttributionSource): string {
     generated_default: 'effective_schedule',
     virtual_template: 'effective_schedule',
     legacy_rule: 'legacy_rule',
+    legacy_attribution: 'legacy_attribution',
     manual_override: 'manual_override',
     offline_manual: 'offline_manual',
     unassigned: 'unassigned',

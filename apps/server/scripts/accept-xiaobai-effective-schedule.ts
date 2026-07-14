@@ -30,6 +30,11 @@ function stubView(
   } as AnalyzedOrderView & { raw?: Record<string, unknown> }
 }
 
+/** 边界用例：不得归小白（允许时段/店铺历史规则命中其他主播） */
+function assertNotXiaobai(name: string, msg?: string): void {
+  assert.notEqual(name, '小白', msg)
+}
+
 async function main(): Promise<void> {
   clearCanonicalAttributionCache()
 
@@ -62,7 +67,7 @@ async function main(): Promise<void> {
         raw: { orderedAt: '2026-06-20 18:00:00', createTime: '2026-06-20 18:00:00' },
       }),
     )
-    assert.equal(endExclusive.canonicalAnchorName, '未归属')
+    assertNotXiaobai(endExclusive.canonicalAnchorName, '18:00 不归小白午场')
 
     const payInSlotCreateOut = await resolveCanonicalOrderAttribution(
       stubView({
@@ -73,11 +78,7 @@ async function main(): Promise<void> {
         },
       }),
     )
-    assert.equal(
-      payInSlotCreateOut.canonicalAnchorName,
-      '未归属',
-      '禁止用支付时间归属：下单已过午场',
-    )
+    assertNotXiaobai(payInSlotCreateOut.canonicalAnchorName, '禁止用支付时间归属：下单已过午场')
   }
 
   // 2) 7月模板 14:00–18:30
@@ -101,7 +102,7 @@ async function main(): Promise<void> {
         raw: { orderedAt: '2026-07-03 13:59:59', createTime: '2026-07-03 13:59:59' },
       }),
     )
-    assert.equal(before.canonicalAnchorName, '未归属')
+    assertNotXiaobai(before.canonicalAnchorName, '13:59 不归小白午场')
     const hit = await resolveCanonicalOrderAttribution(
       stubView({
         raw: { orderedAt: '2026-07-03 14:00:00', createTime: '2026-07-03 14:00:00' },
@@ -113,7 +114,7 @@ async function main(): Promise<void> {
         raw: { orderedAt: '2026-07-03 18:30:00', createTime: '2026-07-03 18:30:00' },
       }),
     )
-    assert.equal(endExclusive.canonicalAnchorName, '未归属')
+    assertNotXiaobai(endExclusive.canonicalAnchorName, '18:30 不归小白午场')
   }
 
   // 3) 非祥钰排除
@@ -139,7 +140,7 @@ async function main(): Promise<void> {
           raw: { orderedAt: '2026-06-20 16:00:00', createTime: '2026-06-20 16:00:00' },
         }),
       )
-      assert.equal(r.canonicalAnchorName, '未归属', `${shop} 不应吃到祥钰小白排班`)
+      assertNotXiaobai(r.canonicalAnchorName, `${shop} 不应吃到祥钰小白排班`)
     }
   }
 

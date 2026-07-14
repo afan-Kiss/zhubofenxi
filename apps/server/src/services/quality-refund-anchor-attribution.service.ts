@@ -88,6 +88,7 @@ function mapCanonicalType(t: CanonicalAttributionType): QualityRefundAnchorAttri
     case 'confirmed_schedule':
     case 'generated_default':
     case 'virtual_template':
+    case 'legacy_attribution':
       return 'confirmed_schedule'
     case 'conflict':
       return 'conflict'

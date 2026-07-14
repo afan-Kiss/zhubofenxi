@@ -23,6 +23,7 @@ import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 import { CANONICAL_ATTRIBUTION_VERSION } from './canonical-order-attribution.service'
+import { loadOfflineDealViewsForRange, splitGmvByDealSource } from './offline-deal.service'
 
 export const BUSINESS_CACHE_PRESETS: BusinessRangePreset[] = [
   'today',
@@ -171,11 +172,18 @@ export function buildBoardSummaryFromViews(views: AnalyzedOrderView[]): Record<s
 
 function buildSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unknown> {
   const m = calculateBusinessMetrics(views)
+  const split = splitGmvByDealSource(views)
   return {
     metricsVersion: m.version,
     productGmv: m.totalGmv,
     totalGmv: m.totalGmv,
     gmv: m.totalGmv,
+    onlineGmv: split.onlineGmv,
+    offlineGmv: split.offlineGmv,
+    unassignedGmv: split.unassignedGmv,
+    offlineDealCount: split.offlineDealCount,
+    /** 总 GMV = 线上 GMV + 线下 GMV；未归属 GMV 已含在总 GMV 内 */
+    gmvSourceNote: '总GMV=线上GMV+线下GMV；未归属GMV计入总GMV但不计入任一主播',
     effectiveGmv: m.validSalesAmount,
     validSalesAmount: m.validSalesAmount,
     actualSignedAmount: m.actualSignedAmount,
@@ -287,12 +295,17 @@ export async function buildAndSetBusinessBoardCache(params: {
       range.startDate,
       range.endDate,
     )
+    const offlineViews = await loadOfflineDealViewsForRange(range.startDate, range.endDate)
+    const mergedViews = [...views, ...offlineViews]
 
-    const coreViews = filterViewsForCoreMetrics(views)
+    const coreViews = filterViewsForCoreMetrics(mergedViews)
     const remappedCoreViews = await remapViewsWithScheduleOverlay(
       attachRawByMatchToViews(coreViews, rawByMatch),
     )
-    const performanceViews = await buildAnchorPerformanceViewsFromScopedViews(views, rawByMatch)
+    const performanceViews = await buildAnchorPerformanceViewsFromScopedViews(
+      mergedViews,
+      rawByMatch,
+    )
 
     const summary = buildSummaryFromViews(coreViews)
     const abnormalOrderCount = artifacts?.abnormalOrderCount ?? 0
@@ -348,11 +361,11 @@ export async function buildAndSetBusinessBoardCache(params: {
       anchorLeaderboard: anchorLeaderboard as unknown as Array<Record<string, unknown>>,
       enrichedAnchorLeaderboard,
       anchorPerformanceSummary,
-      views,
+      views: mergedViews,
       rawByMatch,
       liveSessions,
       blacklistedBuyerIds,
-      orderCount: views.length,
+      orderCount: mergedViews.length,
       lastBuiltAt: new Date().toISOString(),
       workbenchCacheMaxUpdatedAt,
       sourceSyncJobId: await resolveLatestBusinessSyncJobId(),
@@ -385,7 +398,7 @@ export async function buildAndSetBusinessBoardCache(params: {
     }
     logInfo(
       '经营缓存',
-      `${presetLabel(params.preset)} 重新构建完成：${views.length} 单，用时 ${entry.buildDurationMs}ms，${retain ? '已驻留' : '按需（不驻留）'}，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
+      `${presetLabel(params.preset)} 重新构建完成：${mergedViews.length} 单（含线下 ${offlineViews.length}），用时 ${entry.buildDurationMs}ms，${retain ? '已驻留' : '按需（不驻留）'}，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
     )
     return entry
   } catch (e) {

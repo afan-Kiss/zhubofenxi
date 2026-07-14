@@ -38,6 +38,7 @@ import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
+import { loadOfflineDealViewsForRange, splitGmvByDealSource } from './offline-deal.service'
 
 export type BoardLiveQueryPreset =
   | 'today'
@@ -136,11 +137,17 @@ function filterViewsByAnchor(
 function buildSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unknown> {
   const m = calculateBusinessMetrics(views)
   const legacy = aggregateViewsMetrics(views)
+  const split = splitGmvByDealSource(views)
   return {
     metricsVersion: m.version,
     productGmv: m.totalGmv,
     totalGmv: m.totalGmv,
     gmv: m.totalGmv,
+    onlineGmv: split.onlineGmv,
+    offlineGmv: split.offlineGmv,
+    unassignedGmv: split.unassignedGmv,
+    offlineDealCount: split.offlineDealCount,
+    gmvSourceNote: '总GMV=线上GMV+线下GMV；未归属GMV计入总GMV但不计入任一主播',
     effectiveGmv: m.validSalesAmount,
     validSalesAmount: m.validSalesAmount,
     actualSignedAmount: m.actualSignedAmount,
@@ -230,9 +237,14 @@ export async function executeBoardLiveQuery(
       totalOrders,
     })
 
-    const viewsWithRaw = attachRawByMatchToViews(allViews, rawByMatch)
+    const offlineViews = await loadOfflineDealViewsForRange(startDate, endDate)
+    const mergedAllViews = [...allViews, ...offlineViews]
+    const viewsWithRaw = attachRawByMatchToViews(mergedAllViews, rawByMatch)
     const coreViews = filterViewsForCoreMetrics(viewsWithRaw)
-    const performanceViews = await buildAnchorPerformanceViewsFromScopedViews(allViews, rawByMatch)
+    const performanceViews = await buildAnchorPerformanceViewsFromScopedViews(
+      mergedAllViews,
+      rawByMatch,
+    )
     const scopedCoreViews = filterViewsByAnchor(coreViews, params.anchorId, params.anchorName)
     const scopedPerformanceViews = filterViewsByAnchor(
       performanceViews,

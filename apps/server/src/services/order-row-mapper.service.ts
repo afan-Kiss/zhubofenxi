@@ -168,6 +168,11 @@ export interface BoardOrderRow {
   paymentAnchorName?: string | null
   /** 是否手动指定覆盖 */
   manualOverride?: boolean
+  /** online | offline */
+  dealSource?: 'online' | 'offline'
+  offlineDealKey?: string | null
+  attributedBy?: string | null
+  attributedAt?: string | null
   /** 退货退款分类 */
   isReturnRefundOrder?: boolean
   isRefundOnlyOrder?: boolean
@@ -335,6 +340,14 @@ export function mapViewToBoardOrderRow(
   }
   const attributionSource = remapped.scheduleAttributionSource?.trim() || null
   const paymentAnchorName = v.anchorName?.trim() || '未归属'
+  const rawRec = (raw ?? {}) as Record<string, unknown>
+  const dealSource: 'online' | 'offline' =
+    v.dealSource === 'offline' ||
+    v.sourceType === 'offline_deal' ||
+    rawRec.dealSource === 'offline' ||
+    String(displayOrderNo).startsWith('OFF-')
+      ? 'offline'
+      : 'online'
   const qualityAttributionAnchorName =
     remapped.qualityAttributionAnchorName != null
       ? String(remapped.qualityAttributionAnchorName).trim() || null
@@ -428,7 +441,19 @@ export function mapViewToBoardOrderRow(
       remapped.scheduleConfirmed != null ? Boolean(remapped.scheduleConfirmed) : undefined,
     qualityAttributionAnchorName,
     paymentAnchorName,
-    manualOverride: attributionSource === 'manual_override',
+    manualOverride:
+      attributionSource === 'manual_override' || attributionSource === 'offline_manual',
+    dealSource,
+    offlineDealKey: v.offlineDealKey ?? (dealSource === 'offline' ? displayOrderNo : null),
+    attributedBy:
+      rawRec.attributedBy != null
+        ? String(rawRec.attributedBy)
+        : rawRec.updatedBy != null
+          ? String(rawRec.updatedBy)
+          : rawRec.createdBy != null
+            ? String(rawRec.createdBy)
+            : null,
+    attributedAt: rawRec.attributedAt != null ? String(rawRec.attributedAt) : null,
     isReturnRefundOrder: Boolean(v.isReturnRefundOrder),
     isRefundOnlyOrder: Boolean(v.isRefundOnlyOrder),
     isRefundTypeUnknown: Boolean(v.isRefundTypeUnknown),

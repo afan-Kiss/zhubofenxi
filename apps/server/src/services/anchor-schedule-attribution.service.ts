@@ -13,6 +13,8 @@ export type ScheduleAttributionSource =
   | 'template_virtual'
   | 'legacy_rule'
   | 'manual_override'
+  | 'offline_manual'
+  | 'unassigned'
   | 'unmatched'
   | 'confirmed_schedule'
   | 'conflict'

@@ -45,6 +45,7 @@ import {
 } from '../../lib/data-freshness'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
 import { apiRequest } from '../../lib/api'
+import { OfflineDealEntryPanel } from '../../components/board/OfflineDealEntryPanel'
 
 type AnchorSummaryCardType = 'money' | 'count' | 'rate'
 
@@ -589,6 +590,33 @@ export const AnchorPerformanceTab: React.FC = () => {
         customQueried={customQueried}
         onQuery={() => setCustomQueried(true)}
       />
+      <OfflineDealEntryPanel
+        defaultAnchorName={selectedIsManual || anchorFilter !== '全部' ? anchorFilter : undefined}
+        onCreated={() => void reload()}
+      />
+      {showMetrics ? (
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+          {[
+            { label: '总 GMV', value: Number(cards.totalGmv ?? cards.gmv ?? 0) },
+            { label: '线上 GMV', value: Number(cards.onlineGmv ?? 0) },
+            { label: '线下 GMV', value: Number(cards.offlineGmv ?? 0) },
+            { label: '未归属 GMV', value: Number(cards.unassignedGmv ?? 0) },
+          ].map((item) => (
+            <div
+              key={item.label}
+              className="rounded-xl border border-slate-100 bg-white px-3 py-2 shadow-sm"
+            >
+              <p className="text-[11px] text-slate-500">{item.label}</p>
+              <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                {formatMoney(item.value)}
+              </p>
+            </div>
+          ))}
+          <p className="col-span-2 text-[11px] text-slate-400 md:col-span-4">
+            总 GMV = 线上 + 线下；未归属 GMV 已计入总 GMV，但不计入任一主播。
+          </p>
+        </div>
+      ) : null}
       {resolvedRange.startDate && resolvedRange.endDate && (
         <BoardStatRangeNote startDate={resolvedRange.startDate} endDate={resolvedRange.endDate} />
       )}

@@ -61,6 +61,8 @@ export type OrderSourceType =
   | 'excel_order'
   | 'after_sale'
   | 'settlement'
+  /** 线下成交台账（非平台同步订单） */
+  | 'offline_deal'
 
 export interface NormalizedOrder {
   sourceRowIndex: number
@@ -301,6 +303,12 @@ export interface AnalyzedOrderView {
   countsForSigned: boolean
   countsForGrossProfit: boolean
   gmvExcludeReason: string | null
+  /** online=平台订单；offline=线下成交台账 */
+  dealSource?: 'online' | 'offline'
+  /** 线下成交编号 */
+  offlineDealKey?: string
+  /** 数据来源（线下成交为 offline_deal） */
+  sourceType?: OrderSourceType
   /** 统计支付金额（有支付时间且已支付） */
   statPaidAmountCent?: number
   /** 买家 Drawer：官方真实已支付（分），不用应收兜底 */

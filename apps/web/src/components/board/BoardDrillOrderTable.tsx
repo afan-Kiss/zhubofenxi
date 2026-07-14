@@ -252,14 +252,34 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                     <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.orderTime)}</td>
                     <td className="whitespace-nowrap px-2 py-1.5">{displayCell(r.liveAccountName)}</td>
                     <td className="px-2 py-1.5">
-                      <div>{formatAnchorDisplayName(r.anchorName)}</div>
+                      <div className="flex flex-wrap items-center gap-1">
+                        <span>{formatAnchorDisplayName(r.anchorName)}</span>
+                        {String(r.dealSource ?? '') === 'offline' ||
+                        String(r.orderNo ?? '').startsWith('OFF-') ? (
+                          <span className="rounded bg-indigo-50 px-1 py-0.5 text-[10px] text-indigo-700">
+                            线下成交
+                          </span>
+                        ) : null}
+                        {r.attributionSource === 'offline_manual' ||
+                        r.attributionSource === 'manual_override' ? (
+                          <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-800">
+                            手动归属
+                          </span>
+                        ) : null}
+                        {!r.anchorName || r.anchorName === '未归属' ? (
+                          <span className="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-600">
+                            待归属主播
+                          </span>
+                        ) : null}
+                      </div>
                       {(r.paymentAnchorName != null ||
                         r.qualityAttributionAnchorName != null ||
                         r.attributionSource != null ||
-                        r.attributionExplain != null) && (
+                        r.attributionExplain != null ||
+                        r.attributedBy != null) && (
                         <div className="mt-0.5 space-y-0.5 text-[10px] leading-snug text-slate-500">
                           <div>
-                            订单归属主播：
+                            主播：
                             {formatAnchorDisplayName(r.paymentAnchorName || r.anchorName)}
                           </div>
                           <div>
@@ -280,6 +300,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                               r.attributionExplain,
                             )}
                           </div>
+                          {r.attributedBy ? <div>操作人：{String(r.attributedBy)}</div> : null}
                         </div>
                       )}
                     </td>

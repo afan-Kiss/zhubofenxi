@@ -64,6 +64,8 @@ function mapAttributionSource(source: ScheduleAttributionSource): string {
     template_virtual: 'effective_schedule',
     legacy_rule: 'legacy_rule',
     manual_override: 'manual_override',
+    offline_manual: 'offline_manual',
+    unassigned: 'unassigned',
     unmatched: 'unmatched',
     confirmed_schedule: 'confirmed_schedule',
     conflict: 'conflict',

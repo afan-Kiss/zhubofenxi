@@ -15,8 +15,26 @@
 | 取消/退款 | 已支付后取消或退款，**仍计入**支付金额 |
 | 退款冲减 | 退款 **不冲减** 支付金额 |
 | 排除 | 未支付、无支付时间的订单 |
+| 线下成交 | 见 **§1.1**；计入同一套「支付金额 / 总 GMV」 |
 
 **验收方法**：选定日期范围，逐单核对 `payTime` 与支付状态；支付金额 = 符合条件订单的支付金额之和（与退款单列）。
+
+### 1.1 线下成交（OfflineDeal 台账）
+
+| 项 | 口径 |
+|----|------|
+| 事实来源 | 表 `OfflineDeal`（非平台同步订单） |
+| 时间字段 | 按 `dealAt`（成交时间）落入统计周期 |
+| 计入支付金额 / 总 GMV | `status=confirmed` 且 `amountCent>0` 且未软删 |
+| 不计入 | `draft` / `cancelled` / `voided` |
+| 主播归属 | **仅人工**；无直播场次 / 排班 / 时段匹配；canonical 类型 `offline_manual` |
+| 未指定主播 | 可确认成交并计入 **未归属 GMV**；不得静默归入默认主播 |
+| 公式 | 总 GMV = 线上 GMV + 线下 GMV；总 GMV = 已归属主播 GMV 合计 + 未归属 GMV |
+| 改归属 | 总 GMV 不变；金额从原主播移除并计入新主播；写审计日志 |
+| 退款 | 与线上一致：支付金额仍计全额；`refundCent` 记入退款金额；净额 = amount − refund（≥0） |
+| 防重 | `dealKey` / `externalKey` 唯一；禁止用已有平台 P 单号作线下编号 |
+
+**验收**：`npx tsx apps/server/scripts/accept-offline-deal-gmv.ts`
 
 ---
 

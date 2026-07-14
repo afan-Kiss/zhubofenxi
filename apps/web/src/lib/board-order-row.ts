@@ -79,11 +79,17 @@ export interface BoardDrillOrderRow {
   qualityAttributionAnchorName?: string | null
   paymentAnchorName?: string | null
   manualOverride?: boolean
+  dealSource?: 'online' | 'offline' | string | null
+  offlineDealKey?: string | null
+  attributedBy?: string | null
+  attributedAt?: string | null
 }
 
 /** 归属来源短标签（指定主播控件 / 明细行共用） */
 export function attributionSourceShortLabel(source: string | null | undefined): string {
   switch (String(source ?? '').trim()) {
+    case 'offline_manual':
+      return '线下手动归属'
     case 'manual_override':
       return '手动指定'
     case 'live_session':
@@ -102,6 +108,16 @@ export function attributionSourceShortLabel(source: string | null | undefined): 
     default:
       return source ? '自动归属' : '自动归属'
   }
+}
+
+export function dealSourceShortLabel(
+  source: string | null | undefined,
+  orderNo?: string | null,
+): string {
+  const s = String(source ?? '').trim()
+  if (s === 'offline' || s === 'offline_deal') return '线下成交'
+  if (orderNo && String(orderNo).startsWith('OFF-')) return '线下成交'
+  return '线上成交'
 }
 
 export function formatAttributionBasis(
@@ -264,6 +280,16 @@ export function normalizeBoardOrderRow(raw: Record<string, unknown>): BoardDrill
       raw.paymentAnchorName != null
         ? String(raw.paymentAnchorName).trim() || null
         : null,
+    dealSource:
+      raw.dealSource != null
+        ? String(raw.dealSource)
+        : String(raw.orderNo ?? '').startsWith('OFF-')
+          ? 'offline'
+          : 'online',
+    offlineDealKey:
+      raw.offlineDealKey != null ? String(raw.offlineDealKey).trim() || null : null,
+    attributedBy: raw.attributedBy != null ? String(raw.attributedBy).trim() || null : null,
+    attributedAt: raw.attributedAt != null ? String(raw.attributedAt).trim() || null : null,
     manualOverride: Boolean(
       raw.manualOverride ?? String(raw.attributionSource ?? '').trim() === 'manual_override',
     ),

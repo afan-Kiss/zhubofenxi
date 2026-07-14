@@ -318,6 +318,9 @@ function createEmptyAnchorLeaderboardRow(
     color,
     ...m,
     gmv: m.totalGmv,
+    onlineGmv: 0,
+    offlineGmv: 0,
+    offlineDealCount: 0,
     actualSignedCount: m.signedOrderCount,
   }
 }

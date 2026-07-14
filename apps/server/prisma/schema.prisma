@@ -868,6 +868,52 @@ model OrderAttributionDispositionLog {
   @@index([createdAt])
 }
 
+/// 线下成交台账（无平台 P 单也可录入；计入支付金额/主播 GMV）
+model OfflineDeal {
+  id            String    @id @default(cuid())
+  /** 系统唯一成交编号，如 OFF-20260714-xxxx */
+  dealKey       String    @unique
+  /** 可选外部唯一号（防重复提交）；不可与已有线上 P 单号冲突 */
+  externalKey   String?   @unique
+  amountCent    Int
+  refundCent    Int       @default(0)
+  dealAt        DateTime
+  /** draft | confirmed | cancelled | voided */
+  status        String    @default("confirmed")
+  anchorId      String?
+  anchorName    String?
+  customerLabel String?
+  note          String?
+  createdBy     String?
+  updatedBy     String?
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([dealAt, status])
+  @@index([anchorId])
+  @@index([status])
+  @@index([deletedAt])
+}
+
+model OfflineDealAuditLog {
+  id             String   @id @default(cuid())
+  dealId         String
+  dealKey        String
+  action         String
+  beforeJson     String?
+  afterJson      String?
+  beforeAnchorId String?
+  afterAnchorId  String?
+  operator       String?
+  reason         String?
+  createdAt      DateTime @default(now())
+
+  @@index([dealId, createdAt])
+  @@index([dealKey])
+  @@index([createdAt])
+}
+
 /// 老板看板：店铺资金快照（金额均为分）
 model BossFundSnapshot {
   id                       String    @id @default(cuid())

@@ -12,6 +12,7 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { findAnchorByName } from './anchor-rules.service'
 import { getAnchorConfigSync, isAutoAttributableAnchorName } from './anchor.service'
+import { isOfflineDealView } from './offline-deal.service'
 import {
   resolveManualAnchorOverrideForView,
 } from './order-anchor-manual-override.service'
@@ -36,6 +37,7 @@ import { resolveMetricOrderNo } from './calc-refund-rate.service'
 export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v1-order-create-time'
 
 export type CanonicalAttributionType =
+  | 'offline_manual'
   | 'manual_override'
   | 'live_session'
   | 'confirmed_schedule'
@@ -442,6 +444,30 @@ export async function resolveCanonicalOrderAttribution(
   const create = parseViewOrderCreateTimeMs(view)
   const payMs = parseViewPayTimeMs(view)
 
+  // 线下成交台账：人工归属最高优先级，缓存刷新不得用场次/排班覆盖
+  if (isOfflineDealView(view)) {
+    const name = (view.anchorName ?? '').trim() || '未归属'
+    const hasAnchor = name !== '未归属' && Boolean(view.anchorId || name)
+    return {
+      canonicalAnchorId: hasAnchor ? view.anchorId || resolveAnchorId(name) : '',
+      canonicalAnchorName: hasAnchor ? name : '未归属',
+      attributionType: hasAnchor ? 'offline_manual' : 'unassigned',
+      attributionTime: formatAttributionTime(create.ms, create.text),
+      attributionTimeMs: create.ms,
+      liveAccountId: live.id,
+      liveAccountName: live.name,
+      matchedLiveSessionId: null,
+      matchedScheduleId: null,
+      manualOverrideId: view.offlineDealKey || resolveMetricOrderNo(view) || null,
+      attributionExplain: hasAnchor
+        ? `线下成交手动归属：${name}`
+        : '线下成交待归属主播',
+      conflictReason: null,
+      paymentTimeAnchorName: null,
+      paymentTimeMatchedSessionId: null,
+    }
+  }
+
   const manual = resolveManualAnchorOverrideForView(view)
   if (manual) {
     return {
@@ -530,6 +556,8 @@ export async function resolveCanonicalOrderAttribution(
 
 export function canonicalAttributionLabel(type: CanonicalAttributionType): string {
   switch (type) {
+    case 'offline_manual':
+      return '线下手动归属'
     case 'manual_override':
       return '手动指定'
     case 'live_session':

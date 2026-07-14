@@ -33,6 +33,7 @@ import { shopCookiesRouter } from './routes/shop-cookies.routes'
 import { anchorPerformanceRouter } from './routes/anchor-performance.routes'
 import { anchorSchedulesRouter } from './routes/anchor-schedules.routes'
 import { bossDashboardRouter } from './routes/boss-dashboard.routes'
+import { offlineDealRouter } from './routes/offline-deal.routes'
 import { dailyReportImagesRouter } from './routes/daily-report-images.routes'
 import { exportRouter } from './routes/export.routes'
 import { appRouter } from './routes/app.routes'
@@ -104,6 +105,7 @@ export function createApp() {
   app.use('/api/daily-report-images', dailyReportImagesRouter)
   app.use('/api/anchor-performance', anchorPerformanceRouter)
   app.use('/api/boss-dashboard', bossDashboardRouter)
+  app.use('/api/offline-deals', offlineDealRouter)
   app.use('/api/export', exportRouter)
   mountMaintenanceRouter(app, '/api/debug', debugRouter, '调试')
 

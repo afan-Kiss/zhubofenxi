@@ -117,6 +117,8 @@ const SOURCE_LABEL: Record<ScheduleAttributionSource, string> = {
   template_virtual: '模板补齐',
   legacy_rule: '旧规则',
   manual_override: '手动指定',
+  offline_manual: '线下手动归属',
+  unassigned: '未归属',
   unmatched: '未归属',
   confirmed_schedule: '已确认排班',
   conflict: '归属冲突',

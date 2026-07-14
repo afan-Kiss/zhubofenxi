@@ -52,6 +52,9 @@ export interface BoardAnchorMetrics extends BoardViewsMetrics {
   color: string
   actualSignedCount: number
   gmv: number
+  onlineGmv?: number
+  offlineGmv?: number
+  offlineDealCount?: number
 }
 
 function toLegacyMetrics(m: BusinessMetrics, views: AnalyzedOrderView[]): BoardViewsMetrics {
@@ -143,12 +146,35 @@ export function aggregateAnchorLeaderboard(
         })
       }
 
+      let onlineGmvCent = 0
+      let offlineGmvCent = 0
+      let offlineDealCount = 0
+      for (const v of list) {
+        if (!v.includedInGmv) continue
+        const cent = v.paymentBaseCent ?? 0
+        const remapped = v as AnalyzedOrderView & { scheduleAttributionSource?: string }
+        const offline =
+          v.sourceType === 'offline_deal' ||
+          v.dealSource === 'offline' ||
+          Boolean(v.offlineDealKey) ||
+          remapped.scheduleAttributionSource === 'offline_manual'
+        if (offline) {
+          offlineGmvCent += cent
+          offlineDealCount += 1
+        } else {
+          onlineGmvCent += cent
+        }
+      }
+
       return {
         anchorName,
         anchorId,
         color: cfg?.color ?? '#94a3b8',
         ...m,
         gmv: m.totalGmv,
+        onlineGmv: onlineGmvCent / 100,
+        offlineGmv: offlineGmvCent / 100,
+        offlineDealCount,
         actualSignedCount: m.signedOrderCount,
         paidOrderCount: m.orderCount,
         afterSaleRecordCount: m.afterSaleRecordCount,

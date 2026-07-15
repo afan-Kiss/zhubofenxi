@@ -58,6 +58,16 @@ export function formatRatePercent(ratio: number | null | undefined): string {
   return `${(ratio * 100).toFixed(1)}%`
 }
 
+/** 封面点击率合格线：≥7% */
+export const COVER_CLICK_RATE_PASS_THRESHOLD = 0.07
+
+export function formatCoverClickRateWithQuality(ratio: number | null | undefined): string {
+  if (ratio == null || !Number.isFinite(ratio)) return '--'
+  const pct = `${(ratio * 100).toFixed(1)}%`
+  const ok = ratio >= COVER_CLICK_RATE_PASS_THRESHOLD
+  return ok ? `${pct} 合格` : `${pct} 不合格`
+}
+
 export function formatStayDurationSeconds(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return '--'
   if (seconds >= 60) {

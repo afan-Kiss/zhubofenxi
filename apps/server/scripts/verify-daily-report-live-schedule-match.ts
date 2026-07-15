@@ -42,6 +42,10 @@ function session(
     avgViewDurationSeconds: null,
     newFollowerCount: null,
     dealUserCount: null,
+    coverClickRate: null,
+    stay60sUserCount: null,
+    impressionCount: null,
+    viewPayRate: null,
   }
 }
 

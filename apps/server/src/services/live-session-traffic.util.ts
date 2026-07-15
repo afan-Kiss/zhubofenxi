@@ -20,6 +20,14 @@ export interface LiveSessionTrafficMetrics {
   newFollowerCount: number | null
   /** 成交人数（仅官方 dealUserNum/payUserNum/dealUserCnt） */
   dealUserCount: number | null
+  /** 封面点击率（0–1，来自 live_ctr / liveCtr） */
+  coverClickRate: number | null
+  /** 60s 停留人数 */
+  stay60sUserCount: number | null
+  /** 曝光次数 */
+  impressionCount: number | null
+  /** 观看支付率（0–1，来自 viewPayRate / join_conversion_rate） */
+  viewPayRate: number | null
 }
 
 export interface LiveSessionTrafficExtract extends LiveSessionTrafficMetrics {
@@ -33,9 +41,33 @@ const JOIN_USER_KEYS = [
   'viewerNum',
   'liveViewUserNum',
   'watchUserNum',
+  'join_uv',
 ] as const
 const NEW_FOLLOWER_KEYS = ['liveFollowUserNum', 'newFollowUserNum', 'followUserNum'] as const
 const DEAL_USER_KEYS = ['dealUserNum', 'payUserNum', 'dealUserCnt'] as const
+const COVER_CLICK_RATE_KEYS = ['liveCtr', 'live_ctr', 'coverClickRate'] as const
+const STAY_60S_KEYS = [
+  'liveViewOver60sUserNum',
+  'live_view_over60s_user_num',
+  'stay60sUserNum',
+] as const
+const IMPRESSION_KEYS = [
+  'liveTotalImpressionCnt',
+  'live_total_impression_cnt',
+  'impressionCnt',
+] as const
+const VIEW_PAY_RATE_KEYS = [
+  'viewPayRate',
+  'join_conversion_rate',
+  'viewDealRate',
+  'watchPayRate',
+] as const
+const AVG_STAY_KEYS = [
+  'avgViewDuration',
+  'viewer_duration_avg',
+  'avgStayDuration',
+  'perWatchDuration',
+] as const
 
 function extractLiveFieldValue(item: Record<string, unknown>, fieldName: string): unknown {
   const field = item[fieldName]
@@ -69,6 +101,22 @@ function pickLiveRawNumber(
   ...keys: readonly string[]
 ): { value: number | null; key: string | null } {
   return pickLiveRawCountNullable(raw, ...keys)
+}
+
+/** 比率字段：支持 0–1 小数，或偶发的百分数写法（>1 且 ≤100 时按百分数折算） */
+function pickLiveRawRate(
+  raw: Record<string, unknown>,
+  ...keys: readonly string[]
+): { value: number | null; key: string | null } {
+  for (const k of keys) {
+    const v = extractLiveFieldValue(raw, k)
+    if (v == null || v === '') continue
+    const num = typeof v === 'number' ? v : Number(String(v).replace(/%/g, '').replace(/,/g, ''))
+    if (!Number.isFinite(num)) continue
+    if (num > 1 && num <= 100) return { value: num / 100, key: k }
+    if (num >= 0 && num <= 1) return { value: num, key: k }
+  }
+  return { value: null, key: null }
 }
 
 function mergeDataQuality(items: LiveTrafficDataQuality[]): LiveTrafficDataQuality {
@@ -120,7 +168,11 @@ export function extractLiveSessionTraffic(
   const followers = pickLiveRawCountNullable(item, ...NEW_FOLLOWER_KEYS)
   const dealUsers = pickLiveRawCountNullable(item, ...DEAL_USER_KEYS)
   const avgOnline = pickLiveRawNumber(item, 'avgJoinUv', 'avgOnlineUserNum', 'avgOnlineUv')
-  const avgStay = pickLiveRawNumber(item, 'avgViewDuration', 'avgStayDuration', 'perWatchDuration')
+  const avgStay = pickLiveRawNumber(item, ...AVG_STAY_KEYS)
+  const coverClick = pickLiveRawRate(item, ...COVER_CLICK_RATE_KEYS)
+  const stay60s = pickLiveRawCountNullable(item, ...STAY_60S_KEYS)
+  const impression = pickLiveRawCountNullable(item, ...IMPRESSION_KEYS)
+  const viewPay = pickLiveRawRate(item, ...VIEW_PAY_RATE_KEYS)
 
   const qualities = [
     buildFieldQuality('viewSessionCount', view, VIEW_SESSION_KEYS),
@@ -142,7 +194,11 @@ export function extractLiveSessionTraffic(
           officialFields: [`avgViewDurationSeconds:${avgStay.key}`],
           warnings: [],
         }
-      : buildFieldQuality('avgViewDurationSeconds', avgStay, ['avgViewDuration', 'avgStayDuration']),
+      : buildFieldQuality('avgViewDurationSeconds', avgStay, AVG_STAY_KEYS),
+    buildFieldQuality('coverClickRate', coverClick, COVER_CLICK_RATE_KEYS),
+    buildFieldQuality('stay60sUserCount', stay60s, STAY_60S_KEYS),
+    buildFieldQuality('impressionCount', impression, IMPRESSION_KEYS),
+    buildFieldQuality('viewPayRate', viewPay, VIEW_PAY_RATE_KEYS),
   ]
 
   return {
@@ -152,6 +208,10 @@ export function extractLiveSessionTraffic(
     dealUserCount: dealUsers.value,
     avgOnlineUserCount: avgOnline.value,
     avgViewDurationSeconds: avgStay.value,
+    coverClickRate: coverClick.value,
+    stay60sUserCount: stay60s.value,
+    impressionCount: impression.value,
+    viewPayRate: viewPay.value,
     dataQuality: mergeDataQuality(qualities),
   }
 }
@@ -179,6 +239,20 @@ function sumNullable(values: Array<number | null>): number | null {
   return hasAny ? sum : null
 }
 
+function weightedAverage(
+  items: Array<{ value: number | null; weight: number }>,
+): number | null {
+  let sum = 0
+  let weight = 0
+  for (const item of items) {
+    if (item.value == null || !Number.isFinite(item.value)) continue
+    const w = Math.max(1, item.weight)
+    sum += item.value * w
+    weight += w
+  }
+  return weight > 0 ? sum / weight : null
+}
+
 export function aggregateLiveSessionTraffic(
   items: Array<LiveSessionTrafficMetrics & { dataQuality?: LiveTrafficDataQuality }>,
 ): AggregatedLiveSessionTraffic {
@@ -197,6 +271,10 @@ export function aggregateLiveSessionTraffic(
       avgViewDurationSeconds: null,
       newFollowerCount: null,
       dealUserCount: null,
+      coverClickRate: null,
+      stay60sUserCount: null,
+      impressionCount: null,
+      viewPayRate: null,
       dealConversionRate: null,
       newFollowerRate: null,
       dataQuality: emptyQuality,
@@ -207,6 +285,8 @@ export function aggregateLiveSessionTraffic(
   const joinUserCount = sumNullable(items.map((i) => i.joinUserCount))
   const newFollowerCount = sumNullable(items.map((i) => i.newFollowerCount))
   const dealUserCount = sumNullable(items.map((i) => i.dealUserCount))
+  const stay60sUserCount = sumNullable(items.map((i) => i.stay60sUserCount))
+  const impressionCount = sumNullable(items.map((i) => i.impressionCount))
 
   let onlineWeightedSum = 0
   let onlineWeight = 0
@@ -239,12 +319,34 @@ export function aggregateLiveSessionTraffic(
     joinUserCount,
     newFollowerCount,
     dealUserCount,
+    stay60sUserCount,
+    impressionCount,
     avgOnlineUserCount: onlineWeight > 0 ? onlineWeightedSum / onlineWeight : null,
     avgViewDurationSeconds: durationWeight > 0 ? durationWeightedSum / durationWeight : null,
+    coverClickRate: weightedAverage(
+      items.map((i) => ({
+        value: i.coverClickRate,
+        weight: Math.max(1, i.impressionCount ?? i.viewSessionCount ?? 0),
+      })),
+    ),
+    viewPayRate: weightedAverage(
+      items.map((i) => ({
+        value: i.viewPayRate,
+        weight: Math.max(1, i.joinUserCount ?? i.viewSessionCount ?? 0),
+      })),
+    ),
     dealConversionRate,
     newFollowerRate,
     dataQuality: mergeDataQuality(items.map((i) => i.dataQuality ?? emptyQuality)),
   }
+}
+
+/** 封面点击率是否合格（≥7%） */
+export const COVER_CLICK_RATE_PASS_THRESHOLD = 0.07
+
+export function isCoverClickRateQualified(rate: number | null | undefined): boolean | null {
+  if (rate == null || !Number.isFinite(rate)) return null
+  return rate >= COVER_CLICK_RATE_PASS_THRESHOLD
 }
 
 /** 向后兼容：旧代码需要 number 时使用，null 视为 0（仅 legacy 日报汇总） */

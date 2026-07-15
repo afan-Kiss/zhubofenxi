@@ -110,6 +110,14 @@ export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
+  /** 封面点击率（0–1） */
+  coverClickRate: number | null
+  /** 60s 停留人数 */
+  stay60sUserCount: number | null
+  /** 曝光次数 */
+  impressionCount: number | null
+  /** 观看支付率（0–1） */
+  viewPayRate: number | null
   /** 与主播卡片「本期销售额」一致，供走势对账 */
   gmvYuan?: number
   /** 与主播业绩页 anchorLeaderboard.trend 同源 */
@@ -368,6 +376,10 @@ function buildAnchorRow(params: {
     dealUserCount: traffic?.dealUserCount ?? null,
     dealConversionRate: traffic?.dealConversionRate ?? null,
     newFollowerRate: traffic?.newFollowerRate ?? null,
+    coverClickRate: traffic?.coverClickRate ?? null,
+    stay60sUserCount: traffic?.stay60sUserCount ?? null,
+    impressionCount: traffic?.impressionCount ?? null,
+    viewPayRate: traffic?.viewPayRate ?? null,
     ...params.scheduleAttendance,
     sessionLabel,
     shopName,

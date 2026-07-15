@@ -551,6 +551,10 @@ export function pickBestScheduleRowByOverlapForTest(
     avgViewDurationSeconds: null,
     newFollowerCount: null,
     dealUserCount: null,
+    coverClickRate: null,
+    stay60sUserCount: null,
+    impressionCount: null,
+    viewPayRate: null,
   }
   return matchLiveSessionToBestScheduleRow(session, scheduleRows).scheduleRow
 }

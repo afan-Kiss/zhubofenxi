@@ -33,6 +33,10 @@ function makeSession(partial: Partial<DailyReportLiveSession>): DailyReportLiveS
     dealUserCount: null,
     dealConversionRate: null,
     newFollowerRate: null,
+    coverClickRate: null,
+    stay60sUserCount: null,
+    impressionCount: null,
+    viewPayRate: null,
     ...partial,
   }
 }

@@ -4,6 +4,7 @@ export type XhsApiKey =
   | 'live_session_list'
   | 'live_overview'
   | 'live_traffic_core'
+  | 'live_realtime_metric'
   | 'pending_settlement_list'
   | 'settled_settlement_list'
   | 'settlement_detail'

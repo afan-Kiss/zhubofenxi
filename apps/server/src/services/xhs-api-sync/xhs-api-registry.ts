@@ -57,6 +57,17 @@ export const XHS_API_REGISTRY: Record<XhsApiKey, XhsApiDefinition> = {
     pageMode: 'none',
     pageSize: 1,
   },
+  live_realtime_metric: {
+    key: 'live_realtime_metric',
+    name: '直播大屏实时指标',
+    method: 'POST',
+    url: 'https://ark.xiaohongshu.com/api/edith/ecomlivedata/realtime/metric',
+    referer: 'https://ark.xiaohongshu.com/live_screen/operation',
+    enabled: true,
+    needSign: true,
+    pageMode: 'none',
+    pageSize: 1,
+  },
   pending_settlement_list: {
     key: 'pending_settlement_list',
     name: '待结算列表',

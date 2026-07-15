@@ -1,6 +1,7 @@
 import React from 'react'
 import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import {
+  formatCoverClickRateWithQuality,
   formatDensity,
   formatDuration,
   formatHourly,
@@ -57,6 +58,14 @@ export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
+  /** 封面点击率（0–1） */
+  coverClickRate?: number | null
+  /** 60s 停留人数 */
+  stay60sUserCount?: number | null
+  /** 曝光次数 */
+  impressionCount?: number | null
+  /** 观看支付率（0–1） */
+  viewPayRate?: number | null
   gmvYuan?: number
   trend?: AnchorTrend
 }
@@ -128,7 +137,9 @@ function MetricLine({ label, value, strong }: { label: string; value: string; st
   return (
     <div className={`grid grid-cols-[minmax(0,1fr)_auto] border-b ${GOLDEN_TABLE_LINE} last:border-b-0`}>
       <div
-        className={`border-r px-3 py-1.5 text-[13px] leading-6 text-slate-500 ${GOLDEN_TABLE_LINE}`}
+        className={`border-r px-3 py-1.5 text-[13px] leading-6 ${GOLDEN_TABLE_LINE} ${
+          strong ? 'font-semibold text-slate-800' : 'text-slate-500'
+        }`}
       >
         {label}
       </div>
@@ -304,7 +315,27 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         <MetricTableNote>归属支付按主播时段统计；真实发货已剔除售后、关闭与取消单</MetricTableNote>
         <MetricLine label="真实卖出" value={formatOrderCount(row.soldOrderCount)} />
         <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />
-        <MetricLine label="场观人数" value={formatPeopleCount(row.viewSessionCount)} />
+        <MetricLine label="场观人数" value={formatPeopleCount(row.viewSessionCount)} strong />
+        <MetricLine
+          label="封面点击率"
+          value={formatCoverClickRateWithQuality(row.coverClickRate)}
+          strong
+        />
+        <MetricLine
+          label="停留时长"
+          value={formatStayDurationSeconds(row.avgViewDurationSeconds)}
+          strong
+        />
+        <MetricLine label="60s停留人数" value={formatPeopleCount(row.stay60sUserCount)} />
+        <MetricLine
+          label="曝光次数"
+          value={
+            row.impressionCount != null && Number.isFinite(row.impressionCount)
+              ? Math.round(row.impressionCount).toLocaleString('zh-CN')
+              : '--'
+          }
+        />
+        <MetricLine label="观看支付率" value={formatRatePercent(row.viewPayRate)} />
         <MetricLine label="进房人数" value={formatPeopleCount(row.joinUserCount)} />
         <MetricLine
           label="平均在线"
@@ -312,7 +343,6 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
             row.avgOnlineUserCount != null ? formatPeopleCount(row.avgOnlineUserCount) : '--'
           }
         />
-        <MetricLine label="停留时长" value={formatStayDurationSeconds(row.avgViewDurationSeconds)} />
         <MetricLine label="新增粉丝" value={formatPeopleCount(row.newFollowerCount)} />
         <MetricLine label="成交率" value={formatRatePercent(row.dealConversionRate)} />
         <MetricLine label="新增粉丝率" value={formatRatePercent(row.newFollowerRate)} />

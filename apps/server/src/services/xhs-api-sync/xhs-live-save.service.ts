@@ -122,6 +122,7 @@ export async function syncLiveSessionListOnlyWithSave(
   let firstLiveName: string | null = null
   let totalPageEstimate: number | null = null
   const syncStarted = Date.now()
+  const savedSessionIds: string[] = []
 
   const liveAccountId = params.liveAccountId ?? 'legacy'
   const liveAccountName = params.liveAccountName ?? '未知直播号'
@@ -197,6 +198,7 @@ export async function syncLiveSessionListOnlyWithSave(
       totalPageEstimate = Math.ceil(total / pageSize)
     }
 
+    const pageSessionIds: string[] = []
     for (const item of block.items) {
       if (!firstLiveId) firstLiveId = pickLiveField(item, 'liveId')
       if (!firstLiveName) firstLiveName = pickLiveField(item, 'liveName')
@@ -211,8 +213,11 @@ export async function syncLiveSessionListOnlyWithSave(
         savedCount++
         if (saved.created) createdCount++
         else updatedCount++
+        const baseId = stableLiveSessionId(item)
+        pageSessionIds.push(`${liveAccountId}::${baseId}`)
       }
     }
+    savedSessionIds.push(...pageSessionIds)
 
     if (block.items.length === 0) break
     if (total > 0 && page * pageSize >= total) break
@@ -223,6 +228,29 @@ export async function syncLiveSessionListOnlyWithSave(
 
   if (page > maxPages && total > page * pageSize) {
     warnings.push(`已达到最大页数保护 ${maxPages}，可能未拉取完整数据`)
+  }
+
+  if (savedSessionIds.length > 0) {
+    try {
+      const { enrichLiveSessionsWithRealtimeMetric } = await import(
+        './xhs-live-realtime-metric.service'
+      )
+      const enrich = await enrichLiveSessionsWithRealtimeMetric({
+        sessionIds: [...new Set(savedSessionIds)],
+        liveAccountId: params.liveAccountId,
+        liveAccountName,
+        context: params.context,
+        maxRequests: 40,
+      })
+      if (enrich.enriched > 0) {
+        warnings.push(`大屏指标已补齐 ${enrich.enriched} 场`)
+      }
+      warnings.push(...enrich.warnings.slice(0, 5))
+    } catch (err) {
+      warnings.push(
+        `大屏指标补齐异常：${err instanceof Error ? err.message : String(err)}`.slice(0, 160),
+      )
+    }
   }
 
   const durationSec = (Date.now() - syncStarted) / 1000

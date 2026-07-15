@@ -3,10 +3,13 @@ import { prisma } from '../lib/prisma'
 import { findAnchorByName } from './anchor-rules.service'
 import { getAnchorConfigSync, refreshAnchorConfigCache } from './anchor.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
-import { invalidateAndRebuildBusinessBoardCache } from './business-cache.service'
+import {
+  invalidateAndRebuildBusinessBoardCache,
+  invalidateBusinessBoardCache,
+} from './business-cache.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 import { ANCHOR_SESSION_DISPLAY_FROM_0613 } from './anchor-performance-attribution.service'
-import { logInfo } from '../utils/server-log'
+import { logInfo, logWarn } from '../utils/server-log'
 
 export interface ManualAnchorOverrideEntry {
   anchorId: string
@@ -191,7 +194,14 @@ export async function assignOrderAnchorManualOverride(params: {
   clearManualAnchorOverrideCache()
   clearScheduleAttributionCache()
   logInfo('订单归属', `手动指定 ${orderKey} → ${resolvedName}`)
-  await invalidateAndRebuildBusinessBoardCache(`order-anchor-manual:${orderKey}`)
+  // 先立刻清内存缓存，HTTP 不再阻塞 5 档经营缓存全量重建（与线下录入一致后台重建）
+  invalidateBusinessBoardCache()
+  void invalidateAndRebuildBusinessBoardCache(`order-anchor-manual:${orderKey}`).catch((e) => {
+    logWarn(
+      '订单归属',
+      `后台重建失败：${e instanceof Error ? e.message : String(e)}`,
+    )
+  })
 
   return {
     anchorId,
@@ -207,5 +217,11 @@ export async function removeOrderAnchorManualOverride(orderKey: string): Promise
   await prisma.orderAnchorManualOverride.deleteMany({ where: { orderKey: key } })
   clearManualAnchorOverrideCache()
   clearScheduleAttributionCache()
-  await invalidateAndRebuildBusinessBoardCache(`order-anchor-manual-remove:${key}`)
+  invalidateBusinessBoardCache()
+  void invalidateAndRebuildBusinessBoardCache(`order-anchor-manual-remove:${key}`).catch((e) => {
+    logWarn(
+      '订单归属',
+      `清除归属后后台重建失败：${e instanceof Error ? e.message : String(e)}`,
+    )
+  })
 }

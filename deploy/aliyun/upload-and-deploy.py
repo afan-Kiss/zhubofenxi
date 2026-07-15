@@ -316,31 +316,53 @@ count_orders() {{
   count_table "$1" "XhsRawOrder"
 }}
 
+# SQLite WAL 下裸 cp app.db 会丢最近未 checkpoint 的写入（曾丢 OfflineDeal）。
+# 优先用 sqlite3 .backup 做一致性快照；失败再回退到 cp db+wal+shm。
+safe_sqlite_snapshot() {{
+  local src="$1"
+  local dest="$2"
+  rm -f "$dest" "$dest-wal" "$dest-shm"
+  if command -v sqlite3 >/dev/null 2>&1; then
+    if sqlite3 "$src" ".backup '$dest'" 2>/dev/null; then
+      if [ -f "$dest" ] && [ "$(stat -c '%s' "$dest" 2>/dev/null || echo 0)" -gt 0 ]; then
+        echo "safe_sqlite_snapshot: used .backup -> $dest"
+        return 0
+      fi
+    fi
+  fi
+  cp -a "$src" "$dest"
+  [ -f "$src-wal" ] && cp -a "$src-wal" "$dest-wal" || true
+  [ -f "$src-shm" ] && cp -a "$src-shm" "$dest-shm" || true
+  echo "safe_sqlite_snapshot: fallback cp db(+wal+shm) -> $dest"
+}}
+
 collect_db_stats() {{
   local db_file="$1"
   if [ ! -f "$db_file" ]; then
-    echo "orders=0 users=0 creds=0 jobs=0 size=0"
+    echo "orders=0 users=0 creds=0 jobs=0 offline=0 size=0"
     return
   fi
-  local orders users creds jobs size
+  local orders users creds jobs offline size
   orders=$(count_orders "$db_file")
   users=$(count_table "$db_file" "User")
   creds=$(count_table "$db_file" "PlatformCredential")
   jobs=$(count_table "$db_file" "XhsSyncJob")
+  offline=$(count_table "$db_file" "OfflineDeal")
   size=$(stat -c '%s' "$db_file" 2>/dev/null || echo 0)
-  echo "orders=$orders users=$users creds=$creds jobs=$jobs size=$size"
+  echo "orders=$orders users=$users creds=$creds jobs=$jobs offline=$offline size=$size"
 }}
 
 backup_production_db_with_stats() {{
   local db_file="$1"
   local stats="$2"
-  local ts orders users creds backup_name
+  local ts orders users creds offline backup_name
   ts=$(date +%Y%m%d-%H%M%S)
   orders=$(echo "$stats" | sed -n 's/.*orders=\\([0-9]*\\).*/\\1/p')
   users=$(echo "$stats" | sed -n 's/.*users=\\([0-9]*\\).*/\\1/p')
   creds=$(echo "$stats" | sed -n 's/.*creds=\\([0-9]*\\).*/\\1/p')
-  backup_name="app.db.${{ts}}.orders-${{orders}}.users-${{users}}.cookies-${{creds}}.db"
-  cp -a "$db_file" "$DB_BACKUP_DIR/$backup_name"
+  offline=$(echo "$stats" | sed -n 's/.*offline=\\([0-9]*\\).*/\\1/p')
+  backup_name="app.db.${{ts}}.orders-${{orders}}.users-${{users}}.cookies-${{creds}}.offline-${{offline:-0}}.db"
+  safe_sqlite_snapshot "$db_file" "$DB_BACKUP_DIR/$backup_name"
   echo "Backed up production app.db -> $DB_BACKUP_DIR/$backup_name"
 }}
 
@@ -363,7 +385,7 @@ PRE_DEPLOY_STATS=""
 if [ -f "$DEPLOY_DIR/apps/server/data/app.db" ]; then
   PRE_DEPLOY_STATS=$(collect_db_stats "$DEPLOY_DIR/apps/server/data/app.db")
   echo "Pre-deploy db stats: $PRE_DEPLOY_STATS"
-  cp -a "$DEPLOY_DIR/apps/server/data/app.db" "$PRESERVE_DB"
+  safe_sqlite_snapshot "$DEPLOY_DIR/apps/server/data/app.db" "$PRESERVE_DB"
   backup_production_db_with_stats "$DEPLOY_DIR/apps/server/data/app.db" "$PRE_DEPLOY_STATS"
   echo "Preserved production app.db before deploy"
 fi
@@ -452,13 +474,16 @@ fi
 if [ -n "$RESTORE_SOURCE" ]; then
   PRESERVE_ORDERS=0
   PRESERVE_SIZE=0
+  PRESERVE_OFFLINE=0
   if [ -f "$PRESERVE_DB" ]; then
     PRESERVE_ORDERS=$(count_orders "$PRESERVE_DB")
     PRESERVE_SIZE=$(stat -c '%s' "$PRESERVE_DB" 2>/dev/null || echo 0)
+    PRESERVE_OFFLINE=$(count_table "$PRESERVE_DB" "OfflineDeal")
   fi
   RESTORE_ORDERS=$(count_orders "$RESTORE_SOURCE")
   RESTORE_SIZE=$(stat -c '%s' "$RESTORE_SOURCE" 2>/dev/null || echo 0)
-  echo "Database restore check: preserve_orders=$PRESERVE_ORDERS preserve_size=$PRESERVE_SIZE restore_orders=$RESTORE_ORDERS restore_size=$RESTORE_SIZE source=$RESTORE_SOURCE"
+  RESTORE_OFFLINE=$(count_table "$RESTORE_SOURCE" "OfflineDeal")
+  echo "Database restore check: preserve_orders=$PRESERVE_ORDERS preserve_size=$PRESERVE_SIZE preserve_offline=$PRESERVE_OFFLINE restore_orders=$RESTORE_ORDERS restore_size=$RESTORE_SIZE restore_offline=$RESTORE_OFFLINE source=$RESTORE_SOURCE"
 
   if [ "$PRESERVE_ORDERS" -gt 0 ] && [ "$RESTORE_ORDERS" -eq 0 ]; then
     echo "[deploy][FAIL] 拒绝用空库覆盖生产库: 线上原有 XhsRawOrder=$PRESERVE_ORDERS，恢复目标 XhsRawOrder=0"
@@ -468,8 +493,16 @@ if [ -n "$RESTORE_SOURCE" ]; then
     echo "[deploy][FAIL] 拒绝用空库覆盖生产库: preserve 仅 ${{PRESERVE_SIZE}}B (<5MB) 但线上原有 XhsRawOrder=$PRESERVE_ORDERS"
     exit 1
   fi
+  if [ "$PRESERVE_OFFLINE" -gt 0 ] && [ "$RESTORE_OFFLINE" -eq 0 ]; then
+    echo "[deploy][FAIL] 拒绝覆盖：线上 OfflineDeal=$PRESERVE_OFFLINE，恢复目标 OfflineDeal=0（疑似 WAL 裸拷丢失）"
+    exit 1
+  fi
 
+  # 恢复时也用一致快照写入目标（若源已是 .backup 产物则直接 cp）
+  rm -f "$DEPLOY_DIR/apps/server/data/app.db" "$DEPLOY_DIR/apps/server/data/app.db-wal" "$DEPLOY_DIR/apps/server/data/app.db-shm"
   cp -a "$RESTORE_SOURCE" "$DEPLOY_DIR/apps/server/data/app.db"
+  [ -f "$RESTORE_SOURCE-wal" ] && cp -a "$RESTORE_SOURCE-wal" "$DEPLOY_DIR/apps/server/data/app.db-wal" || true
+  [ -f "$RESTORE_SOURCE-shm" ] && cp -a "$RESTORE_SOURCE-shm" "$DEPLOY_DIR/apps/server/data/app.db-shm" || true
   if [ "$RESTORE_SOURCE" = "$FORCED_LOCAL_DB" ]; then
     echo "Restored app.db from explicit local upload (DEPLOY_UPLOAD_LOCAL_DB=1 with overwrite confirmation)"
   else
@@ -482,11 +515,17 @@ if [ -n "$RESTORE_SOURCE" ]; then
   PRE_ORDERS=$(echo "$PRE_DEPLOY_STATS" | sed -n 's/.*orders=\\([0-9]*\\).*/\\1/p')
   PRE_USERS=$(echo "$PRE_DEPLOY_STATS" | sed -n 's/.*users=\\([0-9]*\\).*/\\1/p')
   PRE_CREDS=$(echo "$PRE_DEPLOY_STATS" | sed -n 's/.*creds=\\([0-9]*\\).*/\\1/p')
+  PRE_OFFLINE=$(echo "$PRE_DEPLOY_STATS" | sed -n 's/.*offline=\\([0-9]*\\).*/\\1/p')
   PRE_SIZE=$(echo "$PRE_DEPLOY_STATS" | sed -n 's/.*size=\\([0-9]*\\).*/\\1/p')
   POST_ORDERS=$(echo "$POST_DEPLOY_STATS" | sed -n 's/.*orders=\\([0-9]*\\).*/\\1/p')
   POST_USERS=$(echo "$POST_DEPLOY_STATS" | sed -n 's/.*users=\\([0-9]*\\).*/\\1/p')
   POST_CREDS=$(echo "$POST_DEPLOY_STATS" | sed -n 's/.*creds=\\([0-9]*\\).*/\\1/p')
+  POST_OFFLINE=$(echo "$POST_DEPLOY_STATS" | sed -n 's/.*offline=\\([0-9]*\\).*/\\1/p')
   POST_SIZE=$(echo "$POST_DEPLOY_STATS" | sed -n 's/.*size=\\([0-9]*\\).*/\\1/p')
+  if [ -n "$PRE_OFFLINE" ] && [ -n "$POST_OFFLINE" ] && [ "$PRE_OFFLINE" -gt 0 ] && [ "$POST_OFFLINE" -lt "$PRE_OFFLINE" ]; then
+    echo "[deploy][FAIL] OfflineDeal 数量异常下降（${{PRE_OFFLINE}} -> ${{POST_OFFLINE}}）"
+    exit 1
+  fi
 
   if [ "${{PRE_ORDERS:-0}}" -gt 0 ] && [ "${{POST_ORDERS:-0}}" -eq 0 ]; then
     echo "[deploy][FAIL] 拒绝部署：数据库疑似被空库覆盖（XhsRawOrder ${{PRE_ORDERS}} -> 0）"

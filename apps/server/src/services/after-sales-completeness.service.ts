@@ -1,5 +1,6 @@
 /**
  * 售后补查完整性：全局 + 当前查询范围（支付单号池）分开统计
+ * Wave4: 去掉超大 OR；开放任务一次拉齐后内存相交；全局结果可注入/短缓存
  */
 import { prisma } from '../lib/prisma'
 import { getAfterSalesQueueStatusCounts } from './after-sales-queue.service'
@@ -44,6 +45,24 @@ export type RelevantOrderRef = {
   anchorId?: string | null
   anchorName?: string | null
   shopName?: string | null
+}
+
+const OPEN_STATUSES = ['pending', 'retry_wait', 'running', 'blocked', 'failed'] as const
+
+let globalCompletenessCache: { at: number; value: AfterSalesCompleteness } | null = null
+let openTasksCache: {
+  at: number
+  byKey: Map<
+    string,
+    { status: string; statusChangedAt: Date | null; createdAt: Date }
+  >
+} | null = null
+
+const SHORT_TTL_MS = Math.max(1000, Number(process.env.AFTER_SALES_COMPLETENESS_TTL_MS || 2000))
+
+export function invalidateAfterSalesCompletenessCache(): void {
+  globalCompletenessCache = null
+  openTasksCache = null
 }
 
 function emptyCompleteness(
@@ -151,8 +170,11 @@ async function loadFetchTimestamps(): Promise<{
   }
 }
 
-/** 全局积压摘要（次要提示用） */
+/** 全局积压摘要（次要提示用）；短缓存 */
 export async function resolveGlobalAfterSalesCompleteness(): Promise<AfterSalesCompleteness> {
+  if (globalCompletenessCache && Date.now() - globalCompletenessCache.at < SHORT_TTL_MS) {
+    return globalCompletenessCache.value
+  }
   const counts = await getAfterSalesQueueStatusCounts()
   const pendingCount = counts.pending ?? 0
   const retryWaitCount = counts.retry_wait ?? 0
@@ -178,7 +200,7 @@ export async function resolveGlobalAfterSalesCompleteness(): Promise<AfterSalesC
   const oldestOpenAt =
     oldest?.statusChangedAt?.toISOString() ?? oldest?.createdAt?.toISOString() ?? null
   const lastSuccessfulFetchAt = fetchTs.lastSuccessAt ?? fetchTs.lastEmptySuccessAt
-  return emptyCompleteness('global', {
+  const value = emptyCompleteness('global', {
     status: status === 'complete' ? 'complete' : status,
     pendingCount,
     retryWaitCount,
@@ -194,6 +216,38 @@ export async function resolveGlobalAfterSalesCompleteness(): Promise<AfterSalesC
     globalPendingCount: pendingCount + retryWaitCount + runningCount,
     note: note.replace(/^当前范围/, '全局'),
   })
+  globalCompletenessCache = { at: Date.now(), value }
+  return value
+}
+
+async function loadOpenQueueTasksByKey(): Promise<
+  Map<string, { status: string; statusChangedAt: Date | null; createdAt: Date }>
+> {
+  if (openTasksCache && Date.now() - openTasksCache.at < SHORT_TTL_MS) {
+    return openTasksCache.byKey
+  }
+  const rows = await prisma.xhsAfterSalesWorkbenchQueue.findMany({
+    where: { status: { in: [...OPEN_STATUSES] } },
+    select: {
+      liveAccountId: true,
+      orderNo: true,
+      status: true,
+      statusChangedAt: true,
+      createdAt: true,
+    },
+  })
+  const byKey = new Map(
+    rows.map((q) => [
+      liveAccountOrderKey(q.liveAccountId, q.orderNo),
+      {
+        status: q.status,
+        statusChangedAt: q.statusChangedAt,
+        createdAt: q.createdAt,
+      },
+    ]),
+  )
+  openTasksCache = { at: Date.now(), byKey }
+  return byKey
 }
 
 /**
@@ -205,8 +259,10 @@ export async function resolveAfterSalesCompleteness(params?: {
   endDate?: string
   relevantOrderKeys?: Array<{ liveAccountId: string; orderNo: string }>
   relevantViews?: RelevantOrderRef[]
+  /** Wave4：调用方已算过的全局摘要，避免重复查询 */
+  globalCompleteness?: AfterSalesCompleteness
 }): Promise<AfterSalesCompleteness> {
-  const global = await resolveGlobalAfterSalesCompleteness()
+  const global = params?.globalCompleteness ?? (await resolveGlobalAfterSalesCompleteness())
 
   const refs: RelevantOrderRef[] = []
   if (params?.relevantViews?.length) {
@@ -230,7 +286,6 @@ export async function resolveAfterSalesCompleteness(params?: {
       refs.push({ liveAccountId: k.liveAccountId, orderNo: no })
     }
   } else {
-    // 无范围 → 兼容旧调用，返回全局
     return global
   }
 
@@ -244,32 +299,15 @@ export async function resolveAfterSalesCompleteness(params?: {
     })
   }
 
-  const queues = await prisma.xhsAfterSalesWorkbenchQueue.findMany({
-    where: {
-      OR: refs.map((r) => ({
-        liveAccountId: r.liveAccountId || 'legacy',
-        orderNo: r.orderNo,
-      })),
-    },
-    select: {
-      liveAccountId: true,
-      orderNo: true,
-      status: true,
-      statusChangedAt: true,
-      createdAt: true,
-    },
-  })
-
-  const byKey = new Map(
-    queues.map((q) => [liveAccountOrderKey(q.liveAccountId, q.orderNo), q]),
-  )
+  // Wave4：禁止按订单数量构造 OR；只拉开放任务后与范围 key 内存相交
+  const openByKey = await loadOpenQueueTasksByKey()
 
   let pendingCount = 0
   let retryWaitCount = 0
   let runningCount = 0
   let blockedCount = 0
   let failedCount = 0
-  let doneCount = 0
+  const doneCount = 0
 
   const affectedKeys = new Set<string>()
   const affectedAnchorIds = new Set<string>()
@@ -281,17 +319,14 @@ export async function resolveAfterSalesCompleteness(params?: {
 
   for (const ref of refs) {
     const key = liveAccountOrderKey(ref.liveAccountId, ref.orderNo)
-    const q = byKey.get(key)
-    const status = q?.status ?? 'missing'
+    const q = openByKey.get(key)
+    if (!q) continue
+    const status = q.status
     if (status === 'pending') pendingCount++
     else if (status === 'retry_wait') retryWaitCount++
     else if (status === 'running') runningCount++
     else if (status === 'blocked') blockedCount++
     else if (status === 'failed') failedCount++
-    else if (status === 'done') doneCount++
-
-    const openLike = ['pending', 'retry_wait', 'running', 'blocked', 'failed'].includes(status)
-    if (!openLike) continue
 
     if (!affectedKeys.has(key)) {
       affectedKeys.add(key)
@@ -301,7 +336,7 @@ export async function resolveAfterSalesCompleteness(params?: {
       affectedShopIds.add(ref.liveAccountId || 'legacy')
       if (ref.shopName) affectedShopNames.add(ref.shopName)
     }
-    const ts = (q?.statusChangedAt ?? q?.createdAt)?.toISOString() ?? null
+    const ts = (q.statusChangedAt ?? q.createdAt)?.toISOString?.() ?? null
     if (ts && (!oldestOpenAt || ts < oldestOpenAt)) oldestOpenAt = ts
   }
 
@@ -313,7 +348,6 @@ export async function resolveAfterSalesCompleteness(params?: {
     failedCount,
   })
 
-  // 范围已 complete 时，不因全局历史积压升级状态；仅附带 globalPendingCount
   return emptyCompleteness('range', {
     status,
     pendingCount,

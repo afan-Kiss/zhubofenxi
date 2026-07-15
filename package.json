@@ -34,6 +34,8 @@
     "verify:business-cache-range-invalidation": "tsx apps/server/scripts/verify-business-cache-range-invalidation.ts",
     "verify:after-sales-db-e2e": "tsx apps/server/scripts/verify-after-sales-db-e2e.ts",
     "verify:system-wave3-integrity": "tsx apps/server/scripts/verify-system-wave3-integrity.ts",
+    "verify:board-second-load": "tsx apps/server/scripts/verify-board-second-load.ts",
+    "benchmark:board-load": "tsx apps/server/scripts/benchmark-board-load.ts",
     "verify:four-shop-har-june": "tsx apps/server/scripts/verify-four-shop-har-june.ts",
     "accept:anchor-metrics-fix": "tsx apps/server/scripts/anchor-metrics-fix-acceptance.ts",
     "accept:anchor-trend": "tsx apps/server/scripts/anchor-trend-acceptance.ts",

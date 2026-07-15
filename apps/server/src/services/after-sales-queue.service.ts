@@ -28,6 +28,7 @@ import {
   recordShopAfterSalesSuccess,
   type ShopCircuitSnapshot,
 } from './shop-after-sales-runtime.service'
+import { invalidateAfterSalesCompletenessCache } from './after-sales-completeness.service'
 import { listEnabledLiveAccountsWithCookie } from './live-account.service'
 
 /** 本批临时停止（不跨批次） */
@@ -523,6 +524,7 @@ export async function completeAfterSalesQueueTask(params: {
 }): Promise<AfterSalesQueueStatus> {
   const { queueId, liveAccountId, result, httpStatus } = params
   const now = new Date()
+  invalidateAfterSalesCompletenessCache()
 
   const current = await prisma.xhsAfterSalesWorkbenchQueue.findUnique({
     where: { id: queueId },

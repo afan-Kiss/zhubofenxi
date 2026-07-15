@@ -91,6 +91,22 @@ async function main() {
   await initializeSystemAnchors()
   await refreshAnchorConfigCache()
 
+  // Wave4 P0：HTTP 监听前加载 generation + 标准快照索引（不做全量重建）
+  try {
+    const { ensureBusinessDataGenerationLoaded } = await import(
+      './services/business-data-generation.service'
+    )
+    await ensureBusinessDataGenerationLoaded()
+  } catch (err) {
+    logError('经营版本', `启动加载失败：${err instanceof Error ? err.message : String(err)}`)
+  }
+  try {
+    const { seedBoardPresetSnapshotsOnBoot } = await import('./services/business-cache.service')
+    await seedBoardPresetSnapshotsOnBoot()
+  } catch (err) {
+    logError('经营快照', `启动预载失败：${err instanceof Error ? err.message : String(err)}`)
+  }
+
   const { app, webMounted } = createApp()
   await listenHttp(app, webMounted)
 

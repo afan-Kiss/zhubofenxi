@@ -40,6 +40,7 @@ export function startDeferredBootTasks(): void {
     }
 
     try {
+      // 快照已在 listen 前预载；此处仅作幂等补种
       await seedBoardPresetSnapshotsOnBoot()
     } catch (err) {
       logWarn(

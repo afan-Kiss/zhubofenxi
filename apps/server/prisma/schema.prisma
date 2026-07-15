@@ -1380,3 +1380,19 @@ model LuckyGiftSyncRun {
   summaryJson      String?
   updatedAt        DateTime @updatedAt
 }
+
+/// Wave4: 经营数据版本号（热路径内存整数比对，替代反复 MAX(updatedAt)）
+model BusinessDataGeneration {
+  id                       String   @id @default("default")
+  ordersGeneration         Int      @default(1)
+  liveSessionsGeneration   Int      @default(1)
+  settlementsGeneration    Int      @default(1)
+  workbenchGeneration      Int      @default(1)
+  timeSearchGeneration     Int      @default(1)
+  scheduleGeneration       Int      @default(1)
+  manualOverrideGeneration Int      @default(1)
+  offlineDealGeneration    Int      @default(1)
+  anchorMasterGeneration   Int      @default(1)
+  qualityGeneration        Int      @default(1)
+  updatedAt                DateTime @updatedAt
+}

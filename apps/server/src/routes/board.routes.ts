@@ -45,7 +45,13 @@ const auditCtx = (req: import('express').Request) => ({
 boardRouter.use(attachRequestUser, requireAuth)
 
 boardRouter.get('/overview-data', async (req, res) => {
+  const started = Date.now()
   try {
+    const { createBoardPerfTrace, buildServerTimingHeader, buildBoardEtag, generationToken } =
+      await import('../services/board-perf.service')
+    const { BUSINESS_CACHE_FINGERPRINT } = await import('../services/business-cache.service')
+    const trace = createBoardPerfTrace('overview')
+    trace.mark('total')
     const preset = String(req.query.preset ?? 'thisMonth')
     const startDate = req.query.startDate ? String(req.query.startDate) : undefined
     const endDate = req.query.endDate ? String(req.query.endDate) : undefined
@@ -57,14 +63,61 @@ boardRouter.get('/overview-data', async (req, res) => {
       role: req.user!.role as import('../types/roles').UserRole,
       username: req.user!.username,
     })
-    sendOk(res, data)
+    const cacheStatus = (data as { cacheStatus?: Record<string, unknown> }).cacheStatus
+    const source = String(cacheStatus?.source ?? 'rebuilt') as
+      | 'memory'
+      | 'snapshot'
+      | 'rebuilt'
+      | 'stale-fallback'
+    trace.cacheSource = source
+    const gen = cacheStatus?.dataGeneration as
+      | {
+          ordersGeneration: number
+          workbenchGeneration: number
+          timeSearchGeneration: number
+          scheduleGeneration: number
+          manualOverrideGeneration: number
+          offlineDealGeneration: number
+        }
+      | undefined
+    const lastBuiltAt = String(cacheStatus?.lastBuiltAt ?? '')
+    const etag = buildBoardEtag({
+      cacheKey: String((data as { overviewMeta?: { cacheKey?: string } }).overviewMeta?.cacheKey ?? `${preset}`),
+      fingerprint: BUSINESS_CACHE_FINGERPRINT,
+      generationToken: gen ? generationToken(gen) : '0',
+      lastBuiltAt: lastBuiltAt || new Date().toISOString(),
+    })
+    const ifNoneMatch = String(req.headers['if-none-match'] ?? '')
+    if (ifNoneMatch && ifNoneMatch === etag && source === 'memory') {
+      res.setHeader('ETag', etag)
+      res.setHeader('X-Board-Cache', source)
+      res.status(304).end()
+      return
+    }
+    const payload = JSON.stringify({ ok: true, success: true, data })
+    const totalMs = Date.now() - started
+    trace.payloadBytes = Buffer.byteLength(payload)
+    trace.etag = etag
+    trace.buildDurationMs = Number(cacheStatus?.buildDurationMs ?? 0) || undefined
+    const result = trace.finish(totalMs)
+    res.setHeader('Server-Timing', buildServerTimingHeader(result.phases))
+    res.setHeader('X-Board-Cache', source)
+    res.setHeader('X-Data-Generation', gen ? generationToken(gen) : '0')
+    res.setHeader('ETag', etag)
+    res.setHeader('X-Build-Duration-Ms', String(cacheStatus?.buildDurationMs ?? totalMs))
+    res.status(200).type('json').send(payload)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '加载经营总览失败', 500)
   }
 })
 
 boardRouter.get('/anchors-data', async (req, res) => {
+  const started = Date.now()
   try {
+    const { createBoardPerfTrace, buildServerTimingHeader, buildBoardEtag, generationToken } =
+      await import('../services/board-perf.service')
+    const { BUSINESS_CACHE_FINGERPRINT } = await import('../services/business-cache.service')
+    const trace = createBoardPerfTrace('anchors')
     const preset = String(req.query.preset ?? 'thisMonth')
     const startDate = req.query.startDate ? String(req.query.startDate) : undefined
     const endDate = req.query.endDate ? String(req.query.endDate) : undefined
@@ -76,7 +129,48 @@ boardRouter.get('/anchors-data', async (req, res) => {
       role: req.user!.role as import('../types/roles').UserRole,
       username: req.user!.username,
     })
-    sendOk(res, data)
+    const cacheStatus = (data as { cacheStatus?: Record<string, unknown> }).cacheStatus
+    const source = String(cacheStatus?.source ?? 'rebuilt') as
+      | 'memory'
+      | 'snapshot'
+      | 'rebuilt'
+      | 'stale-fallback'
+    trace.cacheSource = source
+    const gen = cacheStatus?.dataGeneration as
+      | {
+          ordersGeneration: number
+          workbenchGeneration: number
+          timeSearchGeneration: number
+          scheduleGeneration: number
+          manualOverrideGeneration: number
+          offlineDealGeneration: number
+        }
+      | undefined
+    const lastBuiltAt = String(cacheStatus?.lastBuiltAt ?? '')
+    const etag = buildBoardEtag({
+      cacheKey: `anchors|${preset}|${startDate ?? ''}|${endDate ?? ''}`,
+      fingerprint: BUSINESS_CACHE_FINGERPRINT,
+      generationToken: gen ? generationToken(gen) : '0',
+      lastBuiltAt: lastBuiltAt || new Date().toISOString(),
+    })
+    const ifNoneMatch = String(req.headers['if-none-match'] ?? '')
+    if (ifNoneMatch && ifNoneMatch === etag && source === 'memory') {
+      res.setHeader('ETag', etag)
+      res.setHeader('X-Board-Cache', source)
+      res.status(304).end()
+      return
+    }
+    const payload = JSON.stringify({ ok: true, success: true, data })
+    const totalMs = Date.now() - started
+    trace.payloadBytes = Buffer.byteLength(payload)
+    trace.etag = etag
+    const result = trace.finish(totalMs)
+    res.setHeader('Server-Timing', buildServerTimingHeader(result.phases))
+    res.setHeader('X-Board-Cache', source)
+    res.setHeader('X-Data-Generation', gen ? generationToken(gen) : '0')
+    res.setHeader('ETag', etag)
+    res.setHeader('X-Build-Duration-Ms', String(cacheStatus?.buildDurationMs ?? totalMs))
+    res.status(200).type('json').send(payload)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '加载主播业绩失败', 500)
   }

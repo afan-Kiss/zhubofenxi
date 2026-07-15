@@ -1,9 +1,27 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { getDataDir } from '../config/env'
-import { buildBusinessCacheKey, shouldRetainBusinessBoardCache } from './business-cache.service'
+import {
+  buildBusinessCacheKey,
+  shouldRetainBusinessBoardCache,
+  type BusinessBoardCacheEntry,
+} from './business-cache.service'
+import type { BusinessDataGenerationSnapshot } from './business-data-generation.service'
 import { resolveBusinessRange, type BusinessRangePreset } from '../utils/business-range'
 import { logInfo, logWarn } from '../utils/server-log'
+
+export const BOARD_SNAPSHOT_PAYLOAD_VERSION = 'wave4-v1'
+
+/** 由调用方传入当前 BUSINESS_CACHE_FINGERPRINT，避免循环依赖硬编码漂移 */
+let currentFingerprintResolver: () => string = () => 'unknown'
+
+export function setBoardSnapshotFingerprintResolver(fn: () => string): void {
+  currentFingerprintResolver = fn
+}
+
+function currentFingerprint(): string {
+  return currentFingerprintResolver()
+}
 
 export interface BoardPresetSnapshotRecord {
   cacheKey: string
@@ -18,6 +36,13 @@ export interface BoardPresetSnapshotRecord {
   lastBuiltAt: string
   sourceSyncJobId: string | null
   savedAt: string
+  /** Wave4 */
+  businessCacheFingerprint?: string
+  dataGeneration?: BusinessDataGenerationSnapshot | null
+  afterSalesCompletenessSummary?: Record<string, unknown> | null
+  overviewMeta?: Record<string, unknown> | null
+  payloadVersion?: string
+  buildDurationMs?: number
 }
 
 const SNAPSHOT_DIR = () => path.join(getDataDir(), 'board-snapshots')
@@ -25,6 +50,23 @@ const SNAPSHOT_DIR = () => path.join(getDataDir(), 'board-snapshots')
 function snapshotPath(cacheKey: string): string {
   const safe = cacheKey.replace(/[|]/g, '_')
   return path.join(SNAPSHOT_DIR(), `${safe}.json`)
+}
+
+export function isBoardSnapshotStructurallyUsable(
+  snap: BoardPresetSnapshotRecord | null | undefined,
+): boolean {
+  if (!snap?.summary || typeof snap.summary !== 'object') return false
+  return true
+}
+
+/** 业务指纹兼容才视为可信秒开（版本升级后旧快照不可直接当真） */
+export function isBoardSnapshotFingerprintCompatible(
+  snap: BoardPresetSnapshotRecord | null | undefined,
+): boolean {
+  if (!isBoardSnapshotStructurallyUsable(snap)) return false
+  const fp = (snap!.businessCacheFingerprint ?? '').trim()
+  if (!fp) return false
+  return fp === currentFingerprint()
 }
 
 export async function persistBoardPresetSnapshot(input: {
@@ -38,6 +80,11 @@ export async function persistBoardPresetSnapshot(input: {
   orderCount: number
   lastBuiltAt: string
   sourceSyncJobId: string | null
+  businessCacheFingerprint?: string
+  dataGeneration?: BusinessDataGenerationSnapshot | null
+  afterSalesCompletenessSummary?: Record<string, unknown> | null
+  overviewMeta?: Record<string, unknown> | null
+  buildDurationMs?: number
 }): Promise<void> {
   if (!shouldRetainBusinessBoardCache(input.preset)) return
   const cacheKey = buildBusinessCacheKey(input.preset, input.startDate, input.endDate)
@@ -54,10 +101,18 @@ export async function persistBoardPresetSnapshot(input: {
     lastBuiltAt: input.lastBuiltAt,
     sourceSyncJobId: input.sourceSyncJobId,
     savedAt: new Date().toISOString(),
+    businessCacheFingerprint: input.businessCacheFingerprint ?? currentFingerprint(),
+    dataGeneration: input.dataGeneration ?? null,
+    afterSalesCompletenessSummary: input.afterSalesCompletenessSummary ?? null,
+    overviewMeta: input.overviewMeta ?? null,
+    payloadVersion: BOARD_SNAPSHOT_PAYLOAD_VERSION,
+    buildDurationMs: input.buildDurationMs ?? 0,
   }
   try {
     await fs.mkdir(SNAPSHOT_DIR(), { recursive: true })
-    await fs.writeFile(snapshotPath(cacheKey), JSON.stringify(record), 'utf8')
+    const tmp = `${snapshotPath(cacheKey)}.tmp`
+    await fs.writeFile(tmp, JSON.stringify(record), 'utf8')
+    await fs.rename(tmp, snapshotPath(cacheKey))
   } catch (err) {
     logWarn(
       '经营快照',
@@ -75,22 +130,24 @@ export async function readBoardPresetSnapshot(
   try {
     const raw = await fs.readFile(snapshotPath(cacheKey), 'utf8')
     const parsed = JSON.parse(raw) as BoardPresetSnapshotRecord
-    if (!parsed?.summary || typeof parsed.summary !== 'object') return null
+    if (!isBoardSnapshotStructurallyUsable(parsed)) return null
     return parsed
   } catch {
     return null
   }
 }
 
-/** 重启后内存未预热时，用磁盘快照构造只读占位（无 views，仅供总览秒开） */
+/** 重启后用磁盘快照构造可立即展示的 stub（无 views；标记 disk_snapshot + 真实指纹） */
 export function buildSnapshotBoardCacheStub(
   snap: BoardPresetSnapshotRecord,
-): import('./business-cache.service').BusinessBoardCacheEntry {
+): BusinessBoardCacheEntry {
   const range = resolveBusinessRange(
     snap.preset as BusinessRangePreset,
     snap.startDate,
     snap.endDate,
   )
+  const fp = snap.businessCacheFingerprint ?? 'snapshot'
+  const nowFp = currentFingerprint()
   return {
     cacheKey: snap.cacheKey,
     preset: snap.preset,
@@ -113,11 +170,14 @@ export function buildSnapshotBoardCacheStub(
     sourceSyncJobId: snap.sourceSyncJobId,
     sourceDataMaxTime: null,
     sourceRawMaxUpdatedAt: null,
-    attributionAlgorithmVersion: 'snapshot',
-    buildDurationMs: 0,
+    attributionAlgorithmVersion: fp === nowFp ? nowFp : fp,
+    buildDurationMs: snap.buildDurationMs ?? 0,
     stale: false,
     buildError: null,
     fallbackReason: 'disk_snapshot',
+    dataGeneration: snap.dataGeneration ?? null,
+    afterSalesCompletenessSummary: snap.afterSalesCompletenessSummary ?? null,
+    overviewMetaSnapshot: snap.overviewMeta ?? null,
   }
 }
 
@@ -131,7 +191,7 @@ export async function loadAllBoardPresetSnapshots(): Promise<BoardPresetSnapshot
       try {
         const raw = await fs.readFile(path.join(SNAPSHOT_DIR(), file), 'utf8')
         const parsed = JSON.parse(raw) as BoardPresetSnapshotRecord
-        if (parsed?.summary) out.push(parsed)
+        if (isBoardSnapshotStructurallyUsable(parsed)) out.push(parsed)
       } catch {
         /* skip corrupt file */
       }

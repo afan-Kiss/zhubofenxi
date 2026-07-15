@@ -29,6 +29,18 @@ import {
   OFFLINE_GMV_METRICS_VERSION,
 } from '../config/offline-gmv.constants'
 import { AFTER_SALES_METRICS_VERSION } from './workbench-cache-validity.service'
+import {
+  cloneBusinessDataGeneration,
+  getBusinessDataGenerationSync,
+  isBusinessDataGenerationEqual,
+  bumpBoardSourceGenerations,
+  refreshBusinessDataGenerationIfStale,
+  type BusinessDataGenerationSnapshot,
+} from './business-data-generation.service'
+import {
+  enqueueBoardCacheBuild,
+  inferBoardBuildPriority,
+} from './board-cache-build-queue.service'
 
 /** 经营缓存指纹：归属算法 + 线下 GMV 口径 + 主播主数据 + 售后缓存语义版本 */
 export const BUSINESS_CACHE_FINGERPRINT = [
@@ -37,6 +49,10 @@ export const BUSINESS_CACHE_FINGERPRINT = [
   ANCHOR_MASTER_DATA_VERSION,
   AFTER_SALES_METRICS_VERSION,
 ].join('+')
+
+void import('./board-preset-snapshot.service').then((m) => {
+  m.setBoardSnapshotFingerprintResolver(() => BUSINESS_CACHE_FINGERPRINT)
+})
 
 export const BUSINESS_CACHE_PRESETS: BusinessRangePreset[] = [
   'today',
@@ -97,6 +113,10 @@ export interface BusinessBoardCacheEntry {
   stale?: boolean
   buildError?: string | null
   fallbackReason?: string | null
+  /** Wave4: 构建时 generation 快照，热路径整数比对 */
+  dataGeneration?: BusinessDataGenerationSnapshot | null
+  afterSalesCompletenessSummary?: Record<string, unknown> | null
+  overviewMetaSnapshot?: Record<string, unknown> | null
 }
 
 const cache = new Map<string, BusinessBoardCacheEntry>()
@@ -106,8 +126,9 @@ const CUSTOM_CACHE_MAX = 12
 const customCacheKeyOrder: string[] = []
 let warmupPromise: Promise<void> | null = null
 let warmupRunning = false
-/** 串行化全量重建，避免启动/同步/品退等多处同时重建导致内存峰值或进程异常退出 */
+/** @deprecated Wave4: 保留字段兼容，实际构建改走 per-cacheKey 单飞队列 */
 let fullRebuildQueue: Promise<void> = Promise.resolve()
+void fullRebuildQueue
 
 const rebuildLog: Array<{ at: string; reason: string; presetCount: number }> = []
 
@@ -144,18 +165,28 @@ function rememberCustomCacheKey(key: string): void {
   }
 }
 
-/** 启动时从磁盘快照预载标准预设，秒开今日/昨日总览 */
+/** 启动时从磁盘快照预载标准预设：指纹兼容则立即可展示（SWR，后台再重建） */
 export async function seedBoardPresetSnapshotsOnBoot(): Promise<number> {
-  const { loadAllBoardPresetSnapshots, buildSnapshotBoardCacheStub } = await import(
-    './board-preset-snapshot.service'
-  )
+  const {
+    loadAllBoardPresetSnapshots,
+    buildSnapshotBoardCacheStub,
+    isBoardSnapshotFingerprintCompatible,
+    setBoardSnapshotFingerprintResolver,
+  } = await import('./board-preset-snapshot.service')
+  setBoardSnapshotFingerprintResolver(() => BUSINESS_CACHE_FINGERPRINT)
   const snaps = await loadAllBoardPresetSnapshots()
   let seeded = 0
   for (const snap of snaps) {
     if (!shouldRetainBusinessBoardCache(snap.preset)) continue
     if (cache.has(snap.cacheKey)) continue
-    // 快照不含当前归属算法版本：标记 stale，首请求必须重建，禁止当主播业绩事实
-    cache.set(snap.cacheKey, { ...buildSnapshotBoardCacheStub(snap), stale: true })
+    const stub = buildSnapshotBoardCacheStub(snap)
+    const compatible = isBoardSnapshotFingerprintCompatible(snap)
+    cache.set(snap.cacheKey, {
+      ...stub,
+      // 兼容快照：可秒开；不兼容：仍塞入内存但标记需重建
+      stale: !compatible,
+      fallbackReason: 'disk_snapshot',
+    })
     seeded++
   }
   if (seeded > 0) {
@@ -262,8 +293,25 @@ export async function resolveSourceRawMaxUpdatedAt(): Promise<string | null> {
   return new Date(Math.max(...timestamps)).toISOString()
 }
 
-/** 对比经营缓存指纹：raw / 工作台 / 时间售后 / 算法版本 */
+/** 对比经营缓存指纹：算法版本 + 内存 generation（热路径禁止 MAX(updatedAt)） */
 export async function isBusinessBoardCacheFingerprintStale(
+  hit: BusinessBoardCacheEntry,
+): Promise<boolean> {
+  if (hit.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT) return true
+  // 磁盘快照 stub：交给 SWR 层处理，不在此强制判定 generation
+  if (hit.fallbackReason === 'disk_snapshot') return false
+  await refreshBusinessDataGenerationIfStale()
+  const current = getBusinessDataGenerationSync()
+  if (hit.dataGeneration && !isBusinessDataGenerationEqual(hit.dataGeneration, current)) {
+    return true
+  }
+  // 旧缓存条目无 generation：一次性视为过期，重建后写入
+  if (!hit.dataGeneration) return true
+  return false
+}
+
+/** 验收兜底：仍可调用 MAX(updatedAt)，禁止 HTTP 热路径 */
+export async function isBusinessBoardCacheFingerprintStaleViaMaxUpdatedAt(
   hit: BusinessBoardCacheEntry,
 ): Promise<boolean> {
   if (hit.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT) return true
@@ -383,6 +431,7 @@ export async function buildAndSetBusinessBoardCache(params: {
     const workbenchCacheMaxUpdatedAt = (await getLatestWorkbenchCacheUpdatedAt())?.toISOString() ?? null
     const timeSearchCacheMaxUpdatedAt =
       (await getLatestTimeSearchCacheUpdatedAt())?.toISOString() ?? null
+    const dataGeneration = cloneBusinessDataGeneration(getBusinessDataGenerationSync())
 
     const entry: BusinessBoardCacheEntry = {
       cacheKey: key,
@@ -411,6 +460,7 @@ export async function buildAndSetBusinessBoardCache(params: {
       stale: false,
       buildError: null,
       fallbackReason: null,
+      dataGeneration,
     }
 
     const retain = shouldRetainBusinessBoardCache(params.preset)
@@ -428,6 +478,9 @@ export async function buildAndSetBusinessBoardCache(params: {
           orderCount: entry.orderCount,
           lastBuiltAt: entry.lastBuiltAt,
           sourceSyncJobId: entry.sourceSyncJobId,
+          businessCacheFingerprint: BUSINESS_CACHE_FINGERPRINT,
+          dataGeneration: entry.dataGeneration,
+          buildDurationMs: entry.buildDurationMs,
         }),
       )
     } else {
@@ -459,6 +512,8 @@ export async function getOrBuildBusinessBoardCache(params: {
   endDate?: string
   scope?: string
   forceRebuild?: boolean
+  /** 当前 HTTP 交互请求：提高构建优先级，不阻塞于无关 cacheKey */
+  interactive?: boolean
 }): Promise<BusinessBoardCacheEntry> {
   const range = resolveBusinessRange(
     params.preset as BusinessRangePreset,
@@ -467,84 +522,53 @@ export async function getOrBuildBusinessBoardCache(params: {
   )
   const scope = params.scope ?? 'default'
   const key = buildBusinessCacheKey(params.preset, range.startDate, range.endDate, scope)
-  const retain = shouldRetainBusinessBoardCache(params.preset)
 
   if (!BUSINESS_CACHE_ALWAYS_REBUILD && !params.forceRebuild) {
     const hit = cache.get(key)
-    if (hit && !hit.stale) {
+    if (
+      hit &&
+      !hit.stale &&
+      hit.fallbackReason !== 'disk_snapshot' &&
+      hit.attributionAlgorithmVersion === BUSINESS_CACHE_FINGERPRINT
+    ) {
       const fingerprintStale = await isBusinessBoardCacheFingerprintStale(hit)
       if (!fingerprintStale) {
         return hit
       }
       logInfo(
         '经营缓存',
-        `${presetLabel(params.preset)} 售后/原始数据指纹变化，重建经营缓存`,
+        `${presetLabel(params.preset)} generation/指纹变化，重建经营缓存`,
       )
     }
     const pendingEarly = pendingBuilds.get(key)
     if (pendingEarly) return pendingEarly
   }
 
-  await fullRebuildQueue
-
-  if (BUSINESS_CACHE_ALWAYS_REBUILD || params.forceRebuild) {
-    const pending = pendingBuilds.get(key)
-    if (pending) return pending
-    const buildPromise = buildAndSetBusinessBoardCache({
-      preset: params.preset,
-      startDate: range.startDate,
-      endDate: range.endDate,
-      scope,
-    })
-      .catch((err) => {
-        const hit = cache.get(key)
-        if (hit) return fallbackFromPreviousCache(hit, err)
-        throw err
-      })
-      .finally(() => {
-        pendingBuilds.delete(key)
-      })
-    pendingBuilds.set(key, buildPromise)
-    return buildPromise
-  }
-
-  if (retain) {
-    const hit = cache.get(key)
-    if (hit && !params.forceRebuild && !hit.stale) {
-      if (await isBusinessBoardCacheFingerprintStale(hit)) {
-        logInfo(
-          '经营缓存',
-          `${presetLabel(params.preset)} 指纹过期（${hit.attributionAlgorithmVersion ?? '—'} → ${BUSINESS_CACHE_FINGERPRINT}），重建经营缓存`,
-        )
-      } else {
-        return hit
-      }
-    }
-  } else {
-    const hit = cache.get(key)
-    if (hit && !params.forceRebuild && !hit.stale) {
-      if (!(await isBusinessBoardCacheFingerprintStale(hit))) {
-        return hit
-      }
-    }
-  }
   const pending = pendingBuilds.get(key)
   if (pending) return pending
 
-  const buildPromise = buildAndSetBusinessBoardCache({
+  const priority = inferBoardBuildPriority({
     preset: params.preset,
-    startDate: range.startDate,
-    endDate: range.endDate,
-    scope,
+    interactive: params.interactive,
   })
-    .catch((err) => {
-      const hit = cache.get(key)
-      if (hit) return fallbackFromPreviousCache(hit, err)
-      throw err
-    })
-    .finally(() => {
-      pendingBuilds.delete(key)
-    })
+
+  const buildPromise = enqueueBoardCacheBuild({
+    cacheKey: key,
+    priority,
+    run: () =>
+      buildAndSetBusinessBoardCache({
+        preset: params.preset,
+        startDate: range.startDate,
+        endDate: range.endDate,
+        scope,
+      }).catch((err) => {
+        const hit = cache.get(key)
+        if (hit) return fallbackFromPreviousCache(hit, err)
+        throw err
+      }),
+  }).finally(() => {
+    pendingBuilds.delete(key)
+  })
   pendingBuilds.set(key, buildPromise)
   return buildPromise
 }
@@ -556,17 +580,25 @@ export async function rebuildBusinessCacheForPresets(
   const started = Date.now()
   let rebuilt = 0
   const uniquePresets = [...new Set(presets)]
-  for (const preset of uniquePresets) {
-    try {
-      await buildAndSetBusinessBoardCache({ preset })
-      rebuilt++
-    } catch (e) {
-      logWarn(
-        '经营缓存',
-        `${presetLabel(preset)} 构建失败：${e instanceof Error ? e.message : e}`,
-      )
-    }
-  }
+  // 优先级排序：今日/本月优先，上月最后，并行受全局并发上限约束
+  const ordered = [...uniquePresets].sort((a, b) => {
+    const score = (p: string) =>
+      p === 'today' || p === 'thisMonth' ? 0 : p === 'yesterday' || p === 'thisWeek' ? 1 : 2
+    return score(a) - score(b)
+  })
+  await Promise.all(
+    ordered.map(async (preset) => {
+      try {
+        await getOrBuildBusinessBoardCache({ preset, forceRebuild: true })
+        rebuilt++
+      } catch (e) {
+        logWarn(
+          '经营缓存',
+          `${presetLabel(preset)} 构建失败：${e instanceof Error ? e.message : e}`,
+        )
+      }
+    }),
+  )
   const totalMs = Date.now() - started
   logInfo('经营缓存', `全量重建完成：${rebuilt} 个范围，总用时 ${totalMs}ms`)
   rebuildLog.unshift({
@@ -635,11 +667,8 @@ function enqueueBusinessCacheRebuild(
       })
     }
   }
-  const queued = fullRebuildQueue.then(task, task)
-  fullRebuildQueue = queued.catch(() => {
-    /* 队列继续，单次失败不阻断后续重建 */
-  })
-  return queued
+  // Wave4: 不再串行阻塞全局；各 preset 走独立 single-flight + 全局并发上限
+  return task()
 }
 
 function enqueueFullBusinessCacheRebuild(
@@ -705,6 +734,7 @@ export function invalidateBusinessBoardCacheForPresets(
       pendingBuilds.delete(key)
     }
   }
+  void bumpBoardSourceGenerations()
   // 售后范围失效不主动清排班归属缓存；全量 invalidate 才清
   logInfo('经营缓存', `已清理预设缓存：${presets.join(', ')}`)
 }
@@ -734,6 +764,7 @@ export function invalidateBusinessBoardCache(): void {
   cache.clear()
   pendingBuilds.clear()
   clearScheduleAttributionCache()
+  void bumpBoardSourceGenerations()
   logInfo('经营缓存', '已清空全部缓存条目')
 }
 

@@ -101,6 +101,14 @@ export interface BoardLiveQueryResult {
   qualityFeedback?: QualityFeedbackPublicStatus
   afterSalesCompleteness?: import('./after-sales-completeness.service').AfterSalesCompleteness
   globalAfterSalesCompleteness?: import('./after-sales-completeness.service').AfterSalesCompleteness
+  cacheStatus?: {
+    source: 'memory' | 'snapshot' | 'rebuilt' | 'stale-fallback'
+    updatingInBackground: boolean
+    dataGeneration?: unknown
+    lastBuiltAt?: string
+    buildDurationMs?: number
+    attributionAlgorithmVersion?: string
+  }
   dataDisplayStatus?:
     | 'ready'
     | 'syncing_with_cache'

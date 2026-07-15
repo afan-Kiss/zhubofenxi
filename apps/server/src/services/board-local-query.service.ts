@@ -31,7 +31,6 @@ import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { readBoardPresetSnapshot, buildSnapshotBoardCacheStub } from './board-preset-snapshot.service'
 import {
   resolveAfterSalesCompleteness,
-  resolveGlobalAfterSalesCompleteness,
 } from './after-sales-completeness.service'
 
 import { AMOUNT_FORMULA_VERSION } from './order-amount-metrics.service'
@@ -387,39 +386,87 @@ export async function executeBoardLocalQuery(params: {
     !hasAnchorFilter &&
     (queryMode === 'overview' || queryMode === 'anchors' || queryMode === 'full')
 
-  /** 磁盘快照 / 指纹过期不得直接作为主播业绩事实来源 */
-  const isAttributionStale = (entry: BusinessBoardCacheEntry | null | undefined): boolean => {
-    if (!entry || entry.stale) return true
-    if (entry.fallbackReason === 'disk_snapshot') return true
-    return entry.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT
+  /** Wave4 SWR：有可展示 summary 且业务指纹兼容（或可信磁盘快照）即可立即返回 */
+  const canServeDisplayCache = (
+    entry: BusinessBoardCacheEntry | null | undefined,
+  ): entry is BusinessBoardCacheEntry => {
+    if (!entry?.summary || typeof entry.summary !== 'object') return false
+    if (entry.attributionAlgorithmVersion === BUSINESS_CACHE_FINGERPRINT) return true
+    // 磁盘快照：结构可用且指纹字段匹配当前版本时才秒开
+    if (entry.fallbackReason === 'disk_snapshot') {
+      return entry.attributionAlgorithmVersion === BUSINESS_CACHE_FINGERPRINT
+    }
+    return false
   }
+
+  const needsBackgroundRebuild = async (
+    entry: BusinessBoardCacheEntry,
+  ): Promise<boolean> => {
+    if (entry.fallbackReason === 'disk_snapshot') return true
+    if (entry.stale) return true
+    if (entry.buildError) return true
+    if (await isBusinessBoardCacheFingerprintStale(entry)) return true
+    return false
+  }
+
+  let cacheSource: 'memory' | 'snapshot' | 'rebuilt' | 'stale-fallback' = 'rebuilt'
+  let updatingInBackground = false
 
   if (!boardCache && canUseSnapshotFastPath) {
     const snap = await readBoardPresetSnapshot(params.preset, startDate, endDate)
     if (snap) {
-      boardCache = buildSnapshotBoardCacheStub(snap)
-      void getOrBuildBusinessBoardCache({ preset: params.preset, startDate, endDate })
+      const stub = buildSnapshotBoardCacheStub(snap)
+      if (canServeDisplayCache(stub)) {
+        boardCache = stub
+        cacheSource = 'snapshot'
+      }
     }
   }
 
-  if (boardCache && !isAttributionStale(boardCache)) {
-    if (await isBusinessBoardCacheFingerprintStale(boardCache)) {
-      boardCache = null
+  if (boardCache && canServeDisplayCache(boardCache)) {
+    if (boardCache.fallbackReason === 'disk_snapshot') {
+      cacheSource = 'snapshot'
+    } else {
+      cacheSource = 'memory'
     }
+    if (await needsBackgroundRebuild(boardCache)) {
+      updatingInBackground = true
+      cacheSource = boardCache.fallbackReason === 'disk_snapshot' ? 'snapshot' : 'stale-fallback'
+      void getOrBuildBusinessBoardCache({
+        preset: params.preset,
+        startDate,
+        endDate,
+        interactive: true,
+      })
+    }
+  } else {
+    boardCache = null
   }
 
-  if (!boardCache || isAttributionStale(boardCache)) {
+  if (!boardCache) {
     try {
       boardCache = await getOrBuildBusinessBoardCache({
         preset: params.preset,
         startDate,
         endDate,
+        interactive: true,
       })
+      cacheSource = boardCache.fallbackReason === 'disk_snapshot' ? 'snapshot' : 'rebuilt'
+      if (boardCache.stale || boardCache.fallbackReason === 'build_failed') {
+        cacheSource = 'stale-fallback'
+      }
     } catch (err) {
       if (canUseSnapshotFastPath) {
         const snap = await readBoardPresetSnapshot(params.preset, startDate, endDate)
-        if (snap) {
-          boardCache = { ...buildSnapshotBoardCacheStub(snap), stale: true }
+        if (snap?.summary) {
+          boardCache = {
+            ...buildSnapshotBoardCacheStub(snap),
+            stale: true,
+            buildError: err instanceof Error ? err.message : String(err),
+            fallbackReason: 'build_failed',
+          }
+          cacheSource = 'stale-fallback'
+          updatingInBackground = false
         }
       }
       if (!boardCache) throw err
@@ -427,7 +474,9 @@ export async function executeBoardLocalQuery(params: {
   }
 
   const isDiskSnapshot = boardCache.fallbackReason === 'disk_snapshot'
-  const memoryHit = !isDiskSnapshot && Boolean(getBusinessBoardCache(params.preset, startDate, endDate))
+  const memoryHit =
+    cacheSource === 'memory' ||
+    (cacheSource === 'stale-fallback' && !isDiskSnapshot)
 
   const allViews = boardCache.views
   const rawByMatch = boardCache.rawByMatch
@@ -529,12 +578,17 @@ export async function executeBoardLocalQuery(params: {
   if (includeAnchors) {
     if (
       !hasAnchorFilter &&
-      boardCache.enrichedAnchorLeaderboard &&
-      boardCache.enrichedAnchorLeaderboard.length > 0
+      Array.isArray(boardCache.enrichedAnchorLeaderboard) &&
+      (boardCache.enrichedAnchorLeaderboard.length > 0 ||
+        isDiskSnapshot ||
+        boardCache.views.length === 0)
     ) {
       anchorLeaderboard = boardCache.enrichedAnchorLeaderboard
       anchorPerformanceSummary =
-        boardCache.anchorPerformanceSummary ?? buildSummaryFromViews(performanceViews)
+        boardCache.anchorPerformanceSummary ??
+        (boardCache.views.length > 0
+          ? buildSummaryFromViews(performanceViews)
+          : (boardCache.anchorPerformanceSummary ?? boardCache.summary))
     } else {
       anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
       const cacheLiveSessions = boardCache.liveSessions ?? []
@@ -621,28 +675,66 @@ export async function executeBoardLocalQuery(params: {
   }
 
   if (boardCache.stale && boardCache.buildError) {
-    progressMessage = `缓存重建失败（${boardCache.buildError}），当前展示上一次成功缓存，数据可能未完成更新。`
+    progressMessage = `当前展示上一次可信数据，后台更新失败。（${boardCache.buildError}）`
+  } else if (updatingInBackground || isDiskSnapshot) {
+    progressMessage = `${progressMessage} 当前展示上一次可信数据，后台更新中。`.trim()
   }
 
-  const relevantViews = (boardCache.views ?? []).map((v) => ({
-    liveAccountId: String((v as { liveAccountId?: string }).liveAccountId ?? 'legacy'),
-    orderNo: String(
-      (v as { packageId?: string; orderId?: string; displayOrderNo?: string }).packageId ||
-        (v as { orderId?: string }).orderId ||
-        (v as { displayOrderNo?: string }).displayOrderNo ||
-        '',
-    ).trim(),
-    payAmountYuan: Number((v as { gmv?: number; payAmount?: number }).gmv ?? 0) || 0,
-    anchorId: (v as { anchorId?: string | null }).anchorId ?? null,
-    anchorName: (v as { anchorName?: string | null }).anchorName ?? null,
-    shopName: (v as { shopName?: string | null }).shopName ?? null,
-  }))
-  const afterSalesCompleteness = await resolveAfterSalesCompleteness({
-    startDate,
-    endDate,
-    relevantViews,
-  })
-  const globalAfterSalesCompleteness = await resolveGlobalAfterSalesCompleteness()
+  const relevantViews = (boardCache.views ?? [])
+    .map((v) => ({
+      liveAccountId: String((v as { liveAccountId?: string }).liveAccountId ?? 'legacy'),
+      orderNo: String(
+        (v as { packageId?: string; orderId?: string; displayOrderNo?: string }).packageId ||
+          (v as { orderId?: string }).orderId ||
+          (v as { displayOrderNo?: string }).displayOrderNo ||
+          '',
+      ).trim(),
+      payAmountYuan: Number((v as { gmv?: number; payAmount?: number }).gmv ?? 0) || 0,
+      anchorId: (v as { anchorId?: string | null }).anchorId ?? null,
+      anchorName: (v as { anchorName?: string | null }).anchorName ?? null,
+      shopName: (v as { shopName?: string | null }).shopName ?? null,
+    }))
+    .filter((v) => v.orderNo)
+
+  let afterSalesCompleteness: Awaited<ReturnType<typeof resolveAfterSalesCompleteness>>
+  if (boardCache.afterSalesCompletenessSummary && (isDiskSnapshot || updatingInBackground)) {
+    afterSalesCompleteness = {
+      ...boardCache.afterSalesCompletenessSummary,
+      scope: 'range',
+    } as Awaited<ReturnType<typeof resolveAfterSalesCompleteness>>
+  } else if (relevantViews.length === 0 && isDiskSnapshot) {
+    // 快照无 views：勿误报「无支付订单」，用全局摘要填充
+    const { resolveGlobalAfterSalesCompleteness } = await import(
+      './after-sales-completeness.service'
+    )
+    const global = await resolveGlobalAfterSalesCompleteness()
+    afterSalesCompleteness = {
+      ...global,
+      scope: 'range',
+      note:
+        global.globalPendingCount > 0
+          ? `当前展示快照数据；全局另有 ${global.globalPendingCount} 笔售后待处理。`
+          : '当前展示快照数据。',
+    }
+  } else {
+    afterSalesCompleteness = await resolveAfterSalesCompleteness({
+      startDate,
+      endDate,
+      relevantViews,
+    })
+  }
+  // Wave4：首屏不再二次查询 global；由 range 结果附带 globalPendingCount
+  const globalAfterSalesCompleteness =
+    afterSalesCompleteness.scope === 'global'
+      ? afterSalesCompleteness
+      : {
+          ...afterSalesCompleteness,
+          scope: 'global' as const,
+          note:
+            afterSalesCompleteness.globalPendingCount > 0
+              ? `全局另有 ${afterSalesCompleteness.globalPendingCount} 笔待处理（摘要）。`
+              : '全局售后补查状态见范围摘要。',
+        }
   if (
     afterSalesCompleteness.status === 'pending' ||
     afterSalesCompleteness.status === 'partial' ||
@@ -747,6 +839,14 @@ export async function executeBoardLocalQuery(params: {
 
     afterSalesCompleteness,
     globalAfterSalesCompleteness,
+    cacheStatus: {
+      source: cacheSource,
+      updatingInBackground,
+      dataGeneration: boardCache.dataGeneration ?? null,
+      lastBuiltAt: boardCache.lastBuiltAt,
+      buildDurationMs: boardCache.buildDurationMs,
+      attributionAlgorithmVersion: boardCache.attributionAlgorithmVersion,
+    },
 
     ...(fullSyncMeta ? { syncMeta: fullSyncMeta } : {}),
 

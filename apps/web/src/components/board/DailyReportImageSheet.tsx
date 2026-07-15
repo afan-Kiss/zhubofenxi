@@ -17,6 +17,7 @@ import type { AnchorLivePeriodView } from '../../lib/anchor-live-period'
 import { AnchorTrendChart } from './AnchorTrendChart'
 import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
 import type { AnchorLeaderboardRow, AnchorTrend } from '../../lib/anchor-leaderboard-row'
+import { resolveAnchorColor } from '../../lib/anchor-theme'
 import { isOfflineOnlyAnchor } from '../../lib/anchor-system-keys'
 
 export interface DailyReportShippedOrderLine {
@@ -30,6 +31,7 @@ export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   anchorId?: string
   systemKey?: string | null
   attributionMode?: string | null
+  color?: string | null
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -110,7 +112,9 @@ interface Props {
 
 function toCompareLeaderboardRows(anchors: DailyReportAnchorRow[]): AnchorLeaderboardRow[] {
   return anchors.map((row) => ({
+    anchorId: row.anchorId,
     anchorName: row.anchorName,
+    color: row.color ?? null,
     trend: row.trend,
     gmv: row.gmvYuan ?? 0,
     totalGmv: row.gmvYuan ?? 0,
@@ -302,6 +306,11 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         <AnchorTrendChart
           variant="report"
           trend={row.trend}
+          color={resolveAnchorColor({
+            id: row.anchorId,
+            name: row.anchorName,
+            color: row.color,
+          })}
           formatMoney={(v) => formatMoney(v)}
           formatCount={(n) => formatOrderCount(n)}
         />

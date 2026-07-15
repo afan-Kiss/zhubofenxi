@@ -5,13 +5,17 @@
  */
 import { prisma } from '../lib/prisma'
 import type { AnalyzedOrderView } from '../types/analysis'
-import { getAnchorConfigSync, refreshAnchorConfigCache } from './anchor.service'
+import { getAnchorConfigSync, refreshAnchorConfigCache, findYifanManualSystemAnchor } from './anchor.service'
 import { findAnchorByName } from './anchor-rules.service'
 import { invalidateAndRebuildBusinessBoardCache } from './business-cache.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 import { clearCanonicalAttributionCache } from './canonical-order-attribution.service'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import { logInfo } from '../utils/server-log'
+import {
+  isOfflineDealAtEffectiveForGmv,
+  OFFLINE_GMV_EFFECTIVE_FROM_DATE,
+} from '../config/offline-gmv.constants'
 
 export type OfflineDealStatus = 'draft' | 'confirmed' | 'cancelled' | 'voided'
 
@@ -135,13 +139,36 @@ function invalidateAfterWrite(reason: string) {
   })
 }
 
-/** 有效计入支付金额 GMV：已确认且未软删、金额>0（退款不冲减支付金额，与线上一致） */
+/**
+ * 有效计入支付金额 / 线下 GMV：
+ * 已确认、未软删、金额>0，且 dealAt >= 2026-07-14 00:00:00+08（不得用 createdAt）。
+ */
 export function offlineDealCountsInPayGmv(deal: {
   status: string
   amountCent: number
   deletedAt?: Date | null
+  dealAt?: Date | number | string | null
 }): boolean {
-  return deal.status === 'confirmed' && deal.amountCent > 0 && !deal.deletedAt
+  if (deal.status !== 'confirmed' || deal.amountCent <= 0 || deal.deletedAt) return false
+  return isOfflineDealAtEffectiveForGmv(deal.dealAt ?? null)
+}
+
+/** 台账可保留审计，但明确标记不计入业绩（含生效日前） */
+export function offlineDealExcludedFromBusinessReason(deal: {
+  status: string
+  amountCent: number
+  deletedAt?: Date | null
+  dealAt?: Date | number | string | null
+}): string | null {
+  if (deal.deletedAt) return '线下成交已删除'
+  if (deal.status === 'draft') return '线下成交草稿'
+  if (deal.status === 'cancelled') return '线下成交已取消'
+  if (deal.status === 'voided') return '线下成交已作废'
+  if (deal.amountCent <= 0) return '线下成交金额无效'
+  if (!isOfflineDealAtEffectiveForGmv(deal.dealAt ?? null)) {
+    return `不计入业绩（成交日早于 ${OFFLINE_GMV_EFFECTIVE_FROM_DATE}）`
+  }
+  return null
 }
 
 /** 净 GMV 可用金额（支付 − 退款，下限 0） */
@@ -167,6 +194,7 @@ export function offlineDealToAnalyzedView(deal: {
   deletedAt?: Date | null
 }): AnalyzedOrderView {
   const included = offlineDealCountsInPayGmv(deal)
+  const excludeReason = offlineDealExcludedFromBusinessReason(deal)
   const hasAnchor = Boolean(
     deal.anchorId?.trim() ||
       (deal.anchorName?.trim() && deal.anchorName.trim() !== '未归属'),
@@ -239,15 +267,7 @@ export function offlineDealToAnalyzedView(deal: {
     includedInGmv: included,
     countsForSigned: signed,
     countsForGrossProfit: false,
-    gmvExcludeReason: included
-      ? null
-      : deal.status === 'draft'
-        ? '线下成交草稿'
-        : deal.status === 'cancelled'
-          ? '线下成交已取消'
-          : deal.status === 'voided'
-            ? '线下成交已作废'
-            : '线下成交未计入',
+    gmvExcludeReason: included ? null : excludeReason ?? '线下成交未计入',
     dealSource: 'offline',
     offlineDealKey: deal.dealKey,
     sourceType: 'offline_deal',
@@ -390,6 +410,9 @@ export async function createOfflineDeal(input: {
   idempotencyKey?: string | null
 }) {
   await refreshAnchorConfigCache()
+  const yifan = findYifanManualSystemAnchor(getAnchorConfigSync())
+  if (!yifan) throw new Error('系统线下主播未初始化（YIFAN_MANUAL）')
+  // 线下成交固定归属逸凡，不允许改归其他主播
   const amountYuan = Number(input.amountYuan)
   if (!Number.isFinite(amountYuan) || amountYuan <= 0) {
     throw new Error('成交金额必须大于 0')
@@ -403,13 +426,7 @@ export async function createOfflineDeal(input: {
   const externalKey = await assertExternalKeyAvailable(
     input.idempotencyKey?.trim() || input.externalKey,
   )
-  const anchor = resolveAnchorInput({
-    anchorId: input.anchorId,
-    anchorName: input.anchorName,
-  })
-  if (status === 'confirmed' && !anchor.anchorId && !input.allowPending) {
-    throw new Error('已确认成交必须选择归属主播，或明确标记为待归属')
-  }
+  const anchor = { anchorId: yifan.id, anchorName: yifan.name }
 
   let dealKey = generateDealKey(dealAt)
   for (let i = 0; i < 5; i++) {
@@ -466,56 +483,14 @@ export async function createOfflineDeal(input: {
   }
 }
 
-export async function reassignOfflineDeal(params: {
+export async function reassignOfflineDeal(_params: {
   dealId: string
   anchorId?: string | null
   anchorName?: string | null
   operator?: string | null
   reason?: string | null
-}) {
-  await refreshAnchorConfigCache()
-  const existing = await prisma.offlineDeal.findFirst({
-    where: { id: params.dealId, deletedAt: null },
-  })
-  if (!existing) throw new Error('线下成交不存在')
-  const anchor = resolveAnchorInput({
-    anchorId: params.anchorId,
-    anchorName: params.anchorName,
-  })
-  if (existing.status === 'confirmed' && !anchor.anchorId) {
-    throw new Error('已确认成交修改归属时必须指定主播')
-  }
-  const beforeAnchor = existing.anchorName
-  const updated = await prisma.$transaction(async (tx) => {
-    const row = await tx.offlineDeal.update({
-      where: { id: existing.id },
-      data: {
-        anchorId: anchor.anchorId,
-        anchorName: anchor.anchorName,
-        updatedBy: params.operator ?? null,
-      },
-    })
-    await tx.offlineDealAuditLog.create({
-      data: {
-        dealId: row.id,
-        dealKey: row.dealKey,
-        action: 'reassign',
-        beforeJson: JSON.stringify(existing),
-        afterJson: JSON.stringify(row),
-        beforeAnchorId: existing.anchorId,
-        afterAnchorId: row.anchorId,
-        operator: params.operator ?? null,
-        reason: params.reason ?? null,
-      },
-    })
-    return row
-  })
-  await invalidateAfterWrite(`offline-deal-reassign:${updated.dealKey}`)
-  return {
-    ...updated,
-    amountYuan: centToYuan(updated.amountCent),
-    message: `归属已从${beforeAnchor || '待归属'}修改为${updated.anchorName || '待归属'}`,
-  }
+}): Promise<never> {
+  throw new Error('线下成交固定归属系统线下主播，不允许改归其他主播')
 }
 
 export async function updateOfflineDealStatus(params: {

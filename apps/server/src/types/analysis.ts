@@ -159,6 +159,10 @@ export interface Anchor {
   systemKey?: string | null
   /** schedule | manual */
   attributionMode?: 'schedule' | 'manual'
+  /** 上岗业务日 YYYY-MM-DD */
+  effectiveFrom?: string | null
+  /** 离岗业务日 YYYY-MM-DD */
+  effectiveTo?: string | null
 }
 
 export interface TimeRule {

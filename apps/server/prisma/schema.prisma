@@ -360,6 +360,10 @@ model Anchor {
   systemKey           String?                @unique
   /** schedule=场次/排班/时段；manual=仅订单手动指定 */
   attributionMode     AnchorAttributionMode  @default(schedule)
+  /** 上岗/生效业务日 YYYY-MM-DD（Asia/Shanghai），空=不限制 */
+  effectiveFrom       String?
+  /** 离岗业务日 YYYY-MM-DD，空=仍有效；区间 [effectiveFrom, effectiveTo] 闭区间按日 */
+  effectiveTo         String?
   deletedAt           DateTime?
   createdAt           DateTime               @default(now())
   updatedAt           DateTime               @updatedAt
@@ -759,6 +763,9 @@ model GoodReviewSyncMeta {
 /// 主播默认排班模板（种子配置，可被运营扩展）
 model AnchorScheduleTemplate {
   id            String   @id @default(cuid())
+  /** 稳定关联 Anchor.id；匹配优先用此字段 */
+  anchorId      String?
+  /** 姓名快照（改名后历史展示）；正式匹配优先 anchorId */
   anchorName    String
   shopName      String
   liveRoomName  String
@@ -773,12 +780,16 @@ model AnchorScheduleTemplate {
   updatedAt     DateTime @updatedAt
 
   @@index([enabled, sortOrder])
+  @@index([anchorId])
 }
 
 /// 每日主播排班（手动覆盖或生成的默认排班）
 model AnchorDailySchedule {
   id           String    @id @default(cuid())
   scheduleDate String
+  /** 稳定关联 Anchor.id；匹配优先用此字段 */
+  anchorId     String?
+  /** 姓名快照；正式匹配优先 anchorId */
   anchorName   String
   shopName     String
   liveRoomName String
@@ -799,6 +810,7 @@ model AnchorDailySchedule {
   @@index([scheduleDate])
   @@index([scheduleDate, enabled])
   @@index([scheduleDate, confirmed])
+  @@index([anchorId])
 }
 
 /// 日报发货前照片（按日期归档，文件存 data 目录）

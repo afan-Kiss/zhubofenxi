@@ -20,6 +20,7 @@ import {
   type AnchorLeaderboardRow,
 } from '../../lib/anchor-leaderboard-row'
 import { anchorCardTestId } from '../../lib/anchor-test-id'
+import { resolveAnchorTheme } from '../../lib/anchor-theme'
 import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
 import { MobileAnchorLeaderboardCards } from './MobileAnchorLeaderboardCards'
 import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
@@ -174,6 +175,11 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                 const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
                 const livePeriodMultiline = liveLines.primary?.includes('\n') ?? false
                 const isUnassigned = isUnassignedAnchorName(String(a.anchorName ?? ''))
+                const theme = resolveAnchorTheme({
+                  id: typeof a.anchorId === 'string' ? a.anchorId : null,
+                  name: typeof a.anchorName === 'string' ? a.anchorName : null,
+                  color: typeof a.color === 'string' ? a.color : null,
+                })
                 return (
                   <tr
                     key={String(a.anchorId ?? a.anchorName ?? idx)}
@@ -189,8 +195,17 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     <td className="py-2.5 pl-4">
                       <div className="flex flex-col gap-1">
                         <span
-                          className={`font-medium ${isUnassigned ? 'text-amber-900' : 'text-rose-800'}`}
+                          className={`inline-flex items-center gap-2 font-medium ${
+                            isUnassigned ? 'text-amber-900' : 'text-slate-800'
+                          }`}
                         >
+                          {!isUnassigned ? (
+                            <span
+                              className="inline-block h-2 w-2 shrink-0 rounded-full"
+                              style={{ backgroundColor: theme.main }}
+                              aria-hidden
+                            />
+                          ) : null}
                           {formatAnchorDisplayName(String(a.anchorName))}
                         </span>
                         {isUnassigned ? (

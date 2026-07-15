@@ -1,7 +1,15 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
+import {
+  ANCHOR_COLOR_PALETTE,
+  colorsTooSimilar,
+  isValidAnchorColor,
+  resolveAnchorColor,
+} from '../../lib/anchor-theme'
 import { ScheduleTimePicker } from '../ui/ScheduleTimePicker'
+
+type AnchorListFilter = 'all' | 'enabled' | 'disabled' | 'schedule' | 'manual'
 
 interface TimeRule {
   id: string
@@ -78,10 +86,30 @@ export const AnchorManagementPanel: React.FC = () => {
   const [savingId, setSavingId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
-  const [newColor, setNewColor] = useState('#94a3b8')
+  const [newColor, setNewColor] = useState(ANCHOR_COLOR_PALETTE[0] ?? '#94a3b8')
   const [newExternalId, setNewExternalId] = useState('')
   const [newLiveRoom, setNewLiveRoom] = useState('')
   const [newManualOnly, setNewManualOnly] = useState(false)
+  const [listFilter, setListFilter] = useState<AnchorListFilter>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredAnchors = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    return anchors.filter((a) => {
+      if (listFilter === 'enabled' && !a.enabled) return false
+      if (listFilter === 'disabled' && a.enabled) return false
+      if (listFilter === 'schedule' && isManualMode(a)) return false
+      if (listFilter === 'manual' && !isManualMode(a)) return false
+      if (q && !a.name.toLowerCase().includes(q)) return false
+      return true
+    })
+  }, [anchors, listFilter, searchQuery])
+
+  const colorConflictHint = useMemo(() => {
+    if (!isValidAnchorColor(newColor)) return null
+    const hit = anchors.find((a) => colorsTooSimilar(newColor, resolveAnchorColor(a)))
+    return hit ? `与「${hit.name}」颜色接近，保存后图表可能不易区分` : null
+  }, [anchors, newColor])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -129,6 +157,7 @@ export const AnchorManagementPanel: React.FC = () => {
       setNewExternalId('')
       setNewLiveRoom('')
       setNewManualOnly(false)
+      setNewColor(ANCHOR_COLOR_PALETTE[0] ?? '#94a3b8')
       await load()
       setMessage({
         type: 'success',
@@ -342,11 +371,27 @@ export const AnchorManagementPanel: React.FC = () => {
           颜色
           <input
             type="color"
-            value={newColor}
+            value={isValidAnchorColor(newColor) ? newColor : '#94a3b8'}
             onChange={(e) => setNewColor(e.target.value)}
             className="mt-0.5 block h-8 w-12 cursor-pointer"
           />
         </label>
+        <div className="flex flex-wrap items-center gap-1 pb-1">
+          {ANCHOR_COLOR_PALETTE.map((swatch) => (
+            <button
+              key={swatch}
+              type="button"
+              title={swatch}
+              onClick={() => setNewColor(swatch)}
+              className={`h-5 w-5 rounded-full border ${
+                newColor.toLowerCase() === swatch.toLowerCase()
+                  ? 'border-slate-700 ring-1 ring-slate-400'
+                  : 'border-slate-200'
+              }`}
+              style={{ backgroundColor: swatch }}
+            />
+          ))}
+        </div>
         <label className="inline-flex items-center gap-1.5 pb-1 text-xs text-slate-600">
           <input
             type="checkbox"
@@ -365,12 +410,60 @@ export const AnchorManagementPanel: React.FC = () => {
           {creating ? '新增中…' : '新增主播'}
         </button>
       </div>
+      {colorConflictHint ? (
+        <p className="mt-1 text-[11px] text-amber-700">{colorConflictHint}</p>
+      ) : null}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <p className="text-xs text-slate-600">
+          共加载 <span className="font-semibold tabular-nums text-slate-900">{anchors.length}</span> 名主播
+          {filteredAnchors.length !== anchors.length ? (
+            <span className="text-slate-400">
+              {' '}
+              · 当前显示 {filteredAnchors.length} 名
+            </span>
+          ) : null}
+        </p>
+        <input
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="按名称搜索"
+          className="rounded border border-slate-200 px-2 py-1 text-xs"
+        />
+        {(
+          [
+            ['all', '全部'],
+            ['enabled', '启用'],
+            ['disabled', '停用'],
+            ['schedule', '自动归属'],
+            ['manual', '仅手动'],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setListFilter(key)}
+            className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition ${
+              listFilter === key
+                ? 'border-rose-200 bg-rose-50 text-rose-800'
+                : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
 
       {loading ? (
         <p className="mt-4 text-xs text-slate-500">加载中…</p>
+      ) : filteredAnchors.length === 0 ? (
+        <p className="mt-4 text-xs text-slate-500">
+          {anchors.length === 0 ? '暂无主播，请先新增' : '没有符合筛选条件的主播'}
+        </p>
       ) : (
         <div className="mt-4 space-y-4">
-          {anchors.map((a, index) => {
+          {filteredAnchors.map((a) => {
+            const index = anchors.findIndex((row) => row.id === a.id)
             const manual = isManualMode(a)
             return (
               <div
@@ -378,12 +471,13 @@ export const AnchorManagementPanel: React.FC = () => {
                 className={`rounded-xl border p-3 ${
                   a.enabled ? 'border-slate-100' : 'border-slate-200 bg-slate-50/50'
                 }`}
+                style={{ borderLeftWidth: 3, borderLeftColor: resolveAnchorColor(a) }}
               >
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex flex-col gap-0.5">
                     <button
                       type="button"
-                      disabled={index === 0}
+                      disabled={index <= 0}
                       onClick={() => void move(index, -1)}
                       className="rounded border border-slate-200 p-0.5 disabled:opacity-30"
                       title="上移"
@@ -392,7 +486,7 @@ export const AnchorManagementPanel: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      disabled={index === anchors.length - 1}
+                      disabled={index < 0 || index >= anchors.length - 1}
                       onClick={() => void move(index, 1)}
                       className="rounded border border-slate-200 p-0.5 disabled:opacity-30"
                       title="下移"

@@ -21,6 +21,7 @@ import {
   type AnchorLeaderboardRow,
 } from '../../lib/anchor-leaderboard-row'
 import { anchorCardTestId } from '../../lib/anchor-test-id'
+import { resolveAnchorColor, resolveAnchorTheme } from '../../lib/anchor-theme'
 import { AnchorTrendChart } from './AnchorTrendChart'
 
 interface Props {
@@ -128,6 +129,16 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
         const trend = anchorRowTrend(a)
         const showTrend = showIndividualTrend || (expandedTrendKeys[rowKey] ?? true)
         const showExtraMetrics = expandedMetricKeys[rowKey] ?? false
+        const theme = resolveAnchorTheme({
+          id: typeof a.anchorId === 'string' ? a.anchorId : null,
+          name: typeof a.anchorName === 'string' ? a.anchorName : null,
+          color: typeof a.color === 'string' ? a.color : null,
+        })
+        const chartColor = resolveAnchorColor({
+          id: typeof a.anchorId === 'string' ? a.anchorId : null,
+          name: typeof a.anchorName === 'string' ? a.anchorName : null,
+          color: typeof a.color === 'string' ? a.color : null,
+        })
 
         return (
           <article
@@ -148,12 +159,31 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 ? 'border-amber-200 bg-amber-50/60 shadow-amber-100/40'
                 : 'border-rose-100 bg-white shadow-rose-100/40'
             } ${onSelect ? 'cursor-pointer transition active:scale-[0.99] hover:shadow-md' : ''}`}
-            style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
+            style={{
+              ['--i' as string]: String(Math.min(idx, 12)),
+              ...(isUnassigned
+                ? {}
+                : {
+                    borderLeftWidth: 3,
+                    borderLeftColor: theme.main,
+                  }),
+            }}
           >
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] text-slate-500">主播</p>
-                <p className={`text-lg font-semibold ${isUnassigned ? 'text-amber-900' : 'text-rose-800'}`}>
+                <p
+                  className={`flex items-center gap-2 text-lg font-semibold ${
+                    isUnassigned ? 'text-amber-900' : 'text-slate-900'
+                  }`}
+                >
+                  {!isUnassigned ? (
+                    <span
+                      className="inline-block h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: theme.main }}
+                      aria-hidden
+                    />
+                  ) : null}
                   {name}
                 </p>
                 {isUnassigned ? (
@@ -230,6 +260,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 <AnchorTrendChart
                   variant="page"
                   trend={trend}
+                  color={chartColor}
                   includeZeroPerformance={includeZeroPerformance}
                   formatMoney={formatMoney}
                   formatCount={(n) => `${formatCount(n)} 单`}

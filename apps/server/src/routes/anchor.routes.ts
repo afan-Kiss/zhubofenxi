@@ -53,6 +53,8 @@ anchorRouter.post('/', async (req, res) => {
         body.attributionMode === 'manual' || body.attributionMode === 'schedule'
           ? body.attributionMode
           : undefined,
+      effectiveFrom: body.effectiveFrom != null ? String(body.effectiveFrom) : undefined,
+      effectiveTo: body.effectiveTo != null ? String(body.effectiveTo) : undefined,
     })
     sendOk(res, anchor)
   } catch (err) {

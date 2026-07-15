@@ -48,15 +48,13 @@ export function isManualAttributionMode(
   return mode === 'manual'
 }
 
-/** 仅可读：是否为仅手动归属主播（按配置字段，不以空时间段推断） */
+/** 仅按 attributionMode 判断；不得再用「无 timeRules」推断手动主播 */
 export function isManualOnlyAnchor(anchor: {
   attributionMode?: string | null
   timeRules?: Array<{ enabled?: boolean | null }> | null
 }): boolean {
-  if (isManualAttributionMode(anchor.attributionMode)) return true
-  // 兼容未迁移旧数据：无启用时段视为手动
-  const rules = anchor.timeRules ?? []
-  return rules.filter((r) => r.enabled !== false).length === 0
+  void anchor.timeRules
+  return isManualAttributionMode(anchor.attributionMode)
 }
 
 export async function ensureAnchorsSeeded(): Promise<void> {
@@ -277,6 +275,8 @@ export async function refreshAnchorConfigCache(): Promise<AnchorConfig> {
       externalId: a.externalId,
       systemKey: a.systemKey,
       attributionMode: a.attributionMode === 'manual' ? 'manual' : 'schedule',
+      effectiveFrom: a.effectiveFrom ?? null,
+      effectiveTo: a.effectiveTo ?? null,
     })),
     timeRules: rows.flatMap((a) => {
       if (a.attributionMode === 'manual') return []
@@ -401,6 +401,8 @@ export async function createAnchor(input: {
   timeRules?: Array<{ startTime: string; endTime: string; enabled?: boolean }>
   manualOnly?: boolean
   attributionMode?: AnchorAttributionMode
+  effectiveFrom?: string | null
+  effectiveTo?: string | null
 }) {
   const name = input.name.trim()
   if (!name) throw new Error('主播名称不能为空')
@@ -408,18 +410,27 @@ export async function createAnchor(input: {
     where: { deletedAt: null },
     _max: { sortOrder: true },
   })
+  // 正式规则：仅 explicit manual；不得因无 timeRules 推断手动，也不得默认全日时段
   const attributionMode: AnchorAttributionMode =
-    input.attributionMode === 'manual' ||
-    Boolean(input.manualOnly) ||
-    (Array.isArray(input.timeRules) && input.timeRules.length === 0)
-      ? 'manual'
-      : 'schedule'
+    input.attributionMode === 'manual' || Boolean(input.manualOnly) ? 'manual' : 'schedule'
+
+  const effectiveFrom = input.effectiveFrom?.trim() || null
+  if (attributionMode === 'schedule' && !effectiveFrom) {
+    throw new Error('排班主播必须填写上岗日期（YYYY-MM-DD）')
+  }
+  if (effectiveFrom && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
+    throw new Error('上岗日期格式无效，请使用 YYYY-MM-DD')
+  }
+  const effectiveTo = input.effectiveTo?.trim() || null
+  if (effectiveTo && !/^\d{4}-\d{2}-\d{2}$/.test(effectiveTo)) {
+    throw new Error('离岗日期格式无效，请使用 YYYY-MM-DD')
+  }
 
   assertManualModeAllowsRoomAndRules({
     attributionMode,
     defaultLiveRoomName: input.defaultLiveRoomName,
     timeRules: input.timeRules,
-    hasTimeRulesInput: input.timeRules !== undefined || Boolean(input.manualOnly),
+    hasTimeRulesInput: input.timeRules !== undefined,
   })
 
   const timeRules =
@@ -427,7 +438,7 @@ export async function createAnchor(input: {
       ? []
       : input.timeRules && input.timeRules.length > 0
         ? normalizeTimeRulesInput(input.timeRules)
-        : [{ startTime: '00:00', endTime: '23:59', enabled: true, sortOrder: 0 }]
+        : []
   const ruleEffectiveFrom = new Date()
   let anchor
   try {
@@ -440,6 +451,8 @@ export async function createAnchor(input: {
         color: input.color ?? '#94a3b8',
         enabled: true,
         attributionMode,
+        effectiveFrom,
+        effectiveTo,
         sortOrder: input.sortOrder ?? (maxOrder._max.sortOrder ?? 0) + 1,
         timeRules:
           timeRules.length > 0

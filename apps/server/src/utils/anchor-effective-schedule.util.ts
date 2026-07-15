@@ -120,6 +120,7 @@ export function buildEffectiveScheduleRowsForDate(params: {
   templates: ScheduleTemplateSeed[]
   templateRecords?: Array<{
     id: string
+    anchorId?: string | null
     anchorName: string
     shopName: string
     liveRoomName: string
@@ -161,10 +162,11 @@ export function buildEffectiveScheduleRowsForDate(params: {
     ...generatedRows.map(occupiedIntervalFromDbRow),
   ]
 
-  const templateInputs =
+  const rawTemplateInputs =
     params.templateRecords ??
     templates.map((t, i) => ({
       id: `virtual-seed-${i}`,
+      anchorId: null as string | null,
       anchorName: t.anchorName,
       shopName: t.shopName,
       liveRoomName: t.liveRoomName,
@@ -178,6 +180,10 @@ export function buildEffectiveScheduleRowsForDate(params: {
       createdAt: new Date(),
       updatedAt: new Date(),
     }))
+  const templateInputs = rawTemplateInputs.map((t) => ({
+    ...t,
+    anchorId: t.anchorId ?? null,
+  }))
 
   const allVirtual = buildVirtualSchedulesFromTemplates(dateKey, templateInputs)
 

@@ -21,6 +21,8 @@ export interface AnchorTrendChartProps {
   variant?: 'page' | 'report'
   /** 单日业绩/日报：无成交也按排班展示平线 */
   includeZeroPerformance?: boolean
+  /** 主播主题色；缺省回退玫瑰红 */
+  color?: string
   className?: string
 }
 
@@ -145,9 +147,11 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   formatCount = defaultFormatCount,
   variant = 'page',
   includeZeroPerformance = false,
+  color,
   className = '',
 }) => {
   const gradientId = useId().replace(/:/g, '')
+  const strokeColor = color?.trim() || '#f43f5e'
   const resolved = trend ?? null
   const isReport = variant === 'report'
   const showZeroPerformanceTrend = isReport || includeZeroPerformance
@@ -265,8 +269,8 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
           >
             <defs>
               <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#f43f5e" stopOpacity={isReport ? 0.12 : 0.14} />
-                <stop offset="100%" stopColor="#f43f5e" stopOpacity={0.04} />
+                <stop offset="0%" stopColor={strokeColor} stopOpacity={isReport ? 0.12 : 0.14} />
+                <stop offset="100%" stopColor={strokeColor} stopOpacity={0.04} />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
@@ -296,11 +300,13 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
             <Area
               type="monotone"
               dataKey="chartValue"
-              stroke="#f43f5e"
+              stroke={strokeColor}
               strokeWidth={isReport ? 1.25 : 1.5}
               fill={`url(#${gradientId})`}
               dot={false}
-              activeDot={isReport ? false : { r: 3.5, fill: '#f43f5e', stroke: '#fff', strokeWidth: 1 }}
+              activeDot={
+                isReport ? false : { r: 3.5, fill: strokeColor, stroke: '#fff', strokeWidth: 1 }
+              }
               isAnimationActive={!isReport}
             />
           </AreaChart>

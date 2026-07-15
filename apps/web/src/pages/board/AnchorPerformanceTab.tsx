@@ -27,6 +27,7 @@ import {
 } from '../../providers/BoardLiveQueryProvider'
 import { showLongPeriodRates } from '../../lib/board-rate-display'
 import { boardSummaryHasOrderData } from '../../lib/board-summary.util'
+import { rangeIncludesOfflineGmvSurface } from '../../lib/offline-gmv-range'
 import { MetricGridTransition, StaggerCard } from '../../components/ui/MetricGridTransition'
 import { DailyReportPreviewButton, prefetchShipmentPhotoDataUrls } from '../../components/board/DailyReportPreviewButton'
 import {
@@ -405,13 +406,18 @@ export const AnchorPerformanceTab: React.FC = () => {
   /** 总/线上/线下/未归属：必须用后端汇总，禁止对可见主播行求和（否则会丢线下 GMV） */
   const boardGmvSplit = useMemo(() => {
     const src = (performanceSummary ?? displaySummary ?? {}) as Record<string, unknown>
+    const showOffline = rangeIncludesOfflineGmvSurface(startDate, endDate)
+    const onlineGmv = Number(src.onlineGmv ?? 0)
+    const offlineGmv = showOffline ? Number(src.offlineGmv ?? 0) : 0
+    const unassignedGmv = Number(src.unassignedGmv ?? 0)
     return {
-      totalGmv: Number(src.totalGmv ?? src.gmv ?? 0),
-      onlineGmv: Number(src.onlineGmv ?? 0),
-      offlineGmv: Number(src.offlineGmv ?? 0),
-      unassignedGmv: Number(src.unassignedGmv ?? 0),
+      totalGmv: showOffline ? Number(src.totalGmv ?? src.gmv ?? 0) : onlineGmv,
+      onlineGmv,
+      offlineGmv,
+      unassignedGmv,
+      showOfflineGmv: showOffline,
     }
-  }, [performanceSummary, displaySummary])
+  }, [performanceSummary, displaySummary, startDate, endDate])
   const showLivePeriod = isSingleDayPreset(preset, startDate, endDate)
   const showRates = showLongPeriodRates(preset, startDate, endDate)
   const boardDataVisible =
@@ -626,12 +632,16 @@ export const AnchorPerformanceTab: React.FC = () => {
             [
               { label: '总 GMV', value: boardGmvSplit.totalGmv, clickable: false },
               { label: '线上 GMV', value: boardGmvSplit.onlineGmv, clickable: false },
-              {
-                label: '线下 GMV',
-                value: boardGmvSplit.offlineGmv,
-                clickable: true,
-                helper: '查看逸凡线下成交明细',
-              },
+              ...(boardGmvSplit.showOfflineGmv
+                ? [
+                    {
+                      label: '线下 GMV',
+                      value: boardGmvSplit.offlineGmv,
+                      clickable: true,
+                      helper: '查看逸凡线下成交明细',
+                    },
+                  ]
+                : []),
               { label: '未归属 GMV', value: boardGmvSplit.unassignedGmv, clickable: false },
             ] as Array<{
               label: string
@@ -674,7 +684,9 @@ export const AnchorPerformanceTab: React.FC = () => {
             ),
           )}
           <p className="col-span-2 text-[11px] text-slate-400 md:col-span-4">
-            总 GMV = 线上 + 线下；未归属 GMV 已计入总 GMV，但不计入任一主播。线下专属主播业绩请点「线下 GMV」。
+            {boardGmvSplit.showOfflineGmv
+              ? '总 GMV = 线上 + 线下（线下自 2026-07-14 起计入）；未归属已计入总 GMV。线下专属主播请点「线下 GMV」。'
+              : '当前区间早于线下 GMV 生效日（2026-07-14），总 GMV = 线上 GMV。'}
           </p>
         </div>
       ) : null}

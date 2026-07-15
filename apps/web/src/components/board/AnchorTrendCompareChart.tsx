@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
+import { resolveAnchorColor } from '../../lib/anchor-theme'
 import {
   CartesianGrid,
   Legend,
@@ -26,19 +27,18 @@ import {
 
 export { INTRADAY_COMPARE_MAX_BUCKET_INDEX }
 
-const ANCHOR_COLORS = [
-  '#f43f5e',
-  '#3b82f6',
-  '#22c55e',
-  '#f59e0b',
-  '#a855f7',
-  '#06b6d4',
-  '#64748b',
-  '#ec4899',
-] as const
+type CompareMatchedRow = {
+  anchorName: string
+  color: string
+  trend: NonNullable<ReturnType<typeof anchorRowTrend>>
+}
 
-function seriesColor(index: number): string {
-  return ANCHOR_COLORS[index % ANCHOR_COLORS.length] ?? ANCHOR_COLORS[0]!
+function rowAnchorColor(row: AnchorLeaderboardRow): string {
+  return resolveAnchorColor({
+    id: typeof row.anchorId === 'string' ? row.anchorId : null,
+    name: typeof row.anchorName === 'string' ? row.anchorName : null,
+    color: typeof row.color === 'string' ? row.color : null,
+  })
 }
 
 export interface AnchorTrendCompareSeries {
@@ -113,7 +113,7 @@ export function defaultCompareAnchorNames(
 }
 
 function buildDailyComparePayload(
-  matched: Array<{ anchorName: string; trend: NonNullable<ReturnType<typeof anchorRowTrend>> }>,
+  matched: CompareMatchedRow[],
 ): { series: AnchorTrendCompareSeries[]; chartData: CompareChartRow[] } {
   const keyOrder: string[] = []
   const keyLabels = new Map<string, string>()
@@ -129,7 +129,7 @@ function buildDailyComparePayload(
 
   const series: AnchorTrendCompareSeries[] = matched.map((item, index) => ({
     anchorName: item.anchorName,
-    color: seriesColor(index),
+    color: item.color,
     dataKey: `anchor_${index}`,
   }))
 
@@ -153,13 +153,13 @@ function buildDailyComparePayload(
 }
 
 export function buildIntradayRelativeComparePayload(
-  matched: Array<{ anchorName: string; trend: NonNullable<ReturnType<typeof anchorRowTrend>> }>,
+  matched: CompareMatchedRow[],
 ): { series: AnchorTrendCompareSeries[]; chartData: CompareChartRow[] } {
   const { series: rawSeries, chartData: rawChartData } = buildRelativeIntradayCompareSeries(matched)
 
   const series: AnchorTrendCompareSeries[] = rawSeries.map((item, index) => ({
     anchorName: item.anchorName,
-    color: seriesColor(index),
+    color: matched[index]?.color ?? resolveAnchorColor({ name: item.anchorName }),
     dataKey: item.dataKey,
   }))
 
@@ -212,8 +212,7 @@ function buildComparePayload(
   }
 
   const referenceMode = anchorRowTrend(candidates[0]!)!.mode
-  const matched: Array<{ anchorName: string; trend: NonNullable<ReturnType<typeof anchorRowTrend>> }> =
-    []
+  const matched: CompareMatchedRow[] = []
   let skippedModeMismatch = false
 
   for (const row of candidates) {
@@ -223,7 +222,11 @@ function buildComparePayload(
       skippedModeMismatch = true
       continue
     }
-    matched.push({ anchorName: String(row.anchorName).trim(), trend })
+    matched.push({
+      anchorName: String(row.anchorName).trim(),
+      color: rowAnchorColor(row),
+      trend,
+    })
   }
 
   if (matched.length === 0) {
@@ -455,8 +458,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
           {sortedCandidates.map((row) => {
             const name = String(row.anchorName).trim()
             const checked = selectedNames.includes(name)
-            const colorIndex = selectedNames.indexOf(name)
-            const dotColor = colorIndex >= 0 ? seriesColor(colorIndex) : '#cbd5e1'
+            const dotColor = checked ? rowAnchorColor(row) : '#cbd5e1'
             return (
               <label
                 key={name}

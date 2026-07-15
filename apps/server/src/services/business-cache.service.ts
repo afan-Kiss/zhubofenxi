@@ -24,6 +24,17 @@ import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 import { CANONICAL_ATTRIBUTION_VERSION } from './canonical-order-attribution.service'
 import { loadOfflineDealViewsForRange, splitGmvByDealSource } from './offline-deal.service'
+import {
+  ANCHOR_MASTER_DATA_VERSION,
+  OFFLINE_GMV_METRICS_VERSION,
+} from '../config/offline-gmv.constants'
+
+/** 经营缓存指纹：归属算法 + 线下 GMV 口径 + 主播主数据版本 */
+export const BUSINESS_CACHE_FINGERPRINT = [
+  CANONICAL_ATTRIBUTION_VERSION,
+  OFFLINE_GMV_METRICS_VERSION,
+  ANCHOR_MASTER_DATA_VERSION,
+].join('+')
 
 export const BUSINESS_CACHE_PRESETS: BusinessRangePreset[] = [
   'today',
@@ -372,7 +383,7 @@ export async function buildAndSetBusinessBoardCache(params: {
       sourceSyncJobId: await resolveLatestBusinessSyncJobId(),
       sourceDataMaxTime,
       sourceRawMaxUpdatedAt,
-      attributionAlgorithmVersion: CANONICAL_ATTRIBUTION_VERSION,
+      attributionAlgorithmVersion: BUSINESS_CACHE_FINGERPRINT,
       buildDurationMs: Date.now() - started,
       stale: false,
       buildError: null,
@@ -434,7 +445,7 @@ export async function getOrBuildBusinessBoardCache(params: {
   if (!BUSINESS_CACHE_ALWAYS_REBUILD && !params.forceRebuild) {
     const hit = cache.get(key)
     if (hit && !hit.stale) {
-      const versionStale = hit.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION
+      const versionStale = hit.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT
       if (!versionStale) {
         return hit
       }
@@ -469,10 +480,10 @@ export async function getOrBuildBusinessBoardCache(params: {
   if (retain) {
     const hit = cache.get(key)
     if (hit && !params.forceRebuild && !hit.stale) {
-      if (hit.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION) {
+      if (hit.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT) {
         logInfo(
           '经营缓存',
-          `${presetLabel(params.preset)} 归属算法版本变更（${hit.attributionAlgorithmVersion ?? '—'} → ${CANONICAL_ATTRIBUTION_VERSION}），重建经营缓存`,
+          `${presetLabel(params.preset)} 归属算法版本变更（${hit.attributionAlgorithmVersion ?? '—'} → ${BUSINESS_CACHE_FINGERPRINT}），重建经营缓存`,
         )
       } else {
         return hit

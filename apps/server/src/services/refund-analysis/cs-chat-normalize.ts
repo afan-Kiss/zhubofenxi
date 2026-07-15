@@ -123,6 +123,53 @@ export function textLooksRefund(text: string | null | undefined): boolean {
   return REFUND_RE.test(String(text || ''))
 }
 
+const BAD_NICK_RE = /^(系统通知|系统消息|通知|客服|机器人)$/i
+const SHOP_NICK_RE = /的店$/
+
+/** 消息上的 buyerNick 实际是「该条发送者展示名」，系统/商家名不能当买家 */
+export function isUsableBuyerNick(nick: string | null | undefined): boolean {
+  const s = String(nick || '').trim()
+  if (!s) return false
+  if (BAD_NICK_RE.test(s)) return false
+  if (SHOP_NICK_RE.test(s)) return false
+  return true
+}
+
+export function pickBuyerNickFromMessages(
+  messages: Array<{ buyerNick?: string | null; senderType?: string | null }>,
+  preferred?: string | null,
+): string {
+  const pref = String(preferred || '').trim()
+  if (isUsableBuyerNick(pref)) return pref
+
+  for (const m of [...messages].reverse()) {
+    const type = String(m.senderType || '').toUpperCase()
+    if (type !== 'CUSTOMER') continue
+    if (isUsableBuyerNick(m.buyerNick)) return String(m.buyerNick).trim()
+  }
+  for (const m of [...messages].reverse()) {
+    const type = String(m.senderType || '').toUpperCase()
+    if (type === 'SYSTEM' || type === 'SELLER' || type === 'MERCHANT' || type === 'BOT') continue
+    if (isUsableBuyerNick(m.buyerNick)) return String(m.buyerNick).trim()
+  }
+  return ''
+}
+
+export function pickPreviewText(
+  messages: Array<{ text?: string | null; senderType?: string | null }>,
+): string {
+  for (const m of [...messages].reverse()) {
+    const type = String(m.senderType || '').toUpperCase()
+    if (type === 'SYSTEM') continue
+    const text = String(m.text || '').trim()
+    if (!text) continue
+    if (/会话长时间无新消息|系统关闭会话|接入会话/.test(text)) continue
+    return text.slice(0, 200)
+  }
+  const last = messages[messages.length - 1]
+  return String(last?.text || '').trim().slice(0, 200)
+}
+
 export interface NormalizedChatMessage {
   shopTitle: string
   appCid: string

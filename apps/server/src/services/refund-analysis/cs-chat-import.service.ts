@@ -6,6 +6,8 @@ import { prisma } from '../../lib/prisma'
 import {
   messageIdOf,
   normalizeImportMessage,
+  pickBuyerNickFromMessages,
+  pickPreviewText,
   sessionIdOf,
   textLooksRefund,
   type NormalizedChatMessage,
@@ -97,7 +99,10 @@ async function upsertMessages(messages: NormalizedChatMessage[]): Promise<void> 
   }
 }
 
-async function rebuildSessionsFromNormalized(messages: NormalizedChatMessage[]): Promise<number> {
+async function rebuildSessionsFromNormalized(
+  messages: NormalizedChatMessage[],
+  sessionHints?: Map<string, { buyerNick?: string; modifyTime?: number | null }>,
+): Promise<number> {
   const bySession = new Map<string, NormalizedChatMessage[]>()
   for (const m of messages) {
     const key = sessionIdOf(m.shopTitle, m.appCid)
@@ -109,11 +114,17 @@ async function rebuildSessionsFromNormalized(messages: NormalizedChatMessage[]):
   const rows = [...bySession.entries()].map(([sessionId, msgs]) => {
     msgs.sort((a, b) => Number(a.createAt || 0) - Number(b.createAt || 0))
     const last = msgs[msgs.length - 1]
-    const buyerNick = [...msgs].reverse().find((m) => m.buyerNick)?.buyerNick || ''
+    const hint = sessionHints?.get(sessionId)
+    const buyerNick = pickBuyerNickFromMessages(msgs, hint?.buyerNick)
     const hasImage = msgs.some((m) => m.contentType === 'image' || m.imageUrls.length > 0)
     const refundMention = msgs.some((m) => textLooksRefund(m.text))
-    const lastAt = last?.createAt ?? null
+    const lastHuman = [...msgs].reverse().find((m) => String(m.senderType || '').toUpperCase() !== 'SYSTEM')
+    const lastAt =
+      hint?.modifyTime && Number(hint.modifyTime) > 0
+        ? Number(hint.modifyTime)
+        : lastHuman?.createAt ?? last?.createAt ?? null
     const firstAt = msgs[0]?.createAt ?? null
+    const lastText = pickPreviewText(msgs)
     return {
       sessionId,
       shopTitle: msgs[0]!.shopTitle,
@@ -124,7 +135,7 @@ async function rebuildSessionsFromNormalized(messages: NormalizedChatMessage[]):
       lastAt,
       firstAt,
       messageCount: msgs.length,
-      lastText: (last?.text || '').slice(0, 200),
+      lastText,
     }
   })
 
@@ -198,6 +209,21 @@ export async function importCsChatArchiveFromPath(
       ? (parsed as Record<string, unknown>[])
       : []
 
+  const sessionHints = new Map<string, { buyerNick?: string; modifyTime?: number | null }>()
+  const rawSessions = Array.isArray(root.sessions) ? (root.sessions as Record<string, unknown>[]) : []
+  for (const s of rawSessions) {
+    if (!s || typeof s !== 'object') continue
+    const shopTitle = String(s.shopTitle || '').trim()
+    const appCid = String(s.appCid || '').trim()
+    if (!shopTitle || !appCid) continue
+    const buyerNick = String(s.buyerNick || '').trim()
+    const modifyTimeNum = Number(s.modifyTime || 0)
+    sessionHints.set(sessionIdOf(shopTitle, appCid), {
+      buyerNick: buyerNick || undefined,
+      modifyTime: Number.isFinite(modifyTimeNum) && modifyTimeNum > 0 ? modifyTimeNum : null,
+    })
+  }
+
   const normalized: NormalizedChatMessage[] = []
   for (const raw of rawMessages) {
     if (!raw || typeof raw !== 'object') continue
@@ -217,7 +243,7 @@ export async function importCsChatArchiveFromPath(
   }
 
   await upsertMessages(normalized)
-  const sessionCount = await rebuildSessionsFromNormalized(normalized)
+  const sessionCount = await rebuildSessionsFromNormalized(normalized, sessionHints)
   const shops = [...new Set(normalized.map((m) => m.shopTitle))]
 
   const shopCounts: Record<string, { sessions: number; messages: number }> = {}

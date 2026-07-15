@@ -253,7 +253,31 @@ export function isFreightOnlyRefund(
   }
 
   const deliveryOnly = raw.refund_only_delivery_status ?? raw.refundOnlyDeliveryStatus
-  if (deliveryOnly != null && deliveryOnly !== '' && Number(deliveryOnly) > 0) return true
+  if (deliveryOnly != null && deliveryOnly !== '' && Number(deliveryOnly) > 0) {
+    // 金额 > 20 元且原因/码不是运费：不得仅凭 delivery_status 判纯运费
+    if (
+      checkCent > FREIGHT_COMPENSATION_MAX_CENT &&
+      !textIndicatesFreight(reason) &&
+      !textIndicatesFreight(typeName) &&
+      code !== RETURNS_V3_FREIGHT_REASON_CODE
+    ) {
+      return false
+    }
+    // 小额或原因明确运费时可认
+    if (
+      checkCent > 0 &&
+      checkCent <= FREIGHT_COMPENSATION_MAX_CENT &&
+      (textIndicatesFreight(reason) ||
+        textIndicatesFreight(typeName) ||
+        code === RETURNS_V3_FREIGHT_REASON_CODE ||
+        !reason)
+    ) {
+      return true
+    }
+    if (textIndicatesFreight(reason) || code === RETURNS_V3_FREIGHT_REASON_CODE) return true
+    if (checkCent > 0 && checkCent <= FREIGHT_COMPENSATION_MAX_CENT) return true
+    return false
+  }
 
   return false
 }

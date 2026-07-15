@@ -33,6 +33,7 @@ import {
   logXhsAccountAuthFailed,
   logXhsAccountRateLimited,
 } from '../utils/sync-cmd-log'
+import { TIME_SEARCH_CACHE_TTL_MS } from './workbench-cache-validity.service'
 
 const WORKBENCH_URL =
   'https://ark.xiaohongshu.com/api/edith/after-sales/returns/v3'
@@ -200,25 +201,34 @@ export async function syncAfterSalesTimeSearchForRange(
 }> {
   const key = rangeKey(range)
   if (!options?.force) {
-    const cached = await prisma.xhsAfterSalesTimeSearchCache.count({
+    const oldest = await prisma.xhsAfterSalesTimeSearchCache.findFirst({
       where: { rangeKey: key },
+      orderBy: { syncedAt: 'asc' },
+      select: { syncedAt: true },
     })
-    if (cached > 0) {
-      const orderNos = await prisma.xhsAfterSalesTimeSearchCache.groupBy({
-        by: ['orderNo'],
-        where: { rangeKey: key },
-      })
-      return {
-        recordCount: cached,
-        orderCount: orderNos.length,
-        warnings: [],
-        fromCache: true,
+    if (oldest) {
+      const ageMs = Date.now() - oldest.syncedAt.getTime()
+      if (ageMs <= TIME_SEARCH_CACHE_TTL_MS) {
+        const cached = await prisma.xhsAfterSalesTimeSearchCache.count({
+          where: { rangeKey: key },
+        })
+        const orderNos = await prisma.xhsAfterSalesTimeSearchCache.groupBy({
+          by: ['orderNo'],
+          where: { rangeKey: key },
+        })
+        return {
+          recordCount: cached,
+          orderCount: orderNos.length,
+          warnings: [],
+          fromCache: true,
+        }
       }
     }
   }
 
   const accounts = await listEnabledLiveAccountsWithCookie()
   const byAccountReturnId = new Map<string, NormalizedAfterSaleRecord>()
+  const successfulAccountIds = new Set<string>()
   const warnings: string[] = []
   const dateRange = formatSyncDateRange(range.startDate, range.endDate)
   const accountTotal = accounts.length
@@ -237,21 +247,26 @@ export async function syncAfterSalesTimeSearchForRange(
       maxPages: options?.maxPages,
     })
     warnings.push(...single.warnings)
+    if (single.authFailed) {
+      if (i + 1 < accounts.length) {
+        logBusinessSyncContinueNext({
+          accountName: accounts[i + 1]!.name,
+          liveAccountId: accounts[i + 1]!.id,
+          accountIndex: i + 2,
+          accountTotal,
+        })
+      }
+      // Cookie/鉴权失败：保留该店既有缓存，不覆盖
+      continue
+    }
+    successfulAccountIds.add(account.id)
     for (const rec of single.records) {
       const rid = `${account.id}::${rec.returnId || `${rec.orderNo}:${rec.statusName}`}`
       if (!byAccountReturnId.has(rid)) byAccountReturnId.set(rid, rec)
     }
-    if (single.authFailed && i + 1 < accounts.length) {
-      logBusinessSyncContinueNext({
-        accountName: accounts[i + 1]!.name,
-        liveAccountId: accounts[i + 1]!.id,
-        accountIndex: i + 2,
-        accountTotal,
-      })
-    }
   }
 
-  if (byAccountReturnId.size === 0 && accounts.length === 1) {
+  if (byAccountReturnId.size === 0 && accounts.length === 1 && successfulAccountIds.size === 1) {
     const fallback = await fetchAfterSalesForTimeRange({
       startMs: range.startTimeMs,
       endMs: range.endTimeMs,
@@ -265,8 +280,11 @@ export async function syncAfterSalesTimeSearchForRange(
   }
 
   const now = new Date()
-  if (options?.force) {
-    await prisma.xhsAfterSalesTimeSearchCache.deleteMany({ where: { rangeKey: key } })
+  // 仅清理本次成功拉取的店铺，避免某店 Cookie 失败冲掉其他店正确数据
+  for (const liveAccountId of successfulAccountIds) {
+    await prisma.xhsAfterSalesTimeSearchCache.deleteMany({
+      where: { rangeKey: key, liveAccountId },
+    })
   }
 
   const records = [...byAccountReturnId.entries()]
@@ -300,10 +318,23 @@ export async function syncAfterSalesTimeSearchForRange(
     })
   }
 
-  const orderNos = new Set([...byAccountReturnId.values()].map((r) => r.orderNo))
+  if (successfulAccountIds.size > 0) {
+    try {
+      const { invalidateBusinessBoardCache } = await import('./business-cache.service')
+      invalidateBusinessBoardCache()
+    } catch {
+      // ignore
+    }
+  }
+
+  const totalCached = await prisma.xhsAfterSalesTimeSearchCache.count({ where: { rangeKey: key } })
+  const orderNos = await prisma.xhsAfterSalesTimeSearchCache.groupBy({
+    by: ['orderNo'],
+    where: { rangeKey: key },
+  })
   return {
-    recordCount: byAccountReturnId.size,
-    orderCount: orderNos.size,
+    recordCount: totalCached,
+    orderCount: orderNos.length,
     warnings,
     fromCache: false,
   }

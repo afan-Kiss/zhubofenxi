@@ -14,6 +14,12 @@ import {
   type AfterSalesQueueStatus,
 } from './after-sales-queue.types'
 import { logWarn } from '../utils/server-log'
+import {
+  extractOrderAfterSaleContextFromRaw,
+  isWorkbenchCacheCurrentlyValid,
+  type OrderAfterSaleContext,
+  type WorkbenchCacheSnapshot,
+} from './workbench-cache-validity.service'
 
 interface ShopRuntimeState {
   cooldownUntil: number
@@ -164,17 +170,59 @@ export async function recoverStuckAfterSalesRunningTasks(
   return stuck.length
 }
 
+export async function loadOrderAfterSaleContext(
+  liveAccountId: string,
+  orderNo: string,
+): Promise<OrderAfterSaleContext> {
+  const trimmed = orderNo.trim()
+  const row = await prisma.xhsRawOrder.findFirst({
+    where: {
+      liveAccountId,
+      OR: [{ packageId: trimmed }, { orderId: trimmed }],
+    },
+    select: { rawJson: true },
+    orderBy: { updatedAt: 'desc' },
+  })
+  const raw =
+    row?.rawJson && typeof row.rawJson === 'object'
+      ? (row.rawJson as Record<string, unknown>)
+      : {}
+  return extractOrderAfterSaleContextFromRaw(raw)
+}
+
 export async function hasValidWorkbenchCache(
   liveAccountId: string,
   orderNo: string,
+  orderCtx?: OrderAfterSaleContext,
 ): Promise<boolean> {
   const row = await prisma.xhsAfterSalesWorkbenchCache.findUnique({
     where: {
       liveAccountId_orderNo: { liveAccountId, orderNo: orderNo.trim() },
     },
-    select: { fetchStatus: true },
+    select: {
+      fetchStatus: true,
+      fetchedAt: true,
+      updatedAt: true,
+      officialRefundAmountCent: true,
+      successReturnCount: true,
+      hasReturnRefund: true,
+      hasRefundOnly: true,
+      appliedShipFeeAmountCent: true,
+    },
   })
-  return row?.fetchStatus === 'success' || row?.fetchStatus === 'empty'
+  if (!row) return false
+  const ctx = orderCtx ?? (await loadOrderAfterSaleContext(liveAccountId, orderNo))
+  const snapshot: WorkbenchCacheSnapshot = {
+    fetchStatus: row.fetchStatus,
+    fetchedAt: row.fetchedAt,
+    updatedAt: row.updatedAt,
+    officialRefundAmountCent: row.officialRefundAmountCent,
+    successReturnCount: row.successReturnCount,
+    hasReturnRefund: row.hasReturnRefund,
+    hasRefundOnly: row.hasRefundOnly,
+    freightRefundAmountCent: row.appliedShipFeeAmountCent,
+  }
+  return isWorkbenchCacheCurrentlyValid(snapshot, ctx)
 }
 
 export async function selectAfterSalesQueueTasks(
@@ -213,6 +261,22 @@ export async function selectAfterSalesQueueTasks(
   const selected: typeof candidates = []
   const perShop = new Map<string, number>()
 
+  // 批量加载订单售后上下文，避免 stale empty 被错标 done 而跳过真实补查
+  const orderCtxByKey = new Map<string, OrderAfterSaleContext>()
+  const uniquePairs = new Map<string, { liveAccountId: string; orderNo: string }>()
+  for (const row of candidates) {
+    uniquePairs.set(`${row.liveAccountId}::${row.orderNo}`, {
+      liveAccountId: row.liveAccountId,
+      orderNo: row.orderNo,
+    })
+  }
+  await Promise.all(
+    [...uniquePairs.values()].map(async (p) => {
+      const ctx = await loadOrderAfterSaleContext(p.liveAccountId, p.orderNo)
+      orderCtxByKey.set(`${p.liveAccountId}::${p.orderNo}`, ctx)
+    }),
+  )
+
   for (const row of candidates) {
     if (selected.length >= limits.globalPerMinute) break
 
@@ -225,7 +289,11 @@ export async function selectAfterSalesQueueTasks(
     const shopCount = perShop.get(sid) ?? 0
     if (shopCount >= limits.perShopPerMinute) continue
 
-    if (await hasValidWorkbenchCache(row.liveAccountId, row.orderNo)) {
+    const orderCtx =
+      orderCtxByKey.get(`${row.liveAccountId}::${row.orderNo}`) ??
+      ({ orderStatusText: '', afterSaleStatusText: '', isReturned: false } satisfies OrderAfterSaleContext)
+
+    if (await hasValidWorkbenchCache(row.liveAccountId, row.orderNo, orderCtx)) {
       await prisma.xhsAfterSalesWorkbenchQueue.update({
         where: { id: row.id },
         data: {

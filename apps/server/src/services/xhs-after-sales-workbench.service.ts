@@ -515,11 +515,55 @@ export async function getLatestWorkbenchCacheUpdatedAt(): Promise<Date | null> {
   return row?.updatedAt ?? null
 }
 
+export async function getLatestTimeSearchCacheUpdatedAt(): Promise<Date | null> {
+  const row = await prisma.xhsAfterSalesTimeSearchCache.findFirst({
+    orderBy: { updatedAt: 'desc' },
+    select: { updatedAt: true },
+  })
+  return row?.updatedAt ?? null
+}
+
+function workbenchRefundFingerprint(r: {
+  officialRefundAmountCent?: number | null
+  successReturnCount?: number | null
+  hasReturnRefund?: boolean | null
+  hasRefundOnly?: boolean | null
+  afterSaleStatus?: string | null
+  fetchStatus?: string | null
+}): string {
+  return [
+    r.fetchStatus ?? '',
+    r.officialRefundAmountCent ?? 0,
+    r.successReturnCount ?? 0,
+    r.hasReturnRefund ? 1 : 0,
+    r.hasRefundOnly ? 1 : 0,
+    r.afterSaleStatus ?? '',
+  ].join('|')
+}
+
 export async function saveWorkbenchCache(
   result: AfterSalesWorkbenchRefund & { rawDetail?: unknown },
   liveAccountId?: string,
 ): Promise<void> {
   const accountId = resolveLiveAccountId(liveAccountId ?? result.liveAccountId)
+  const prev = await prisma.xhsAfterSalesWorkbenchCache.findUnique({
+    where: {
+      liveAccountId_orderNo: {
+        liveAccountId: accountId,
+        orderNo: result.orderNo,
+      },
+    },
+    select: {
+      officialRefundAmountCent: true,
+      successReturnCount: true,
+      hasReturnRefund: true,
+      hasRefundOnly: true,
+      afterSaleStatus: true,
+      fetchStatus: true,
+      rawDetail: true,
+    },
+  })
+
   await prisma.xhsAfterSalesWorkbenchCache.upsert({
     where: {
       liveAccountId_orderNo: {
@@ -583,33 +627,105 @@ export async function saveWorkbenchCache(
   })
   if (result.fetchStatus === 'success' || result.fetchStatus === 'empty') {
     const key = liveAccountOrderKey(accountId, result.orderNo)
-    const prev = memoryCache.get(key)
+    const memPrev = memoryCache.get(key)
     memoryCache.set(
       key,
-      prev ? pickPreferredWorkbenchRefund({ ...result, liveAccountId: accountId }, prev) : {
+      memPrev ? pickPreferredWorkbenchRefund({ ...result, liveAccountId: accountId }, memPrev) : {
         ...result,
         liveAccountId: accountId,
       },
     )
+  }
+
+  const nextFp = workbenchRefundFingerprint(result)
+  const prevFp = prev ? workbenchRefundFingerprint(prev) : ''
+  const emptyToSuccess = prev?.fetchStatus === 'empty' && result.fetchStatus === 'success'
+  const rawChanged =
+    Boolean(result.rawDetail) &&
+    JSON.stringify(prev?.rawDetail ?? null) !== JSON.stringify(result.rawDetail ?? null)
+  if (!prev || prevFp !== nextFp || emptyToSuccess || rawChanged) {
+    try {
+      const { invalidateBusinessBoardCache } = await import('./business-cache.service')
+      invalidateBusinessBoardCache()
+    } catch {
+      // 构建期/脚本环境可能未加载经营缓存
+    }
   }
 }
 
 export async function enqueueWorkbenchSync(
   orderNo: string,
   liveAccountId?: string,
+  opts?: { force?: boolean },
 ): Promise<void> {
   const trimmed = orderNo.trim()
   const accountId = resolveLiveAccountId(liveAccountId)
   if (!trimmed || !/^P/i.test(trimmed)) return
-  await prisma.xhsAfterSalesWorkbenchQueue.upsert({
-    where: {
-      liveAccountId_orderNo: {
-        liveAccountId: accountId,
-        orderNo: trimmed,
+
+  const [{ extractOrderAfterSaleContextFromRaw, shouldReopenWorkbenchQueueTask }, { loadOrderAfterSaleContext }] =
+    await Promise.all([
+      import('./workbench-cache-validity.service'),
+      import('./after-sales-queue.service'),
+    ])
+
+  const [existingQueue, cacheRow, orderCtx] = await Promise.all([
+    prisma.xhsAfterSalesWorkbenchQueue.findUnique({
+      where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
+      select: { status: true },
+    }),
+    prisma.xhsAfterSalesWorkbenchCache.findUnique({
+      where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
+      select: {
+        fetchStatus: true,
+        fetchedAt: true,
+        updatedAt: true,
+        officialRefundAmountCent: true,
+        successReturnCount: true,
+        hasReturnRefund: true,
+        hasRefundOnly: true,
+        appliedShipFeeAmountCent: true,
       },
+    }),
+    loadOrderAfterSaleContext(accountId, trimmed),
+  ])
+
+  const reopen = shouldReopenWorkbenchQueueTask({
+    queueStatus: existingQueue?.status,
+    cache: cacheRow
+      ? {
+          fetchStatus: cacheRow.fetchStatus,
+          fetchedAt: cacheRow.fetchedAt,
+          updatedAt: cacheRow.updatedAt,
+          officialRefundAmountCent: cacheRow.officialRefundAmountCent,
+          successReturnCount: cacheRow.successReturnCount,
+          hasReturnRefund: cacheRow.hasReturnRefund,
+          hasRefundOnly: cacheRow.hasRefundOnly,
+          freightRefundAmountCent: cacheRow.appliedShipFeeAmountCent,
+        }
+      : null,
+    order: orderCtx ?? extractOrderAfterSaleContextFromRaw({}),
+    force: opts?.force === true,
+  })
+
+  if (!existingQueue) {
+    await prisma.xhsAfterSalesWorkbenchQueue.create({
+      data: { liveAccountId: accountId, orderNo: trimmed, status: 'pending' },
+    })
+    return
+  }
+
+  if (!reopen) return
+
+  await prisma.xhsAfterSalesWorkbenchQueue.update({
+    where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
+    data: {
+      status: 'pending',
+      completedAt: null,
+      runningSince: null,
+      lastError: null,
+      errorType: null,
+      nextAttemptAt: null,
     },
-    create: { liveAccountId: accountId, orderNo: trimmed, status: 'pending' },
-    update: {},
   })
 }
 

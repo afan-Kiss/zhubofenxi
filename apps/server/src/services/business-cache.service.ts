@@ -15,7 +15,7 @@ import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { prisma } from '../lib/prisma'
-import { getLatestWorkbenchCacheUpdatedAt } from './xhs-after-sales-workbench.service'
+import { getLatestWorkbenchCacheUpdatedAt, getLatestTimeSearchCacheUpdatedAt } from './xhs-after-sales-workbench.service'
 import { logInfo, logWarn, presetLabel } from '../utils/server-log'
 import { printStartupSummary } from './startup-summary.service'
 import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
@@ -28,12 +28,14 @@ import {
   ANCHOR_MASTER_DATA_VERSION,
   OFFLINE_GMV_METRICS_VERSION,
 } from '../config/offline-gmv.constants'
+import { AFTER_SALES_METRICS_VERSION } from './workbench-cache-validity.service'
 
-/** 经营缓存指纹：归属算法 + 线下 GMV 口径 + 主播主数据版本 */
+/** 经营缓存指纹：归属算法 + 线下 GMV 口径 + 主播主数据 + 售后缓存语义版本 */
 export const BUSINESS_CACHE_FINGERPRINT = [
   CANONICAL_ATTRIBUTION_VERSION,
   OFFLINE_GMV_METRICS_VERSION,
   ANCHOR_MASTER_DATA_VERSION,
+  AFTER_SALES_METRICS_VERSION,
 ].join('+')
 
 export const BUSINESS_CACHE_PRESETS: BusinessRangePreset[] = [
@@ -83,6 +85,8 @@ export interface BusinessBoardCacheEntry {
   lastBuiltAt: string
   /** 构建时售后工作台 DB 最新 updatedAt，用于检测 resync 后失效 */
   workbenchCacheMaxUpdatedAt: string | null
+  /** 时间范围售后缓存最新 updatedAt */
+  timeSearchCacheMaxUpdatedAt: string | null
   sourceSyncJobId: string | null
   sourceDataMaxTime: string | null
   /** 原始订单/直播/结算表 updatedAt 最大值，检测 rawJson/售后字段更新 */
@@ -258,6 +262,22 @@ export async function resolveSourceRawMaxUpdatedAt(): Promise<string | null> {
   return new Date(Math.max(...timestamps)).toISOString()
 }
 
+/** 对比经营缓存指纹：raw / 工作台 / 时间售后 / 算法版本 */
+export async function isBusinessBoardCacheFingerprintStale(
+  hit: BusinessBoardCacheEntry,
+): Promise<boolean> {
+  if (hit.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT) return true
+  const [rawMax, wbMax, tsMax] = await Promise.all([
+    resolveSourceRawMaxUpdatedAt(),
+    getLatestWorkbenchCacheUpdatedAt(),
+    getLatestTimeSearchCacheUpdatedAt(),
+  ])
+  if ((rawMax ?? null) !== (hit.sourceRawMaxUpdatedAt ?? null)) return true
+  if ((wbMax?.toISOString() ?? null) !== (hit.workbenchCacheMaxUpdatedAt ?? null)) return true
+  if ((tsMax?.toISOString() ?? null) !== (hit.timeSearchCacheMaxUpdatedAt ?? null)) return true
+  return false
+}
+
 function evictBusinessBoardCacheEntry(
   key: string,
   preset: string,
@@ -361,6 +381,8 @@ export async function buildAndSetBusinessBoardCache(params: {
     const sourceDataMaxTime = await resolveSourceDataMaxTime()
     const sourceRawMaxUpdatedAt = await resolveSourceRawMaxUpdatedAt()
     const workbenchCacheMaxUpdatedAt = (await getLatestWorkbenchCacheUpdatedAt())?.toISOString() ?? null
+    const timeSearchCacheMaxUpdatedAt =
+      (await getLatestTimeSearchCacheUpdatedAt())?.toISOString() ?? null
 
     const entry: BusinessBoardCacheEntry = {
       cacheKey: key,
@@ -380,6 +402,7 @@ export async function buildAndSetBusinessBoardCache(params: {
       orderCount: mergedViews.length,
       lastBuiltAt: new Date().toISOString(),
       workbenchCacheMaxUpdatedAt,
+      timeSearchCacheMaxUpdatedAt,
       sourceSyncJobId: await resolveLatestBusinessSyncJobId(),
       sourceDataMaxTime,
       sourceRawMaxUpdatedAt,
@@ -407,10 +430,14 @@ export async function buildAndSetBusinessBoardCache(params: {
           sourceSyncJobId: entry.sourceSyncJobId,
         }),
       )
+    } else {
+      // custom 等按需范围：短时驻留 LRU，便于指纹比对与抽屉连点不重复全量重建
+      cache.set(entry.cacheKey, entry)
+      rememberCustomCacheKey(entry.cacheKey)
     }
     logInfo(
       '经营缓存',
-      `${presetLabel(params.preset)} 重新构建完成：${mergedViews.length} 单（含线下 ${offlineViews.length}），用时 ${entry.buildDurationMs}ms，${retain ? '已驻留' : '按需（不驻留）'}，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
+      `${presetLabel(params.preset)} 重新构建完成：${mergedViews.length} 单（含线下 ${offlineViews.length}），用时 ${entry.buildDurationMs}ms，${retain ? '已驻留' : '按需 LRU 驻留'}，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
     )
     return entry
   } catch (e) {
@@ -445,10 +472,14 @@ export async function getOrBuildBusinessBoardCache(params: {
   if (!BUSINESS_CACHE_ALWAYS_REBUILD && !params.forceRebuild) {
     const hit = cache.get(key)
     if (hit && !hit.stale) {
-      const versionStale = hit.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT
-      if (!versionStale) {
+      const fingerprintStale = await isBusinessBoardCacheFingerprintStale(hit)
+      if (!fingerprintStale) {
         return hit
       }
+      logInfo(
+        '经营缓存',
+        `${presetLabel(params.preset)} 售后/原始数据指纹变化，重建经营缓存`,
+      )
     }
     const pendingEarly = pendingBuilds.get(key)
     if (pendingEarly) return pendingEarly
@@ -480,10 +511,10 @@ export async function getOrBuildBusinessBoardCache(params: {
   if (retain) {
     const hit = cache.get(key)
     if (hit && !params.forceRebuild && !hit.stale) {
-      if (hit.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT) {
+      if (await isBusinessBoardCacheFingerprintStale(hit)) {
         logInfo(
           '经营缓存',
-          `${presetLabel(params.preset)} 归属算法版本变更（${hit.attributionAlgorithmVersion ?? '—'} → ${BUSINESS_CACHE_FINGERPRINT}），重建经营缓存`,
+          `${presetLabel(params.preset)} 指纹过期（${hit.attributionAlgorithmVersion ?? '—'} → ${BUSINESS_CACHE_FINGERPRINT}），重建经营缓存`,
         )
       } else {
         return hit
@@ -492,7 +523,9 @@ export async function getOrBuildBusinessBoardCache(params: {
   } else {
     const hit = cache.get(key)
     if (hit && !params.forceRebuild && !hit.stale) {
-      return hit
+      if (!(await isBusinessBoardCacheFingerprintStale(hit))) {
+        return hit
+      }
     }
   }
   const pending = pendingBuilds.get(key)

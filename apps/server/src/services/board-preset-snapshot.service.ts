@@ -109,6 +109,7 @@ export function buildSnapshotBoardCacheStub(
     orderCount: snap.orderCount,
     lastBuiltAt: snap.lastBuiltAt,
     workbenchCacheMaxUpdatedAt: null,
+    timeSearchCacheMaxUpdatedAt: null,
     sourceSyncJobId: snap.sourceSyncJobId,
     sourceDataMaxTime: null,
     sourceRawMaxUpdatedAt: null,

@@ -26,6 +26,8 @@
     "accept:buyer-identity": "tsx apps/server/scripts/buyer-identity-acceptance.ts",
     "accept:after-sales-fetch": "tsx apps/server/scripts/after-sales-fetch-decision-acceptance.ts",
     "accept:after-sales-pending": "tsx apps/server/scripts/after-sales-pending-state-acceptance.ts",
+    "verify:after-sales-pending": "tsx apps/server/scripts/after-sales-stale-empty-e2e-acceptance.ts",
+    "verify:four-shop-har-june": "tsx apps/server/scripts/verify-four-shop-har-june.ts",
     "accept:anchor-metrics-fix": "tsx apps/server/scripts/anchor-metrics-fix-acceptance.ts",
     "accept:anchor-trend": "tsx apps/server/scripts/anchor-trend-acceptance.ts",
     "verify:return-refund-classification": "tsx apps/server/scripts/verify-return-refund-classification.ts",

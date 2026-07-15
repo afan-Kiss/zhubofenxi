@@ -19,6 +19,7 @@ import {
   resolveBusinessRefundAmountCent,
   yuanApiAmountToCent,
   FREIGHT_REFUND_CENT,
+  FREIGHT_COMPENSATION_MAX_CENT,
 } from './business-refund-caliber.service'
 
 export const RETURNS_V3_FREIGHT_REASON_CODE = 700004
@@ -70,14 +71,24 @@ export function pickReturnsV3StatusName(rec: Record<string, unknown>): string {
   return ''
 }
 
-/** HAR：reason_name_zh=退运费 / reason=700004 / refund_only_delivery_status 存在 → 纯运费退款 */
+/** HAR：reason_name_zh=退运费 / reason=700004 → 纯运费；delivery_status 需联合金额与原因，不可单独越权 */
 export function isReturnsV3FreightOnlyRefund(rec: Record<string, unknown>): boolean {
   const reasonZh = pickReturnsV3ReasonNameZh(rec)
-  if (reasonZh === '退运费' || reasonZh.includes('退运费')) return true
+  if (reasonZh === '退运费' || reasonZh.includes('退运费') || /运费|邮费/.test(reasonZh)) {
+    return true
+  }
   const code = pickReturnsV3ReasonCode(rec)
   if (code === RETURNS_V3_FREIGHT_REASON_CODE) return true
+
   const deliveryOnly = rec.refund_only_delivery_status ?? rec.refundOnlyDeliveryStatus
-  if (deliveryOnly != null && deliveryOnly !== '' && Number(deliveryOnly) > 0) return true
+  if (deliveryOnly != null && deliveryOnly !== '' && Number(deliveryOnly) > 0) {
+    const feeCent = resolveBusinessRefundAmountCent(rec)
+    // 退款明显大于 20 元且原因不是运费 → 不得仅因 delivery_status 归类为纯运费
+    if (feeCent > FREIGHT_COMPENSATION_MAX_CENT) {
+      return false
+    }
+    return true
+  }
   return false
 }
 

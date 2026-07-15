@@ -38,7 +38,7 @@ function main() {
   assert.match(tab, /label: '已签收单数'/)
   assert.match(tab, /label: '退款单数'/)
   assert.match(tab, /更多指标/)
-  assert.match(tab, /部分售后类型尚未同步/)
+  assert.match(tab, /部分退款单尚未同步售后明细|售后明细尚未完整同步/)
   console.log('✓ 主播榜支持退货退款下钻与退款单数列')
 
   assert.match(tab, /returnRefundCount/)

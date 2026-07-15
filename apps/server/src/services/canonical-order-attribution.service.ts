@@ -45,7 +45,7 @@ import {
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
 
 /** 归属算法版本，写入缓存指纹；变更后自动重建经营缓存 */
-export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v4-manual-schedule-2026-07-14'
+export { CANONICAL_ATTRIBUTION_VERSION } from './business-cache-fingerprint'
 
 export type CanonicalAttributionType =
   | 'offline_manual'
@@ -309,6 +309,47 @@ async function loadEffectiveSchedules(dateKey: string): Promise<EffectiveSchedul
     effectiveScheduleCache.set(dateKey, pending)
   }
   return pending
+}
+
+/** Wave4: 按日期范围预热排班/场次缓存，避免归属循环内逐日冷启动 */
+export async function preloadCanonicalAttributionForDateRange(
+  startDate: string,
+  endDate: string,
+): Promise<{ dayCount: number; preloadDurationMs: number }> {
+  const { eachDayInShanghaiRange } = await import('../utils/each-day-shanghai')
+  const t0 = Date.now()
+  const days = eachDayInShanghaiRange(startDate, endDate)
+  const concurrency = Math.max(4, Math.min(16, Number(process.env.ATTRIBUTION_PRELOAD_CONCURRENCY || 12)))
+  let cursor = 0
+  async function worker(): Promise<void> {
+    while (cursor < days.length) {
+      const idx = cursor++
+      const day = days[idx]!
+      await Promise.all([loadEffectiveSchedules(day), loadAssignment(day)])
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, Math.max(1, days.length)) }, () => worker()),
+  )
+  return { dayCount: days.length, preloadDurationMs: Date.now() - t0 }
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length)
+  let next = 0
+  async function worker(): Promise<void> {
+    while (next < items.length) {
+      const i = next++
+      out[i] = await fn(items[i]!, i)
+    }
+  }
+  const n = Math.max(1, Math.min(concurrency, items.length || 1))
+  await Promise.all(Array.from({ length: n }, () => worker()))
+  return out
 }
 
 async function resolveByLiveSession(
@@ -803,9 +844,10 @@ export function canonicalAttributionLabel(type: CanonicalAttributionType): strin
   }
 }
 
-/** 批量 remap：所有榜单/明细/品退共用 */
+/** 批量 remap：所有榜单/明细/品退共用。Wave4：可选范围预热 + 有限并发，禁止逐单串行冷加载。 */
 export async function remapViewsWithCanonicalAttribution(
   views: (AnalyzedOrderView & { raw?: Record<string, unknown> })[],
+  options?: { startDate?: string; endDate?: string; concurrency?: number; preload?: boolean },
 ): Promise<
   (AnalyzedOrderView & {
     scheduleAttributionExplain?: string
@@ -818,10 +860,20 @@ export async function remapViewsWithCanonicalAttribution(
 > {
   const { ensureManualAnchorOverrideCache } = await import('./order-anchor-manual-override.service')
   await ensureManualAnchorOverrideCache()
-  const out = []
-  for (const view of views) {
+  if (
+    options?.preload !== false &&
+    options?.startDate &&
+    options?.endDate
+  ) {
+    await preloadCanonicalAttributionForDateRange(options.startDate, options.endDate)
+  }
+  const concurrency = Math.max(
+    1,
+    Math.min(32, options?.concurrency ?? Number(process.env.ATTRIBUTION_REMAP_CONCURRENCY || 16)),
+  )
+  return mapWithConcurrency(views, concurrency, async (view) => {
     const resolved = await resolveCanonicalOrderAttribution(view)
-    out.push({
+    return {
       ...view,
       anchorId: resolved.canonicalAnchorId,
       anchorName: resolved.canonicalAnchorName,
@@ -833,11 +885,28 @@ export async function remapViewsWithCanonicalAttribution(
       canonicalAttributionType: resolved.attributionType,
       matchedLiveSessionId: resolved.matchedLiveSessionId,
       matchedScheduleId: resolved.matchedScheduleId,
-      // 品退主播 = 订单唯一归属主播（禁止另算）
       qualityAttributionAnchorName: resolved.canonicalAnchorName,
-    })
-  }
-  return out
+    }
+  })
+}
+
+/** 验收用：严格串行 remap（与 Wave3 行为一致），供 batch 等价比对 */
+export async function remapViewsWithCanonicalAttributionSequential(
+  views: (AnalyzedOrderView & { raw?: Record<string, unknown> })[],
+): Promise<
+  (AnalyzedOrderView & {
+    scheduleAttributionExplain?: string
+    scheduleAttributionSource?: string
+    scheduleConfirmed?: boolean
+    canonicalAttributionType?: CanonicalAttributionType
+    matchedLiveSessionId?: string | null
+    matchedScheduleId?: string | null
+  })[]
+> {
+  return remapViewsWithCanonicalAttribution(views, {
+    preload: false,
+    concurrency: 1,
+  })
 }
 
 /** 兼容旧 isPayTimeInSchedule 调用点的半开区间探测 */

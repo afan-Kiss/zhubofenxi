@@ -302,17 +302,28 @@ async function buildDailySessionInfoByDate(params: {
   anchorId: string
   startDate: string
   endDate: string
+  sessionIndex?: import('./range-live-session-index.service').RangeLiveSessionIndex | null
 }): Promise<Map<string, { scheduleRange: string | null; actualRange: string | null }>> {
   const days = eachDayInShanghaiRange(params.startDate, params.endDate)
   const result = new Map<string, { scheduleRange: string | null; actualRange: string | null }>()
 
-  const sessions = await resolveAnchorLiveSessionsForRange({
-    preset: 'custom',
-    startDate: params.startDate,
-    endDate: params.endDate,
-    anchorId: params.anchorId,
-    anchorName: params.anchorName,
-  })
+  let sessions: AnchorLiveSessionBrief[]
+  if (params.sessionIndex) {
+    const { sessionsForAnchorFromIndex } = await import('./range-live-session-index.service')
+    sessions = sessionsForAnchorFromIndex(
+      params.sessionIndex,
+      params.anchorName,
+      params.anchorId,
+    )
+  } else {
+    sessions = await resolveAnchorLiveSessionsForRange({
+      preset: 'custom',
+      startDate: params.startDate,
+      endDate: params.endDate,
+      anchorId: params.anchorId,
+      anchorName: params.anchorName,
+    })
+  }
 
   const sessionsByDay = new Map<string, AnchorLiveSessionBrief[]>()
   for (const session of sessions) {
@@ -324,19 +335,13 @@ async function buildDailySessionInfoByDate(params: {
     sessionsByDay.set(dayKey, list)
   }
 
-  const scheduleTables = await Promise.all(
-    days.map(async (day) => ({
-      day,
-      table: await getEffectiveScheduleTableForDate(day),
-    })),
-  )
-
-  for (const { day, table } of scheduleTables) {
+  for (const day of days) {
+    const table =
+      params.sessionIndex?.scheduleByDate.get(day) ?? (await getEffectiveScheduleTableForDate(day))
     const daySessions = sessionsByDay.get(day) ?? []
     const scheduleRange = resolveSchedulePeriodText(table.rows, params.anchorName)
     let actualRange: string | null = null
     if (daySessions.length > 0) {
-      // 多场直播：各场时段用分号拼接；若需合并为最早~最晚可改此处
       const text = buildActualLivePeriodText(daySessions)
       actualRange =
         text && text !== '—'
@@ -391,6 +396,7 @@ export async function enrichAnchorLeaderboardWithTrend(
   rows: Array<Record<string, unknown>>,
   performanceViews: AnalyzedOrderView[],
   params: { preset?: string; startDate: string; endDate: string },
+  sessionIndex?: import('./range-live-session-index.service').RangeLiveSessionIndex | null,
 ): Promise<Array<Record<string, unknown>>> {
   const mode = resolveAnchorTrendMode(params)
 
@@ -411,6 +417,16 @@ export async function enrichAnchorLeaderboardWithTrend(
       return { ...row, trend }
     })
   }
+
+  // Wave4: 未传入索引时按范围加载一次，禁止每个主播重复查场次
+  const index =
+    sessionIndex ??
+    (await import('./range-live-session-index.service').then((m) =>
+      m.loadRangeLiveSessionIndex({
+        startDate: params.startDate,
+        endDate: params.endDate,
+      }),
+    ))
 
   const enriched = await Promise.all(
     rows.map(async (row) => {
@@ -434,6 +450,7 @@ export async function enrichAnchorLeaderboardWithTrend(
         anchorId,
         startDate: params.startDate,
         endDate: params.endDate,
+        sessionIndex: index,
       })
       const trend = buildDailyTrendFromViews(
         anchorViews,

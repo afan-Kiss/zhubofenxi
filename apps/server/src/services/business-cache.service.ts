@@ -6,14 +6,9 @@ import { resolveBusinessRange, type BusinessRangePreset } from '../utils/busines
 import type { DateRangePreset, DateRangeResolved } from '../utils/date-range'
 import {
   aggregateAnchorLeaderboard,
-  loadBoardArtifactsForRange,
   normalizeBoardPreset,
 } from './board-metrics.service'
 import { buildBlacklistedBuyerIds, calculateBusinessMetrics } from './business-metrics.service'
-import { buildAnchorPerformanceViewsFromScopedViews } from './anchor-performance-views.service'
-import { attachRawByMatchToViews } from './low-price-brush-order.service'
-import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
-import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { prisma } from '../lib/prisma'
 import { getLatestWorkbenchCacheUpdatedAt, getLatestTimeSearchCacheUpdatedAt } from './xhs-after-sales-workbench.service'
 import { logInfo, logWarn, presetLabel } from '../utils/server-log'
@@ -22,8 +17,11 @@ import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-at
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
-import { CANONICAL_ATTRIBUTION_VERSION } from './canonical-order-attribution.service'
-import { loadOfflineDealViewsForRange, splitGmvByDealSource } from './offline-deal.service'
+import { splitGmvByDealSource } from './offline-deal.service'
+import {
+  BUSINESS_CACHE_FINGERPRINT as FINGERPRINT_CONST,
+  CANONICAL_ATTRIBUTION_VERSION,
+} from './business-cache-fingerprint'
 import {
   ANCHOR_MASTER_DATA_VERSION,
   OFFLINE_GMV_METRICS_VERSION,
@@ -43,12 +41,11 @@ import {
 } from './board-cache-build-queue.service'
 
 /** 经营缓存指纹：归属算法 + 线下 GMV 口径 + 主播主数据 + 售后缓存语义版本 */
-export const BUSINESS_CACHE_FINGERPRINT = [
-  CANONICAL_ATTRIBUTION_VERSION,
-  OFFLINE_GMV_METRICS_VERSION,
-  ANCHOR_MASTER_DATA_VERSION,
-  AFTER_SALES_METRICS_VERSION,
-].join('+')
+export const BUSINESS_CACHE_FINGERPRINT = FINGERPRINT_CONST
+void CANONICAL_ATTRIBUTION_VERSION
+void ANCHOR_MASTER_DATA_VERSION
+void OFFLINE_GMV_METRICS_VERSION
+void AFTER_SALES_METRICS_VERSION
 
 void import('./board-preset-snapshot.service').then((m) => {
   m.setBoardSnapshotFingerprintResolver(() => BUSINESS_CACHE_FINGERPRINT)
@@ -370,22 +367,25 @@ export async function buildAndSetBusinessBoardCache(params: {
   const previous = cache.get(key)
 
   try {
-    const { views, rawByMatch, artifacts, liveSessions } = await loadBoardArtifactsForRange(
-      datePreset,
-      range.startDate,
-      range.endDate,
-    )
-    const offlineViews = await loadOfflineDealViewsForRange(range.startDate, range.endDate)
-    const mergedViews = [...views, ...offlineViews]
-
-    const coreViews = filterViewsForCoreMetrics(mergedViews)
-    const remappedCoreViews = await remapViewsWithScheduleOverlay(
-      attachRawByMatchToViews(coreViews, rawByMatch),
-    )
-    const performanceViews = await buildAnchorPerformanceViewsFromScopedViews(
+    const { loadRangeFactBundle } = await import('./board-range-fact-bundle.service')
+    const bundle = await loadRangeFactBundle({
+      preset: datePreset,
+      startDate: range.startDate,
+      endDate: range.endDate,
+    })
+    const {
       mergedViews,
+      offlineViews,
+      coreMetricViewsUnmapped: coreViews,
+      remappedViews: remappedCoreViews,
+      anchorPerformanceViews: performanceViews,
+      qualityRefundViews,
       rawByMatch,
-    )
+      artifacts,
+      liveSessions,
+    } = bundle
+    // qualityRefundViews 与 remapped core 同池
+    void remappedCoreViews
 
     const summary = buildSummaryFromViews(coreViews)
     const abnormalOrderCount = artifacts?.abnormalOrderCount ?? 0
@@ -396,7 +396,7 @@ export async function buildAndSetBusinessBoardCache(params: {
 
     const anchorLeaderboard = aggregateAnchorLeaderboard(performanceViews, undefined, {
       liveSessions,
-      qualityRefundViews: remappedCoreViews,
+      qualityRefundViews,
     })
     const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
       anchorLeaderboard as import('./board-metrics.service').BoardAnchorMetrics[],
@@ -410,10 +410,16 @@ export async function buildAndSetBusinessBoardCache(params: {
         preset: params.preset,
       },
     )
+    const { loadRangeLiveSessionIndex } = await import('./range-live-session-index.service')
+    const sessionIndex = await loadRangeLiveSessionIndex({
+      startDate: range.startDate,
+      endDate: range.endDate,
+    })
     const enrichedAnchorLeaderboard = await enrichAnchorLeaderboardWithTrend(
       anchorLeaderboardWithLate,
       performanceViews,
       { preset: params.preset, startDate: range.startDate, endDate: range.endDate },
+      sessionIndex,
     )
     const anchorPerformanceSummary = buildSummaryFromViews(performanceViews)
     if (

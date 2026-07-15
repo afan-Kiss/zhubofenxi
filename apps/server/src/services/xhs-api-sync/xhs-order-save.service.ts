@@ -15,6 +15,10 @@ import {
   SAFE_MAX_PAGES,
   shouldStopPagination,
 } from './xhs-page-pagination.util'
+import {
+  extractNormalizedOrderColumnsFromRaw,
+  toPrismaNormalizedOrderColumns,
+} from '../normalized-order-columns.service'
 
 const DEFAULT_MAX_PAGES = SAFE_MAX_PAGES
 
@@ -72,6 +76,14 @@ async function saveOrderPackage(
   const orderTime = parseOrderTime(item)
   const buyerId = extractBuyerId(item)
   const rawJson = item as Prisma.InputJsonValue
+  const structured = toPrismaNormalizedOrderColumns(
+    extractNormalizedOrderColumnsFromRaw(item, {
+      dbPackageId: packageId,
+      dbOrderId: orderId,
+      liveAccountId,
+      liveAccountName,
+    }),
+  )
 
   if (packageId) {
     const existing = await prisma.xhsRawOrder.findUnique({
@@ -99,6 +111,7 @@ async function saveOrderPackage(
         buyerId,
         rawJson,
         syncJobId: syncJobId ?? null,
+        ...structured,
       },
       update: {
         orderId,
@@ -107,6 +120,7 @@ async function saveOrderPackage(
         buyerId,
         rawJson,
         syncJobId: syncJobId ?? null,
+        ...structured,
       },
     })
     const displayNo = (packageId || orderId || '').trim()
@@ -129,6 +143,7 @@ async function saveOrderPackage(
         buyerId,
         rawJson,
         syncJobId: syncJobId ?? null,
+        ...structured,
       },
     })
   } else {
@@ -141,6 +156,7 @@ async function saveOrderPackage(
         buyerId,
         rawJson,
         syncJobId: syncJobId ?? null,
+        ...structured,
       },
     })
   }

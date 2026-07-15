@@ -512,11 +512,37 @@ export function buildOrderTimeDbWhere(range: DateRangeResolved) {
   }
 }
 
+/**
+ * Wave4 P2：优先按结构化 paymentTime 精确预筛；未回填 / 无支付时间的行仍走 orderTime±30d 兼容路径。
+ * 最终仍经 normalize + orderPayTimeInRange，不改变口径。
+ */
+export function buildOrderRangeDbWhere(range: DateRangeResolved) {
+  const legacy = buildOrderTimeDbWhere(range)
+  return {
+    OR: [
+      {
+        paymentTime: {
+          gte: new Date(range.startTimeMs),
+          lte: new Date(range.endTimeMs),
+        },
+      },
+      {
+        AND: [
+          {
+            OR: [{ paymentTime: null }, { normalizedVersion: null }],
+          },
+          legacy,
+        ],
+      },
+    ],
+  }
+}
+
 export async function loadNormalizedOrdersFromRaw(options?: {
   range?: DateRangeResolved
 }): Promise<NormalizedOrder[]> {
   const rows = await prisma.xhsRawOrder.findMany({
-    where: options?.range ? buildOrderTimeDbWhere(options.range) : undefined,
+    where: options?.range ? buildOrderRangeDbWhere(options.range) : undefined,
     orderBy: { updatedAt: 'desc' },
   })
   const normalized = rows.map((row, index) =>
@@ -529,6 +555,33 @@ export async function loadNormalizedOrdersFromRaw(options?: {
   )
   if (!options?.range) return normalized
   return normalized.filter((o) => orderPayTimeInRange(o, options.range!))
+}
+
+/** 结算范围 DB 缓冲：已结算用 settleTime；待结算可选 orderTime 宽窗 */
+export const RAW_SETTLEMENT_RANGE_DB_BUFFER_MS = 2 * 24 * 60 * 60 * 1000
+export const RAW_PENDING_SETTLEMENT_RANGE_DB_BUFFER_MS = 90 * 24 * 60 * 60 * 1000
+
+export function buildSettledSettlementDbWhere(range: DateRangeResolved) {
+  const start = new Date(range.startTimeMs - RAW_SETTLEMENT_RANGE_DB_BUFFER_MS)
+  const end = new Date(range.endTimeMs + RAW_SETTLEMENT_RANGE_DB_BUFFER_MS)
+  return {
+    OR: [
+      { settleTime: { gte: start, lte: end } },
+      { settleTime: null, orderTime: { gte: start, lte: end } },
+      { settleTime: null, orderTime: null },
+    ],
+  }
+}
+
+export function buildPendingSettlementDbWhere(range: DateRangeResolved) {
+  const start = new Date(range.startTimeMs - RAW_PENDING_SETTLEMENT_RANGE_DB_BUFFER_MS)
+  const end = new Date(range.endTimeMs + RAW_PENDING_SETTLEMENT_RANGE_DB_BUFFER_MS)
+  return {
+    OR: [
+      { orderTime: { gte: start, lte: end } },
+      { orderTime: null },
+    ],
+  }
 }
 
 /** @deprecated 旧流水线兼容：阶段八后由独立看板接口提供数据 */
@@ -851,15 +904,25 @@ export function normalizeSettlementItem(
   }
 }
 
-export async function normalizePendingSettlementsFromRaw(): Promise<SettlementRecord[]> {
-  const rows = await prisma.xhsRawPendingSettlement.findMany({ orderBy: { updatedAt: 'desc' } })
+export async function normalizePendingSettlementsFromRaw(options?: {
+  range?: DateRangeResolved
+}): Promise<SettlementRecord[]> {
+  const rows = await prisma.xhsRawPendingSettlement.findMany({
+    where: options?.range ? buildPendingSettlementDbWhere(options.range) : undefined,
+    orderBy: { updatedAt: 'desc' },
+  })
   return rows.map((row, i) =>
     normalizeSettlementItem(asRecord(row.rawJson), 'pending', i + 1),
   )
 }
 
-export async function normalizeSettledSettlementsFromRaw(): Promise<SettlementRecord[]> {
-  const rows = await prisma.xhsRawSettledSettlement.findMany({ orderBy: { updatedAt: 'desc' } })
+export async function normalizeSettledSettlementsFromRaw(options?: {
+  range?: DateRangeResolved
+}): Promise<SettlementRecord[]> {
+  const rows = await prisma.xhsRawSettledSettlement.findMany({
+    where: options?.range ? buildSettledSettlementDbWhere(options.range) : undefined,
+    orderBy: { updatedAt: 'desc' },
+  })
   return rows.map((row, i) =>
     normalizeSettlementItem(asRecord(row.rawJson), 'settled', i + 1),
   )

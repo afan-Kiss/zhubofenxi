@@ -277,6 +277,23 @@ model XhsRawOrder {
   buyerId         String?
   rawJson         Json
   syncJobId       String?
+  /// Wave4：结构化读模型（与 normalizeXhsOrderPackage 同源；rawJson 仍为权威原稿）
+  paymentTime           DateTime?
+  orderedAt             DateTime?
+  displayOrderNo        String?
+  gmvCent               Int?
+  productAmountCent     Int?
+  actualPaidCent        Int?
+  sellerReceiveCent     Int?
+  freightCent           Int?
+  platformDiscountCent  Int?
+  orderStatusText       String?
+  afterSaleStatusText   String?
+  isSigned              Boolean?
+  isReturned            Boolean?
+  isQualityReturn       Boolean?
+  normalizedVersion     String?
+  businessFingerprint   String?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
@@ -285,6 +302,12 @@ model XhsRawOrder {
   @@index([liveAccountId, orderId])
   @@index([orderTime])
   @@index([buyerId])
+  @@index([paymentTime])
+  @@index([orderedAt])
+  @@index([liveAccountId, paymentTime])
+  @@index([liveAccountId, displayOrderNo])
+  @@index([paymentTime, isReturned])
+  @@index([normalizedVersion])
 }
 
 model XhsRawOrderDetail {

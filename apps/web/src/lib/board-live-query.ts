@@ -223,7 +223,15 @@ export interface BoardResolvedRange {
   endDate: string
 }
 
-async function fetchBoardRangeData(
+export type BoardFetchResult = {
+  data: BoardLiveQueryData
+  etag?: string
+  dataGeneration?: string
+  notModified?: boolean
+  cacheStatus?: string
+}
+
+async function fetchBoardRangeDataResult(
   path: 'overview-data' | 'anchors-data' | 'local-data',
   params: {
     preset: BoardRangePreset
@@ -231,8 +239,9 @@ async function fetchBoardRangeData(
     endDate?: string
     includeAnchorLeaderboard?: boolean
     signal?: AbortSignal
+    etag?: string
   },
-): Promise<BoardLiveQueryData> {
+): Promise<BoardFetchResult> {
   if (params.signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError')
   }
@@ -247,9 +256,51 @@ async function fetchBoardRangeData(
   if (path === 'local-data' && params.includeAnchorLeaderboard === false) {
     qs.set('includeAnchorLeaderboard', '0')
   }
-  return apiRequest<BoardLiveQueryData>(`/api/board/${path}?${qs}`, {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (params.etag) headers['If-None-Match'] = params.etag
+
+  const res = await fetch(`/api/board/${path}?${qs}`, {
+    credentials: 'include',
     signal: params.signal,
+    headers,
   })
+  const etag = res.headers.get('etag') || undefined
+  const dataGeneration = res.headers.get('x-data-generation') || undefined
+  const cacheStatus = res.headers.get('x-board-cache') || undefined
+  if (res.status === 304) {
+    return { data: null as unknown as BoardLiveQueryData, etag, dataGeneration, notModified: true, cacheStatus }
+  }
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  const body = (await res.json()) as { ok?: boolean; data?: BoardLiveQueryData; message?: string }
+  if (!body.ok || !body.data) {
+    throw new Error(body.message || '看板数据返回异常')
+  }
+  return {
+    data: body.data,
+    etag,
+    dataGeneration,
+    cacheStatus,
+  }
+}
+
+async function fetchBoardRangeData(
+  path: 'overview-data' | 'anchors-data' | 'local-data',
+  params: {
+    preset: BoardRangePreset
+    startDate?: string
+    endDate?: string
+    includeAnchorLeaderboard?: boolean
+    signal?: AbortSignal
+  },
+): Promise<BoardLiveQueryData> {
+  const result = await fetchBoardRangeDataResult(path, params)
+  if (result.notModified) {
+    throw new Error('收到 304 但调用方未提供缓存')
+  }
+  return result.data
 }
 
 export async function fetchBoardOverview(params: {
@@ -261,6 +312,16 @@ export async function fetchBoardOverview(params: {
   return fetchBoardRangeData('overview-data', params)
 }
 
+export async function fetchBoardOverviewResult(params: {
+  preset: BoardRangePreset
+  startDate?: string
+  endDate?: string
+  signal?: AbortSignal
+  etag?: string
+}): Promise<BoardFetchResult> {
+  return fetchBoardRangeDataResult('overview-data', params)
+}
+
 export async function fetchBoardAnchorsData(params: {
   preset: BoardRangePreset
   startDate?: string
@@ -268,6 +329,16 @@ export async function fetchBoardAnchorsData(params: {
   signal?: AbortSignal
 }): Promise<BoardLiveQueryData> {
   return fetchBoardRangeData('anchors-data', params)
+}
+
+export async function fetchBoardAnchorsDataResult(params: {
+  preset: BoardRangePreset
+  startDate?: string
+  endDate?: string
+  signal?: AbortSignal
+  etag?: string
+}): Promise<BoardFetchResult> {
+  return fetchBoardRangeDataResult('anchors-data', params)
 }
 
 export async function fetchBoardLocalData(params: {

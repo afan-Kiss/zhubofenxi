@@ -7,6 +7,9 @@ export const LIVE_QUERY_REALTIME_CACHE_TTL_MS = 90 * 1000
 const STORAGE_KEY = 'board-live-query-cache-v1'
 const STORAGE_PREFIX = 'board-live-query:v2:'
 const INDEX_KEY = 'board-live-query:v2:__index__'
+const IDB_NAME = 'zhubo-board-cache'
+const IDB_STORE = 'live-query'
+const IDB_VERSION = 1
 const MAX_ENTRIES = 24
 
 /** 排班变更后广播，经营看板 / 主播业绩应重新拉取 */
@@ -26,6 +29,9 @@ export interface LiveQueryCacheEntry {
   dataGeneration?: string
 }
 
+const memory = new Map<string, LiveQueryCacheEntry>()
+let idbReady: Promise<IDBDatabase | null> | null = null
+
 export function buildLiveQueryCacheKey(params: {
   pageScope: LiveQueryPageScope
   preset: BoardRangePreset
@@ -39,6 +45,106 @@ export function buildLiveQueryCacheKey(params: {
 
 function entryStorageKey(key: string): string {
   return `${STORAGE_PREFIX}${key}`
+}
+
+function slimBoardData(data: BoardLiveQueryData): BoardLiveQueryData {
+  return {
+    ...data,
+    orders: [],
+    allOrders: [],
+    debug: {
+      orderNos: [],
+      includedOrderNos: [],
+      excludedOrderNos: [],
+      gmvField: data.debug?.gmvField ?? '',
+      formulaVersion: data.debug?.formulaVersion ?? '',
+    },
+  }
+}
+
+function openIdb(): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === 'undefined') return Promise.resolve(null)
+  if (!idbReady) {
+    idbReady = new Promise((resolve) => {
+      try {
+        const req = indexedDB.open(IDB_NAME, IDB_VERSION)
+        req.onupgradeneeded = () => {
+          const db = req.result
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            db.createObjectStore(IDB_STORE, { keyPath: 'key' })
+          }
+        }
+        req.onsuccess = () => resolve(req.result)
+        req.onerror = () => resolve(null)
+      } catch {
+        resolve(null)
+      }
+    })
+  }
+  return idbReady
+}
+
+async function idbGet(key: string): Promise<LiveQueryCacheEntry | null> {
+  const db = await openIdb()
+  if (!db) return null
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readonly')
+      const req = tx.objectStore(IDB_STORE).get(key)
+      req.onsuccess = () => {
+        const v = req.result as LiveQueryCacheEntry | undefined
+        resolve(v?.data ? v : null)
+      }
+      req.onerror = () => resolve(null)
+    } catch {
+      resolve(null)
+    }
+  })
+}
+
+async function idbPut(entry: LiveQueryCacheEntry): Promise<void> {
+  const db = await openIdb()
+  if (!db) return
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite')
+      tx.objectStore(IDB_STORE).put(entry)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()
+    } catch {
+      resolve()
+    }
+  })
+}
+
+async function idbDelete(key: string): Promise<void> {
+  const db = await openIdb()
+  if (!db) return
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite')
+      tx.objectStore(IDB_STORE).delete(key)
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()
+    } catch {
+      resolve()
+    }
+  })
+}
+
+async function idbClear(): Promise<void> {
+  const db = await openIdb()
+  if (!db) return
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(IDB_STORE, 'readwrite')
+      tx.objectStore(IDB_STORE).clear()
+      tx.oncomplete = () => resolve()
+      tx.onerror = () => resolve()
+    } catch {
+      resolve()
+    }
+  })
 }
 
 function readIndex(): string[] {
@@ -73,23 +179,10 @@ function migrateLegacyIfNeeded(): void {
     const keys: string[] = []
     for (const [k, entry] of Object.entries(parsed)) {
       if (!entry?.data) continue
-      // 禁止把订单明细塞进长期缓存
-      const slim = {
-        ...entry,
-        data: {
-          ...entry.data,
-          orders: [],
-          allOrders: [],
-          debug: {
-            orderNos: [],
-            includedOrderNos: [],
-            excludedOrderNos: [],
-            gmvField: entry.data.debug?.gmvField ?? '',
-            formulaVersion: entry.data.debug?.formulaVersion ?? '',
-          },
-        },
-      }
+      const slim = { ...entry, data: slimBoardData(entry.data) }
       localStorage.setItem(entryStorageKey(k), JSON.stringify(slim))
+      memory.set(k, slim)
+      void idbPut(slim)
       keys.push(k)
     }
     writeIndex(keys)
@@ -109,11 +202,13 @@ function touchLru(key: string): void {
   while (keys.length > MAX_ENTRIES) {
     const oldest = keys.shift()
     if (!oldest) break
+    memory.delete(oldest)
     try {
       localStorage.removeItem(entryStorageKey(oldest))
     } catch {
       /* ignore */
     }
+    void idbDelete(oldest)
   }
   writeIndex(keys)
 }
@@ -122,6 +217,7 @@ export function clearBoardLiveQueryCache(): void {
   try {
     const keys = readIndex()
     for (const k of keys) {
+      memory.delete(k)
       localStorage.removeItem(entryStorageKey(k))
     }
     localStorage.removeItem(INDEX_KEY)
@@ -129,9 +225,10 @@ export function clearBoardLiveQueryCache(): void {
   } catch {
     /* ignore */
   }
+  void idbClear()
 }
 
-/** 清 localStorage 并通知各页面重新拉取 */
+/** 清缓存并通知各页面重新拉取 */
 export function invalidateBoardLiveQueryCache(reason?: string): void {
   clearBoardLiveQueryCache()
   if (typeof window !== 'undefined') {
@@ -151,15 +248,35 @@ export function invalidateBuyerProfileCache(reason?: string): void {
 
 export function readLiveQueryCache(key: string): LiveQueryCacheEntry | null {
   migrateLegacyIfNeeded()
+  const mem = memory.get(key)
+  if (mem?.data) return mem
   try {
     const raw = localStorage.getItem(entryStorageKey(key))
     if (!raw) return null
     const parsed = JSON.parse(raw) as LiveQueryCacheEntry
     if (!parsed?.data) return null
+    memory.set(key, parsed)
     return parsed
   } catch {
     return null
   }
+}
+
+export async function readLiveQueryCacheAsync(key: string): Promise<LiveQueryCacheEntry | null> {
+  const sync = readLiveQueryCache(key)
+  if (sync) return sync
+  const fromIdb = await idbGet(key)
+  if (fromIdb?.data) {
+    memory.set(key, fromIdb)
+    try {
+      localStorage.setItem(entryStorageKey(key), JSON.stringify(fromIdb))
+      touchLru(key)
+    } catch {
+      /* ignore */
+    }
+    return fromIdb
+  }
+  return null
 }
 
 export function writeLiveQueryCache(
@@ -168,35 +285,28 @@ export function writeLiveQueryCache(
   meta?: { etag?: string; dataGeneration?: string },
 ): LiveQueryCacheEntry {
   migrateLegacyIfNeeded()
-  const slimData: BoardLiveQueryData = {
-    ...data,
-    orders: [],
-    allOrders: [],
-    debug: {
-      orderNos: [],
-      includedOrderNos: [],
-      excludedOrderNos: [],
-      gmvField: data.debug?.gmvField ?? '',
-      formulaVersion: data.debug?.formulaVersion ?? '',
-    },
-  }
   const entry: LiveQueryCacheEntry = {
     key,
-    data: slimData,
+    data: slimBoardData(data),
     lastUpdatedAt: data.fetchedAt || new Date().toISOString(),
     savedAt: Date.now(),
     etag: meta?.etag,
     dataGeneration: meta?.dataGeneration,
   }
+  memory.set(key, entry)
+  void idbPut(entry)
   try {
     localStorage.setItem(entryStorageKey(key), JSON.stringify(entry))
     touchLru(key)
   } catch {
-    /* quota：清最旧再试一次 */
     try {
       const keys = readIndex()
       const oldest = keys.shift()
-      if (oldest) localStorage.removeItem(entryStorageKey(oldest))
+      if (oldest) {
+        memory.delete(oldest)
+        localStorage.removeItem(entryStorageKey(oldest))
+        void idbDelete(oldest)
+      }
       writeIndex(keys)
       localStorage.setItem(entryStorageKey(key), JSON.stringify(entry))
       touchLru(key)
@@ -212,6 +322,8 @@ export function touchLiveQueryCacheTimestamp(key: string): void {
   const hit = readLiveQueryCache(key)
   if (!hit) return
   hit.savedAt = Date.now()
+  memory.set(key, hit)
+  void idbPut(hit)
   try {
     localStorage.setItem(entryStorageKey(key), JSON.stringify(hit))
     touchLru(key)
@@ -242,3 +354,16 @@ export function formatDataUpdatedAt(iso: string | null): string {
     return iso
   }
 }
+
+/** 标准预置键：用于启动/切换后后台预取 */
+export const BOARD_STANDARD_PREFETCH_TARGETS: Array<{
+  pageScope: LiveQueryPageScope
+  preset: BoardRangePreset
+}> = [
+  { pageScope: 'overview', preset: 'today' },
+  { pageScope: 'overview', preset: 'thisMonth' },
+  { pageScope: 'overview', preset: 'lastMonth' },
+  { pageScope: 'anchors', preset: 'today' },
+  { pageScope: 'anchors', preset: 'thisMonth' },
+  { pageScope: 'anchors', preset: 'lastMonth' },
+]

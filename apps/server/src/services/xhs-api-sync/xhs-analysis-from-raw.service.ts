@@ -106,8 +106,8 @@ export async function buildRawAnalyzeBundle(
     .map((s, i) => toLiveSession(s, i))
     .filter((s): s is LiveSession => s != null)
 
-  const pendingAll = await normalizePendingSettlementsFromRaw()
-  const settledAll = await normalizeSettledSettlementsFromRaw()
+  const pendingAll = await normalizePendingSettlementsFromRaw({ range })
+  const settledAll = await normalizeSettledSettlementsFromRaw({ range })
 
   const pendingRecords = pendingAll.filter((r) => r.errors.length === 0)
   const settledRecords = settledAll.filter(

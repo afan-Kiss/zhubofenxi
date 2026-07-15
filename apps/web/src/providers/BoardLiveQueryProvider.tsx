@@ -17,13 +17,16 @@ import {
   invalidateBuyerProfileCache,
   isLiveQueryCacheFresh,
   readLiveQueryCache,
+  readLiveQueryCacheAsync,
+  touchLiveQueryCacheTimestamp,
   writeLiveQueryCache,
   type LiveQueryPageScope,
 } from '../lib/board-live-query-cache'
+import { scheduleBoardStandardPrefetch } from '../lib/board-prefetch'
 import { resolveAppPageScope } from '../lib/app-page-scope'
 import {
-  fetchBoardAnchorsData,
-  fetchBoardOverview,
+  fetchBoardAnchorsDataResult,
+  fetchBoardOverviewResult,
   fetchBoardSyncMeta,
   type BoardActiveSyncJob,
   type BoardLiveQueryData,
@@ -187,7 +190,8 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       startDate,
       endDate,
     })
-    const cachedEntry = readLiveQueryCache(liveCacheKey)
+    const cachedEntry =
+      (await readLiveQueryCacheAsync(liveCacheKey)) ?? readLiveQueryCache(liveCacheKey)
     const cachedRangeKey =
       cachedEntry?.data?.rangeKey ??
       (cachedEntry?.data
@@ -237,14 +241,31 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
 
     try {
       const fetchBoard =
-        pageScope === 'anchors' ? fetchBoardAnchorsData : fetchBoardOverview
-      const result = await fetchBoard({
+        pageScope === 'anchors' ? fetchBoardAnchorsDataResult : fetchBoardOverviewResult
+      const fetchResult = await fetchBoard({
         preset,
         startDate,
         endDate,
         signal: controller.signal,
+        etag: cachedEntry?.etag,
       })
       if (controller.signal.aborted || seq !== requestSeqRef.current) return
+
+      if (fetchResult.notModified && cachedEntry?.data) {
+        touchLiveQueryCacheTimestamp(liveCacheKey)
+        setIsRefreshing(false)
+        setStatus('ready')
+        scheduleBoardStandardPrefetch({ preferScope: pageScope })
+        return
+      }
+
+      const result = fetchResult.data
+      if (!result) {
+        setError('看板数据为空')
+        setStatus('failed')
+        setIsRefreshing(false)
+        return
+      }
 
       const resultRangeKey =
         result.rangeKey ??
@@ -275,12 +296,16 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       if (result.syncMeta) {
         setSyncMeta(result.syncMeta)
       }
-      writeLiveQueryCache(liveCacheKey, { ...result, rangeKey: resultRangeKey })
+      writeLiveQueryCache(liveCacheKey, { ...result, rangeKey: resultRangeKey }, {
+        etag: fetchResult.etag,
+        dataGeneration: fetchResult.dataGeneration,
+      })
       setLastSyncedAt(
         result.overviewMeta?.lastQianfanSyncAt ??
           result.syncMeta?.businessSync.lastSuccessAt ??
           result.fetchedAt,
       )
+      scheduleBoardStandardPrefetch({ preferScope: pageScope })
 
       const applyStaleMessage = (
         meta: BoardSyncMeta | null,

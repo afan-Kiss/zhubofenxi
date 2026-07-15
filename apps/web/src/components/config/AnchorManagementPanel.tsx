@@ -335,7 +335,7 @@ export const AnchorManagementPanel: React.FC = () => {
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <h3 className="text-sm font-semibold text-slate-900">主播管理</h3>
       <p className="mt-1 text-xs text-slate-500">
-        配置主播名称、ID、默认直播间与归属时间段。「仅手动归属」主播只通过订单明细手动指定计入业绩，不参与直播场次、排班与时段自动匹配。
+        配置主播档案（名称、颜色、上岗日、归属模式）。日常默认班次与直播间请到下方「默认排班」修改。「仅手动归属」主播不参与场次/排班自动匹配。
       </p>
 
       {message && (
@@ -612,7 +612,10 @@ export const AnchorManagementPanel: React.FC = () => {
                   </p>
                 ) : (
                   <div className="mt-2 space-y-1">
-                    <p className="text-xs font-medium text-slate-600">默认归属时间段</p>
+                    <p className="text-xs font-medium text-slate-600">旧版归属时段（可选）</p>
+                    <p className="text-[11px] text-slate-400">
+                      优先使用下方「默认排班」。此处仅兼容历史时段规则。
+                    </p>
                     {a.timeRules.length === 0 ? (
                       <p className="text-[11px] text-slate-400">暂无时间段</p>
                     ) : (

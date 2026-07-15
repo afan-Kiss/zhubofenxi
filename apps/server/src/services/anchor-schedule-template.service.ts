@@ -526,3 +526,165 @@ export function listTemplateSeedKeysForDate(dateKey: string): string[] {
     templateSeedKey,
   )
 }
+
+export type ScheduleTemplateAdminDto = {
+  id: string
+  anchorId: string | null
+  anchorName: string
+  shopName: string
+  liveRoomName: string
+  startTime: string
+  endTime: string
+  effectiveFrom: string | null
+  effectiveTo: string | null
+  enabled: boolean
+  sortOrder: number
+  note: string | null
+}
+
+/** 设置页：列出当前日期仍生效的默认排班模板（生成默认排班的事实源） */
+export async function listCurrentDefaultTemplatesForAdmin(
+  asOfDate?: string,
+): Promise<{ date: string; templates: ScheduleTemplateAdminDto[] }> {
+  const dateKey = asOfDate?.trim() || todayShanghaiDateKey()
+  const rows = await listActiveTemplatesForDate(dateKey)
+  return {
+    date: dateKey,
+    templates: rows.map((t) => ({
+      id: t.id,
+      anchorId: t.anchorId ?? null,
+      anchorName: t.anchorName,
+      shopName: t.shopName,
+      liveRoomName: t.liveRoomName,
+      startTime: t.startTime,
+      endTime: t.endTime,
+      effectiveFrom: t.effectiveFrom,
+      effectiveTo: t.effectiveTo,
+      enabled: t.enabled,
+      sortOrder: t.sortOrder,
+      note: t.note,
+    })),
+  }
+}
+
+function normalizeHm(value: string, allowEnd2400 = false): string {
+  const t = value.trim()
+  if (allowEnd2400 && (t === '24:00' || t === '24:00:00')) return '24:00'
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(t)
+  if (!m) throw new Error(`时间格式无效：${value}`)
+  const h = Number(m[1])
+  const min = Number(m[2])
+  if (h < 0 || h > 23 || min < 0 || min > 59) throw new Error(`时间格式无效：${value}`)
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`
+}
+
+async function resolveAnchorIdByName(name: string): Promise<string | null> {
+  const hit = await prisma.anchor.findFirst({
+    where: {
+      name: name.trim(),
+      deletedAt: null,
+      enabled: true,
+      attributionMode: 'schedule',
+      systemKey: null,
+    },
+    select: { id: true },
+  })
+  return hit?.id ?? null
+}
+
+/**
+ * 保存设置页默认排班：
+ * - 有 id：更新对应行
+ * - 无 id：新建（effectiveFrom=asOfDate，effectiveTo=null）
+ * - 本次未提交的原「当日生效」模板：标记 enabled=false（历史日不再用它生成）
+ */
+export async function saveCurrentDefaultTemplates(params: {
+  asOfDate?: string
+  templates: Array<{
+    id?: string | null
+    anchorId?: string | null
+    anchorName: string
+    shopName: string
+    liveRoomName: string
+    startTime: string
+    endTime: string
+    note?: string | null
+    sortOrder?: number
+  }>
+}): Promise<{ date: string; templates: ScheduleTemplateAdminDto[] }> {
+  const dateKey = params.asOfDate?.trim() || todayShanghaiDateKey()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    throw new Error('日期格式须为 YYYY-MM-DD')
+  }
+
+  const draft = params.templates.map((t, i) => ({
+    ...t,
+    anchorName: t.anchorName.trim(),
+    shopName: t.shopName.trim(),
+    liveRoomName: (t.liveRoomName || t.shopName).trim(),
+    startTime: normalizeHm(t.startTime),
+    endTime: normalizeHm(t.endTime, true),
+    sortOrder: t.sortOrder ?? (i + 1) * 10,
+    note: t.note?.trim() || null,
+  }))
+
+  const validation = validateScheduleDraft(dateKey, draft)
+  if (!validation.ok) {
+    throw new Error(validation.conflicts[0]?.message ?? '默认排班有冲突，不能保存')
+  }
+
+  const before = await listActiveTemplatesForDate(dateKey)
+  const keepIds = new Set(draft.map((d) => d.id).filter(Boolean) as string[])
+
+  await prisma.$transaction(async (tx) => {
+    for (const old of before) {
+      if (!keepIds.has(old.id)) {
+        await tx.anchorScheduleTemplate.update({
+          where: { id: old.id },
+          data: { enabled: false, updatedAt: new Date() },
+        })
+      }
+    }
+
+    for (const row of draft) {
+      const resolvedAnchorId =
+        (row.anchorId?.trim() || null) ?? (await resolveAnchorIdByName(row.anchorName))
+      if (row.id) {
+        const existing = await tx.anchorScheduleTemplate.findUnique({ where: { id: row.id } })
+        if (!existing) throw new Error(`排班模板不存在：${row.id}`)
+        await tx.anchorScheduleTemplate.update({
+          where: { id: row.id },
+          data: {
+            anchorId: resolvedAnchorId,
+            anchorName: row.anchorName,
+            shopName: row.shopName,
+            liveRoomName: row.liveRoomName,
+            startTime: row.startTime,
+            endTime: row.endTime,
+            enabled: true,
+            sortOrder: row.sortOrder,
+            note: row.note,
+          },
+        })
+      } else {
+        await tx.anchorScheduleTemplate.create({
+          data: {
+            anchorId: resolvedAnchorId,
+            anchorName: row.anchorName,
+            shopName: row.shopName,
+            liveRoomName: row.liveRoomName,
+            startTime: row.startTime,
+            endTime: row.endTime,
+            effectiveFrom: dateKey,
+            effectiveTo: null,
+            enabled: true,
+            sortOrder: row.sortOrder,
+            note: row.note,
+          },
+        })
+      }
+    }
+  })
+
+  return listCurrentDefaultTemplatesForAdmin(dateKey)
+}

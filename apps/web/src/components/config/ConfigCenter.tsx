@@ -1,5 +1,6 @@
 import React from 'react'
 import { AnchorManagementPanel } from './AnchorManagementPanel'
+import { DefaultScheduleTemplatePanel } from './DefaultScheduleTemplatePanel'
 import { BoardCheckExportPanel } from './BoardCheckExportPanel'
 import { LocalSyncStatusPanel } from './LocalSyncStatusPanel'
 import { LiveAccountCookiePanel } from './LiveAccountCookiePanel'
@@ -11,6 +12,7 @@ const SECTIONS: Array<{ id: string; node: React.ReactNode; adminOnly?: boolean }
   { id: 'sync', node: <LocalSyncStatusPanel /> },
   { id: 'cookie', node: <LiveAccountCookiePanel /> },
   { id: 'anchor', node: <AnchorManagementPanel /> },
+  { id: 'default-schedule', node: <DefaultScheduleTemplatePanel /> },
   { id: 'export', node: <BoardCheckExportPanel /> },
   { id: 'users', node: <UserManagementPanel />, adminOnly: true },
   { id: 'permissions', node: <PagePermissionPanel />, adminOnly: true },

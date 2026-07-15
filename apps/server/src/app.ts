@@ -32,6 +32,7 @@ import { luckyGiftsRouter } from './routes/lucky-gifts.routes'
 import { shopCookiesRouter } from './routes/shop-cookies.routes'
 import { anchorPerformanceRouter } from './routes/anchor-performance.routes'
 import { anchorSchedulesRouter } from './routes/anchor-schedules.routes'
+import { anchorScheduleTemplatesRouter } from './routes/anchor-schedule-templates.routes'
 import { bossDashboardRouter } from './routes/boss-dashboard.routes'
 import { offlineDealRouter } from './routes/offline-deal.routes'
 import { dailyReportImagesRouter } from './routes/daily-report-images.routes'
@@ -102,6 +103,7 @@ export function createApp() {
   app.use('/api/board/lucky-gifts', luckyGiftsRouter)
   app.use('/api/shop-cookies', shopCookiesRouter)
   app.use('/api/anchor-schedules', anchorSchedulesRouter)
+  app.use('/api/anchor-schedule-templates', anchorScheduleTemplatesRouter)
   app.use('/api/daily-report-images', dailyReportImagesRouter)
   app.use('/api/anchor-performance', anchorPerformanceRouter)
   app.use('/api/boss-dashboard', bossDashboardRouter)

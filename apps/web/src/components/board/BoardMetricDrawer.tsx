@@ -21,6 +21,7 @@ export type BoardMetricKey =
   | 'orderCount'
   | 'freightRefundAmount'
   | 'returnRate'
+  | 'offlineGmv'
 
 interface MetricDetailData {
   metric: string
@@ -43,6 +44,9 @@ interface MetricDetailData {
     qualityRefundOrderCount?: number
     unmatchedOfficialQualityCount?: number
     description: string
+    offlineDealCount?: number
+    offlineRefundAmountYuan?: number
+    offlineNetAmountYuan?: number
   }
   tabs: Array<{ key: string; label: string; count: number }>
   pagination: { page: number; pageSize: number; total: number; totalPages: number }
@@ -52,6 +56,13 @@ interface MetricDetailData {
   source?: string
   overviewStableWarning?: string
   overviewStableSnapshot?: boolean
+  allowManualAnchorAssign?: boolean
+  scope?: {
+    dealSource?: string
+    anchorSystemKey?: string
+    anchorId?: string
+    anchorName?: string
+  }
 }
 
 interface Props {
@@ -107,7 +118,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     clearAssignError,
     clearAssignSuccess,
   } = useManualOrderAnchorAssign({
-    enabled: open,
+    enabled: open && metric !== 'offlineGmv',
     onAssigned: () => {
       bumpReload()
       onOrderAnchorAssigned?.()
@@ -179,7 +190,10 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     data?.summary.valueText ??
     (metric.includes('Rate')
       ? formatRate(data?.summary.valueRaw ?? 0)
-      : metric.includes('Amount') || metric === 'gmv' || metric === 'effectiveGmv'
+      : metric.includes('Amount') ||
+          metric === 'gmv' ||
+          metric === 'effectiveGmv' ||
+          metric === 'offlineGmv'
         ? formatMoney(data?.summary.valueRaw ?? 0)
         : metric.includes('Count') || metric === 'orderCount' || metric === 'signedCount'
           ? formatCount(data?.summary.valueRaw ?? data?.summary.matchedOrders ?? 0)
@@ -197,7 +211,20 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     overviewStableSnapshot || data?.overviewStableSnapshot || data?.overviewStableWarning,
   )
 
+  const isOfflineGmvMetric = metric === 'offlineGmv'
+  const allowManualAssign =
+    !isOfflineGmvMetric && data?.allowManualAnchorAssign !== false
+
   const drawerSubtitle = (() => {
+    if (isOfflineGmvMetric) {
+      const rangePart =
+        data?.dateRange?.startDate && data?.dateRange?.endDate
+          ? `${data.dateRange.startDate} ~ ${data.dateRange.endDate}`
+          : ''
+      return rangePart
+        ? `${rangePart} · 当前日期范围内已确认的线下成交`
+        : '当前日期范围内已确认的线下成交'
+    }
     const rangePart =
       data?.dateRange?.startDate && data?.dateRange?.endDate
         ? `${data.dateRange.startDate} ~ ${data.dateRange.endDate} · 本地已同步数据`
@@ -212,7 +239,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     <BoardDrawerShell
       open={open}
       onClose={onClose}
-      title={data?.title ?? '指标明细'}
+      title={data?.title ?? (isOfflineGmvMetric ? '线下 GMV｜逸凡' : '指标明细')}
       subtitle={drawerSubtitle}
       footer={
         data ? (
@@ -300,6 +327,19 @@ export const BoardMetricDrawer: React.FC<Props> = ({
                   )}
                 </p>
               </div>
+            ) : isOfflineGmvMetric ? (
+              <div className="mt-2 space-y-1.5 text-sm font-semibold text-slate-900">
+                <p>线下 GMV：{displayValue}</p>
+                <p>有效成交笔数：{formatCount(data.summary.offlineDealCount ?? data.summary.matchedOrders)}</p>
+                <p>
+                  退款金额：
+                  {formatMoney(data.summary.offlineRefundAmountYuan ?? data.summary.productRefundAmount ?? 0)}
+                </p>
+                <p>
+                  净成交金额：
+                  {formatMoney(data.summary.offlineNetAmountYuan ?? 0)}
+                </p>
+              </div>
             ) : (
               <p className="mt-2 text-lg font-semibold text-slate-900">当前统计值：{displayValue}</p>
             )}
@@ -347,20 +387,29 @@ export const BoardMetricDrawer: React.FC<Props> = ({
             listKey={`${metric}-${tab}-${data.pagination.page}-${data.rows.length}`}
             blacklistedBuyerIds={liveBlacklist}
             loading={loading && !!data}
-            emptyText="该指标下暂无匹配订单"
+            emptyText={
+              isOfflineGmvMetric
+                ? '当前日期范围内暂无已确认的逸凡线下成交'
+                : '该指标下暂无匹配订单'
+            }
             amountMode={metric === 'actualSignedAmount' ? 'signed' : 'default'}
-            manualAnchorAssign={{
-              anchorOptions,
-              assigningOrderNo,
-              onAssign: (orderNo, targetAnchorName) => {
-                void handleManualAssign(orderNo, targetAnchorName)
-              },
-              onClearManualOverride: (orderNo) => {
-                void handleClearManualOverride(orderNo)
-              },
-            }}
+            variant={isOfflineGmvMetric ? 'offline' : 'board'}
+            manualAnchorAssign={
+              allowManualAssign
+                ? {
+                    anchorOptions,
+                    assigningOrderNo,
+                    onAssign: (orderNo, targetAnchorName) => {
+                      void handleManualAssign(orderNo, targetAnchorName)
+                    },
+                    onClearManualOverride: (orderNo) => {
+                      void handleClearManualOverride(orderNo)
+                    },
+                  }
+                : undefined
+            }
           />
-          {optionsError ? (
+          {allowManualAssign && optionsError ? (
             <div className="flex flex-wrap items-center gap-2 text-xs text-red-600">
               <span>主播选项加载失败：{optionsError}</span>
               <button
@@ -372,8 +421,8 @@ export const BoardMetricDrawer: React.FC<Props> = ({
               </button>
             </div>
           ) : null}
-          {assignError ? <p className="text-xs text-red-600">{assignError}</p> : null}
-          {assignSuccess ? <p className="text-xs text-emerald-700">{assignSuccess}</p> : null}
+          {allowManualAssign && assignError ? <p className="text-xs text-red-600">{assignError}</p> : null}
+          {allowManualAssign && assignSuccess ? <p className="text-xs text-emerald-700">{assignSuccess}</p> : null}
         </div>
       ) : null}
     </BoardDrawerShell>

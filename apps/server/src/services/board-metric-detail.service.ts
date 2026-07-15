@@ -36,6 +36,13 @@ import { aggregateQualityRefundByAnchor } from './quality-refund-anchor-attribut
 import { buildRawAnalyzeBundle } from './xhs-api-sync/xhs-analysis-from-raw.service'
 import { resolveDateRange, type DateRangePreset } from '../utils/date-range'
 import { anchorLeaderboardRowMatches } from './anchor-attribution.util'
+import {
+  findYifanManualSystemAnchor,
+  getAnchorConfigSync,
+  YIFAN_SYSTEM_KEY,
+} from './anchor.service'
+import { isOfflineDealView, loadOfflineDealViewsForRange } from './offline-deal.service'
+import { logInfo } from '../utils/server-log'
 
 export type BoardDataSource = 'local_db' | 'live_api'
 
@@ -53,10 +60,11 @@ export type BoardMetricKey =
   | 'orderCount'
   | 'freightRefundAmount'
   | 'returnRate'
+  | 'offlineGmv'
 
 const METRIC_DEFS: Record<
   BoardMetricKey,
-  { title: string; formula: string; description: string; valueKey: BoardMetricValueKey }
+  { title: string; formula: string; description: string; valueKey: BoardMetricValueKey | 'offlineGmv' }
 > = {
   gmv: {
     title: '支付金额',
@@ -151,6 +159,14 @@ const METRIC_DEFS: Record<
       '退款订单数 = 本期已支付且真实退款金额>0 的订单（P 订单号去重）；未签收不计入退款订单。',
     valueKey: 'returnRate',
   },
+  offlineGmv: {
+    title: '线下 GMV｜逸凡',
+    formula:
+      '线下 GMV = 当前日期范围内，状态为 confirmed、金额大于 0、未软删除，且归属于 YIFAN_MANUAL 的线下成交支付金额合计',
+    description:
+      '支付金额口径，不扣退款；取消、作废、草稿不计入。日报为线上直播经营日报，本指标仅在主播业绩页「线下 GMV」卡片下钻。',
+    valueKey: 'offlineGmv',
+  },
 }
 
 function matchMetricViews(views: AnalyzedOrderView[], metric: BoardMetricKey, tab?: string): AnalyzedOrderView[] {
@@ -179,8 +195,150 @@ function matchMetricViews(views: AnalyzedOrderView[], metric: BoardMetricKey, ta
       return views.filter((v) => isQualityRefundOrder(v))
     case 'orderCount':
       return views.filter((v) => viewCountsAsPaidOrder(v))
+    case 'offlineGmv':
+      // 由 buildOfflineGmvMetricDetail 专用路径处理，此处不应落到匹配
+      return views.filter((v) => isOfflineDealView(v) && v.includedInGmv)
     default:
       return views
+  }
+}
+
+function belongsToYifanManual(
+  view: AnalyzedOrderView,
+  yifan: { id: string; name: string },
+): boolean {
+  const id = (view.anchorId ?? '').trim()
+  if (id && id === yifan.id) return true
+  const name = (view.anchorName ?? '').trim()
+  return Boolean(name && name === yifan.name)
+}
+
+/** 线下 GMV｜逸凡：只含 confirmed 且归属 YIFAN_MANUAL 的线下成交；禁止改归属 */
+async function buildOfflineGmvMetricDetail(params: {
+  preset?: string
+  startDate: string
+  endDate: string
+  page?: number
+  pageSize?: number
+  sort?: string
+  role: UserRole
+  username: string
+}) {
+  const def = METRIC_DEFS.offlineGmv
+  const normalizedPreset = normalizeBoardPreset(params.preset ?? 'custom')
+
+  if (isStaffUnbound(params.role, params.username)) {
+    throw new Error(STAFF_UNBOUND_MESSAGE)
+  }
+
+  const scoped = await getBoardScopedViewsForRange({
+    preset: normalizedPreset,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    role: params.role,
+    username: params.username,
+  })
+  const range = scoped.range
+  const config = getAnchorConfigSync()
+  const yifan = findYifanManualSystemAnchor(config)
+  if (!yifan) {
+    throw new Error('未找到线下专属主播（systemKey=YIFAN_MANUAL），请先初始化系统主播')
+  }
+
+  /**
+   * 线下 GMV 下钻直接读 OfflineDeal 台账，避免经营缓存未重建时漏单。
+   * 经营看板总 GMV / offlineGmv 卡片仍由缓存 rebuild 合并写入。
+   */
+  const offlineAll = await loadOfflineDealViewsForRange(range.startDate, range.endDate)
+  const offlineIncluded = offlineAll.filter((v) => isOfflineDealView(v) && v.includedInGmv)
+  const yifanViews = offlineIncluded.filter((v) => belongsToYifanManual(v, yifan))
+  const otherAnchorOffline = offlineIncluded.filter((v) => !belongsToYifanManual(v, yifan))
+
+  if (otherAnchorOffline.length > 0) {
+    const otherCent = otherAnchorOffline.reduce((sum, v) => sum + (v.paymentBaseCent ?? 0), 0)
+    logInfo(
+      'offline-gmv-drill',
+      `发现 ${otherAnchorOffline.length} 笔有效线下成交未归属 YIFAN_MANUAL（金额 ¥${(otherCent / 100).toFixed(2)}），下钻已排除，本次不改库`,
+    )
+  }
+
+  const valueRaw =
+    Math.round(yifanViews.reduce((sum, v) => sum + (v.paymentBaseCent ?? 0), 0)) / 100
+  const refundYuan =
+    Math.round(
+      yifanViews.reduce((sum, v) => sum + (v.successfulRefundAmountCent ?? 0), 0),
+    ) / 100
+  const netYuan = Math.round((valueRaw - refundYuan) * 100) / 100
+
+  const viewsWithRaw = yifanViews.map((v) => {
+    const withRaw = v as AnalyzedOrderView & { raw?: Record<string, unknown> }
+    return withRaw
+  })
+  const allRows = sortRows(
+    viewsWithRaw.map((v) =>
+      mapViewToBoardDrillRow(v, { useBuyerRefund: true }),
+    ),
+    params.sort ?? 'time_desc',
+  )
+
+  const page = Math.max(1, Math.floor(params.page ?? 1))
+  const pageSize = Math.min(100, Math.max(1, Math.floor(params.pageSize ?? 20)))
+  const total = allRows.length
+  const rows = allRows.slice((page - 1) * pageSize, page * pageSize)
+
+  return {
+    metric: 'offlineGmv' as const,
+    title: def.title,
+    formulaText: def.formula,
+    dateRange: {
+      preset: params.preset,
+      startDate: range.startDate,
+      endDate: range.endDate,
+    },
+    summary: {
+      totalOrders: yifanViews.length,
+      matchedOrders: yifanViews.length,
+      value: valueRaw,
+      valueRaw,
+      valueText: formatYuan(valueRaw),
+      productRefundAmount: refundYuan,
+      refundRelatedOrderCount: yifanViews.filter(
+        (v) => (v.successfulRefundAmountCent ?? 0) > 0,
+      ).length,
+      refundWithAmountOrderCount: yifanViews.filter(
+        (v) => (v.successfulRefundAmountCent ?? 0) > 0,
+      ).length,
+      paidOrderCount: yifanViews.length,
+      qualityRefundOrderCount: 0,
+      unmatchedOfficialQualityCount: 0,
+      description: def.description,
+      offlineDealCount: yifanViews.length,
+      offlineRefundAmountYuan: refundYuan,
+      offlineNetAmountYuan: netYuan,
+    },
+    tabs: [] as Array<{ key: string; label: string; count: number }>,
+    pagination: {
+      page,
+      pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    },
+    rows,
+    pageSummary: {
+      offlineGmv: valueRaw,
+      offlineDealCount: yifanViews.length,
+      offlineRefundAmountYuan: refundYuan,
+      offlineNetAmountYuan: netYuan,
+    },
+    blacklistedBuyerIds: [] as string[],
+    source: 'local_db' as BoardDataSource,
+    allowManualAnchorAssign: false,
+    scope: {
+      dealSource: 'offline' as const,
+      anchorSystemKey: YIFAN_SYSTEM_KEY,
+      anchorId: yifan.id,
+      anchorName: yifan.name,
+    },
   }
 }
 
@@ -309,7 +467,12 @@ export async function buildBoardMetricDetail(params: {
   username: string
   overviewStableSnapshot?: boolean
 }) {
+  if (params.metric === 'offlineGmv') {
+    return buildOfflineGmvMetricDetail(params)
+  }
+
   const def = METRIC_DEFS[params.metric]
+  const valueKey = def.valueKey as BoardMetricValueKey
   const preset = normalizeBoardPreset(params.preset ?? 'custom')
   const requestId = `metric-${Date.now()}`
 
@@ -383,7 +546,7 @@ export async function buildBoardMetricDetail(params: {
   }
 
   const totals = calculateBusinessMetrics(viewsForTotals)
-  let valueRaw: number | null = pickMetricValue(totals, def.valueKey)
+  let valueRaw: number | null = pickMetricValue(totals, valueKey)
 
   if (isQualityMetric && qualityMatchedCount != null) {
     valueRaw =
@@ -492,7 +655,7 @@ export async function buildBoardMetricDetail(params: {
   const stableDrawer = await resolveOverviewStableDrawerContext({
     preset: normalizedPreset,
     startDate: range.startDate,
-    valueKey: def.valueKey,
+    valueKey,
     latestValueRaw: valueRaw ?? 0,
     overviewStableSnapshot: params.overviewStableSnapshot,
   })

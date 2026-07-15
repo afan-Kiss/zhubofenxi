@@ -55,6 +55,9 @@ export interface BoardAnchorMetrics extends BoardViewsMetrics {
   onlineGmv?: number
   offlineGmv?: number
   offlineDealCount?: number
+  /** 系统主播稳定身份，如 YIFAN_MANUAL；前端隐藏线下专属主播用 */
+  systemKey?: string | null
+  attributionMode?: string | null
 }
 
 function toLegacyMetrics(m: BusinessMetrics, views: AnalyzedOrderView[]): BoardViewsMetrics {
@@ -170,6 +173,8 @@ export function aggregateAnchorLeaderboard(
         anchorName,
         anchorId,
         color: cfg?.color ?? '#94a3b8',
+        systemKey: cfg?.systemKey ?? null,
+        attributionMode: cfg?.attributionMode ?? null,
         ...m,
         gmv: m.totalGmv,
         onlineGmv: onlineGmvCent / 100,

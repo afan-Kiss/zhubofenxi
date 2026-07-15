@@ -11,6 +11,37 @@ export const YIFAN_DEFAULT_DISPLAY_NAME = '逸凡'
 
 export type AnchorAttributionMode = 'schedule' | 'manual'
 
+/** 稳定身份：线下成交专属主播（禁止用展示名判断） */
+export function isYifanManualSystemAnchor(anchor: {
+  systemKey?: string | null
+}): boolean {
+  return (anchor.systemKey ?? '').trim() === YIFAN_SYSTEM_KEY
+}
+
+/** 仅线下展示：不进日报/普通直播主播榜 */
+export function isOfflineOnlyAnchor(anchor: {
+  systemKey?: string | null
+  attributionMode?: string | null
+}): boolean {
+  return isYifanManualSystemAnchor(anchor)
+}
+
+export function findYifanManualSystemAnchor(config: AnchorConfig): {
+  id: string
+  name: string
+  systemKey: string
+  attributionMode?: string
+} | null {
+  const found = config.anchors.find((a) => isYifanManualSystemAnchor(a))
+  if (!found) return null
+  return {
+    id: found.id,
+    name: found.name,
+    systemKey: YIFAN_SYSTEM_KEY,
+    attributionMode: found.attributionMode,
+  }
+}
+
 export function isManualAttributionMode(
   mode: string | null | undefined,
 ): boolean {

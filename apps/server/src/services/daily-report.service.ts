@@ -1,6 +1,7 @@
 import type { AnchorConfig, AnalyzedOrderView } from '../types/analysis'
 import type { UserRole } from '../types/roles'
-import { getAnchorConfigSync } from './anchor.service'
+import { getAnchorConfigSync, isOfflineOnlyAnchor } from './anchor.service'
+import { isOfflineDealView } from './offline-deal.service'
 import {
   filterViewsByAnchorSpec,
   getAnchorPerformanceViews,
@@ -77,6 +78,9 @@ function isUnassignedAnchorView(v: AnalyzedOrderView): boolean {
 }
 
 export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
+  anchorId?: string
+  systemKey?: string | null
+  attributionMode?: string | null
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -328,6 +332,10 @@ function buildAnchorRow(params: {
       : buildLivePeriodText(params.sessions).replace(/~/g, '–')
     : NO_LIVE_SESSION_TEXT
   return {
+    anchorId: params.anchorId,
+    systemKey: params.config.anchors.find((a) => a.id === params.anchorId)?.systemKey ?? null,
+    attributionMode:
+      params.config.anchors.find((a) => a.id === params.anchorId)?.attributionMode ?? null,
     anchorName: params.anchorName,
     livePeriodText: hasRealSessions ? buildLivePeriodText(params.sessions) : '—',
     liveTimeRange,
@@ -383,24 +391,34 @@ export async function buildDailyReport(params: {
   const config = getAnchorConfigSync()
   const anchorRows: DailyReportAnchorRow[] = []
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)
-  const remappedAll = await remapViewsWithScheduleOverlay(
-    attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
-  )
-  const allPerformanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const remappedAll = (
+    await remapViewsWithScheduleOverlay(attachRawByMatchToViews(scoped.views, scoped.rawByMatch))
+  ).filter((v) => !isOfflineDealView(v))
+  /**
+   * 日报图片 = 线上直播经营日报。
+   * 线下成交不进汇总；经营看板总 GMV 仍 = 线上 + 线下。
+   */
+  const allPerformanceViews = (
+    await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  ).filter((v) => !isOfflineDealView(v))
   const storeWideShipped = sumDailyReportShippedFromViews(allPerformanceViews)
   const storeWideInvalid = countDailyReportOrders(allPerformanceViews).invalidOrderCount
 
-  const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
+  const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate).filter(
+    (a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }),
+  )
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
   const liveAssignment = await resolveDailyReportLiveSessionAssignments(params.startDate)
   const usedScheduleRowIds = new Set<string>()
   for (const anchor of reportAnchors) {
-    const performanceViews = await getAnchorPerformanceViews(
+    if (isOfflineOnlyAnchor({ systemKey: anchor.systemKey })) continue
+    const performanceViewsRaw = await getAnchorPerformanceViews(
       scoped.views,
       scoped.rawByMatch,
       anchor.anchorId,
       anchor.anchorName,
     )
+    const performanceViews = performanceViewsRaw.filter((v) => !isOfflineDealView(v))
     const shipped = sumDailyReportShippedFromViews(performanceViews)
     const shippedAmountYuan = shipped.shippedAmountYuan
     const shippedOrders = listDailyReportShippedOrders(performanceViews, anchor.anchorName)

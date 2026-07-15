@@ -46,6 +46,7 @@ import {
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
 import { apiRequest } from '../../lib/api'
 import { OfflineDealEntryPanel } from '../../components/board/OfflineDealEntryPanel'
+import { isOfflineOnlyAnchor } from '../../lib/anchor-system-keys'
 
 type AnchorSummaryCardType = 'money' | 'count' | 'rate'
 
@@ -329,6 +330,20 @@ export const AnchorPerformanceTab: React.FC = () => {
     }
   }, [])
 
+  /** 普通直播主播榜：排除线下专属 YIFAN_MANUAL（勿用展示名判断） */
+  const visibleLiveAnchorRows = useMemo(
+    () =>
+      allAnchors.filter((row) => {
+        const rowKey = row.systemKey != null ? String(row.systemKey) : null
+        if (isOfflineOnlyAnchor({ systemKey: rowKey })) return false
+        const cfg = configAnchors.find(
+          (a) => a.id === String(row.anchorId ?? '') || a.name === String(row.anchorName ?? ''),
+        )
+        return !isOfflineOnlyAnchor({ systemKey: cfg?.systemKey ?? null })
+      }),
+    [allAnchors, configAnchors],
+  )
+
   const handleOrderAnchorAssigned = useCallback(() => {
     void reload()
   }, [reload])
@@ -337,9 +352,10 @@ export const AnchorPerformanceTab: React.FC = () => {
     const byName = new Map<string, { id: string; name: string }>()
     for (const a of configAnchors) {
       if (!a.name.trim()) continue
+      if (isOfflineOnlyAnchor({ systemKey: a.systemKey })) continue
       byName.set(a.name, { id: a.id, name: a.name })
     }
-    for (const a of allAnchors) {
+    for (const a of visibleLiveAnchorRows) {
       const name = String(a.anchorName ?? '').trim()
       if (!name || name === '未归属') continue
       if (!byName.has(name)) {
@@ -347,7 +363,7 @@ export const AnchorPerformanceTab: React.FC = () => {
       }
     }
     return Array.from(byName.values())
-  }, [configAnchors, allAnchors])
+  }, [configAnchors, visibleLiveAnchorRows])
 
   const options = filterOptions
 
@@ -361,11 +377,11 @@ export const AnchorPerformanceTab: React.FC = () => {
     Boolean(selectedConfigAnchor?.systemKey)
 
   const anchors = useMemo(() => {
-    if (anchorFilter === '全部') return allAnchors
-    return allAnchors.filter(
+    if (anchorFilter === '全部') return visibleLiveAnchorRows
+    return visibleLiveAnchorRows.filter(
       (a) => String(a.anchorName) === anchorFilter || String(a.anchorName).includes(anchorFilter),
     )
-  }, [allAnchors, anchorFilter])
+  }, [visibleLiveAnchorRows, anchorFilter])
 
   const performanceSummary = data?.anchorPerformanceSummary
   const filteredPerformanceSummary = useMemo(() => {
@@ -386,6 +402,16 @@ export const AnchorPerformanceTab: React.FC = () => {
     boardSummaryHasOrderData(filteredPerformanceSummary as Record<string, unknown>) ||
     (anchorFilter === '全部' && (data?.anchorLeaderboard?.length ?? 0) > 0)
   const cards = filteredPerformanceSummary ?? {}
+  /** 总/线上/线下/未归属：必须用后端汇总，禁止对可见主播行求和（否则会丢线下 GMV） */
+  const boardGmvSplit = useMemo(() => {
+    const src = (performanceSummary ?? displaySummary ?? {}) as Record<string, unknown>
+    return {
+      totalGmv: Number(src.totalGmv ?? src.gmv ?? 0),
+      onlineGmv: Number(src.onlineGmv ?? 0),
+      offlineGmv: Number(src.offlineGmv ?? 0),
+      unassignedGmv: Number(src.unassignedGmv ?? 0),
+    }
+  }, [performanceSummary, displaySummary])
   const showLivePeriod = isSingleDayPreset(preset, startDate, endDate)
   const showRates = showLongPeriodRates(preset, startDate, endDate)
   const boardDataVisible =
@@ -596,24 +622,59 @@ export const AnchorPerformanceTab: React.FC = () => {
       />
       {showMetrics ? (
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-          {[
-            { label: '总 GMV', value: Number(cards.totalGmv ?? cards.gmv ?? 0) },
-            { label: '线上 GMV', value: Number(cards.onlineGmv ?? 0) },
-            { label: '线下 GMV', value: Number(cards.offlineGmv ?? 0) },
-            { label: '未归属 GMV', value: Number(cards.unassignedGmv ?? 0) },
-          ].map((item) => (
-            <div
-              key={item.label}
-              className="rounded-xl border border-slate-100 bg-white px-3 py-2 shadow-sm"
-            >
-              <p className="text-[11px] text-slate-500">{item.label}</p>
-              <p className="mt-0.5 text-sm font-semibold text-slate-900">
-                {formatMoney(item.value)}
-              </p>
-            </div>
-          ))}
+          {(
+            [
+              { label: '总 GMV', value: boardGmvSplit.totalGmv, clickable: false },
+              { label: '线上 GMV', value: boardGmvSplit.onlineGmv, clickable: false },
+              {
+                label: '线下 GMV',
+                value: boardGmvSplit.offlineGmv,
+                clickable: true,
+                helper: '查看逸凡线下成交明细',
+              },
+              { label: '未归属 GMV', value: boardGmvSplit.unassignedGmv, clickable: false },
+            ] as Array<{
+              label: string
+              value: number
+              clickable: boolean
+              helper?: string
+            }>
+          ).map((item) =>
+            item.clickable ? (
+              <button
+                key={item.label}
+                type="button"
+                data-testid="offline-gmv-card"
+                aria-label={`线下 GMV ${formatMoney(item.value)}，查看逸凡线下成交明细`}
+                onClick={() => {
+                  setReturnRefundDrawerAnchor(null)
+                  setReturnCountDrawerAnchor(null)
+                  setMetricDrawer('offlineGmv')
+                }}
+                className="rounded-xl border border-slate-100 bg-white px-3 py-2 text-left shadow-sm transition hover:border-rose-200 hover:bg-rose-50/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300"
+              >
+                <p className="text-[11px] text-slate-500">{item.label}</p>
+                <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                  {formatMoney(item.value)}
+                </p>
+                {item.helper ? (
+                  <p className="mt-0.5 text-[10px] text-rose-600">{item.helper}</p>
+                ) : null}
+              </button>
+            ) : (
+              <div
+                key={item.label}
+                className="rounded-xl border border-slate-100 bg-white px-3 py-2 shadow-sm"
+              >
+                <p className="text-[11px] text-slate-500">{item.label}</p>
+                <p className="mt-0.5 text-sm font-semibold text-slate-900">
+                  {formatMoney(item.value)}
+                </p>
+              </div>
+            ),
+          )}
           <p className="col-span-2 text-[11px] text-slate-400 md:col-span-4">
-            总 GMV = 线上 + 线下；未归属 GMV 已计入总 GMV，但不计入任一主播。
+            总 GMV = 线上 + 线下；未归属 GMV 已计入总 GMV，但不计入任一主播。线下专属主播业绩请点「线下 GMV」。
           </p>
         </div>
       ) : null}
@@ -803,7 +864,7 @@ export const AnchorPerformanceTab: React.FC = () => {
             <MetricGridTransition transitionKey={anchorTransitionKey} loading={isLoadingRange}>
               <AnchorLeaderboardPanel
                 rows={anchors}
-                compareRows={allAnchors}
+                compareRows={visibleLiveAnchorRows}
                 showLongPeriodRates={showRates}
                 showLivePeriod={showLivePeriod}
                 includeZeroPerformance={showLivePeriod}
@@ -912,17 +973,23 @@ export const AnchorPerformanceTab: React.FC = () => {
           endDate={endDate}
           preset={preset}
           anchorId={
-            returnRefundDrawerAnchor?.anchorId ??
-            returnCountDrawerAnchor?.anchorId ??
-            selectedAnchorMeta?.anchorId
+            metricDrawer === 'offlineGmv'
+              ? undefined
+              : returnRefundDrawerAnchor?.anchorId ??
+                returnCountDrawerAnchor?.anchorId ??
+                selectedAnchorMeta?.anchorId
           }
           anchorName={
-            returnRefundDrawerAnchor?.anchorName ??
-            returnCountDrawerAnchor?.anchorName ??
-            selectedAnchorMeta?.anchorName
+            metricDrawer === 'offlineGmv'
+              ? undefined
+              : returnRefundDrawerAnchor?.anchorName ??
+                returnCountDrawerAnchor?.anchorName ??
+                selectedAnchorMeta?.anchorName
           }
           cardValueRaw={
-            metricDrawer === 'returnRefundCount' && returnRefundDrawerAnchor
+            metricDrawer === 'offlineGmv'
+              ? Number(boardGmvSplit.offlineGmv ?? 0)
+              : metricDrawer === 'returnRefundCount' && returnRefundDrawerAnchor
               ? Number(
                   anchors.find((a) => String(a.anchorName) === returnRefundDrawerAnchor.anchorName)
                     ?.returnRefundCount ?? 0,
@@ -938,7 +1005,9 @@ export const AnchorPerformanceTab: React.FC = () => {
                 : anchorSummaryMetricValue(filteredPerformanceSummary, metricDrawer)
           }
           blacklistedBuyerIds={blacklistedBuyerIds}
-          onOrderAnchorAssigned={handleOrderAnchorAssigned}
+          onOrderAnchorAssigned={
+            metricDrawer === 'offlineGmv' ? undefined : handleOrderAnchorAssigned
+          }
         />
       ) : null}
     </div>

@@ -292,6 +292,9 @@ export interface LiveRoomNewFollowerRow {
 
 
 export interface DailyOperationsAnchorRow extends AnchorLivePeriodView {
+  anchorId?: string
+  systemKey?: string | null
+  attributionMode?: string | null
   anchorName: string
   sessionLabel: string
   shopName: string

@@ -1,5 +1,6 @@
 import type { UserRole } from '../types/roles'
-import { getAnchorConfigSync } from './anchor.service'
+import { getAnchorConfigSync, isOfflineOnlyAnchor } from './anchor.service'
+import { isOfflineDealView } from './offline-deal.service'
 import {
   filterViewsByAnchorSpec,
   getAnchorPerformanceViews,
@@ -88,6 +89,9 @@ function sumSignedDisplayFromViews(views: AnalyzedOrderView[]): {
 }
 
 export interface DailyOperationsAnchorRow extends AnchorAttendanceStatusPayload {
+  anchorId?: string
+  systemKey?: string | null
+  attributionMode?: string | null
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -276,6 +280,10 @@ function buildAnchorRow(params: {
     params.returnOrderCount,
   )
   return {
+    anchorId: params.anchorId,
+    systemKey: params.config.anchors.find((a) => a.id === params.anchorId)?.systemKey ?? null,
+    attributionMode:
+      params.config.anchors.find((a) => a.id === params.anchorId)?.attributionMode ?? null,
     anchorName: params.anchorName,
     livePeriodText: buildLivePeriodText(params.sessions),
     liveTimeRange: params.liveTimeRange,
@@ -348,8 +356,12 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
   const remappedAll = await remapViewsWithScheduleOverlay(
     attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
   )
+  // 日报仅统计线上直播订单：排除线下成交（offline_deal）
+  const remappedOnlineAll = remappedAll.filter((v) => !isOfflineDealView(v))
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(params.startDate)
-  const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate)
+  const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate).filter(
+    (a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }),
+  )
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
   const liveAssignment = await loadAndAssignDailyReportLiveSessions({
     reportDate: params.startDate,
@@ -361,16 +373,23 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
   const anchorRows: DailyOperationsAnchorRow[] = []
 
   for (const anchor of reportAnchors) {
-    const performanceViews = await getAnchorPerformanceViews(
+    if (isOfflineOnlyAnchor({ systemKey: anchor.systemKey })) continue
+    const performanceViewsRaw = await getAnchorPerformanceViews(
       scoped.views,
       scoped.rawByMatch,
       anchor.anchorId,
       anchor.anchorName,
     )
+    // 主播行业绩：排除线下成交，避免逸凡/线下 GMV 进入日报
+    const performanceViews = performanceViewsRaw.filter((v) => !isOfflineDealView(v))
     const validRevenue = sumSignedDisplayFromViews(performanceViews)
     const validAmountCent = validRevenue.validAmountCent
     const validAmountYuan = validRevenue.validAmountYuan
-    const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
+    const anchorAllViews = filterViewsByAnchorSpec(
+      remappedOnlineAll,
+      anchor.anchorId,
+      anchor.anchorName,
+    )
     const { soldOrderCount } = validRevenue
     const { invalidOrderCount: invalidFromPerformance } = countDailyReportOrders(performanceViews)
     const anchorRefundMetrics = computeOperationsRefundMetricsFromViews(performanceViews)
@@ -456,10 +475,16 @@ export async function buildDailyOperationsReport(params: {
   const dayParams = { ...params, preset: 'custom' as const }
 
   const scoped = await getBoardScopedViewsForRange(dayParams)
-  const performanceViewsAll = await getAnchorPerformanceViews(
+  const performanceViewsAllRaw = await getAnchorPerformanceViews(
     scoped.views,
     scoped.rawByMatch,
   )
+  /**
+   * 运营日报 = 线上直播经营日报。
+   * 线下成交不进入日报汇总/主播/商品/退款/趋势；经营看板总 GMV 仍含线上+线下。
+   */
+  const onlineReportViews = performanceViewsAllRaw.filter((v) => !isOfflineDealView(v))
+  const performanceViewsAll = onlineReportViews
 
   const anchorRows = await buildDailyOperationsAnchorRowsForDay(params)
 
@@ -479,9 +504,9 @@ export async function buildDailyOperationsReport(params: {
 
   const storeWideInvalid = countDailyReportOrders(performanceViewsAll)
   const invalidOrderCount = storeWideInvalid.invalidOrderCount
-  const remappedAll = await remapViewsWithScheduleOverlay(
-    attachRawByMatchToViews(scoped.views, scoped.rawByMatch),
-  )
+  const remappedAll = (
+    await remapViewsWithScheduleOverlay(attachRawByMatchToViews(scoped.views, scoped.rawByMatch))
+  ).filter((v) => !isOfflineDealView(v))
   const unassignedInvalidViews = dedupeViewsByMetricOrderNo(performanceViewsAll).filter(
     isUnassignedOperationsView,
   )

@@ -1,6 +1,6 @@
 import type { AnchorConfig, AnalyzedOrderView } from '../types/analysis'
 import { findAnchorByName } from './anchor-rules.service'
-import { getAnchorConfigSync } from './anchor.service'
+import { getAnchorConfigSync, isOfflineOnlyAnchor, YIFAN_SYSTEM_KEY } from './anchor.service'
 import { applyManualAnchorOverrideToView } from './order-anchor-manual-override.service'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import { getTimeMinutes } from '../utils/time'
@@ -186,13 +186,23 @@ export function resolveDailyReportAnchors(
 export function resolveDailyReportAnchorsForDate(
   config: AnchorConfig,
   startDate: string,
-): Array<{ anchorId: string; anchorName: string }> {
+): Array<{ anchorId: string; anchorName: string; systemKey?: string | null; attributionMode?: string }> {
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(startDate)
   const anchors = resolveDailyReportAnchors(config, useShopSessionRules)
   if (useShopSessionRules && isReportDateOnOrAfterXiaoBaiCutoff(startDate)) {
     anchors.push(resolveXiaoBaiAnchor(config))
   }
+  // 日报为线上直播经营日报：排除线下专属主播（YIFAN_MANUAL）
   return anchors
+    .map((a) => {
+      const cfg = config.anchors.find((x) => x.id === a.anchorId || x.name === a.anchorName)
+      return {
+        ...a,
+        systemKey: cfg?.systemKey ?? null,
+        attributionMode: cfg?.attributionMode,
+      }
+    })
+    .filter((a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }))
 }
 
 /** 早场 00:00–17:59，晚场 18:00–23:59（与历史默认时间段一致） */
@@ -364,12 +374,15 @@ function createEmptyAnchorLeaderboardRow(
   anchorId: string,
   anchorName: string,
   color: string,
+  opts?: { systemKey?: string | null; attributionMode?: string | null },
 ): BoardAnchorMetrics {
   const m = aggregateViewsMetrics([])
   return {
     anchorName,
     anchorId,
     color,
+    systemKey: opts?.systemKey ?? null,
+    attributionMode: opts?.attributionMode ?? null,
     ...m,
     gmv: m.totalGmv,
     onlineGmv: 0,
@@ -379,7 +392,7 @@ function createEmptyAnchorLeaderboardRow(
   }
 }
 
-/** 6.13 起主播业绩固定展示场次主播；另补「无时间段」手动归属主播空卡（如逸凡） */
+/** 6.13 起主播业绩固定展示场次主播；另补「无时间段」手动归属主播空卡（不含线下专属 YIFAN_MANUAL） */
 export function ensureAnchorPerformanceLeaderboardSlots(
   rows: BoardAnchorMetrics[],
   endDate: string,
@@ -399,6 +412,7 @@ export function ensureAnchorPerformanceLeaderboardSlots(
       (a) =>
         a.enabled &&
         a.name.trim() &&
+        !isOfflineOnlyAnchor(a) &&
         (a.attributionMode === 'manual' ||
           // 兼容未写 attributionMode 的缓存：无任何启用时段 → 手动槽位
           (!a.attributionMode &&
@@ -417,11 +431,13 @@ export function ensureAnchorPerformanceLeaderboardSlots(
   for (const anchorName of slotNames) {
     if (byName.has(anchorName)) continue
     const found = findAnchorByName(config, anchorName)
+    if (found && isOfflineOnlyAnchor(found)) continue
     merged.push(
       createEmptyAnchorLeaderboardRow(
         found?.id ?? `extra-${anchorName}`,
         anchorName,
         found?.color ?? '#94a3b8',
+        { systemKey: found?.systemKey ?? null, attributionMode: found?.attributionMode ?? null },
       ),
     )
   }

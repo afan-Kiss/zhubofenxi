@@ -18,6 +18,8 @@ interface Props {
   blacklistedBuyerIds?: string[]
   className?: string
   amountMode?: 'default' | 'signed'
+  /** 线下 GMV 下钻：不展示直播号 / 千帆跳转 / 改归属 */
+  offlineMode?: boolean
   manualAnchorAssign?: {
     anchorOptions: Array<{ id: string; name: string }>
     assigningOrderNo?: string | null
@@ -74,6 +76,7 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
   blacklistedBuyerIds = [],
   className = 'block md:hidden',
   amountMode = 'default',
+  offlineMode = false,
   manualAnchorAssign,
 }) => {
   const { formatMoney } = useAmountDisplay()
@@ -93,12 +96,65 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
     <div className={`space-y-3 ${className}`}>
       {rows.map((r, idx) => {
         const orderNo = boardRowDisplayOrderNo(r)
+        const dealKey = displayCell(r.offlineDealKey ?? orderNo)
         const buyerKey = displayCell(r.buyerKey)
         const nick = displayCell(r.buyerNickname)
         const rowBlocked =
           Boolean(r.isBlacklistedBuyer) ||
           (buyerKey !== '—' && blacklistSet.has(buyerKey))
         const reason = displayAfterSaleReason(r)
+        const pay = Number(r.merchantReceivableAmount ?? r.paymentBaseAmount ?? r.statPaidAmount ?? 0)
+        const refund = Number(r.refundAmount ?? r.productRefundAmount ?? 0)
+        const net = Math.round((pay - refund) * 100) / 100
+
+        if (offlineMode) {
+          return (
+            <article
+              key={`${dealKey}-${idx}`}
+              className="rounded-2xl border border-rose-100/80 bg-white p-3.5 shadow-sm shadow-rose-100/40"
+            >
+              <div className="border-b border-rose-50 pb-2.5">
+                <p className="break-all font-mono text-[12px] font-semibold leading-snug text-slate-900">
+                  {dealKey}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {displayCell(r.payTime ?? r.orderTime)}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
+                    线下成交
+                  </span>
+                  <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700">
+                    {formatAnchorDisplayName(r.anchorName)}
+                  </span>
+                  <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">
+                    线下手动归属
+                  </span>
+                  <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                    已确认
+                  </span>
+                </div>
+              </div>
+              <div className="mt-2.5 space-y-0.5">
+                <FieldRow label="归属主播">{formatAnchorDisplayName(r.anchorName)}</FieldRow>
+                <FieldRow label="客户/订单标识">
+                  <BuyerDisplay nickname={nick === '—' ? '未知' : nick} />
+                </FieldRow>
+                <FieldRow label="支付金额">
+                  <span className="font-medium">{formatMoney(pay)}</span>
+                </FieldRow>
+                <FieldRow label="退款金额">
+                  <span className="font-semibold text-rose-600">{formatMoney(refund)}</span>
+                </FieldRow>
+                <FieldRow label="净金额">{formatMoney(net)}</FieldRow>
+                <FieldRow label="状态">{displayCell(r.orderStatus)}</FieldRow>
+                {r.attributedBy ? (
+                  <FieldRow label="操作人">{String(r.attributedBy)}</FieldRow>
+                ) : null}
+              </div>
+            </article>
+          )
+        }
 
         return (
           <article

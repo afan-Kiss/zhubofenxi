@@ -1,5 +1,6 @@
-import React, { forwardRef } from 'react'
+import React, { forwardRef, useMemo } from 'react'
 import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
+import { isOfflineOnlyAnchor } from '../../lib/anchor-system-keys'
 import type { DailyOperationsReportPayload } from '../../pages/operations/operationsReportTypes'
 import {
   formatDuration,
@@ -43,11 +44,17 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
   const highReturnItems = (data.rankings?.products.highReturn.items ?? []).slice(0, 5)
   const insightItems = (data.businessInsights?.items ?? []).slice(0, 6)
   const qualityWarnings = data.reportDataQuality?.warnings ?? []
+  const visibleAnchors = useMemo(
+    () => (data.anchors ?? []).filter((row) => !isOfflineOnlyAnchor({ systemKey: row.systemKey })),
+    [data.anchors],
+  )
 
   return (
     <div ref={ref} className="w-[720px] bg-white p-6 text-slate-900">
       <h1 className="text-xl font-bold">{data.title}</h1>
-      <p className="mt-1 text-sm text-slate-500">全店有效成交与直播经营数据（本地已同步）</p>
+      <p className="mt-1 text-sm text-slate-500">
+        本日报统计线上直播经营数据，线下成交请在主播业绩页的「线下 GMV」中查看。
+      </p>
 
       <div className="mt-4 grid grid-cols-3 gap-2">
         <MetricCard label="全店有效成交" value={formatIntegerMoney(data.summary.validAmountYuan)} />
@@ -83,7 +90,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
 
       <div className="mt-5">
         <p className="mb-2 text-sm font-semibold">主播表现</p>
-        {data.anchors.map((row) => {
+        {visibleAnchors.map((row) => {
           const liveTime =
             row.liveTimeRange && row.liveTimeRange !== '—'
               ? row.liveTimeRange
@@ -96,7 +103,7 @@ export const OperationsReportImageSheet = forwardRef<HTMLDivElement, Props>(({ d
           const paidCount = row.paidOrderCount ?? 0
           return (
             <div
-              key={row.anchorName}
+              key={`${row.anchorName}-${row.systemKey ?? row.anchorId ?? ''}`}
               className="mb-2 rounded-xl border border-slate-200 bg-white p-3 text-xs leading-relaxed"
             >
               <p className="text-sm font-semibold">

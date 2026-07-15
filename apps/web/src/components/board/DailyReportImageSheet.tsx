@@ -16,6 +16,7 @@ import type { AnchorLivePeriodView } from '../../lib/anchor-live-period'
 import { AnchorTrendChart } from './AnchorTrendChart'
 import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
 import type { AnchorLeaderboardRow, AnchorTrend } from '../../lib/anchor-leaderboard-row'
+import { isOfflineOnlyAnchor } from '../../lib/anchor-system-keys'
 
 export interface DailyReportShippedOrderLine {
   orderNo: string
@@ -25,6 +26,9 @@ export interface DailyReportShippedOrderLine {
 }
 
 export interface DailyReportAnchorRow extends AnchorLivePeriodView {
+  anchorId?: string
+  systemKey?: string | null
+  attributionMode?: string | null
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -334,6 +338,10 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
   const photoGridCols = readyPhotos.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'
   const photoCellHeight = readyPhotos.length <= 2 ? 'min-h-[480px]' : 'min-h-[360px]'
   const sheetWidthClass = readyPhotos.length > 0 ? 'w-[960px]' : 'w-[700px]'
+  /** 防御：即使后端旧缓存仍带 YIFAN_MANUAL，图片侧也不渲染；禁止用展示名过滤 */
+  const visibleAnchors = (data.anchors ?? []).filter(
+    (row) => !isOfflineOnlyAnchor({ systemKey: row.systemKey }),
+  )
 
   return (
     <div
@@ -344,6 +352,9 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
     >
       <div className="text-center">
         <h1 className="text-[22px] font-bold tracking-wide text-slate-900">{data.title}</h1>
+        <p className="mt-1 text-[12px] text-slate-500">
+          本日报统计线上直播经营数据，线下成交请在主播业绩页的「线下 GMV」中查看。
+        </p>
       </div>
 
       <div className="mt-5 rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50/80 to-white p-5">
@@ -416,15 +427,15 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
       <div className="mt-4">
         <AnchorTrendCompareChart
           variant="report"
-          rows={toCompareLeaderboardRows(data.anchors)}
+          rows={toCompareLeaderboardRows(visibleAnchors)}
           formatMoney={(v) => formatMoney(v)}
           formatCount={(n) => formatOrderCount(n)}
         />
       </div>
 
       <div className="mt-4 space-y-3">
-        {data.anchors.map((row) => (
-            <AnchorCard key={`${row.anchorName}-${row.sessionLabel}`} row={row} />
+        {visibleAnchors.map((row) => (
+            <AnchorCard key={`${row.anchorName}-${row.sessionLabel}-${row.systemKey ?? ''}`} row={row} />
         ))}
       </div>
 

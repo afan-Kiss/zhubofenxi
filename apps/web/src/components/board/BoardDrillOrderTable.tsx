@@ -40,8 +40,8 @@ interface Props {
   loading?: boolean
   emptyText?: string
   listKey?: string
-  /** 买家 Drawer 明细表：拆分金额列 */
-  variant?: 'board' | 'buyer'
+  /** 买家 Drawer 明细表：拆分金额列；offline：线下成交下钻（无直播号/场次/改归属） */
+  variant?: 'board' | 'buyer' | 'offline'
   headerRefundOrderCount?: number
   /** 已签收金额抽屉：主金额列展示 signedAmount */
   amountMode?: 'default' | 'signed'
@@ -87,12 +87,15 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
   const { formatMoney } = useAmountDisplay()
   const blacklistSet = useMemo(() => new Set(blacklistedBuyerIds), [blacklistedBuyerIds])
   const isBuyer = variant === 'buyer'
-  const showManualAssign = Boolean(manualAnchorAssign)
+  const isOffline = variant === 'offline'
+  const showManualAssign = Boolean(manualAnchorAssign) && !isOffline
   const columnCount = isBuyer
     ? BUYER_COLUMN_COUNT
-    : showManualAssign
-      ? BOARD_COLUMN_COUNT_WITH_ASSIGN
-      : BOARD_COLUMN_COUNT
+    : isOffline
+      ? 8
+      : showManualAssign
+        ? BOARD_COLUMN_COUNT_WITH_ASSIGN
+        : BOARD_COLUMN_COUNT
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
 
   const showCardsOnDesktop = viewMode === 'cards'
@@ -159,11 +162,104 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
         blacklistedBuyerIds={blacklistedBuyerIds}
         className={cardClass}
         amountMode={amountMode}
-        manualAnchorAssign={manualAnchorAssign}
+        manualAnchorAssign={isOffline ? undefined : manualAnchorAssign}
+        offlineMode={isOffline}
       />
-      <div className={tableWrapClass}>{renderBoardTable()}</div>
+      <div className={tableWrapClass}>
+        {isOffline ? renderOfflineTable() : renderBoardTable()}
+      </div>
     </div>
   )
+
+  function renderOfflineTable() {
+    return (
+      <div className="max-h-[min(70dvh,680px)] overflow-auto rounded-2xl border border-rose-100/60 bg-white">
+        <table className="w-full min-w-[960px] text-left text-[11px]">
+          <thead className="sticky top-0 z-10 bg-rose-50/95 text-slate-500 shadow-[0_1px_0_rgba(244,63,94,0.08)]">
+            <tr>
+              <th className="whitespace-nowrap px-2 py-2">线下成交编号</th>
+              <th className="whitespace-nowrap px-2 py-2">成交时间</th>
+              <th className="whitespace-nowrap px-2 py-2">归属主播</th>
+              <th className="whitespace-nowrap px-2 py-2">客户/订单标识</th>
+              <th className="whitespace-nowrap px-2 py-2">支付金额</th>
+              <th className="whitespace-nowrap px-2 py-2">退款金额</th>
+              <th className="whitespace-nowrap px-2 py-2">净金额</th>
+              <th className="whitespace-nowrap px-2 py-2">状态 / 备注</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={columnCount}
+                  data-testid="drawer-empty-state"
+                  className="py-10 text-center text-slate-400"
+                >
+                  {emptyText}
+                </td>
+              </tr>
+            ) : (
+              rows.map((r, idx) => {
+                const pay = Number(r.merchantReceivableAmount ?? r.paymentBaseAmount ?? r.statPaidAmount ?? 0)
+                const refund = Number(r.refundAmount ?? r.productRefundAmount ?? 0)
+                const net = Math.round((pay - refund) * 100) / 100
+                return (
+                  <tr
+                    key={`${boardRowDisplayOrderNo(r)}-${idx}`}
+                    className="border-t border-slate-50 hover:bg-rose-50/30"
+                  >
+                    <td className="px-2 py-1.5">
+                      <div className="font-mono">
+                        {displayCell(r.offlineDealKey ?? boardRowDisplayOrderNo(r))}
+                      </div>
+                      <div className="mt-0.5 flex flex-wrap gap-1">
+                        <span className="rounded bg-indigo-50 px-1 py-0.5 text-[10px] text-indigo-700">
+                          线下成交
+                        </span>
+                        <span className="rounded bg-violet-50 px-1 py-0.5 text-[10px] text-violet-700">
+                          {formatAnchorDisplayName(r.anchorName)}
+                        </span>
+                        <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] text-amber-800">
+                          线下手动归属
+                        </span>
+                        <span className="rounded bg-emerald-50 px-1 py-0.5 text-[10px] text-emerald-700">
+                          已确认
+                        </span>
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5">
+                      {displayCell(r.payTime ?? r.orderTime)}
+                    </td>
+                    <td className="px-2 py-1.5">{formatAnchorDisplayName(r.anchorName)}</td>
+                    <td className="px-2 py-1.5">
+                      <BuyerDisplay
+                        nickname={
+                          displayCell(r.buyerNickname) === '—'
+                            ? '未知'
+                            : displayCell(r.buyerNickname)
+                        }
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 font-medium">{formatMoney(pay)}</td>
+                    <td className="px-2 py-1.5 text-rose-600">{formatMoney(refund)}</td>
+                    <td className="px-2 py-1.5">{formatMoney(net)}</td>
+                    <td className="px-2 py-1.5">
+                      <div>{displayCell(r.orderStatus)}</div>
+                      {r.attributedBy ? (
+                        <div className="mt-0.5 text-[10px] text-slate-500">
+                          操作人：{String(r.attributedBy)}
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
 
   function renderBuyerTable() {
     return (

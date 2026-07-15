@@ -24,6 +24,7 @@ function todayShanghaiInput(): string {
   return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
 }
 
+/** 仅按钮；展开后显示录入表单。用于放在日期栏「自定义」右侧。 */
 export const OfflineDealEntryPanel: React.FC<{
   defaultAnchorName?: string
   onCreated?: () => void
@@ -107,28 +108,28 @@ export const OfflineDealEntryPanel: React.FC<{
   }
 
   return (
-    <div className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-semibold text-slate-900">线下成交录入</h3>
-          <p className="mt-0.5 text-xs text-slate-500">
-            已确认的线下成交固定归属逸凡，并计入总支付金额与该主播 GMV（自生效日起）。
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="rounded-lg border border-indigo-200 bg-white px-3 py-1.5 text-xs font-medium text-indigo-700"
-        >
-          {open ? '收起' : '录入线下成交'}
-        </button>
-      </div>
+    <div className="relative shrink-0" data-testid="offline-deal-entry">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${
+          open
+            ? 'border-indigo-300 bg-indigo-50 text-indigo-800'
+            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+        }`}
+      >
+        {open ? '收起录入' : '线下录入'}
+      </button>
 
       {open ? (
-        <div className="mt-3 space-y-3">
+        <div className="absolute right-0 z-30 mt-2 w-[min(100vw-2rem,28rem)] rounded-xl border border-slate-200 bg-white p-3 shadow-lg sm:w-[28rem]">
+          <p className="text-[11px] text-slate-500">
+            线下成交固定归属逸凡，自 2026-07-14 起计入总支付与线下 GMV。
+          </p>
+
           {flash ? (
             <p
-              className={`rounded-lg border px-2 py-1 text-xs ${
+              className={`mt-2 rounded-lg border px-2 py-1 text-xs ${
                 flash.type === 'error'
                   ? 'border-red-200 bg-red-50 text-red-800'
                   : 'border-emerald-200 bg-emerald-50 text-emerald-800'
@@ -138,7 +139,7 @@ export const OfflineDealEntryPanel: React.FC<{
             </p>
           ) : null}
 
-          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
             <label className="text-xs text-slate-600">
               成交金额（元）*
               <input
@@ -161,7 +162,7 @@ export const OfflineDealEntryPanel: React.FC<{
                     : '系统线下主播未就绪'}
               </div>
             </label>
-            <label className="text-xs text-slate-600">
+            <label className="text-xs text-slate-600 sm:col-span-2">
               成交时间*
               <input
                 type="datetime-local"
@@ -180,15 +181,6 @@ export const OfflineDealEntryPanel: React.FC<{
               />
             </label>
             <label className="text-xs text-slate-600">
-              外部单号 / 幂等键
-              <input
-                value={externalKey}
-                onChange={(e) => setExternalKey(e.target.value)}
-                className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
-                placeholder="可选"
-              />
-            </label>
-            <label className="text-xs text-slate-600">
               状态
               <select
                 value={status}
@@ -199,7 +191,16 @@ export const OfflineDealEntryPanel: React.FC<{
                 <option value="draft">草稿</option>
               </select>
             </label>
-            <label className="text-xs text-slate-600 sm:col-span-2 lg:col-span-3">
+            <label className="text-xs text-slate-600 sm:col-span-2">
+              外部单号 / 幂等键
+              <input
+                value={externalKey}
+                onChange={(e) => setExternalKey(e.target.value)}
+                className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                placeholder="可选"
+              />
+            </label>
+            <label className="text-xs text-slate-600 sm:col-span-2">
               备注
               <input
                 value={note}
@@ -214,7 +215,7 @@ export const OfflineDealEntryPanel: React.FC<{
             type="button"
             disabled={!canSubmit}
             onClick={() => void submit()}
-            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            className="mt-3 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
             {saving ? '提交中…' : '确认录入'}
           </button>

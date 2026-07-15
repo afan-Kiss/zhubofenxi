@@ -12,6 +12,8 @@ interface Props {
   onQuery?: () => void
   customQueried?: boolean
   showCustomQuery?: boolean
+  /** 放在「自定义」右侧，例如线下录入按钮 */
+  trailing?: React.ReactNode
 }
 
 export const RangeBar: React.FC<Props> = ({
@@ -24,6 +26,7 @@ export const RangeBar: React.FC<Props> = ({
   onQuery,
   customQueried,
   showCustomQuery = true,
+  trailing,
 }) => {
   const validCustom = Boolean(customStart && customEnd && customStart <= customEnd)
 
@@ -31,15 +34,18 @@ export const RangeBar: React.FC<Props> = ({
 
   return (
     <div className="flex flex-col gap-2.5">
-      <div className="rounded-2xl border border-slate-100/90 bg-white/90 p-1.5 shadow-sm">
-        <AnimatedTabs
-          items={tabItems}
-          activeKey={preset}
-          onChange={(key) => onPreset(key as BoardRangePreset)}
-          variant="pills"
-          compactMobile
-          testIdPrefix="range-preset"
-        />
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="min-w-0 flex-1 rounded-2xl border border-slate-100/90 bg-white/90 p-1.5 shadow-sm">
+          <AnimatedTabs
+            items={tabItems}
+            activeKey={preset}
+            onChange={(key) => onPreset(key as BoardRangePreset)}
+            variant="pills"
+            compactMobile
+            testIdPrefix="range-preset"
+          />
+        </div>
+        {trailing ? <div className="shrink-0">{trailing}</div> : null}
       </div>
       {preset === 'custom' && (
         <div className="board-custom-panel-enter flex flex-col gap-2 rounded-xl border border-slate-100 bg-white p-3 text-xs sm:flex-row sm:flex-wrap sm:items-center">

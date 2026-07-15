@@ -621,10 +621,7 @@ export const AnchorPerformanceTab: React.FC = () => {
         onCustomEnd={setCustomEnd}
         customQueried={customQueried}
         onQuery={() => setCustomQueried(true)}
-      />
-      <OfflineDealEntryPanel
-        defaultAnchorName={selectedIsManual || anchorFilter !== '全部' ? anchorFilter : undefined}
-        onCreated={() => void reload()}
+        trailing={<OfflineDealEntryPanel onCreated={() => void reload()} />}
       />
       {showMetrics ? (
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">

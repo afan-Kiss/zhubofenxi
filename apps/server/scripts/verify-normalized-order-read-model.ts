@@ -55,15 +55,9 @@ async function main() {
     where: buildOrderRangeDbWhere(range),
     select: { id: true },
   })
-  const legacyIds = new Set(legacyRows.map((r) => r.id))
-  const hybridIds = new Set(hybridRows.map((r) => r.id))
+  console.log('db prefilter sizes', { legacy: legacyRows.length, hybrid: hybridRows.length })
 
-  // 混合预筛应为旧预筛的超集（含 paymentTime 命中且 orderTime 较远的行）或在回填前近似相等
-  for (const id of legacyIds) {
-    assert.ok(hybridIds.has(id), `hybrid missing legacy id ${id}`)
-  }
-  console.log('ok hybrid ⊇ legacy', { legacy: legacyIds.size, hybrid: hybridIds.size })
-
+  // 回填后 hybrid 会按 paymentTime 收窄，不必再是 legacy 超集；只要求支付口径结果一致。
   const legacyPayMatched = legacyRows
     .map((row) =>
       normalizeXhsOrderPackage(asRecord(row.rawJson), 1, {
@@ -101,6 +95,7 @@ async function main() {
     orders: a.size,
     gmvCent: gmvA,
     range: `${range.startDate}~${range.endDate}`,
+    hybridNarrowed: hybridRows.length < legacyRows.length,
   })
 
   console.log('verify:normalized-order-read-model PASS')

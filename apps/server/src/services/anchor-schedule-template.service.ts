@@ -268,28 +268,8 @@ export async function upsertScheduleTemplateSeed(seed: ScheduleTemplateSeed): Pr
     return 'created'
   }
 
-  const needsUpdate =
-    existing.endTime !== seed.endTime ||
-    existing.liveRoomName !== seed.liveRoomName ||
-    existing.effectiveTo !== seed.effectiveTo ||
-    existing.sortOrder !== seed.sortOrder ||
-    (existing.note ?? '') !== (seed.note ?? '') ||
-    !existing.enabled
-
-  if (!needsUpdate) return 'unchanged'
-
-  await prisma.anchorScheduleTemplate.update({
-    where: { id: existing.id },
-    data: {
-      endTime: seed.endTime,
-      liveRoomName: seed.liveRoomName,
-      effectiveTo: seed.effectiveTo,
-      sortOrder: seed.sortOrder,
-      note: seed.note ?? null,
-      enabled: true,
-    },
-  })
-  return 'updated'
+  // 已有行不再被种子静默覆盖（设置页可手改主播/班次/直播间；强制修复走 repair 脚本）
+  return 'unchanged'
 }
 
 export async function repairScheduleTemplatesFrom20260701(options?: {

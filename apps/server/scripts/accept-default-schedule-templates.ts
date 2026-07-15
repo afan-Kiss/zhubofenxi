@@ -62,7 +62,7 @@ async function main() {
           },
     ),
   })
-  assert.equal(mid.templates[0]?.note, '验收备注')
+  assert.equal(mid.templates.find((t) => t.id === first.id)?.note, '验收备注')
 
   await saveCurrentDefaultTemplates({
     asOfDate: before.date,
@@ -79,12 +79,13 @@ async function main() {
     })),
   })
   const after = await listCurrentDefaultTemplatesForAdmin(before.date)
-  assert.equal(after.templates[0]?.note, first.note)
+  assert.equal(after.templates.find((t) => t.id === first.id)?.note, first.note)
   console.log(
     JSON.stringify({
       date: before.date,
       count: before.templates.length,
       sample: before.templates.map((t) => `${t.anchorName} ${t.startTime}-${t.endTime} ${t.liveRoomName}`),
+      noteRoundTrip: after.templates.find((t) => t.id === first.id)?.note ?? null,
     }),
   )
   console.log('PASS accept-default-schedule-templates')

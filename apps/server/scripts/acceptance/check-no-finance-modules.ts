@@ -18,6 +18,7 @@ const ALLOWED_PRIMARY_ROUTES = new Set([
   '/buyers',
   '/operations-report',
   '/good-reviews',
+  '/refund-analysis',
   '/data-health',
   '/boss-dashboard',
   '/lucky-gifts',

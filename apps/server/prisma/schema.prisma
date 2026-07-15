@@ -1419,3 +1419,58 @@ model BusinessDataGeneration {
   qualityGeneration        Int      @default(1)
   updatedAt                DateTime @updatedAt
 }
+
+/// 退款分析：客服会话缓存
+model CsChatSession {
+  id              String   @id
+  shopTitle       String
+  appCid          String
+  buyerNick       String?
+  modifyTime      BigInt?
+  createAt        BigInt?
+  messageCount    Int      @default(0)
+  lastMessageText String?
+  lastMessageAt   BigInt?
+  hasImage        Boolean  @default(false)
+  refundMention   Boolean  @default(false)
+  syncedAt        DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdAt       DateTime @default(now())
+
+  @@unique([shopTitle, appCid])
+  @@index([shopTitle, modifyTime])
+  @@index([modifyTime])
+  @@index([refundMention])
+}
+
+/// 退款分析：客服消息缓存
+model CsChatMessage {
+  id            String   @id
+  sessionId     String
+  shopTitle     String
+  appCid        String
+  msgId         String
+  buyerNick     String?
+  contentType   String   @default("text")
+  text          String?
+  imageUrlsJson String   @default("[]")
+  thumbUrl      String?
+  senderType    String?
+  createAt      BigInt?
+  syncedAt      DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  createdAt     DateTime @default(now())
+
+  @@unique([shopTitle, msgId])
+  @@index([sessionId, createAt])
+  @@index([shopTitle, appCid])
+}
+
+/// 退款分析：同步元数据
+model CsChatSyncMeta {
+  id           String    @id @default("default")
+  lastSyncedAt DateTime?
+  source       String?
+  summaryJson  String?
+  updatedAt    DateTime  @updatedAt
+}

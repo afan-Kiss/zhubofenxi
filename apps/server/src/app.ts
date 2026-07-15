@@ -28,6 +28,7 @@ import { boardRouter } from './routes/board.routes'
 import { debugRouter } from './routes/debug.routes'
 import { qualityBadCasesRouter } from './routes/quality-bad-cases.routes'
 import { goodReviewsRouter } from './routes/good-reviews.routes'
+import { refundAnalysisRouter } from './routes/refund-analysis.routes'
 import { luckyGiftsRouter } from './routes/lucky-gifts.routes'
 import { shopCookiesRouter } from './routes/shop-cookies.routes'
 import { anchorPerformanceRouter } from './routes/anchor-performance.routes'
@@ -112,6 +113,7 @@ export function createApp() {
   app.use('/api/board', boardRouter)
   app.use('/api/quality-bad-cases', qualityBadCasesRouter)
   app.use('/api/good-reviews', goodReviewsRouter)
+  app.use('/api/refund-analysis', refundAnalysisRouter)
   app.use('/api/board/lucky-gifts', luckyGiftsRouter)
   app.use('/api/shop-cookies', shopCookiesRouter)
   app.use('/api/anchor-schedules', anchorSchedulesRouter)

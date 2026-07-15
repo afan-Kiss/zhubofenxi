@@ -10,6 +10,7 @@ import {
   ThumbsUp,
   Briefcase,
   Gift,
+  MessageSquareWarning,
 } from 'lucide-react'
 import { PageRequestStatusBar } from './board/PageRequestStatusBar'
 import { CookieHealthWatcher } from './board/CookieHealthWatcher'
@@ -82,6 +83,13 @@ const ALL_NAV: Array<{
     icon: ThumbsUp,
     dataTestId: 'tab-good-reviews',
     permission: 'good_reviews',
+  },
+  {
+    to: '/refund-analysis',
+    label: '退款分析',
+    icon: MessageSquareWarning,
+    dataTestId: 'tab-refund-analysis',
+    permission: 'refund_analysis',
   },
   {
     to: '/boss-dashboard',

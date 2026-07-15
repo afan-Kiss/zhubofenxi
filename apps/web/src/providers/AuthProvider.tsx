@@ -25,6 +25,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     buyers: true,
     operations_report: true,
     good_reviews: true,
+    refund_analysis: true,
     boss_dashboard: true,
     lucky_gifts: true,
     settings: true,

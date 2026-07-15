@@ -5,6 +5,7 @@ export const PAGE_PERMISSION_KEYS = [
   'lucky_gifts',
   'operations_report',
   'good_reviews',
+  'refund_analysis',
   'boss_dashboard',
   'settings',
 ] as const
@@ -18,6 +19,7 @@ export const PAGE_PERMISSION_LABELS: Record<PagePermissionKey, string> = {
   lucky_gifts: '福袋发货',
   operations_report: '运营报表',
   good_reviews: '好评中心',
+  refund_analysis: '退款分析',
   boss_dashboard: '老板查看',
   settings: '系统设置',
 }
@@ -29,6 +31,7 @@ export const PAGE_PERMISSION_ROUTES: Record<PagePermissionKey, string> = {
   lucky_gifts: '/lucky-gifts',
   operations_report: '/operations-report',
   good_reviews: '/good-reviews',
+  refund_analysis: '/refund-analysis',
   boss_dashboard: '/boss-dashboard',
   settings: '/settings',
 }

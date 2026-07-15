@@ -8,6 +8,7 @@ export const PAGE_PERMISSION_KEYS = [
   'lucky_gifts',
   'operations_report',
   'good_reviews',
+  'refund_analysis',
   'boss_dashboard',
   'settings',
 ] as const
@@ -21,6 +22,7 @@ export const PAGE_PERMISSION_LABELS: Record<PagePermissionKey, string> = {
   lucky_gifts: '福袋发货',
   operations_report: '运营报表',
   good_reviews: '好评中心',
+  refund_analysis: '退款分析',
   boss_dashboard: '老板查看',
   settings: '系统设置',
 }
@@ -34,6 +36,7 @@ const ALL_TRUE: Record<PagePermissionKey, boolean> = {
   lucky_gifts: true,
   operations_report: true,
   good_reviews: true,
+  refund_analysis: true,
   boss_dashboard: true,
   settings: true,
 }
@@ -47,6 +50,7 @@ export const DEFAULT_ROLE_PAGE_PERMISSIONS: RolePagePermissions = {
     lucky_gifts: true,
     operations_report: true,
     good_reviews: true,
+    refund_analysis: true,
     boss_dashboard: true,
     settings: false,
   },
@@ -57,6 +61,7 @@ export const DEFAULT_ROLE_PAGE_PERMISSIONS: RolePagePermissions = {
     lucky_gifts: true,
     operations_report: false,
     good_reviews: true,
+    refund_analysis: true,
     boss_dashboard: false,
     settings: false,
   },

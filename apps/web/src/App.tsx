@@ -22,10 +22,24 @@ const GoodReviewsPage = React.lazy(() =>
   import('./pages/good-reviews/GoodReviewsPage').then((m) => ({ default: m.GoodReviewsPage })),
 )
 
+const RefundAnalysisPage = React.lazy(() =>
+  import('./pages/refund-analysis/RefundAnalysisPage').then((m) => ({
+    default: m.RefundAnalysisPage,
+  })),
+)
+
 function GoodReviewsPageFallback(): React.ReactElement {
   return (
     <div className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-white px-4 py-8 text-sm text-slate-500">
       正在打开好评中心...
+    </div>
+  )
+}
+
+function RefundAnalysisPageFallback(): React.ReactElement {
+  return (
+    <div className="flex items-center gap-2 rounded-2xl border border-slate-100 bg-white px-4 py-8 text-sm text-slate-500">
+      正在打开退款分析...
     </div>
   )
 }
@@ -60,6 +74,14 @@ const App: React.FC = () => {
                   element={
                     <Suspense fallback={<GoodReviewsPageFallback />}>
                       <GoodReviewsPage />
+                    </Suspense>
+                  }
+                />
+                <Route
+                  path="refund-analysis"
+                  element={
+                    <Suspense fallback={<RefundAnalysisPageFallback />}>
+                      <RefundAnalysisPage />
                     </Suspense>
                   }
                 />

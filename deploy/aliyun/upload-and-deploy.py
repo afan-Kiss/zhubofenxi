@@ -42,7 +42,10 @@ DB_OVERWRITE_CONFIRM = "YES_I_KNOW_THIS_WILL_OVERWRITE_PRODUCTION_DB"
 FORCED_LOCAL_DB_REMOTE = "/tmp/zhubo-upload/forced-local-app.db"
 MIN_PRESERVE_DB_BYTES = 5 * 1024 * 1024
 DB_BACKUP_DIR = "/www/backups/zhubo-analysis-db"
-MIN_DB_BACKUP_KEEP_WITH_ORDERS = 20
+# 有订单的库快照只留最近几份，避免撑盘
+MIN_DB_BACKUP_KEEP_WITH_ORDERS = 5
+# 全量目录备份（已改为轻量、排除 node_modules）只留最近几份
+MIN_FULL_DIR_BACKUP_KEEP = 2
 
 
 def load_ssh_pass() -> str:
@@ -298,6 +301,7 @@ FORCED_LOCAL_DB={FORCED_LOCAL_DB_REMOTE}
 MIN_PRESERVE_DB_BYTES={MIN_PRESERVE_DB_BYTES}
 DB_BACKUP_DIR={DB_BACKUP_DIR}
 MIN_DB_BACKUP_KEEP_WITH_ORDERS={MIN_DB_BACKUP_KEEP_WITH_ORDERS}
+MIN_FULL_DIR_BACKUP_KEEP={MIN_FULL_DIR_BACKUP_KEEP}
 rm -f /tmp/zhubo-upload/app.db "$PRESERVE_DB" "$PRESERVE_ENV"
 rm -rf "$PRESERVE_REPORT_IMAGES"
 mkdir -p "$DB_BACKUP_DIR"
@@ -368,6 +372,13 @@ backup_production_db_with_stats() {{
 
 prune_db_backups() {{
   local keep=0
+  # 清理 .backup 产生的旁路文件与空订单快照
+  rm -f "$DB_BACKUP_DIR"/*.db-wal "$DB_BACKUP_DIR"/*.db-shm 2>/dev/null || true
+  for f in "$DB_BACKUP_DIR"/app.db.*.orders-0.*.db; do
+    [ -f "$f" ] || continue
+    rm -f "$f"
+    echo "Pruned empty-orders backup: $f"
+  done
   for f in $(ls -t "$DB_BACKUP_DIR"/app.db.*.orders-*.db 2>/dev/null); do
     local orders
     orders=$(echo "$f" | sed -n 's/.*orders-\\([0-9]*\\).*/\\1/p')
@@ -377,6 +388,20 @@ prune_db_backups() {{
         rm -f "$f"
         echo "Pruned old non-empty backup: $f"
       fi
+    else
+      rm -f "$f"
+      echo "Pruned empty-orders backup: $f"
+    fi
+  done
+}}
+
+prune_full_dir_backups() {{
+  local keep=0
+  for d in $(ls -dt /www/wwwroot/zhubo-analysis-backup-* 2>/dev/null); do
+    keep=$((keep + 1))
+    if [ "$keep" -gt "$MIN_FULL_DIR_BACKUP_KEEP" ]; then
+      rm -rf "$d"
+      echo "Pruned old full-dir backup: $d"
     fi
   done
 }}
@@ -399,9 +424,34 @@ if [ -d "$DEPLOY_DIR/apps/server/data/daily-report-images" ]; then
 fi
 if [ -d "$DEPLOY_DIR" ] && [ "$(ls -A "$DEPLOY_DIR" 2>/dev/null | wc -l)" -gt 0 ]; then
   ts=$(date +%Y%m%d-%H%M%S)
-  cp -a "$DEPLOY_DIR" "/www/wwwroot/zhubo-analysis-backup-$ts"
+  # 轻量代码备份：排除 node_modules 与库文件（库已单独 .backup）
+  mkdir -p "/www/wwwroot/zhubo-analysis-backup-$ts"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a \
+      --exclude 'node_modules' \
+      --exclude '**/node_modules' \
+      --exclude 'apps/server/data/*.db' \
+      --exclude 'apps/server/data/*.db-wal' \
+      --exclude 'apps/server/data/*.db-shm' \
+      --exclude 'apps/server/data/good-review-image-cache' \
+      --exclude 'apps/server/data/downloads' \
+      --exclude 'apps/server/data/board-snapshots' \
+      "$DEPLOY_DIR/" "/www/wwwroot/zhubo-analysis-backup-$ts/"
+  else
+    cp -a "$DEPLOY_DIR" "/www/wwwroot/zhubo-analysis-backup-$ts.tmp"
+    rm -rf "/www/wwwroot/zhubo-analysis-backup-$ts.tmp/node_modules" \
+      "/www/wwwroot/zhubo-analysis-backup-$ts.tmp/apps/web/node_modules" \
+      "/www/wwwroot/zhubo-analysis-backup-$ts.tmp/apps/server/node_modules" 2>/dev/null || true
+    rm -f "/www/wwwroot/zhubo-analysis-backup-$ts.tmp/apps/server/data/"*.db \
+      "/www/wwwroot/zhubo-analysis-backup-$ts.tmp/apps/server/data/"*.db-wal \
+      "/www/wwwroot/zhubo-analysis-backup-$ts.tmp/apps/server/data/"*.db-shm 2>/dev/null || true
+    rm -rf "/www/wwwroot/zhubo-analysis-backup-$ts"
+    mv "/www/wwwroot/zhubo-analysis-backup-$ts.tmp" "/www/wwwroot/zhubo-analysis-backup-$ts"
+  fi
   echo "$ts" > /www/wwwroot/.zhubo-analysis-last-backup-name
   echo "/www/wwwroot/zhubo-analysis-backup-$ts" > /www/wwwroot/.zhubo-analysis-last-backup
+  prune_full_dir_backups
+  echo "Created lightweight code backup (no node_modules/db): zhubo-analysis-backup-$ts"
 fi
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"

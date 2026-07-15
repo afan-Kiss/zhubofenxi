@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>近两个月退款真实原因分析</title>
+<style>
+:root {
+  --bg:#f2efe9;
+  --paper:#fffdf9;
+  --ink:#211f1b;
+  --muted:#726b61;
+  --line:#e9e0d3;
+  --gold:#9a7135;
+  --gold2:#d5b47d;
+  --red:#a9463f;
+  --green:#356b57;
+  --blue:#536b7f;
+  --soft:#f8f3eb;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0;
+  color:var(--ink);
+  background:
+    radial-gradient(circle at 5% 0,rgba(154,113,53,.11),transparent 25%),
+    radial-gradient(circle at 100% 90%,rgba(83,107,127,.08),transparent 26%),
+    var(--bg);
+  font-family:"Microsoft YaHei","PingFang SC","Noto Sans CJK SC",Arial,sans-serif;
+}
+.report{
+  width:min(1240px,calc(100% - 16px));
+  margin:12px auto 24px;
+  background:var(--paper);
+  border:1px solid var(--line);
+  border-radius:22px;
+  overflow:hidden;
+  box-shadow:0 22px 70px rgba(51,42,32,.12);
+}
+.hero{
+  padding:42px 46px 34px;
+  background:linear-gradient(135deg,#fffdfa 0%,#f4e8d5 100%);
+  border-bottom:1px solid var(--line);
+  position:relative;
+}
+.hero:after{
+  content:"";
+  position:absolute;right:35px;top:32px;width:130px;height:130px;
+  border:1px solid rgba(154,113,53,.22);border-radius:50%;
+}
+.kicker{font-size:12px;letter-spacing:.24em;color:var(--gold);font-weight:800}
+h1{font-size:38px;margin:12px 0 12px;line-height:1.22;letter-spacing:-.03em}
+.hero p{font-size:16px;line-height:1.8;color:#5e574e;max-width:970px;margin:0}
+.hero .warning{
+  display:inline-block;margin-top:16px;padding:9px 13px;border-radius:9px;
+  background:#fff7e6;border:1px solid #ead3a8;color:#715020;font-size:13px;
+}
+main{padding:30px 46px 42px}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:13px}
+.metric{border:1px solid var(--line);background:#fff;border-radius:15px;padding:18px 18px 16px}
+.metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}
+.metric b{font-size:27px;display:block;letter-spacing:-.02em}
+.metric small{display:block;color:var(--muted);font-size:11px;line-height:1.55;margin-top:7px}
+.metric.highlight b{color:var(--red)}
+.metric.good b{color:var(--green)}
+.section-title{
+  margin:31px 0 15px;font-size:23px;font-weight:850;
+  display:flex;align-items:center;gap:10px;
+}
+.section-title:before{content:"";width:5px;height:24px;border-radius:5px;background:var(--gold)}
+.executive{
+  display:grid;grid-template-columns:1.1fr .9fr;gap:14px;margin-top:18px;
+}
+.panel{background:#fff;border:1px solid var(--line);border-radius:16px;padding:20px}
+.panel h2{font-size:18px;margin:0 0 11px}
+.panel p{margin:7px 0;color:#514b43;line-height:1.75;font-size:14px}
+.panel strong{color:var(--red)}
+.big-callout{
+  background:linear-gradient(135deg,#2b2925,#41392f);color:#fff;
+  border:0;display:flex;flex-direction:column;justify-content:center;
+}
+.big-callout b{font-size:38px;color:#efd6a8}
+.big-callout p{color:#efe9e0}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.chart{border:1px solid var(--line);border-radius:17px;background:#fff;padding:20px}
+.chart h3{font-size:17px;margin:0}
+.chart .sub{font-size:12px;color:var(--muted);margin:6px 0 18px;line-height:1.6}
+.bar-row{
+  display:grid;grid-template-columns:minmax(190px,1.7fr) minmax(130px,2.2fr) 92px;
+  align-items:center;gap:10px;margin:11px 0;
+}
+.bar-label b{display:block;font-size:12px;line-height:1.35}
+.bar-label span{display:block;font-size:10px;color:var(--muted);margin-top:3px}
+.bar-track{height:13px;border-radius:99px;background:#eee8df;overflow:hidden}
+.bar-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#9a7135,#d4b57e)}
+.bar-fill.amount{background:linear-gradient(90deg,#536b7f,#92a4b1)}
+.bar-fill.rank-1{filter:saturate(1.25)}
+.bar-value{font-weight:800;font-size:13px;text-align:right}
+.money-value{font-size:11px}
+.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:16px;background:#fff}
+table{width:100%;border-collapse:collapse;min-width:850px}
+th,td{padding:13px 12px;border-bottom:1px solid #eee7de;text-align:right;font-size:13px;vertical-align:top}
+th{background:#f7f1e8;color:#5d554b;font-size:12px}
+th:first-child,td:first-child{text-align:left}
+td small{display:block;color:var(--muted);font-size:11px;margin-top:5px;line-height:1.5}
+tr:last-child td{border-bottom:0}
+.shop-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:13px}
+.shop-card{border:1px solid var(--line);border-radius:15px;padding:18px;background:#fff}
+.shop-head{display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.shop-head h3{font-size:18px;margin:0}
+.shop-head span{font-size:12px;color:var(--gold);font-weight:750}
+.shop-card p{font-size:13px;line-height:1.7;margin:10px 0 0;color:#514b43}
+.shop-card .advice{padding-top:9px;border-top:1px dashed var(--line)}
+.compare-note{
+  margin-bottom:13px;padding:15px 17px;border-radius:13px;
+  background:#fff5ed;border:1px solid #efd3c3;color:#6a3f2d;font-size:13px;line-height:1.7;
+}
+.actions{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.action-card{
+  display:flex;gap:14px;border:1px solid var(--line);border-radius:15px;padding:17px;background:#fff;
+}
+.action-card>span{
+  flex:0 0 38px;height:38px;border-radius:50%;display:grid;place-items:center;
+  background:#f1e5d2;color:var(--gold);font-weight:850;font-size:12px;
+}
+.action-card h3{font-size:15px;margin:1px 0 7px}
+.action-card p{font-size:13px;line-height:1.65;color:#5a534b;margin:0}
+.method{
+  margin-top:23px;border-left:5px solid var(--green);background:#eef6f1;
+  border-radius:12px;padding:16px 18px;font-size:13px;line-height:1.75;color:#365548;
+}
+.footer{
+  padding:21px 46px 28px;border-top:1px solid var(--line);
+  color:var(--muted);font-size:12px;line-height:1.8;background:#fbf8f3;
+}
+.print-btn{
+  position:fixed;right:22px;bottom:22px;border:0;border-radius:999px;
+  padding:12px 18px;background:#292621;color:#fff;font-weight:750;cursor:pointer;
+  box-shadow:0 10px 28px rgba(0,0,0,.18);
+}
+@media(max-width:950px){
+  .metrics{grid-template-columns:repeat(2,1fr)}
+  .chart-grid,.executive,.shop-grid,.actions{grid-template-columns:1fr}
+}
+@media(max-width:620px){
+  .report{width:calc(100% - 12px);margin:6px auto;border-radius:14px}
+  .hero,main,.footer{padding-left:18px;padding-right:18px}
+  h1{font-size:29px}
+  .metrics{grid-template-columns:1fr}
+  .bar-row{grid-template-columns:145px 1fr 65px;gap:7px}
+  .bar-label b{font-size:11px}
+}
+@media print{
+  body{background:#fff}
+  .report{width:100%;margin:0;border:0;box-shadow:none}
+  .print-btn{display:none}
+  .chart-grid,.shop-grid,.actions{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<article class="report">
+  <header class="hero">
+    <div class="kicker">REFUND ROOT CAUSE · OWNER VIEW</div>
+    <h1>近两个月退款真实原因分析</h1>
+    <p>
+      这份报告不直接照搬平台退款选项，而是优先看顾客在聊天里真正说了什么，
+      再结合售后选择进行判断。目的是让老板看清：退款到底是尺寸、玉质、实物落差，
+      还是多拍后筛选，而不是把所有问题都笼统归到“不想要”。
+    </p>
+    <div class="warning">现有成功退款数据实际覆盖：2026年6月1日—7月6日，并非完整60天。</div>
+  </header>
+
+  <main>
+    <section class="metrics">
+      <div class="metric">
+        <span>全部成功退款</span>
+        <b>170 单</b>
+        <small>成功退款金额 ¥321,253.20</small>
+      </div>
+      <div class="metric good">
+        <span>有聊天依据的分析样本</span>
+        <b>130 单</b>
+        <small>覆盖全部成功退款订单 76.47%</small>
+      </div>
+      <div class="metric">
+        <span>本报告分析金额</span>
+        <b>¥264,535.30</b>
+        <small>覆盖全部成功退款金额 82.34%</small>
+      </div>
+      <div class="metric highlight">
+        <span>聊天没有说清原因</span>
+        <b>38 单</b>
+        <small>占分析样本 29.23%，这是当前最大的管理盲区</small>
+      </div>
+    </section>
+
+    <section class="executive">
+      <div class="panel">
+        <h2>老板先看这三个结论</h2>
+        <p>第一，退款并不只是顾客“随便不想要”。<strong>多拍后筛选、尺寸、玉质描述和实物观感</strong>四类合计77单。</p>
+        <p>第二，这四类涉及退款金额 <strong>¥186,271.00</strong>，占本次有聊天依据退款金额的 <strong>70.41%</strong>。</p>
+        <p>第三，38单聊天里没有留下真实原因。以后客服必须问清并记录，否则老板看不到问题到底出在主播、货品还是顾客个人。</p>
+      </div>
+      <div class="panel big-callout">
+        <span>最值得优先整改的金额覆盖</span>
+        <b>70.41%</b>
+        <p>多拍后筛选 + 尺寸不合适 + 玉质/描述不符 + 实物观感落差</p>
+      </div>
+    </section>
+
+    <div class="section-title">真实退款原因柱状图</div>
+    <section class="chart-grid">
+      <div class="chart">
+        <h3>按退款订单数</h3>
+        <p class="sub">每个订单只计算一次，优先采用顾客在聊天中的真实表达。</p>
+        
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>聊天未说明或只说“不想要”</b>
+        <span>38 单 · 29.23%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-1" style="width:100.00%"></div></div>
+      <div class="bar-value">38</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>拍错、重复下单或多拍后筛选</b>
+        <span>24 单 · 18.46%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-2" style="width:63.16%"></div></div>
+      <div class="bar-value">24</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>圈口或尺寸不合适</b>
+        <span>24 单 · 18.46%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-3" style="width:63.16%"></div></div>
+      <div class="bar-value">24</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>玉质、瑕疵或描述不符</b>
+        <span>18 单 · 13.85%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-4" style="width:47.37%"></div></div>
+      <div class="bar-value">18</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>实物观感不合预期</b>
+        <span>11 单 · 8.46%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-5" style="width:28.95%"></div></div>
+      <div class="bar-value">11</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>家人或送礼对象不喜欢</b>
+        <span>5 单 · 3.85%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-6" style="width:13.16%"></div></div>
+      <div class="bar-value">5</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>发错货、漏发或包装问题</b>
+        <span>3 单 · 2.31%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-6" style="width:7.89%"></div></div>
+      <div class="bar-value">3</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>客服或运费承诺影响体验</b>
+        <span>2 单 · 1.54%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-6" style="width:5.26%"></div></div>
+      <div class="bar-value">2</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>缺货或商家原因</b>
+        <span>2 单 · 1.54%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-6" style="width:5.26%"></div></div>
+      <div class="bar-value">2</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>纯运费或小额补偿</b>
+        <span>2 单 · 1.54%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-6" style="width:5.26%"></div></div>
+      <div class="bar-value">2</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>物流或收货安排</b>
+        <span>1 单 · 0.77%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill rank-6" style="width:2.63%"></div></div>
+      <div class="bar-value">1</div>
+    </div>
+    
+      </div>
+      <div class="chart">
+        <h3>按退款金额</h3>
+        <p class="sub">金额高不一定单数多，可用来判断老板应先解决哪类问题。</p>
+        
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>拍错、重复下单或多拍后筛选</b>
+        <span>¥68,368.00 · 25.84%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-1" style="width:100.00%"></div></div>
+      <div class="bar-value money-value">¥68,368.00</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>聊天未说明或只说“不想要”</b>
+        <span>¥62,482.50 · 23.62%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-2" style="width:91.39%"></div></div>
+      <div class="bar-value money-value">¥62,482.50</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>玉质、瑕疵或描述不符</b>
+        <span>¥54,566.00 · 20.63%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-3" style="width:79.81%"></div></div>
+      <div class="bar-value money-value">¥54,566.00</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>圈口或尺寸不合适</b>
+        <span>¥45,237.00 · 17.10%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-4" style="width:66.17%"></div></div>
+      <div class="bar-value money-value">¥45,237.00</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>实物观感不合预期</b>
+        <span>¥18,100.00 · 6.84%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-5" style="width:26.47%"></div></div>
+      <div class="bar-value money-value">¥18,100.00</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>家人或送礼对象不喜欢</b>
+        <span>¥8,726.00 · 3.30%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-6" style="width:12.76%"></div></div>
+      <div class="bar-value money-value">¥8,726.00</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>物流或收货安排</b>
+        <span>¥2,930.00 · 1.11%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-6" style="width:4.29%"></div></div>
+      <div class="bar-value money-value">¥2,930.00</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>发错货、漏发或包装问题</b>
+        <span>¥2,297.00 · 0.87%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-6" style="width:3.36%"></div></div>
+      <div class="bar-value money-value">¥2,297.00</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>客服或运费承诺影响体验</b>
+        <span>¥1,334.00 · 0.50%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-6" style="width:1.95%"></div></div>
+      <div class="bar-value money-value">¥1,334.00</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>缺货或商家原因</b>
+        <span>¥446.90 · 0.17%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-6" style="width:0.65%"></div></div>
+      <div class="bar-value money-value">¥446.90</div>
+    </div>
+    
+    <div class="bar-row">
+      <div class="bar-label">
+        <b>纯运费或小额补偿</b>
+        <span>¥47.90 · 0.02%</span>
+      </div>
+      <div class="bar-track"><div class="bar-fill amount rank-6" style="width:0.07%"></div></div>
+      <div class="bar-value money-value">¥47.90</div>
+    </div>
+    
+      </div>
+    </section>
+
+    <div class="section-title">各类原因详细构成</div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>真实原因</th>
+            <th>退款单数</th>
+            <th>单数占比</th>
+            <th>退款金额</th>
+            <th>金额占比</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td><strong>聊天未说明或只说“不想要”</strong><small>聊天里没有讲清真正原因，或只简单说退货、不想要。</small></td>
+        <td>38</td>
+        <td>29.23%</td>
+        <td>¥62,482.50</td>
+        <td>23.62%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>拍错、重复下单或多拍后筛选</strong><small>拍错、券用错、重复下单，或同时拍多件，收到后只留一件。</small></td>
+        <td>24</td>
+        <td>18.46%</td>
+        <td>¥68,368.00</td>
+        <td>25.84%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>圈口或尺寸不合适</strong><small>戴不上、太紧、太松、显得太大或太小。</small></td>
+        <td>24</td>
+        <td>18.46%</td>
+        <td>¥45,237.00</td>
+        <td>17.10%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>玉质、瑕疵或描述不符</strong><small>棉、纹、裂、结构、划痕、矿点、证书或材质与预期不一致。</small></td>
+        <td>18</td>
+        <td>13.85%</td>
+        <td>¥54,566.00</td>
+        <td>20.63%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>实物观感不合预期</strong><small>颜色、宽窄、厚薄、上手效果或实物感觉不喜欢。</small></td>
+        <td>11</td>
+        <td>8.46%</td>
+        <td>¥18,100.00</td>
+        <td>6.84%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>家人或送礼对象不喜欢</strong><small>本人能接受，但孩子、父母、婆婆或收礼人不喜欢。</small></td>
+        <td>5</td>
+        <td>3.85%</td>
+        <td>¥8,726.00</td>
+        <td>3.30%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>发错货、漏发或包装问题</strong><small>颜色发错、商品或卡片对不上、包装不稳妥等。</small></td>
+        <td>3</td>
+        <td>2.31%</td>
+        <td>¥2,297.00</td>
+        <td>0.87%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>客服或运费承诺影响体验</strong><small>答应退运费却迟迟未处理，顾客失去信任后直接退货。</small></td>
+        <td>2</td>
+        <td>1.54%</td>
+        <td>¥1,334.00</td>
+        <td>0.50%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>缺货或商家原因</strong><small>缺货、商品无法正常发出或商家侧原因。</small></td>
+        <td>2</td>
+        <td>1.54%</td>
+        <td>¥446.90</td>
+        <td>0.17%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>纯运费或小额补偿</strong><small>不是商品本身退货，单独处理运费或小额补偿。</small></td>
+        <td>2</td>
+        <td>1.54%</td>
+        <td>¥47.90</td>
+        <td>0.02%</td>
+      </tr>
+    
+      <tr>
+        <td><strong>物流或收货安排</strong><small>顾客临时外出、无法收货或物流安排不便。</small></td>
+        <td>1</td>
+        <td>0.77%</td>
+        <td>¥2,930.00</td>
+        <td>1.11%</td>
+      </tr>
+    </tbody>
+      </table>
+    </div>
+
+    <div class="section-title">为什么不能只看平台退款选项</div>
+    <div class="compare-note">
+      同一个平台选项，背后的经营问题可能完全不同。下面这些例子都来自顾客聊天内容，
+      报告未展示顾客姓名、账号和订单号。
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>平台选择</th>
+            <th>顾客聊天里的真实表达</th>
+            <th>本报告归类</th>
+          </tr>
+        </thead>
+        <tbody>
+      <tr>
+        <td>其他</td>
+        <td>顾客说“孩子看了觉得不好看”</td>
+        <td><strong>家人或送礼对象不喜欢</strong></td>
+      </tr>
+    
+      <tr>
+        <td>多拍/拍错/不想要</td>
+        <td>顾客明确说收到的颜色不是自己拍的颜色</td>
+        <td><strong>直播间展示和实物有微色差</strong></td>
+      </tr>
+    
+      <tr>
+        <td>多拍/拍错/不想要</td>
+        <td>顾客反复指出棉、纹、裂和结构比直播里明显</td>
+        <td><strong>玉质、瑕疵或描述不符</strong></td>
+      </tr>
+    
+      <tr>
+        <td>尺码/尺寸不合适</td>
+        <td>顾客说商品卡片和货品对不上，怀疑发错</td>
+        <td><strong>商品或信息错配</strong></td>
+      </tr>
+    </tbody>
+      </table>
+    </div>
+
+    <div class="section-title">四家店分别先抓什么</div>
+    <section class="shop-grid">
+      
+      <article class="shop-card">
+        <div class="shop-head">
+          <h3>拾玉居和田玉</h3>
+          <span>67 单 · ¥176,169.30</span>
+        </div>
+        <p><b>主要表现：</b>多拍后筛选 20 单、玉质/描述问题 11 单、原因未说清 18 单</p>
+        <p class="advice"><b>老板先抓：</b>先控制直播间多拍多退，再把棉、纹、裂、结构讲透。</p>
+      </article>
+    
+      <article class="shop-card">
+        <div class="shop-head">
+          <h3>XY祥钰珠宝</h3>
+          <span>39 单 · ¥52,849.00</span>
+        </div>
+        <p><b>主要表现：</b>尺寸问题 10 单、实物观感 8 单、原因未说清 9 单</p>
+        <p class="advice"><b>老板先抓：</b>重点做好圈口确认、自然光实拍和上手效果说明。</p>
+      </article>
+    
+      <article class="shop-card">
+        <div class="shop-head">
+          <h3>和田雅玉</h3>
+          <span>14 单 · ¥15,017.00</span>
+        </div>
+        <p><b>主要表现：</b>原因未说清 10 单、尺寸问题 3 单</p>
+        <p class="advice"><b>老板先抓：</b>先把每一单真实退款原因问清并记录，再针对性整改。</p>
+      </article>
+    
+      <article class="shop-card">
+        <div class="shop-head">
+          <h3>祥钰珠宝</h3>
+          <span>10 单 · ¥20,500.00</span>
+        </div>
+        <p><b>主要表现：</b>尺寸问题 3 单、玉质/描述问题 2 单、多拍重拍 2 单</p>
+        <p class="advice"><b>老板先抓：</b>发货前再次确认圈口，并强化瑕疵与包装检查。</p>
+      </article>
+    
+    </section>
+
+    <div class="section-title">建议老板接下来这样改</div>
+    <section class="actions">
+      
+      <article class="action-card">
+        <span>01</span>
+        <div><h3>先管住“多拍后挑”</h3><p>直播间不要默认鼓励顾客一次拍很多件回去挑。高金额订单付款前再次确认：最终要哪一件、是否需要取消重复订单。</p></div>
+      </article>
+    
+      <article class="action-card">
+        <span>02</span>
+        <div><h3>圈口确认必须前置</h3><p>主播统一询问手腕尺寸、常戴圈口和佩戴松紧偏好。发货前再确认一次圈口，减少“收到后戴不上”。</p></div>
+      </article>
+    
+      <article class="action-card">
+        <span>03</span>
+        <div><h3>瑕疵必须主动讲透</h3><p>棉、纹、裂、结构、矿点、色差要用自然光和近景展示。顾客特别在意的点，要在发货前再次发图确认。</p></div>
+      </article>
+    
+      <article class="action-card">
+        <span>04</span>
+        <div><h3>高价订单发货前确认实物</h3><p>建议金额较高的订单发货前提供正面、背面、侧面和自然光实拍，让顾客确认颜色、宽窄和明显结构。</p></div>
+      </article>
+    
+      <article class="action-card">
+        <span>05</span>
+        <div><h3>客服必须记录一句真实原因</h3><p>顾客提出退款时，客服至少记录一句：为什么退。不能只留下“已处理”“申请了”这类没有经营价值的信息。</p></div>
+      </article>
+    
+      <article class="action-card">
+        <span>06</span>
+        <div><h3>运费承诺当天闭环</h3><p>直播间承诺退运费后，当天形成待办并完成。不要让十几元运费问题升级成整单退货和信任流失。</p></div>
+      </article>
+    
+    </section>
+
+    <div class="method">
+      <b>统计口径：</b>
+      只统计退款成功且金额大于0的订单；同一个订单有多条售后记录时只算1单，金额合并；
+      先看顾客聊天中的明确原因，聊天没有说清时才参考售后选择；
+      单独退运费不混进商品质量问题。
+      没有完整聊天内容的40笔成功退款不放进“真实原因”柱状图，避免凭空猜测。
+    </div>
+  </main>
+
+  <footer class="footer">
+    <b>数据来源：</b>上传的四店售后记录与对应客服聊天记录。<br>
+    <b>数据期间：</b>售后申请时间为2026年6月1日至2026年7月6日。<br>
+    <b>隐私处理：</b>报告不展示顾客姓名、账号、会话编号和订单号。<br>
+    <b>生成时间：</b>2026年7月16日。
+  </footer>
+</article>
+<button class="print-btn" onclick="window.print()">打印 / 保存PDF</button>
+</body>
+</html>

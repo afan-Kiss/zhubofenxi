@@ -200,7 +200,8 @@ export const Layout: React.FC = () => {
 
         <main
           className={`mx-auto w-full min-w-0 flex-1 overflow-x-hidden py-4 ${
-            location.pathname.startsWith('/boss-dashboard')
+            location.pathname.startsWith('/boss-dashboard') ||
+            location.pathname.startsWith('/refund-analysis')
               ? 'max-w-[1440px] px-3 md:px-6 xl:px-8'
               : 'max-w-6xl px-3 md:px-4'
           }`}

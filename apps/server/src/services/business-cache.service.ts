@@ -705,8 +705,29 @@ export function invalidateBusinessBoardCacheForPresets(
       pendingBuilds.delete(key)
     }
   }
-  clearScheduleAttributionCache()
+  // 售后范围失效不主动清排班归属缓存；全量 invalidate 才清
   logInfo('经营缓存', `已清理预设缓存：${presets.join(', ')}`)
+}
+
+/** 删除与给定支付日期相交的 custom 经营缓存 */
+export function removeCustomBusinessCachesIntersectingDates(dates: string[]): number {
+  if (!dates.length) return 0
+  let removed = 0
+  for (const key of [...cache.keys()]) {
+    const parts = key.split('|')
+    // scope|preset|start|end
+    const preset = parts[1]
+    const startDate = parts[2]
+    const endDate = parts[3]
+    if (preset !== 'custom' || !startDate || !endDate) continue
+    const hit = dates.some((d) => d >= startDate && d <= endDate)
+    if (hit) {
+      cache.delete(key)
+      pendingBuilds.delete(key)
+      removed++
+    }
+  }
+  return removed
 }
 
 export function invalidateBusinessBoardCache(): void {

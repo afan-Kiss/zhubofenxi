@@ -197,6 +197,25 @@ const MORE_SUMMARY_CARDS: SummaryCardDef[] = [
 ]
 
 
+function afterSalesRangeStatusLabel(
+  status: 'partial' | 'pending' | 'blocked' | 'failed',
+): string {
+  if (status === 'pending') return '进行中'
+  if (status === 'partial') return '部分完成'
+  if (status === 'failed') return '存在失败'
+  return '受阻'
+}
+
+function afterSalesRefundBadge(
+  status: 'complete' | 'partial' | 'pending' | 'blocked' | 'failed' | undefined,
+): string | null {
+  if (!status || status === 'complete') return null
+  if (status === 'pending') return '补查进行中'
+  if (status === 'partial') return '数据待更新'
+  if (status === 'failed') return '补查异常'
+  return '补查受阻'
+}
+
 function qualityReturnCardNote(
   qualityFeedback: QualityFeedbackStatus | null | undefined,
 ): string | null {
@@ -367,23 +386,21 @@ export const OverviewTab: React.FC = () => {
           data.afterSalesCompleteness.status !== 'complete' ? (
             <p
               className={
-                data.afterSalesCompleteness.status === 'blocked'
+                data.afterSalesCompleteness.status === 'blocked' ||
+                data.afterSalesCompleteness.status === 'failed'
                   ? 'mt-1 text-xs text-amber-800'
                   : 'mt-1 text-xs text-sky-800'
               }
             >
-              售后补查
-              {data.afterSalesCompleteness.status === 'pending'
-                ? '进行中'
-                : data.afterSalesCompleteness.status === 'partial'
-                  ? '部分完成'
-                  : '受阻'}
+              当前范围售后补查
+              {afterSalesRangeStatusLabel(data.afterSalesCompleteness.status)}
               ：{data.afterSalesCompleteness.note}
-              {data.afterSalesCompleteness.pendingCount +
-                data.afterSalesCompleteness.retryWaitCount >
-              0
-                ? `（待补查 ${data.afterSalesCompleteness.pendingCount + data.afterSalesCompleteness.retryWaitCount}）`
-                : ''}
+            </p>
+          ) : null}
+          {data?.globalAfterSalesCompleteness?.globalPendingCount &&
+          data.globalAfterSalesCompleteness.globalPendingCount > 0 ? (
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              全局另有 {data.globalAfterSalesCompleteness.globalPendingCount} 笔待处理
             </p>
           ) : null}
           {status === 'loading' && !displaySummary ? (
@@ -502,7 +519,11 @@ export const OverviewTab: React.FC = () => {
               const raw = valuePickers[card.valueKey](ds)
               const Icon = card.icon
               const cardNote =
-                card.drawerKey === 'qualityReturnCount' ? qualityNote : null
+                card.drawerKey === 'qualityReturnCount'
+                  ? qualityNote
+                  : card.drawerKey === 'returnAmount' || card.drawerKey === 'returnCount'
+                    ? afterSalesRefundBadge(data?.afterSalesCompleteness?.status)
+                    : null
               return (
                 <StaggerCard key={card.drawerKey} index={index + 1} className="h-full">
                   <div className="flex h-full flex-col">

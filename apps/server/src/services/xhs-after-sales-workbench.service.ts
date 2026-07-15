@@ -680,13 +680,34 @@ export async function saveWorkbenchCache(
       })
     : ''
   const emptyToSuccess = prev?.fetchStatus === 'empty' && result.fetchStatus === 'success'
-  // 业务指纹变化才失效；fetchedAt 变化不单独触发
+  // 业务指纹变化 → 按订单支付日合并失效（禁止每笔全量清空）
   if (!prev || prevFp !== nextFp || emptyToSuccess) {
     try {
-      const { invalidateBusinessBoardCache } = await import('./business-cache.service')
-      invalidateBusinessBoardCache()
+      const orderRow = await prisma.xhsRawOrder.findFirst({
+        where: {
+          liveAccountId: accountId,
+          OR: [{ packageId: result.orderNo }, { orderId: result.orderNo }],
+        },
+        select: { orderTime: true, rawJson: true },
+        orderBy: { updatedAt: 'desc' },
+      })
+      let payTime: Date | null = orderRow?.orderTime ?? null
+      const raw = orderRow?.rawJson as Record<string, unknown> | undefined
+      if (raw) {
+        const t = String(
+          raw.payTime ?? raw.paidAt ?? raw.paymentTime ?? raw.pay_time ?? '',
+        ).trim()
+        if (t) {
+          const d = new Date(t.replace(' ', 'T'))
+          if (!Number.isNaN(d.getTime())) payTime = d
+        }
+      }
+      const { scheduleBusinessBoardCacheInvalidationForPayTime } = await import(
+        './business-cache-range-invalidation.service'
+      )
+      scheduleBusinessBoardCacheInvalidationForPayTime(payTime, result.orderNo)
     } catch {
-      // 构建期/脚本环境可能未加载经营缓存
+      // ignore
     }
   }
 }
@@ -700,9 +721,12 @@ export async function enqueueWorkbenchSync(
   const accountId = resolveLiveAccountId(liveAccountId)
   if (!trimmed || !/^P/i.test(trimmed)) return { reopened: false, reason: 'invalid_order_no' }
 
-  const { loadOrderAfterSaleContext } = await import('./after-sales-queue.service')
+  const { loadOrderAfterSaleContext, getShopExternalHealth } = await import(
+    './after-sales-queue.service'
+  )
+  const { writeAfterSalesQueueAudit } = await import('./after-sales-queue-audit.service')
 
-  const [existingQueue, cacheRow, orderCtx] = await Promise.all([
+  const [existingQueue, cacheRow, orderCtx, externalHealth] = await Promise.all([
     prisma.xhsAfterSalesWorkbenchQueue.findUnique({
       where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
       select: {
@@ -737,6 +761,7 @@ export async function enqueueWorkbenchSync(
       },
     }),
     loadOrderAfterSaleContext(accountId, trimmed),
+    getShopExternalHealth(accountId),
   ])
 
   const decision = shouldReopenWorkbenchQueueTask({
@@ -771,11 +796,28 @@ export async function enqueueWorkbenchSync(
     order: orderCtx ?? extractOrderAfterSaleContextFromRaw({}),
     force: opts?.force === true,
     source: opts?.source ?? 'enqueueWorkbenchSync',
+    externalHealth,
   })
 
   if (!existingQueue) {
+    const now = new Date()
     await prisma.xhsAfterSalesWorkbenchQueue.create({
-      data: { liveAccountId: accountId, orderNo: trimmed, status: 'pending' },
+      data: {
+        liveAccountId: accountId,
+        orderNo: trimmed,
+        status: 'pending',
+        statusChangedAt: now,
+      },
+    })
+    await writeAfterSalesQueueAudit({
+      liveAccountId: accountId,
+      orderNo: trimmed,
+      fromStatus: null,
+      toStatus: 'pending',
+      reason: 'created',
+      source: opts?.source ?? 'enqueueWorkbenchSync',
+      cacheStatus: cacheRow?.fetchStatus,
+      orderAfterSaleStatus: orderCtx.afterSaleStatusText,
     })
     logInfo(
       '售后补查',
@@ -788,7 +830,6 @@ export async function enqueueWorkbenchSync(
     return { reopened: false, reason: decision.reason }
   }
 
-  // force 重开保留 errorType 到日志；写入时清空运行字段以便重新调度
   if (decision.force) {
     logWarn(
       '售后补查',
@@ -801,6 +842,7 @@ export async function enqueueWorkbenchSync(
     )
   }
 
+  const now = new Date()
   await prisma.xhsAfterSalesWorkbenchQueue.update({
     where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
     data: {
@@ -810,7 +852,23 @@ export async function enqueueWorkbenchSync(
       lastError: null,
       errorType: null,
       nextAttemptAt: null,
+      workerId: null,
+      claimToken: null,
+      claimedAt: null,
+      statusChangedAt: now,
     },
+  })
+  await writeAfterSalesQueueAudit({
+    liveAccountId: accountId,
+    orderNo: trimmed,
+    fromStatus: decision.fromStatus,
+    toStatus: 'pending',
+    reason: decision.reason,
+    force: decision.force,
+    source: opts?.source ?? 'enqueueWorkbenchSync',
+    cacheStatus: cacheRow?.fetchStatus,
+    orderAfterSaleStatus: orderCtx.afterSaleStatusText,
+    operator: decision.force ? 'admin_force' : null,
   })
   return { reopened: true, reason: decision.reason }
 }
@@ -888,64 +946,119 @@ export async function syncWorkbenchForOrderNo(
   return result
 }
 
+/**
+ * 唯一售后 worker 批入口：走 select/claim/限流，禁止直接 findMany pending
+ */
 export async function processWorkbenchQueueBatch(limit = 10): Promise<{
   processed: number
+  selected: number
+  succeeded: number
+  emptied: number
+  retryWait: number
+  blocked: number
+  failed: number
+  skipped: number
   errors: string[]
 }> {
-  const pending = await prisma.xhsAfterSalesWorkbenchQueue.findMany({
-    where: { status: 'pending' },
-    take: limit,
-    orderBy: { createdAt: 'asc' },
+  const { runAfterSalesBackfillBatch } = await import('./after-sales-backfill.service')
+  const { DEFAULT_AFTER_SALES_QUEUE_LIMITS } = await import('./after-sales-queue.types')
+  const globalPerMinute = Math.max(1, Math.min(limit, DEFAULT_AFTER_SALES_QUEUE_LIMITS.globalPerMinute))
+  const result = await runAfterSalesBackfillBatch({
+    ...DEFAULT_AFTER_SALES_QUEUE_LIMITS,
+    globalPerMinute,
   })
-  const errors: string[] = []
-  for (const item of pending) {
-    try {
-      const rawOrder = await prisma.xhsRawOrder.findFirst({
-        where: {
-          liveAccountId: item.liveAccountId,
-          OR: [{ packageId: item.orderNo }, { orderId: item.orderNo }],
-        },
-        select: { rawJson: true, buyerId: true },
-      })
-      const fallbackBuyerUserId = pickBuyerUserIdFromRawJson(
-        rawOrder?.rawJson as Record<string, unknown> | undefined,
-        rawOrder?.buyerId,
-      )
-      await syncWorkbenchForOrderNo(item.orderNo, item.liveAccountId, {
-        fallbackBuyerUserId,
-      })
-    } catch (e) {
-      errors.push(`${item.liveAccountId}:${item.orderNo}: ${e instanceof Error ? e.message : String(e)}`)
-    }
+  return {
+    processed: result.processed,
+    selected: result.processed,
+    succeeded: result.success,
+    emptied: 0,
+    retryWait: result.retryWait,
+    blocked: result.blocked,
+    failed: result.failed,
+    skipped: 0,
+    errors: [],
   }
-  return { processed: pending.length, errors }
+}
+
+export type WorkbenchRefundLoadResult = AfterSalesWorkbenchRefund & {
+  refundDataStatus?: 'trusted' | 'stale' | 'pending' | 'unknown'
+  refundDataFetchedAt?: string | null
+  refundDataSource?: 'workbench_cache' | 'memory'
+  refundDataStaleReason?: string | null
 }
 
 export async function loadWorkbenchRefundMapFromDb(
   queries: LiveAccountOrderQuery[],
-): Promise<Map<string, AfterSalesWorkbenchRefund>> {
+): Promise<Map<string, WorkbenchRefundLoadResult>> {
   if (queries.length === 0) return new Map()
   const unique = new Map<string, LiveAccountOrderQuery>()
   for (const q of queries) {
     unique.set(liveAccountOrderKey(q.liveAccountId, q.orderNo), q)
   }
+  const { loadOrderAfterSaleContext } = await import('./after-sales-queue.service')
+  const { resolveWorkbenchCacheValidity } = await import('./workbench-cache-validity.service')
+
   const rows = await prisma.xhsAfterSalesWorkbenchCache.findMany({
     where: {
       OR: [...unique.values()].map((q) => ({
         liveAccountId: resolveLiveAccountId(q.liveAccountId),
         orderNo: q.orderNo.trim(),
       })),
-      fetchStatus: 'success',
+      fetchStatus: { in: ['success', 'empty'] },
     },
   })
-  const m = new Map<string, AfterSalesWorkbenchRefund>()
+  const m = new Map<string, WorkbenchRefundLoadResult>()
   for (const row of rows) {
-    m.set(liveAccountOrderKey(row.liveAccountId, row.orderNo), rowToRefund(row))
+    const key = liveAccountOrderKey(row.liveAccountId, row.orderNo)
+    const orderCtx = await loadOrderAfterSaleContext(row.liveAccountId, row.orderNo)
+    const validity = resolveWorkbenchCacheValidity(
+      {
+        fetchStatus: row.fetchStatus,
+        fetchedAt: row.fetchedAt,
+        updatedAt: row.updatedAt,
+        officialRefundAmountCent: row.officialRefundAmountCent,
+        freightRefundAmountCent: row.appliedShipFeeAmountCent,
+        expectedRefundAmountCent: row.expectedRefundAmountCent,
+        appliedAmountCent: row.appliedAmountCent,
+        appliedShipFeeAmountCent: row.appliedShipFeeAmountCent,
+        successReturnCount: row.successReturnCount,
+        returnRefundCount: row.returnRefundCount,
+        refundOnlyCount: row.refundOnlyCount,
+        hasReturnRefund: row.hasReturnRefund,
+        hasRefundOnly: row.hasRefundOnly,
+        afterSaleStatus: row.afterSaleStatus,
+        afterSaleReason: row.afterSaleReason,
+        afterSaleType: row.afterSaleType,
+        returnTypeCodes: row.returnTypeCodes,
+        classificationSource: row.classificationSource,
+        returnsIds: row.returnsIds,
+        refundIncludesFreight: row.refundIncludesFreight,
+      },
+      orderCtx,
+    )
+    // stale 可暂展示但标记；不可信空结果不得冒充 0 退款正式关账
+    if (!validity.valid && row.fetchStatus === 'empty') continue
+    const base = rowToRefund(row)
+    m.set(key, {
+      ...base,
+      refundDataStatus: validity.valid ? 'trusted' : 'stale',
+      refundDataFetchedAt: row.fetchedAt?.toISOString() ?? null,
+      refundDataSource: 'workbench_cache',
+      refundDataStaleReason: validity.valid ? null : validity.reason,
+    })
   }
   for (const [key, q] of unique) {
     if (!m.has(key)) {
       const mem = memoryCache.get(key)
-      if (mem) m.set(key, mem)
+      if (mem) {
+        m.set(key, {
+          ...mem,
+          refundDataStatus: 'trusted',
+          refundDataFetchedAt: mem.fetchedAt?.toISOString?.() ?? null,
+          refundDataSource: 'memory',
+          refundDataStaleReason: null,
+        })
+      }
     }
   }
   return m
@@ -1052,22 +1165,78 @@ export async function loadAfterSalesBundleForOrderNos(
 
 export { type LiveAccountOrderQuery, buildLiveAccountOrderQueries }
 
+/** 批量入队：分页扫描 + 批量决策；不直接打平台 */
+export async function enqueueWorkbenchSyncBatch(
+  orderKeys: Array<{ liveAccountId: string; orderNo: string }>,
+  opts?: { force?: boolean; source?: string },
+): Promise<{
+  scanned: number
+  created: number
+  reopened: number
+  skipped: number
+  failed: number
+}> {
+  const stats = { scanned: 0, created: 0, reopened: 0, skipped: 0, failed: 0 }
+  const BATCH = 200
+  for (let i = 0; i < orderKeys.length; i += BATCH) {
+    const chunk = orderKeys.slice(i, i + BATCH)
+    for (const k of chunk) {
+      stats.scanned++
+      try {
+        const r = await enqueueWorkbenchSync(k.orderNo, k.liveAccountId, {
+          force: opts?.force,
+          source: opts?.source ?? 'enqueueWorkbenchSyncBatch',
+        })
+        if (r.reason === 'created') stats.created++
+        else if (r.reopened) stats.reopened++
+        else stats.skipped++
+      } catch {
+        stats.failed++
+      }
+    }
+  }
+  return stats
+}
+
 export async function syncAllOrdersWorkbenchFromRaw(): Promise<{
   enqueued: number
   processed: number
-}> {
-  const orders = await prisma.xhsRawOrder.findMany({
-    select: { packageId: true, orderId: true, liveAccountId: true },
-  })
-  let enqueued = 0
-  for (const o of orders) {
-    const no = (o.packageId || o.orderId || '').trim()
-    if (no && /^P/i.test(no)) {
-      await enqueueWorkbenchSync(no, o.liveAccountId)
-      enqueued += 1
-    }
+  batch?: {
+    scanned: number
+    created: number
+    reopened: number
+    skipped: number
+    failed: number
   }
-  const { processed } = await processWorkbenchQueueBatch(5000)
+}> {
+  const PAGE = 400
+  let cursor: string | undefined
+  const keys: Array<{ liveAccountId: string; orderNo: string }> = []
+  for (;;) {
+    const rows = await prisma.xhsRawOrder.findMany({
+      take: PAGE,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { id: 'asc' },
+      select: { id: true, packageId: true, orderId: true, liveAccountId: true },
+    })
+    if (rows.length === 0) break
+    for (const o of rows) {
+      const no = (o.packageId || o.orderId || '').trim()
+      if (no && /^P/i.test(no)) {
+        keys.push({ liveAccountId: o.liveAccountId, orderNo: no })
+      }
+    }
+    cursor = rows[rows.length - 1]!.id
+    if (rows.length < PAGE) break
+  }
+  const batch = await enqueueWorkbenchSyncBatch(keys, {
+    source: 'syncAllOrdersWorkbenchFromRaw',
+  })
+  // 不在此处 process 5000；由后台 worker 限流消化
   await refreshWorkbenchMemoryCache()
-  return { enqueued, processed }
+  return {
+    enqueued: batch.created + batch.reopened,
+    processed: 0,
+    batch,
+  }
 }

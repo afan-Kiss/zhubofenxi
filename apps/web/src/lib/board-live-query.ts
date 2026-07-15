@@ -162,6 +162,26 @@ export interface OverviewMeta {
 
 export type BoardDataSource = 'local_db' | 'live_api'
 
+export type AfterSalesCompletenessView = {
+  status: 'complete' | 'partial' | 'pending' | 'blocked' | 'failed'
+  pendingCount: number
+  retryWaitCount: number
+  blockedCount: number
+  failedCount: number
+  runningCount?: number
+  doneCount?: number
+  affectedOrderCount?: number
+  affectedGmv?: number
+  affectedAnchorNames?: string[]
+  affectedShopNames?: string[]
+  oldestOpenAt?: string | null
+  lastSuccessAt?: string | null
+  lastEmptySuccessAt?: string | null
+  globalPendingCount?: number
+  note: string
+  scope?: 'global' | 'range'
+}
+
 export interface BoardLiveQueryData {
   requestId: string
   preset: string
@@ -191,14 +211,8 @@ export interface BoardLiveQueryData {
     formulaVersion: string
   }
   qualityFeedback?: QualityFeedbackStatus
-  afterSalesCompleteness?: {
-    status: 'complete' | 'partial' | 'pending' | 'blocked'
-    pendingCount: number
-    retryWaitCount: number
-    blockedCount: number
-    failedCount: number
-    note: string
-  }
+  afterSalesCompleteness?: AfterSalesCompletenessView
+  globalAfterSalesCompleteness?: AfterSalesCompletenessView
   syncMeta?: BoardSyncMeta
   overviewMeta?: OverviewMeta
 }

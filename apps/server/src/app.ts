@@ -71,14 +71,26 @@ export function createApp() {
   getDataDir()
   void ensureSqlitePragmas()
 
-  app.get('/api/health', (_req, res) => {
+  app.get('/api/health', async (_req, res) => {
     const meta = resolveReportBuildMeta(false)
+    let afterSalesOps: Awaited<
+      ReturnType<
+        typeof import('./services/after-sales-queue-audit.service').getAfterSalesOpsSummary
+      >
+    > | null = null
+    try {
+      const { getAfterSalesOpsSummary } = await import('./services/after-sales-queue-audit.service')
+      afterSalesOps = await getAfterSalesOpsSummary()
+    } catch {
+      // 健康检查不因售后摘要失败
+    }
     res.json({
       ok: true,
       service: 'live-business-api',
       appVersion: meta.appVersion,
       gitCommit: meta.gitCommit,
       cache: getBusinessCacheHealthStats(),
+      afterSalesOps,
     })
   })
 

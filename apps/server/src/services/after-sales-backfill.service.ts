@@ -114,6 +114,8 @@ export async function runAfterSalesBackfillBatch(
         liveAccountId: item.liveAccountId,
         orderNo: item.orderNo,
         result,
+        claimToken: item.claimToken,
+        workerId: item.workerId,
       })
       if (finalStatus === 'done') {
         success++

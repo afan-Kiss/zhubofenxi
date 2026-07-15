@@ -29,7 +29,7 @@ export const WORKBENCH_RECENT_ORDER_WINDOW_MS = 45 * 24 * 60 * 60 * 1000
 export const TIME_SEARCH_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 
 /** 售后算法 / 缓存语义版本：bump 后强制重建经营缓存 */
-export const AFTER_SALES_METRICS_VERSION = 'after-sales-cache-v3'
+export const AFTER_SALES_METRICS_VERSION = 'after-sales-cache-v4'
 
 const IN_PROGRESS_AFTER_SALE_RE =
   /待退货|待退款|待商家收货|退款中|售后处理中|处理中|待审核|待寄回|商家处理中|买家退货中/

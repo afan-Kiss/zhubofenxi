@@ -29,7 +29,10 @@ import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-at
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { readBoardPresetSnapshot, buildSnapshotBoardCacheStub } from './board-preset-snapshot.service'
-import { resolveAfterSalesCompleteness } from './after-sales-completeness.service'
+import {
+  resolveAfterSalesCompleteness,
+  resolveGlobalAfterSalesCompleteness,
+} from './after-sales-completeness.service'
 
 import { AMOUNT_FORMULA_VERSION } from './order-amount-metrics.service'
 
@@ -621,11 +624,30 @@ export async function executeBoardLocalQuery(params: {
     progressMessage = `缓存重建失败（${boardCache.buildError}），当前展示上一次成功缓存，数据可能未完成更新。`
   }
 
-  const afterSalesCompleteness = await resolveAfterSalesCompleteness()
+  const relevantViews = (boardCache.views ?? []).map((v) => ({
+    liveAccountId: String((v as { liveAccountId?: string }).liveAccountId ?? 'legacy'),
+    orderNo: String(
+      (v as { packageId?: string; orderId?: string; displayOrderNo?: string }).packageId ||
+        (v as { orderId?: string }).orderId ||
+        (v as { displayOrderNo?: string }).displayOrderNo ||
+        '',
+    ).trim(),
+    payAmountYuan: Number((v as { gmv?: number; payAmount?: number }).gmv ?? 0) || 0,
+    anchorId: (v as { anchorId?: string | null }).anchorId ?? null,
+    anchorName: (v as { anchorName?: string | null }).anchorName ?? null,
+    shopName: (v as { shopName?: string | null }).shopName ?? null,
+  }))
+  const afterSalesCompleteness = await resolveAfterSalesCompleteness({
+    startDate,
+    endDate,
+    relevantViews,
+  })
+  const globalAfterSalesCompleteness = await resolveGlobalAfterSalesCompleteness()
   if (
     afterSalesCompleteness.status === 'pending' ||
     afterSalesCompleteness.status === 'partial' ||
-    afterSalesCompleteness.status === 'blocked'
+    afterSalesCompleteness.status === 'blocked' ||
+    afterSalesCompleteness.status === 'failed'
   ) {
     progressMessage = `${progressMessage} ${afterSalesCompleteness.note}`.trim()
   }
@@ -724,6 +746,7 @@ export async function executeBoardLocalQuery(params: {
     qualityFeedback,
 
     afterSalesCompleteness,
+    globalAfterSalesCompleteness,
 
     ...(fullSyncMeta ? { syncMeta: fullSyncMeta } : {}),
 

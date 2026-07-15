@@ -1,64 +1,62 @@
 /**
- * 售后工作台补查队列：状态机、冷却恢复、按店隔离
+ * 售后工作台补查队列：公平按店调度、原子认领、持久化熔断
  */
+import { randomUUID } from 'node:crypto'
 import { prisma } from '../lib/prisma'
 import type { AfterSalesWorkbenchRefund } from './xhs-after-sales-workbench.service'
 import {
   AFTER_SALES_RUNNING_TIMEOUT_MS,
-  AFTER_SALES_SHOP_AUTH_BLOCK_THRESHOLD,
-  AFTER_SALES_SHOP_SIGN_BLOCK_THRESHOLD,
   DEFAULT_AFTER_SALES_QUEUE_LIMITS,
   type AfterSalesQueueDisposition,
   type AfterSalesQueueErrorType,
   type AfterSalesQueueRateLimits,
   type AfterSalesQueueStatus,
 } from './after-sales-queue.types'
-import { logWarn } from '../utils/server-log'
+import { logInfo, logWarn } from '../utils/server-log'
 import {
   extractOrderAfterSaleContextFromRaw,
   isWorkbenchCacheCurrentlyValid,
   type OrderAfterSaleContext,
   type WorkbenchCacheSnapshot,
 } from './workbench-cache-validity.service'
+import { writeAfterSalesQueueAudit } from './after-sales-queue-audit.service'
+import {
+  isAuthOrSignCircuitError,
+  loadShopCircuits,
+  markShopProbeFailed,
+  openShopCircuit,
+  recordShopAfterSalesSuccess,
+  type ShopCircuitSnapshot,
+} from './shop-after-sales-runtime.service'
+import { listEnabledLiveAccountsWithCookie } from './live-account.service'
 
-interface ShopRuntimeState {
-  cooldownUntil: number
-  consecutiveCoolingCount: number
-  consecutiveSignFailureCount: number
-  consecutiveAuthFailureCount: number
-  lastSuccessAt: number | null
-  lastErrorType: AfterSalesQueueErrorType | null
-  batchStop: boolean
+/** 本批临时停止（不跨批次） */
+const batchStopShops = new Set<string>()
+
+export type SelectedAfterSalesQueueTask = {
+  id: string
+  liveAccountId: string
+  orderNo: string
+  temporaryAttemptCount: number
+  claimToken: string
+  workerId: string
 }
 
-const shopRuntime = new Map<string, ShopRuntimeState>()
+export type ShopSelectStats = {
+  liveAccountId: string
+  candidates: number
+  claimed: number
+  skippedCooldown: number
+  skippedBlocked: number
+  skippedValidCache: number
+}
 
 function shopKey(liveAccountId: string): string {
   return liveAccountId || 'legacy'
 }
 
-function getShopState(liveAccountId: string): ShopRuntimeState {
-  const key = shopKey(liveAccountId)
-  let s = shopRuntime.get(key)
-  if (!s) {
-    s = {
-      cooldownUntil: 0,
-      consecutiveCoolingCount: 0,
-      consecutiveSignFailureCount: 0,
-      consecutiveAuthFailureCount: 0,
-      lastSuccessAt: null,
-      lastErrorType: null,
-      batchStop: false,
-    }
-    shopRuntime.set(key, s)
-  }
-  return s
-}
-
 export function resetAfterSalesQueueBatchShopFlags(): void {
-  for (const s of shopRuntime.values()) {
-    s.batchStop = false
-  }
+  batchStopShops.clear()
 }
 
 export function parseCooldownSecondsFromError(message: string): number | null {
@@ -146,7 +144,15 @@ export async function recoverStuckAfterSalesRunningTasks(
   const cutoff = new Date(Date.now() - timeoutMs)
   const stuck = await prisma.xhsAfterSalesWorkbenchQueue.findMany({
     where: { status: 'running', runningSince: { lt: cutoff } },
-    select: { id: true, liveAccountId: true, orderNo: true, temporaryAttemptCount: true },
+    select: {
+      id: true,
+      liveAccountId: true,
+      orderNo: true,
+      temporaryAttemptCount: true,
+      status: true,
+      claimToken: true,
+      workerId: true,
+    },
   })
   if (stuck.length === 0) return 0
   const now = new Date()
@@ -161,9 +167,23 @@ export async function recoverStuckAfterSalesRunningTasks(
         nextAttemptAt: nextAt,
         lastAttemptAt: now,
         runningSince: null,
+        workerId: null,
+        claimToken: null,
+        claimedAt: null,
+        statusChangedAt: now,
         temporaryAttemptCount: { increment: 1 },
         attempts: { increment: 1 },
       },
+    })
+    await writeAfterSalesQueueAudit({
+      liveAccountId: row.liveAccountId,
+      orderNo: row.orderNo,
+      fromStatus: 'running',
+      toStatus: 'retry_wait',
+      reason: 'running_timeout',
+      errorType: 'running_timeout',
+      workerId: row.workerId,
+      claimToken: row.claimToken,
     })
     logWarn('售后补查', `running 超时恢复：shop=${row.liveAccountId} order=${row.orderNo}`)
   }
@@ -240,7 +260,8 @@ export async function hasValidWorkbenchCache(
     refundOnlyCount: row.refundOnlyCount,
     hasReturnRefund: row.hasReturnRefund,
     hasRefundOnly: row.hasRefundOnly,
-    hasFreightOnlyRefund: (row.appliedShipFeeAmountCent ?? 0) > 0 && (row.officialRefundAmountCent ?? 0) === 0,
+    hasFreightOnlyRefund:
+      (row.appliedShipFeeAmountCent ?? 0) > 0 && (row.officialRefundAmountCent ?? 0) === 0,
     afterSaleStatus: row.afterSaleStatus,
     afterSaleReason: row.afterSaleReason,
     afterSaleType: row.afterSaleType,
@@ -252,147 +273,242 @@ export async function hasValidWorkbenchCache(
   return isWorkbenchCacheCurrentlyValid(snapshot, ctx)
 }
 
-export async function selectAfterSalesQueueTasks(
-  limits: AfterSalesQueueRateLimits = DEFAULT_AFTER_SALES_QUEUE_LIMITS,
+/** 原子认领：仅当仍为可执行状态时写入 running */
+export async function claimAfterSalesQueueTask(params: {
+  id: string
+  workerId: string
+}): Promise<{ claimed: boolean; claimToken: string | null }> {
+  const claimToken = randomUUID()
+  const nowIso = new Date().toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '')
+  const changed = await prisma.$executeRaw`
+    UPDATE XhsAfterSalesWorkbenchQueue
+    SET
+      status = 'running',
+      workerId = ${params.workerId},
+      claimToken = ${claimToken},
+      claimedAt = ${nowIso},
+      runningSince = ${nowIso},
+      lastAttemptAt = ${nowIso},
+      statusChangedAt = ${nowIso}
+    WHERE id = ${params.id}
+      AND (
+        status = 'pending'
+        OR (
+          status = 'retry_wait'
+          AND (nextAttemptAt IS NULL OR nextAttemptAt <= datetime('now'))
+        )
+      )
+  `
+  return { claimed: Number(changed) === 1, claimToken: Number(changed) === 1 ? claimToken : null }
+}
+
+async function loadDueCandidatesForShop(
+  liveAccountId: string,
+  take: number,
 ): Promise<
   Array<{
     id: string
     liveAccountId: string
     orderNo: string
+    status: string
     temporaryAttemptCount: number
   }>
 > {
+  return prisma.$queryRaw`
+    SELECT id, liveAccountId, orderNo, status, temporaryAttemptCount
+    FROM XhsAfterSalesWorkbenchQueue
+    WHERE liveAccountId = ${liveAccountId}
+      AND (
+        status = 'pending'
+        OR (status = 'retry_wait' AND (nextAttemptAt IS NULL OR nextAttemptAt <= datetime('now')))
+      )
+    ORDER BY COALESCE(nextAttemptAt, createdAt) ASC, createdAt ASC
+    LIMIT ${take}
+  `
+}
+
+export async function selectAfterSalesQueueTasks(
+  limits: AfterSalesQueueRateLimits = DEFAULT_AFTER_SALES_QUEUE_LIMITS,
+  opts?: { workerId?: string },
+): Promise<SelectedAfterSalesQueueTask[]> {
   await recoverStuckAfterSalesRunningTasks()
   resetAfterSalesQueueBatchShopFlags()
 
-  const now = new Date()
-  // SQLite 存 naive datetime；Prisma DateTime 过滤在部分环境下会匹配不到到期任务
-  const candidateLimit = limits.globalPerMinute * 4
-  const candidates = await prisma.$queryRaw<
-    Array<{
-      id: string
-      liveAccountId: string
-      orderNo: string
-      status: string
-      temporaryAttemptCount: number
-    }>
-  >`
-    SELECT id, liveAccountId, orderNo, status, temporaryAttemptCount
-    FROM XhsAfterSalesWorkbenchQueue
-    WHERE status = 'pending'
-       OR (status = 'retry_wait' AND (nextAttemptAt IS NULL OR nextAttemptAt <= datetime('now')))
-    ORDER BY COALESCE(nextAttemptAt, createdAt) ASC, createdAt ASC
-    LIMIT ${candidateLimit}
-  `
+  const workerId = opts?.workerId ?? `worker-${process.pid}-${randomUUID().slice(0, 8)}`
+  const accounts = await listEnabledLiveAccountsWithCookie()
+  const shopIds = accounts.map((a) => a.id)
+  if (shopIds.length === 0) return []
 
-  const selected: typeof candidates = []
-  const perShop = new Map<string, number>()
+  const circuits = await loadShopCircuits(shopIds)
+  const perShopCap = limits.perShopPerMinute
+  const globalCap = limits.globalPerMinute
+  const shopStats: ShopSelectStats[] = []
 
-  // 批量加载订单售后上下文，避免 stale empty 被错标 done 而跳过真实补查
-  const orderCtxByKey = new Map<string, OrderAfterSaleContext>()
-  const uniquePairs = new Map<string, { liveAccountId: string; orderNo: string }>()
-  for (const row of candidates) {
-    uniquePairs.set(`${row.liveAccountId}::${row.orderNo}`, {
-      liveAccountId: row.liveAccountId,
-      orderNo: row.orderNo,
-    })
-  }
+  // 每店独立拉候选，再轮询合并，避免单店饿死其他店
+  const shopQueues = new Map<string, Array<{
+    id: string
+    liveAccountId: string
+    orderNo: string
+    status: string
+    temporaryAttemptCount: number
+  }>>()
+
   await Promise.all(
-    [...uniquePairs.values()].map(async (p) => {
-      const ctx = await loadOrderAfterSaleContext(p.liveAccountId, p.orderNo)
-      orderCtxByKey.set(`${p.liveAccountId}::${p.orderNo}`, ctx)
+    shopIds.map(async (sid) => {
+      const circuit = circuits.get(sid)
+      const stats: ShopSelectStats = {
+        liveAccountId: sid,
+        candidates: 0,
+        claimed: 0,
+        skippedCooldown: 0,
+        skippedBlocked: 0,
+        skippedValidCache: 0,
+      }
+      shopStats.push(stats)
+
+      if (circuit?.circuitOpen && !circuit.allowProbe) {
+        stats.skippedBlocked++
+        shopQueues.set(sid, [])
+        return
+      }
+      if (circuit?.cooldownUntil && circuit.cooldownUntil.getTime() > Date.now()) {
+        stats.skippedCooldown++
+        shopQueues.set(sid, [])
+        return
+      }
+
+      const take = circuit?.allowProbe ? 1 : Math.max(perShopCap * 3, 6)
+      const rows = await loadDueCandidatesForShop(sid, take)
+      stats.candidates = rows.length
+      // probe：熔断中只放 1 笔
+      shopQueues.set(sid, circuit?.allowProbe ? rows.slice(0, 1) : rows)
     }),
   )
 
-  for (const row of candidates) {
-    if (selected.length >= limits.globalPerMinute) break
+  const selectedMeta: Array<{
+    id: string
+    liveAccountId: string
+    orderNo: string
+    temporaryAttemptCount: number
+  }> = []
+  const perShopPicked = new Map<string, number>()
+  const orderCtxByKey = new Map<string, OrderAfterSaleContext>()
 
-    const sid = shopKey(row.liveAccountId)
-    const state = getShopState(row.liveAccountId)
+  // 轮询
+  let progress = true
+  while (selectedMeta.length < globalCap && progress) {
+    progress = false
+    for (const sid of shopIds) {
+      if (selectedMeta.length >= globalCap) break
+      if (batchStopShops.has(sid)) continue
+      const picked = perShopPicked.get(sid) ?? 0
+      if (picked >= perShopCap) continue
+      const q = shopQueues.get(sid)
+      if (!q?.length) continue
+      const row = q.shift()!
+      progress = true
 
-    if (state.batchStop) continue
-    if (state.cooldownUntil > Date.now()) continue
+      const ctxKey = `${row.liveAccountId}::${row.orderNo}`
+      let orderCtx = orderCtxByKey.get(ctxKey)
+      if (!orderCtx) {
+        orderCtx = await loadOrderAfterSaleContext(row.liveAccountId, row.orderNo)
+        orderCtxByKey.set(ctxKey, orderCtx)
+      }
+      if (await hasValidWorkbenchCache(row.liveAccountId, row.orderNo, orderCtx)) {
+        const now = new Date()
+        await prisma.xhsAfterSalesWorkbenchQueue.update({
+          where: { id: row.id },
+          data: {
+            status: 'done',
+            errorType: null,
+            lastError: null,
+            completedAt: now,
+            runningSince: null,
+            workerId: null,
+            claimToken: null,
+            claimedAt: null,
+            statusChangedAt: now,
+          },
+        })
+        const st = shopStats.find((s) => s.liveAccountId === sid)
+        if (st) st.skippedValidCache++
+        continue
+      }
 
-    const shopCount = perShop.get(sid) ?? 0
-    if (shopCount >= limits.perShopPerMinute) continue
-
-    const orderCtx =
-      orderCtxByKey.get(`${row.liveAccountId}::${row.orderNo}`) ??
-      ({ orderStatusText: '', afterSaleStatusText: '', isReturned: false } satisfies OrderAfterSaleContext)
-
-    if (await hasValidWorkbenchCache(row.liveAccountId, row.orderNo, orderCtx)) {
-      await prisma.xhsAfterSalesWorkbenchQueue.update({
-        where: { id: row.id },
-        data: {
-          status: 'done',
-          errorType: null,
-          lastError: null,
-          completedAt: now,
-          runningSince: null,
-        },
+      selectedMeta.push({
+        id: row.id,
+        liveAccountId: row.liveAccountId,
+        orderNo: row.orderNo,
+        temporaryAttemptCount: row.temporaryAttemptCount,
       })
-      continue
+      perShopPicked.set(sid, picked + 1)
     }
-
-    selected.push(row)
-    perShop.set(sid, shopCount + 1)
   }
 
-  const now2 = new Date()
-  for (const row of selected) {
-    await prisma.xhsAfterSalesWorkbenchQueue.update({
-      where: { id: row.id },
-      data: { status: 'running', runningSince: now2, lastAttemptAt: now2 },
+  const claimed: SelectedAfterSalesQueueTask[] = []
+  for (const row of selectedMeta) {
+    const { claimed: ok, claimToken } = await claimAfterSalesQueueTask({
+      id: row.id,
+      workerId,
+    })
+    if (!ok || !claimToken) continue
+    claimed.push({
+      ...row,
+      claimToken,
+      workerId,
+    })
+    const st = shopStats.find((s) => s.liveAccountId === row.liveAccountId)
+    if (st) st.claimed++
+    await writeAfterSalesQueueAudit({
+      liveAccountId: row.liveAccountId,
+      orderNo: row.orderNo,
+      fromStatus: 'pending|retry_wait',
+      toStatus: 'running',
+      reason: 'atomic_claim',
+      workerId,
+      claimToken,
+      source: 'selectAfterSalesQueueTasks',
     })
   }
 
-  return selected
+  logInfo(
+    '售后补查',
+    `公平调度 worker=${workerId} claimed=${claimed.length}/${selectedMeta.length} shops=${shopStats
+      .map(
+        (s) =>
+          `${s.liveAccountId.slice(0, 6)}:c${s.candidates}/cl${s.claimed}/bl${s.skippedBlocked}/cd${s.skippedCooldown}`,
+      )
+      .join(' ')}`,
+  )
+
+  return claimed
 }
 
-function applyShopOutcome(
+async function applyShopOutcomePersistent(
   liveAccountId: string,
   disposition: AfterSalesQueueDisposition,
   errorType: AfterSalesQueueErrorType,
-): void {
-  const state = getShopState(liveAccountId)
-  state.lastErrorType = errorType
-
+  message?: string | null,
+): Promise<void> {
   if (disposition === 'done') {
-    state.consecutiveCoolingCount = 0
-    state.consecutiveSignFailureCount = 0
-    state.consecutiveAuthFailureCount = 0
-    state.lastSuccessAt = Date.now()
-    state.batchStop = false
+    await recordShopAfterSalesSuccess(liveAccountId)
     return
   }
-
   if (disposition === 'retry_wait') {
     if (errorType === 'platform_cooling' || errorType === 'http_429') {
-      state.consecutiveCoolingCount++
-      state.batchStop = true
-      const extraMs = Math.min(300_000, state.consecutiveCoolingCount * 60_000)
-      state.cooldownUntil = Date.now() + extraMs
-    } else if (errorType === 'sign_generation_failed') {
-      state.consecutiveSignFailureCount++
+      batchStopShops.add(shopKey(liveAccountId))
+      await openShopCircuit({
+        liveAccountId,
+        errorType,
+        message,
+        probeBackoffMs: 60_000,
+      })
     }
     return
   }
-
-  if (disposition === 'blocked') {
-    if (errorType === 'http_401' || errorType === 'http_403' || errorType === 'cookie_expired') {
-      state.consecutiveAuthFailureCount++
-      state.batchStop = true
-    }
-    if (
-      errorType === 'sign_env_missing' ||
-      errorType === 'sign_python2_interpreter' ||
-      state.consecutiveSignFailureCount >= AFTER_SALES_SHOP_SIGN_BLOCK_THRESHOLD
-    ) {
-      state.batchStop = true
-    }
-    if (state.consecutiveAuthFailureCount >= AFTER_SALES_SHOP_AUTH_BLOCK_THRESHOLD) {
-      state.batchStop = true
-    }
+  if (disposition === 'blocked' || isAuthOrSignCircuitError(errorType)) {
+    batchStopShops.add(shopKey(liveAccountId))
+    await openShopCircuit({ liveAccountId, errorType, message })
   }
 }
 
@@ -402,12 +518,41 @@ export async function completeAfterSalesQueueTask(params: {
   orderNo: string
   result: Pick<AfterSalesWorkbenchRefund, 'fetchStatus' | 'fetchError'>
   httpStatus?: number | null
+  claimToken?: string | null
+  workerId?: string | null
 }): Promise<AfterSalesQueueStatus> {
   const { queueId, liveAccountId, result, httpStatus } = params
   const now = new Date()
 
+  const current = await prisma.xhsAfterSalesWorkbenchQueue.findUnique({
+    where: { id: queueId },
+    select: {
+      status: true,
+      claimToken: true,
+      workerId: true,
+      temporaryAttemptCount: true,
+    },
+  })
+  if (!current) return 'failed'
+  if (params.claimToken && current.claimToken && params.claimToken !== current.claimToken) {
+    logWarn('售后补查', `旧 claimToken 放弃覆盖：queue=${queueId}`)
+    return current.status as AfterSalesQueueStatus
+  }
+  if (params.workerId && current.workerId && params.workerId !== current.workerId) {
+    logWarn('售后补查', `旧 worker 放弃覆盖：queue=${queueId}`)
+    return current.status as AfterSalesQueueStatus
+  }
+
+  const clearClaim = {
+    runningSince: null as Date | null,
+    workerId: null as string | null,
+    claimToken: null as string | null,
+    claimedAt: null as Date | null,
+    statusChangedAt: now,
+  }
+
   if (result.fetchStatus === 'success' || result.fetchStatus === 'empty') {
-    applyShopOutcome(liveAccountId, 'done', 'unknown')
+    await applyShopOutcomePersistent(liveAccountId, 'done', 'unknown')
     await prisma.xhsAfterSalesWorkbenchQueue.update({
       where: { id: queueId },
       data: {
@@ -417,22 +562,35 @@ export async function completeAfterSalesQueueTask(params: {
         nextAttemptAt: null,
         completedAt: now,
         lastAttemptAt: now,
-        runningSince: null,
         attempts: { increment: 1 },
+        ...clearClaim,
       },
+    })
+    await writeAfterSalesQueueAudit({
+      liveAccountId,
+      orderNo: params.orderNo,
+      fromStatus: current.status,
+      toStatus: 'done',
+      reason: result.fetchStatus,
+      workerId: params.workerId,
+      claimToken: params.claimToken,
+      cacheStatus: result.fetchStatus,
+      source: 'completeAfterSalesQueueTask',
     })
     return 'done'
   }
 
   const { errorType, disposition } = classifyWorkbenchQueueError(result.fetchError, httpStatus)
-  applyShopOutcome(liveAccountId, disposition, errorType)
+  await applyShopOutcomePersistent(liveAccountId, disposition, errorType, result.fetchError)
+
+  // probe 失败延长熔断
+  const circuit = (await loadShopCircuits([liveAccountId])).get(shopKey(liveAccountId))
+  if (circuit?.circuitOpen && disposition === 'blocked') {
+    await markShopProbeFailed(liveAccountId, errorType, result.fetchError)
+  }
 
   if (disposition === 'retry_wait') {
-    const row = await prisma.xhsAfterSalesWorkbenchQueue.findUnique({
-      where: { id: queueId },
-      select: { temporaryAttemptCount: true },
-    })
-    const tempCount = (row?.temporaryAttemptCount ?? 0) + 1
+    const tempCount = (current.temporaryAttemptCount ?? 0) + 1
     const nextAt = computeNextAttemptAt(tempCount, result.fetchError)
     await prisma.xhsAfterSalesWorkbenchQueue.update({
       where: { id: queueId },
@@ -442,10 +600,20 @@ export async function completeAfterSalesQueueTask(params: {
         lastError: result.fetchError,
         nextAttemptAt: nextAt,
         lastAttemptAt: now,
-        runningSince: null,
         temporaryAttemptCount: { increment: 1 },
         attempts: { increment: 1 },
+        ...clearClaim,
       },
+    })
+    await writeAfterSalesQueueAudit({
+      liveAccountId,
+      orderNo: params.orderNo,
+      fromStatus: current.status,
+      toStatus: 'retry_wait',
+      reason: errorType,
+      errorType,
+      workerId: params.workerId,
+      claimToken: params.claimToken,
     })
     return 'retry_wait'
   }
@@ -459,10 +627,20 @@ export async function completeAfterSalesQueueTask(params: {
         lastError: result.fetchError,
         nextAttemptAt: null,
         lastAttemptAt: now,
-        runningSince: null,
         temporaryAttemptCount: { increment: 1 },
         attempts: { increment: 1 },
+        ...clearClaim,
       },
+    })
+    await writeAfterSalesQueueAudit({
+      liveAccountId,
+      orderNo: params.orderNo,
+      fromStatus: current.status,
+      toStatus: 'blocked',
+      reason: errorType,
+      errorType,
+      workerId: params.workerId,
+      claimToken: params.claimToken,
     })
     logWarn(
       '售后补查',
@@ -479,10 +657,20 @@ export async function completeAfterSalesQueueTask(params: {
       lastError: result.fetchError,
       nextAttemptAt: null,
       lastAttemptAt: now,
-      runningSince: null,
       permanentFailureCount: { increment: 1 },
       attempts: { increment: 1 },
+      ...clearClaim,
     },
+  })
+  await writeAfterSalesQueueAudit({
+    liveAccountId,
+    orderNo: params.orderNo,
+    fromStatus: current.status,
+    toStatus: 'failed',
+    reason: errorType,
+    errorType,
+    workerId: params.workerId,
+    claimToken: params.claimToken,
   })
   return 'failed'
 }
@@ -498,3 +686,42 @@ export async function getAfterSalesQueueStatusCounts(): Promise<Record<string, n
   }
   return out
 }
+
+export async function getShopExternalHealth(
+  liveAccountId: string,
+): Promise<{ cookieHealthy: boolean; signEnvHealthy: boolean }> {
+  const circuit = (await loadShopCircuits([liveAccountId])).get(shopKey(liveAccountId))
+  if (!circuit) return { cookieHealthy: true, signEnvHealthy: true }
+  return {
+    cookieHealthy: !circuit.circuitOpen || !isAuthOrSignCircuitError(circuit.circuitReason),
+    signEnvHealthy: !circuit.circuitOpen || circuit.circuitReason !== 'sign_env_missing',
+  }
+}
+
+/** 测试导出：轮询合并算法纯函数版 */
+export function mergeShopCandidatesRoundRobin<T extends { liveAccountId: string }>(
+  byShop: Map<string, T[]>,
+  shopOrder: string[],
+  globalCap: number,
+  perShopCap: number,
+): T[] {
+  const queues = new Map(shopOrder.map((s) => [s, [...(byShop.get(s) ?? [])]]))
+  const out: T[] = []
+  const picked = new Map<string, number>()
+  let progress = true
+  while (out.length < globalCap && progress) {
+    progress = false
+    for (const sid of shopOrder) {
+      if (out.length >= globalCap) break
+      if ((picked.get(sid) ?? 0) >= perShopCap) continue
+      const q = queues.get(sid)
+      if (!q?.length) continue
+      out.push(q.shift()!)
+      picked.set(sid, (picked.get(sid) ?? 0) + 1)
+      progress = true
+    }
+  }
+  return out
+}
+
+export type { ShopCircuitSnapshot }

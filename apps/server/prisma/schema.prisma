@@ -462,6 +462,11 @@ model XhsAfterSalesWorkbenchQueue {
   lastAttemptAt         DateTime?
   completedAt           DateTime?
   runningSince          DateTime?
+  /// 原子认领：worker 身份与令牌
+  workerId              String?
+  claimToken            String?
+  claimedAt             DateTime?
+  statusChangedAt       DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -469,6 +474,53 @@ model XhsAfterSalesWorkbenchQueue {
   @@index([status])
   @@index([liveAccountId])
   @@index([status, nextAttemptAt])
+  @@index([liveAccountId, status, nextAttemptAt])
+}
+
+/// 售后任务状态变更审计（不含 Cookie）
+model XhsAfterSalesQueueAudit {
+  id                   String   @id @default(cuid())
+  liveAccountId        String   @default("legacy")
+  orderNo              String
+  fromStatus           String?
+  toStatus             String
+  reason               String?
+  errorType            String?
+  force                Boolean  @default(false)
+  source               String?
+  workerId             String?
+  claimToken           String?
+  cacheStatus          String?
+  orderAfterSaleStatus String?
+  operator             String?
+  createdAt            DateTime @default(now())
+
+  @@index([liveAccountId, createdAt])
+  @@index([orderNo])
+  @@index([createdAt])
+}
+
+/// 店铺售后运行时熔断（跨进程持久化）
+model ShopAfterSalesRuntime {
+  id                  String    @id @default(cuid())
+  liveAccountId       String    @unique
+  platformName        String    @default("")
+  circuitOpen         Boolean   @default(false)
+  circuitReason       String?
+  circuitOpenedAt     DateTime?
+  circuitNextProbeAt  DateTime?
+  consecutiveAuthFail Int       @default(0)
+  consecutiveSignFail Int       @default(0)
+  consecutiveCooling  Int       @default(0)
+  cooldownUntil       DateTime?
+  lastSuccessAt       DateTime?
+  lastErrorType       String?
+  lastErrorMessage    String?
+  completedPerMinute  Int       @default(0)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([circuitOpen])
 }
 
 /// 未完结订单追踪池
@@ -587,6 +639,32 @@ model XhsAfterSalesTimeSearchCache {
   @@index([orderNo])
   @@index([rangeKey])
   @@index([liveAccountId])
+}
+
+/// 时间售后按店同步元数据（success_empty 也必须有行）
+model XhsAfterSalesRangeSyncMeta {
+  id            String    @id @default(cuid())
+  rangeKey      String
+  liveAccountId String
+  platformName  String    @default("")
+  /// success | success_empty | partial_success | failed | blocked | running
+  status        String    @default("running")
+  lastAttemptAt DateTime?
+  lastSuccessAt DateTime?
+  completedAt   DateTime?
+  recordCount   Int       @default(0)
+  orderCount    Int       @default(0)
+  pageCount     Int       @default(0)
+  errorType     String?
+  errorMessage  String?
+  sourceVersion String    @default("after-sales-range-v1")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([liveAccountId, rangeKey])
+  @@index([rangeKey])
+  @@index([status])
+  @@index([lastSuccessAt])
 }
 
 /// 经营总览上月稳定快照（同步完成后写入，老板查看 lastMonth 时优先展示）

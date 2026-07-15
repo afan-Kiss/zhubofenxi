@@ -587,19 +587,31 @@ export const AnchorPerformanceTab: React.FC = () => {
           {data?.afterSalesCompleteness && data.afterSalesCompleteness.status !== 'complete' ? (
             <p
               className={
-                data.afterSalesCompleteness.status === 'blocked'
+                data.afterSalesCompleteness.status === 'blocked' ||
+                data.afterSalesCompleteness.status === 'failed'
                   ? 'mt-1 text-xs text-amber-800'
                   : 'mt-1 text-xs text-sky-800'
               }
             >
-              售后补查
+              当前范围售后补查
               {data.afterSalesCompleteness.status === 'pending'
                 ? '进行中'
                 : data.afterSalesCompleteness.status === 'partial'
                   ? '部分完成'
-                  : '受阻'}
-              ：退款/签收指标可能继续变化（待补查{' '}
-              {data.afterSalesCompleteness.pendingCount + data.afterSalesCompleteness.retryWaitCount}）
+                  : data.afterSalesCompleteness.status === 'failed'
+                    ? '有失败'
+                    : '受阻'}
+              ：{data.afterSalesCompleteness.note}
+              {data.afterSalesCompleteness.affectedOrderCount
+                ? `（受影响 ${data.afterSalesCompleteness.affectedOrderCount} 单）`
+                : ''}
+            </p>
+          ) : null}
+          {data?.globalAfterSalesCompleteness?.globalPendingCount &&
+          data.globalAfterSalesCompleteness.globalPendingCount > 0 &&
+          data?.afterSalesCompleteness?.status === 'complete' ? (
+            <p className="mt-0.5 text-[11px] text-slate-500">
+              全局另有 {data.globalAfterSalesCompleteness.globalPendingCount} 笔历史待处理
             </p>
           ) : null}
           {selectedIsManual ? (

@@ -100,6 +100,7 @@ export interface BoardLiveQueryResult {
   }
   qualityFeedback?: QualityFeedbackPublicStatus
   afterSalesCompleteness?: import('./after-sales-completeness.service').AfterSalesCompleteness
+  globalAfterSalesCompleteness?: import('./after-sales-completeness.service').AfterSalesCompleteness
   dataDisplayStatus?:
     | 'ready'
     | 'syncing_with_cache'

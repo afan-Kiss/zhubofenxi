@@ -1,6 +1,6 @@
 /**
  * 售后按时间范围查询（交叉印证用，非品退主来源）
- * 对应 HAR：售后根据时间查询.har → returns/v3 分页接口
+ * 按店独立判断完整性；success_empty 写 meta
  */
 import { prisma } from '../lib/prisma'
 import type { DateRangeResolved } from '../utils/date-range'
@@ -34,11 +34,13 @@ import {
   logXhsAccountRateLimited,
 } from '../utils/sync-cmd-log'
 import { TIME_SEARCH_CACHE_TTL_MS } from './workbench-cache-validity.service'
+import { scheduleBusinessBoardCacheInvalidationForPayTime } from './business-cache-range-invalidation.service'
 
 const WORKBENCH_URL =
   'https://ark.xiaohongshu.com/api/edith/after-sales/returns/v3'
 const WORKBENCH_REFERER = 'https://ark.xiaohongshu.com/app-order/aftersale/list'
 const DEFAULT_PAGE_SIZE = 50
+export const RANGE_SYNC_SOURCE_VERSION = 'after-sales-range-v1'
 
 function buildRangeQueryUrl(
   page: number,
@@ -64,7 +66,26 @@ function rangeKey(range: DateRangeResolved): string {
   return `${range.startDate}_${range.endDate}`
 }
 
-/** 单账号按时间范围拉取售后（供多账号合并） */
+export type ShopRangeSyncStatus =
+  | 'success'
+  | 'success_empty'
+  | 'partial_success'
+  | 'failed'
+  | 'blocked'
+  | 'running'
+
+export type ShopRangeSyncMetaView = {
+  liveAccountId: string
+  platformName: string
+  status: ShopRangeSyncStatus
+  lastSuccessAt: string | null
+  recordCount: number
+  orderCount: number
+  errorType: string | null
+  errorMessage: string | null
+  fresh: boolean
+}
+
 async function fetchAfterSalesForTimeRangeAccount(params: {
   startMs: number
   endMs: number
@@ -76,7 +97,12 @@ async function fetchAfterSalesForTimeRangeAccount(params: {
   accountIndex?: number
   accountTotal?: number
   dateRange: string
-}): Promise<{ records: NormalizedAfterSaleRecord[]; warnings: string[]; authFailed?: boolean }> {
+}): Promise<{
+  records: NormalizedAfterSaleRecord[]
+  warnings: string[]
+  authFailed?: boolean
+  pageCount: number
+}> {
   const warnings: string[] = []
   const pageSize = params.pageSize ?? DEFAULT_PAGE_SIZE
   const maxPages = params.maxPages ?? 200
@@ -89,6 +115,7 @@ async function fetchAfterSalesForTimeRangeAccount(params: {
     accountTotal: params.accountTotal,
   }
   const syncStarted = Date.now()
+  let pageCount = 0
 
   logAfterSaleSyncStart(accountCtx, params.dateRange)
 
@@ -99,11 +126,12 @@ async function fetchAfterSalesForTimeRangeAccount(params: {
     const reason = e instanceof Error ? e.message : 'Cookie 未配置'
     warnings.push(`${params.accountName}: ${reason}`)
     logAfterSaleSyncFailed(accountCtx, reason)
-    return { records, warnings, authFailed: true }
+    return { records, warnings, authFailed: true, pageCount: 0 }
   }
 
   let page = 1
   while (page <= maxPages) {
+    pageCount++
     const url = buildRangeQueryUrl(page, pageSize, params.startMs, params.endMs)
     let payload: unknown
     try {
@@ -129,8 +157,7 @@ async function fetchAfterSalesForTimeRangeAccount(params: {
     } catch (e) {
       const msg = e instanceof Error ? e.message : '失败'
       warnings.push(`${params.accountName} 第${page}页: ${msg}`)
-      const isAuth =
-        /401|403|406|429|Cookie|失效|权限|限流|unauthorized/i.test(msg)
+      const isAuth = /401|403|406|429|Cookie|失效|权限|限流|unauthorized/i.test(msg)
       if (isAuth) {
         const reason = /429|406|限流/i.test(msg)
           ? '触发限流'
@@ -143,7 +170,7 @@ async function fetchAfterSalesForTimeRangeAccount(params: {
         } else if (/401|403|Cookie|失效|权限/i.test(msg)) {
           logXhsAccountAuthFailed(accountCtx)
         }
-        return { records, warnings, authFailed: true }
+        return { records, warnings, authFailed: true, pageCount }
       }
       logAfterSaleSyncFailed(accountCtx, msg.slice(0, 80))
       break
@@ -186,7 +213,167 @@ async function fetchAfterSalesForTimeRangeAccount(params: {
     durationSec,
   })
 
-  return { records, warnings }
+  return { records, warnings, pageCount }
+}
+
+function isShopMetaFresh(meta: {
+  status: string
+  lastSuccessAt: Date | null
+  sourceVersion: string
+}): boolean {
+  if (meta.sourceVersion !== RANGE_SYNC_SOURCE_VERSION) return false
+  if (meta.status !== 'success' && meta.status !== 'success_empty') return false
+  if (!meta.lastSuccessAt) return false
+  return Date.now() - meta.lastSuccessAt.getTime() <= TIME_SEARCH_CACHE_TTL_MS
+}
+
+export async function evaluateRangeShopFreshness(
+  range: DateRangeResolved,
+): Promise<{
+  fromCache: boolean
+  overall: 'complete' | 'partial' | 'blocked'
+  shops: ShopRangeSyncMetaView[]
+}> {
+  const key = rangeKey(range)
+  const accounts = await listEnabledLiveAccountsWithCookie()
+  const metas = await prisma.xhsAfterSalesRangeSyncMeta.findMany({
+    where: { rangeKey: key },
+  })
+  const byId = new Map(metas.map((m) => [m.liveAccountId, m]))
+  const shops: ShopRangeSyncMetaView[] = accounts.map((a) => {
+    const m = byId.get(a.id)
+    const fresh = m
+      ? isShopMetaFresh({
+          status: m.status,
+          lastSuccessAt: m.lastSuccessAt,
+          sourceVersion: m.sourceVersion,
+        })
+      : false
+    return {
+      liveAccountId: a.id,
+      platformName: a.platformName,
+      status: (m?.status as ShopRangeSyncStatus) ?? 'failed',
+      lastSuccessAt: m?.lastSuccessAt?.toISOString() ?? null,
+      recordCount: m?.recordCount ?? 0,
+      orderCount: m?.orderCount ?? 0,
+      errorType: m?.errorType ?? (m ? null : 'missing_meta'),
+      errorMessage: m?.errorMessage ?? (m ? null : '无同步元数据'),
+      fresh,
+    }
+  })
+  const allFresh = shops.length > 0 && shops.every((s) => s.fresh)
+  const anyBlocked = shops.some((s) => s.status === 'blocked')
+  return {
+    fromCache: allFresh,
+    overall: allFresh ? 'complete' : anyBlocked ? 'blocked' : 'partial',
+    shops,
+  }
+}
+
+async function replaceShopRangeRowsInTransaction(params: {
+  rangeKey: string
+  liveAccountId: string
+  platformName: string
+  records: NormalizedAfterSaleRecord[]
+  pageCount: number
+  status: 'success' | 'success_empty'
+}): Promise<void> {
+  const now = new Date()
+  const orderCount = new Set(params.records.map((r) => r.orderNo)).size
+  await prisma.$transaction(async (tx) => {
+    await tx.xhsAfterSalesTimeSearchCache.deleteMany({
+      where: { rangeKey: params.rangeKey, liveAccountId: params.liveAccountId },
+    })
+    for (const rec of params.records) {
+      const returnId = rec.returnId || `${rec.orderNo}:${rec.refundAmountCent}`
+      await tx.xhsAfterSalesTimeSearchCache.create({
+        data: {
+          liveAccountId: params.liveAccountId,
+          returnId,
+          orderNo: rec.orderNo,
+          platformName: params.platformName,
+          rangeKey: params.rangeKey,
+          rawJson: rec.raw as object,
+          syncedAt: now,
+        },
+      })
+    }
+    await tx.xhsAfterSalesRangeSyncMeta.upsert({
+      where: {
+        liveAccountId_rangeKey: {
+          liveAccountId: params.liveAccountId,
+          rangeKey: params.rangeKey,
+        },
+      },
+      create: {
+        liveAccountId: params.liveAccountId,
+        rangeKey: params.rangeKey,
+        platformName: params.platformName,
+        status: params.status,
+        lastAttemptAt: now,
+        lastSuccessAt: now,
+        completedAt: now,
+        recordCount: params.records.length,
+        orderCount,
+        pageCount: params.pageCount,
+        errorType: null,
+        errorMessage: null,
+        sourceVersion: RANGE_SYNC_SOURCE_VERSION,
+      },
+      update: {
+        platformName: params.platformName,
+        status: params.status,
+        lastAttemptAt: now,
+        lastSuccessAt: now,
+        completedAt: now,
+        recordCount: params.records.length,
+        orderCount,
+        pageCount: params.pageCount,
+        errorType: null,
+        errorMessage: null,
+        sourceVersion: RANGE_SYNC_SOURCE_VERSION,
+      },
+    })
+  })
+}
+
+async function markShopRangeMetaFailed(params: {
+  rangeKey: string
+  liveAccountId: string
+  platformName: string
+  errorType: string
+  errorMessage: string
+  status: 'failed' | 'blocked'
+}): Promise<void> {
+  const now = new Date()
+  await prisma.xhsAfterSalesRangeSyncMeta.upsert({
+    where: {
+      liveAccountId_rangeKey: {
+        liveAccountId: params.liveAccountId,
+        rangeKey: params.rangeKey,
+      },
+    },
+    create: {
+      liveAccountId: params.liveAccountId,
+      rangeKey: params.rangeKey,
+      platformName: params.platformName,
+      status: params.status,
+      lastAttemptAt: now,
+      recordCount: 0,
+      orderCount: 0,
+      pageCount: 0,
+      errorType: params.errorType,
+      errorMessage: params.errorMessage,
+      sourceVersion: RANGE_SYNC_SOURCE_VERSION,
+    },
+    update: {
+      status: params.status,
+      lastAttemptAt: now,
+      errorType: params.errorType,
+      errorMessage: params.errorMessage,
+      // 不覆盖 lastSuccessAt / 不删缓存
+    },
+  })
 }
 
 /** 多账号按 liveAccountId 拉取并写入缓存 */
@@ -198,44 +385,45 @@ export async function syncAfterSalesTimeSearchForRange(
   orderCount: number
   warnings: string[]
   fromCache: boolean
+  shops?: ShopRangeSyncMetaView[]
+  overall?: string
 }> {
   const key = rangeKey(range)
   if (!options?.force) {
-    // 以该 range 最近一次成功同步时间为准（max syncedAt）
-    const newest = await prisma.xhsAfterSalesTimeSearchCache.findFirst({
-      where: { rangeKey: key },
-      orderBy: { syncedAt: 'desc' },
-      select: { syncedAt: true },
-    })
-    if (newest) {
-      const ageMs = Date.now() - newest.syncedAt.getTime()
-      if (ageMs <= TIME_SEARCH_CACHE_TTL_MS) {
-        const cached = await prisma.xhsAfterSalesTimeSearchCache.count({
-          where: { rangeKey: key },
-        })
-        const orderNos = await prisma.xhsAfterSalesTimeSearchCache.groupBy({
-          by: ['orderNo'],
-          where: { rangeKey: key },
-        })
-        return {
-          recordCount: cached,
-          orderCount: orderNos.length,
-          warnings: [],
-          fromCache: true,
-        }
+    const freshness = await evaluateRangeShopFreshness(range)
+    if (freshness.fromCache) {
+      const cached = await prisma.xhsAfterSalesTimeSearchCache.count({
+        where: { rangeKey: key },
+      })
+      const orderNos = await prisma.xhsAfterSalesTimeSearchCache.groupBy({
+        by: ['orderNo'],
+        where: { rangeKey: key },
+      })
+      return {
+        recordCount: cached,
+        orderCount: orderNos.length,
+        warnings: [],
+        fromCache: true,
+        shops: freshness.shops,
+        overall: freshness.overall,
       }
     }
   }
 
   const accounts = await listEnabledLiveAccountsWithCookie()
-  const byAccountReturnId = new Map<string, NormalizedAfterSaleRecord>()
-  const successfulAccountIds = new Set<string>()
+  const freshness = await evaluateRangeShopFreshness(range)
   const warnings: string[] = []
   const dateRange = formatSyncDateRange(range.startDate, range.endDate)
   const accountTotal = accounts.length
+  let anySuccess = false
 
   for (let i = 0; i < accounts.length; i++) {
     const account = accounts[i]!
+    const shopFresh = freshness.shops.find((s) => s.liveAccountId === account.id)
+    if (!options?.force && shopFresh?.fresh) {
+      continue // 只刷新过期店
+    }
+
     const single = await fetchAfterSalesForTimeRangeAccount({
       startMs: range.startTimeMs,
       endMs: range.endTimeMs,
@@ -249,6 +437,14 @@ export async function syncAfterSalesTimeSearchForRange(
     })
     warnings.push(...single.warnings)
     if (single.authFailed) {
+      await markShopRangeMetaFailed({
+        rangeKey: key,
+        liveAccountId: account.id,
+        platformName: account.platformName,
+        errorType: 'cookie_or_auth',
+        errorMessage: single.warnings.join('; ') || 'auth_failed',
+        status: 'blocked',
+      })
       if (i + 1 < accounts.length) {
         logBusinessSyncContinueNext({
           accountName: accounts[i + 1]!.name,
@@ -257,86 +453,70 @@ export async function syncAfterSalesTimeSearchForRange(
           accountTotal,
         })
       }
-      // Cookie/鉴权失败：保留该店既有缓存，不覆盖
       continue
     }
-    successfulAccountIds.add(account.id)
-    for (const rec of single.records) {
-      const rid = `${account.id}::${rec.returnId || `${rec.orderNo}:${rec.statusName}`}`
-      if (!byAccountReturnId.has(rid)) byAccountReturnId.set(rid, rec)
+
+    try {
+      await replaceShopRangeRowsInTransaction({
+        rangeKey: key,
+        liveAccountId: account.id,
+        platformName: account.platformName,
+        records: single.records,
+        pageCount: single.pageCount,
+        status: single.records.length === 0 ? 'success_empty' : 'success',
+      })
+      anySuccess = true
+      // 用范围中点近似触发失效（支付日期归属业务日由订单侧更精确）
+      scheduleBusinessBoardCacheInvalidationForPayTime(
+        new Date(range.startTimeMs + (range.endTimeMs - range.startTimeMs) / 2),
+      )
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      warnings.push(`${account.name}: DB写入失败 ${msg}`)
+      await markShopRangeMetaFailed({
+        rangeKey: key,
+        liveAccountId: account.id,
+        platformName: account.platformName,
+        errorType: 'db_write_failed',
+        errorMessage: msg,
+        status: 'failed',
+      })
+      // 事务回滚后旧数据仍在，不会半删
     }
   }
 
-  if (byAccountReturnId.size === 0 && accounts.length === 1 && successfulAccountIds.size === 1) {
+  // 单账号 fallback（兼容旧路径）
+  if (!anySuccess && accounts.length === 1) {
     const fallback = await fetchAfterSalesForTimeRange({
       startMs: range.startTimeMs,
       endMs: range.endTimeMs,
       maxPages: options?.maxPages,
     })
     warnings.push(...fallback.warnings)
-    for (const rec of fallback.records) {
-      const rid = `${accounts[0]!.id}::${rec.returnId || `${rec.orderNo}:${rec.statusName}`}`
-      if (!byAccountReturnId.has(rid)) byAccountReturnId.set(rid, rec)
-    }
-  }
-
-  const now = new Date()
-  // 仅清理本次成功拉取的店铺，避免某店 Cookie 失败冲掉其他店正确数据
-  for (const liveAccountId of successfulAccountIds) {
-    await prisma.xhsAfterSalesTimeSearchCache.deleteMany({
-      where: { rangeKey: key, liveAccountId },
-    })
-  }
-
-  const records = [...byAccountReturnId.entries()]
-  for (const [accountReturnKey, rec] of records) {
-    const liveAccountId = accountReturnKey.split('::')[0]!
-    const returnId = rec.returnId || `${rec.orderNo}:${rec.refundAmountCent}`
-    const account = accounts.find((a) => a.id === liveAccountId)
-    await prisma.xhsAfterSalesTimeSearchCache.upsert({
-      where: {
-        liveAccountId_returnId_rangeKey: {
-          liveAccountId,
-          returnId,
-          rangeKey: key,
-        },
-      },
-      create: {
-        liveAccountId,
-        returnId,
-        orderNo: rec.orderNo,
-        platformName: account?.platformName ?? 'merged',
-        rangeKey: key,
-        rawJson: rec.raw as object,
-        syncedAt: now,
-      },
-      update: {
-        orderNo: rec.orderNo,
-        platformName: account?.platformName ?? 'merged',
-        rawJson: rec.raw as object,
-        syncedAt: now,
-      },
-    })
-  }
-
-  if (successfulAccountIds.size > 0) {
     try {
-      const { invalidateBusinessBoardCache } = await import('./business-cache.service')
-      invalidateBusinessBoardCache()
+      await replaceShopRangeRowsInTransaction({
+        rangeKey: key,
+        liveAccountId: accounts[0]!.id,
+        platformName: accounts[0]!.platformName,
+        records: fallback.records,
+        pageCount: 1,
+        status: fallback.records.length === 0 ? 'success_empty' : 'success',
+      })
+      anySuccess = true
     } catch {
       // ignore
     }
   }
 
+  const after = await evaluateRangeShopFreshness(range)
   const totalCached = await prisma.xhsAfterSalesTimeSearchCache.count({ where: { rangeKey: key } })
   const orderNos = await prisma.xhsAfterSalesTimeSearchCache.groupBy({
     by: ['orderNo'],
     where: { rangeKey: key },
   })
-  const failedShopCount = accounts.length - successfulAccountIds.size
-  if (failedShopCount > 0) {
+  if (after.overall !== 'complete') {
     warnings.push(
-      `partial_success: ${successfulAccountIds.size}/${accounts.length} 店成功；失败店保留原缓存未覆盖`,
+      `range_${after.overall}: ${after.shops.filter((s) => s.fresh).length}/${after.shops.length} 店新鲜`,
     )
   }
   return {
@@ -344,10 +524,11 @@ export async function syncAfterSalesTimeSearchForRange(
     orderCount: orderNos.length,
     warnings,
     fromCache: false,
+    shops: after.shops,
+    overall: after.overall,
   }
 }
 
-/** 从缓存加载时间范围售后 raw，按 liveAccountId + orderNo 索引 */
 export async function loadAfterSalesTimeSearchByOrderNo(
   range: DateRangeResolved,
   queries: LiveAccountOrderQuery[],
@@ -381,20 +562,14 @@ export async function loadAfterSalesTimeSearchByOrderNo(
   return m
 }
 
-/** 合并工作台与时间查询售后记录（时间查询优先补充） */
 export function mergeAfterSaleRecordMaps(
   base: Map<string, Record<string, unknown>[]>,
   extra: Map<string, Record<string, unknown>[]>,
 ): Map<string, Record<string, unknown>[]> {
   const out = new Map(base)
-  for (const [orderKey, records] of extra) {
-    const existing = out.get(orderKey) ?? []
-    const byId = new Map<string, Record<string, unknown>>()
-    for (const r of [...existing, ...records]) {
-      const rid = String(r.returns_id ?? r.returnsId ?? r.return_id ?? JSON.stringify(r))
-      byId.set(rid, r)
-    }
-    out.set(orderKey, [...byId.values()])
+  for (const [k, list] of extra) {
+    const prev = out.get(k) ?? []
+    out.set(k, [...prev, ...list])
   }
   return out
 }

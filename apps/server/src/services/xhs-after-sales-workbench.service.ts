@@ -28,6 +28,14 @@ import {
   splitReturnsV3RefundCent,
 } from './returns-v3-record.service'
 import { yuanApiAmountToCent } from './business-refund-caliber.service'
+import {
+  buildWorkbenchBusinessFingerprint,
+  extractOrderAfterSaleContextFromRaw,
+  resolvePreferredWorkbenchRefund,
+  shouldReopenWorkbenchQueueTask,
+  type OrderAfterSaleContext,
+} from './workbench-cache-validity.service'
+import { logInfo, logWarn } from '../utils/server-log'
 
 const WORKBENCH_URL =
   'https://ark.xiaohongshu.com/api/edith/after-sales/returns/v3'
@@ -476,21 +484,17 @@ export function getWorkbenchRefundMapForOrders(
   return m
 }
 
-/** 合并 DB / 内存售后缓存：success + 有退款优先于 empty / 0 元 */
+/** 合并 DB / 内存售后缓存：优先更新时间与完整性，金额越大不胜出 */
 export function pickPreferredWorkbenchRefund(
   a: AfterSalesWorkbenchRefund,
   b: AfterSalesWorkbenchRefund,
+  orderContext?: OrderAfterSaleContext,
 ): AfterSalesWorkbenchRefund {
-  const score = (x: AfterSalesWorkbenchRefund): number => {
-    let s = 0
-    if (x.fetchStatus === 'success') s += 1_000_000
-    else if (x.fetchStatus === 'empty') s += 1_000
-    if (x.successReturnCount > 0) s += 500_000
-    s += x.officialRefundAmountCent
-    s += (x.fetchedAt?.getTime() ?? 0) / 1_000_000
-    return s
-  }
-  return score(a) >= score(b) ? a : b
+  const aT = a.fetchedAt?.getTime() ?? 0
+  const bT = b.fetchedAt?.getTime() ?? 0
+  const incoming = aT >= bT ? a : b
+  const current = aT >= bT ? b : a
+  return resolvePreferredWorkbenchRefund({ current, incoming, orderContext }).preferred
 }
 
 export function mergeWorkbenchRefundMaps(
@@ -524,21 +528,34 @@ export async function getLatestTimeSearchCacheUpdatedAt(): Promise<Date | null> 
 }
 
 function workbenchRefundFingerprint(r: {
+  fetchStatus?: string | null
   officialRefundAmountCent?: number | null
+  freightRefundAmountCent?: number | null
+  appliedAmountCent?: number | null
+  appliedShipFeeAmountCent?: number | null
+  expectedRefundAmountCent?: number | null
   successReturnCount?: number | null
+  returnRefundCount?: number | null
+  refundOnlyCount?: number | null
   hasReturnRefund?: boolean | null
   hasRefundOnly?: boolean | null
+  hasFreightOnlyRefund?: boolean | null
   afterSaleStatus?: string | null
-  fetchStatus?: string | null
+  afterSaleReason?: string | null
+  afterSaleType?: string | null
+  returnTypeCodes?: string | null
+  classificationSource?: string | null
+  returnsIds?: string | string[] | null
+  refundIncludesFreight?: boolean | null
 }): string {
-  return [
-    r.fetchStatus ?? '',
-    r.officialRefundAmountCent ?? 0,
-    r.successReturnCount ?? 0,
-    r.hasReturnRefund ? 1 : 0,
-    r.hasRefundOnly ? 1 : 0,
-    r.afterSaleStatus ?? '',
-  ].join('|')
+  return buildWorkbenchBusinessFingerprint({
+    ...r,
+    freightRefundAmountCent: r.freightRefundAmountCent ?? r.appliedShipFeeAmountCent,
+    hasFreightOnlyRefund:
+      r.hasFreightOnlyRefund ??
+      ((r.freightRefundAmountCent ?? r.appliedShipFeeAmountCent ?? 0) > 0 &&
+        (r.officialRefundAmountCent ?? 0) === 0),
+  })
 }
 
 export async function saveWorkbenchCache(
@@ -554,12 +571,23 @@ export async function saveWorkbenchCache(
       },
     },
     select: {
+      fetchStatus: true,
       officialRefundAmountCent: true,
+      expectedRefundAmountCent: true,
+      appliedAmountCent: true,
+      appliedShipFeeAmountCent: true,
       successReturnCount: true,
+      returnRefundCount: true,
+      refundOnlyCount: true,
       hasReturnRefund: true,
       hasRefundOnly: true,
       afterSaleStatus: true,
-      fetchStatus: true,
+      afterSaleReason: true,
+      afterSaleType: true,
+      returnTypeCodes: true,
+      classificationSource: true,
+      returnsIds: true,
+      refundIncludesFreight: true,
       rawDetail: true,
     },
   })
@@ -637,13 +665,23 @@ export async function saveWorkbenchCache(
     )
   }
 
-  const nextFp = workbenchRefundFingerprint(result)
-  const prevFp = prev ? workbenchRefundFingerprint(prev) : ''
+  const nextFp = workbenchRefundFingerprint({
+    ...result,
+    returnsIds: result.returnsIds,
+    freightRefundAmountCent: result.freightRefundAmountCent,
+    hasFreightOnlyRefund: result.hasFreightOnlyRefund,
+  })
+  const prevFp = prev
+    ? workbenchRefundFingerprint({
+        ...prev,
+        freightRefundAmountCent: prev.appliedShipFeeAmountCent,
+        hasFreightOnlyRefund:
+          (prev.appliedShipFeeAmountCent ?? 0) > 0 && (prev.officialRefundAmountCent ?? 0) === 0,
+      })
+    : ''
   const emptyToSuccess = prev?.fetchStatus === 'empty' && result.fetchStatus === 'success'
-  const rawChanged =
-    Boolean(result.rawDetail) &&
-    JSON.stringify(prev?.rawDetail ?? null) !== JSON.stringify(result.rawDetail ?? null)
-  if (!prev || prevFp !== nextFp || emptyToSuccess || rawChanged) {
+  // 业务指纹变化才失效；fetchedAt 变化不单独触发
+  if (!prev || prevFp !== nextFp || emptyToSuccess) {
     try {
       const { invalidateBusinessBoardCache } = await import('./business-cache.service')
       invalidateBusinessBoardCache()
@@ -656,22 +694,23 @@ export async function saveWorkbenchCache(
 export async function enqueueWorkbenchSync(
   orderNo: string,
   liveAccountId?: string,
-  opts?: { force?: boolean },
-): Promise<void> {
+  opts?: { force?: boolean; source?: string },
+): Promise<{ reopened: boolean; reason: string }> {
   const trimmed = orderNo.trim()
   const accountId = resolveLiveAccountId(liveAccountId)
-  if (!trimmed || !/^P/i.test(trimmed)) return
+  if (!trimmed || !/^P/i.test(trimmed)) return { reopened: false, reason: 'invalid_order_no' }
 
-  const [{ extractOrderAfterSaleContextFromRaw, shouldReopenWorkbenchQueueTask }, { loadOrderAfterSaleContext }] =
-    await Promise.all([
-      import('./workbench-cache-validity.service'),
-      import('./after-sales-queue.service'),
-    ])
+  const { loadOrderAfterSaleContext } = await import('./after-sales-queue.service')
 
   const [existingQueue, cacheRow, orderCtx] = await Promise.all([
     prisma.xhsAfterSalesWorkbenchQueue.findUnique({
       where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
-      select: { status: true },
+      select: {
+        status: true,
+        nextAttemptAt: true,
+        errorType: true,
+        lastError: true,
+      },
     }),
     prisma.xhsAfterSalesWorkbenchCache.findUnique({
       where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
@@ -680,41 +719,87 @@ export async function enqueueWorkbenchSync(
         fetchedAt: true,
         updatedAt: true,
         officialRefundAmountCent: true,
+        expectedRefundAmountCent: true,
+        appliedAmountCent: true,
+        appliedShipFeeAmountCent: true,
         successReturnCount: true,
+        returnRefundCount: true,
+        refundOnlyCount: true,
         hasReturnRefund: true,
         hasRefundOnly: true,
-        appliedShipFeeAmountCent: true,
+        afterSaleStatus: true,
+        afterSaleReason: true,
+        afterSaleType: true,
+        returnTypeCodes: true,
+        classificationSource: true,
+        returnsIds: true,
+        refundIncludesFreight: true,
       },
     }),
     loadOrderAfterSaleContext(accountId, trimmed),
   ])
 
-  const reopen = shouldReopenWorkbenchQueueTask({
+  const decision = shouldReopenWorkbenchQueueTask({
     queueStatus: existingQueue?.status,
+    nextAttemptAt: existingQueue?.nextAttemptAt,
+    errorType: existingQueue?.errorType,
+    lastError: existingQueue?.lastError,
     cache: cacheRow
       ? {
           fetchStatus: cacheRow.fetchStatus,
           fetchedAt: cacheRow.fetchedAt,
           updatedAt: cacheRow.updatedAt,
           officialRefundAmountCent: cacheRow.officialRefundAmountCent,
+          expectedRefundAmountCent: cacheRow.expectedRefundAmountCent,
+          appliedAmountCent: cacheRow.appliedAmountCent,
+          appliedShipFeeAmountCent: cacheRow.appliedShipFeeAmountCent,
+          freightRefundAmountCent: cacheRow.appliedShipFeeAmountCent,
           successReturnCount: cacheRow.successReturnCount,
+          returnRefundCount: cacheRow.returnRefundCount,
+          refundOnlyCount: cacheRow.refundOnlyCount,
           hasReturnRefund: cacheRow.hasReturnRefund,
           hasRefundOnly: cacheRow.hasRefundOnly,
-          freightRefundAmountCent: cacheRow.appliedShipFeeAmountCent,
+          afterSaleStatus: cacheRow.afterSaleStatus,
+          afterSaleReason: cacheRow.afterSaleReason,
+          afterSaleType: cacheRow.afterSaleType,
+          returnTypeCodes: cacheRow.returnTypeCodes,
+          classificationSource: cacheRow.classificationSource,
+          returnsIds: cacheRow.returnsIds,
+          refundIncludesFreight: cacheRow.refundIncludesFreight,
         }
       : null,
     order: orderCtx ?? extractOrderAfterSaleContextFromRaw({}),
     force: opts?.force === true,
+    source: opts?.source ?? 'enqueueWorkbenchSync',
   })
 
   if (!existingQueue) {
     await prisma.xhsAfterSalesWorkbenchQueue.create({
       data: { liveAccountId: accountId, orderNo: trimmed, status: 'pending' },
     })
-    return
+    logInfo(
+      '售后补查',
+      `入队 create pending shop=${accountId} order=${trimmed} source=${opts?.source ?? 'enqueue'}`,
+    )
+    return { reopened: true, reason: 'created' }
   }
 
-  if (!reopen) return
+  if (!decision.reopen) {
+    return { reopened: false, reason: decision.reason }
+  }
+
+  // force 重开保留 errorType 到日志；写入时清空运行字段以便重新调度
+  if (decision.force) {
+    logWarn(
+      '售后补查',
+      `FORCE 重开 ${decision.fromStatus}→pending shop=${accountId} order=${trimmed} reason=${decision.reason} cache=${cacheRow?.fetchStatus ?? 'none'} afterSale=${orderCtx.afterSaleStatusText ?? ''}`,
+    )
+  } else {
+    logInfo(
+      '售后补查',
+      `重开 ${decision.fromStatus}→pending shop=${accountId} order=${trimmed} reason=${decision.reason}`,
+    )
+  }
 
   await prisma.xhsAfterSalesWorkbenchQueue.update({
     where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
@@ -727,6 +812,7 @@ export async function enqueueWorkbenchSync(
       nextAttemptAt: null,
     },
   })
+  return { reopened: true, reason: decision.reason }
 }
 
 /** @deprecated 请使用 shouldFetchAfterSalesWorkbench */

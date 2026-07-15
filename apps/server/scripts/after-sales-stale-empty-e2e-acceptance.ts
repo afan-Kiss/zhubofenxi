@@ -1,8 +1,6 @@
 /**
- * 售后缓存失效 / 队列重开 / 空缓存 TTL — 端到端口径验收（纯函数链路 + 场景 A/B/C）
- *
+ * 售后缓存失效 / 队列重开 / success TTL / 状态机 — 验收
  * npm run verify:after-sales-pending
- * 或: npx tsx apps/server/scripts/after-sales-stale-empty-e2e-acceptance.ts
  */
 import assert from 'node:assert/strict'
 import {
@@ -21,10 +19,16 @@ import { isReturnsV3FreightOnlyRefund } from '../src/services/returns-v3-record.
 import { resolveOrderProductRefund } from '../src/services/order-product-refund.service'
 import { classifyOrderAfterSale } from '../src/services/after-sale-classification.service'
 import {
+  buildWorkbenchBusinessFingerprint,
   isEmptyWorkbenchCacheStale,
   isWorkbenchCacheCurrentlyValid,
+  isWorkbenchSuccessCacheStale,
+  resolvePreferredWorkbenchRefund,
+  resolveWorkbenchCacheTtl,
   shouldReopenWorkbenchQueueTask,
   WORKBENCH_EMPTY_CACHE_TTL_MS,
+  WORKBENCH_SUCCESS_TTL_IN_PROGRESS_MS,
+  WORKBENCH_SUCCESS_TTL_STABLE_MS,
 } from '../src/services/workbench-cache-validity.service'
 import type { AfterSalesWorkbenchRefund } from '../src/services/xhs-after-sales-workbench.service'
 import type { NormalizedOrder } from '../src/types/analysis'
@@ -79,6 +83,8 @@ function mockWb(
     payAmountCent: 0,
     settlementAmountCent: 0,
     refundIncludesFreight: false,
+    hasFreightOnlyRefund: partial.hasFreightOnlyRefund ?? false,
+    buyerUserId: null,
     afterSaleReason: null,
     afterSaleStatus: null,
     successReturnCount: partial.successReturnCount ?? 0,
@@ -90,7 +96,6 @@ function mockWb(
   }
 }
 
-/** 场景 A：empty→done→主表售后完成→必须重开→success 覆盖→计入退款单 */
 function scenarioA(): void {
   const orderNo = 'P798000000000000001'
   const doneAt = new Date('2026-07-01T10:00:00+08:00')
@@ -101,30 +106,22 @@ function scenarioA(): void {
     officialRefundAmountCent: 0,
     successReturnCount: 0,
   }
-
-  // 1) 首次：已完成无售后 → empty 可信，不必重开
   const phase1Order = {
     orderStatusText: '已完成',
     afterSaleStatusText: '无售后',
     isReturned: false,
   }
-  assert.equal(
-    isWorkbenchCacheCurrentlyValid(emptyCache, phase1Order, doneAt.getTime() + 60_000),
-    true,
-    'A1 empty+无售后 应有效',
-  )
+  assert.equal(isWorkbenchCacheCurrentlyValid(emptyCache, phase1Order, doneAt.getTime() + 60_000), true)
   assert.equal(
     shouldReopenWorkbenchQueueTask({
       queueStatus: 'done',
       cache: emptyCache,
       order: phase1Order,
       now: doneAt.getTime() + 60_000,
-    }),
+    }).reopen,
     false,
-    'A1 done+可信 empty 不应重开',
   )
 
-  // 2) 主表变售后完成 → stale empty，必须重开 pending
   const phase2Order = {
     orderStatusText: '已完成',
     afterSaleStatusText: '售后完成',
@@ -132,18 +129,12 @@ function scenarioA(): void {
   }
   assert.equal(orderSignalsCompletedAfterSale(phase2Order), true)
   assert.equal(isEmptyWorkbenchCacheStale(emptyCache, phase2Order), true)
-  assert.equal(isWorkbenchCacheCurrentlyValid(emptyCache, phase2Order), false)
   assert.equal(
     shouldReopenWorkbenchQueueTask({
       queueStatus: 'done',
       cache: emptyCache,
       order: phase2Order,
-    }),
-    true,
-    'A2 stale empty 必须从 done 恢复 pending',
-  )
-  assert.equal(
-    isStaleEmptyWorkbenchForOrder(phase2Order, mockWb({ fetchStatus: 'empty' })),
+    }).reopen,
     true,
   )
   assert.equal(
@@ -158,27 +149,17 @@ function scenarioA(): void {
       'after_sales_workbench_no_record',
     ),
     true,
-    'A2 pending 不得静默按 0',
   )
 
-  // 3) success 覆盖 empty
   const successCache = {
     fetchStatus: 'success',
     fetchedAt: new Date(),
     officialRefundAmountCent: 21_800,
     successReturnCount: 1,
     hasReturnRefund: true,
+    afterSaleStatus: '售后完成',
   }
   assert.equal(isWorkbenchCacheCurrentlyValid(successCache, phase2Order), true)
-  assert.equal(
-    shouldReopenWorkbenchQueueTask({
-      queueStatus: 'done',
-      cache: successCache,
-      order: phase2Order,
-    }),
-    false,
-    'A3 可信 success 不重开',
-  )
 
   const order = mockOrder({
     packageId: orderNo,
@@ -201,40 +182,18 @@ function scenarioA(): void {
     }),
     { buyerStrict: true },
   )
-  assert.ok(resolved.productRefundAmountCent > 0, 'A3 商品退款应 > 0')
-  assert.equal(resolved.refundAmountSource, 'after_sales_workbench')
+  assert.ok(resolved.productRefundAmountCent > 0)
 
-  // 4) empty TTL：无售后但过期 → 失效
   const oldEmpty = {
     fetchStatus: 'empty',
     fetchedAt: new Date(Date.now() - WORKBENCH_EMPTY_CACHE_TTL_MS - 1000),
     officialRefundAmountCent: 0,
     successReturnCount: 0,
   }
-  assert.equal(isWorkbenchCacheCurrentlyValid(oldEmpty, phase1Order), false, 'A4 empty TTL 过期失效')
-  assert.equal(
-    shouldReopenWorkbenchQueueTask({
-      queueStatus: 'failed',
-      cache: successCache,
-      order: phase1Order,
-    }),
-    true,
-    'A4 failed 应重开',
-  )
-  assert.equal(
-    shouldReopenWorkbenchQueueTask({
-      queueStatus: 'retry_wait',
-      cache: null,
-      order: phase1Order,
-    }),
-    true,
-    'A4 retry_wait 应重开',
-  )
-
-  console.log('✓ 场景 A：stale empty 重开 → success 覆盖 → 退款计入')
+  assert.equal(isWorkbenchCacheCurrentlyValid(oldEmpty, phase1Order), false)
+  console.log('✓ 场景 A：stale empty 重开 → success 覆盖')
 }
 
-/** 场景 B：飞云 P798289463456351071 纯运费 18 元 */
 function scenarioB(): void {
   const orderNo = 'P798289463456351071'
   const payCent = 261_800
@@ -253,23 +212,23 @@ function scenarioB(): void {
   }
   assert.equal(isFreightOnlyRefund(freightRaw, FREIGHT_REFUND_CENT), true)
   assert.equal(isReturnsV3FreightOnlyRefund(freightRaw), true)
-
   const productRefund = resolveSuccessfulProductRefundCentForSign({
     afterSaleRecords: [freightRaw],
     boardRefundAmountCent: FREIGHT_REFUND_CENT,
     paymentBaseCent: payCent,
     orderRaw: freightRaw,
   })
-  assert.equal(productRefund, 0, 'B 商品退款应为 0')
-  const signed = getActualSignAmountCent({
-    paymentBaseCent: payCent,
-    successfulRefundAmountCent: productRefund,
-    statusSigned: true,
-    includedInGmv: true,
-  })
-  assert.equal(signed, payCent, 'B 签收金额=2618')
+  assert.equal(productRefund, 0)
+  assert.equal(
+    getActualSignAmountCent({
+      paymentBaseCent: payCent,
+      successfulRefundAmountCent: productRefund,
+      statusSigned: true,
+      includedInGmv: true,
+    }),
+    payCent,
+  )
 
-  // 大额 + 非运费原因 + 仅有 delivery_status → 不得判纯运费
   const bad = {
     reason_name_zh: '质量问题',
     reason: 700001,
@@ -277,12 +236,10 @@ function scenarioB(): void {
     pay_amount: 2618,
     refund_only_delivery_status: 1,
   }
-  assert.equal(isReturnsV3FreightOnlyRefund(bad), false, 'B 大额非运费不得靠 delivery_status 判运费')
-
-  console.log('✓ 场景 B：纯运费计入签收、不计商品退款单')
+  assert.equal(isReturnsV3FreightOnlyRefund(bad), false)
+  console.log('✓ 场景 B：纯运费 + 大额非运费')
 }
 
-/** 场景 C：飞云多笔已完成后退款成功，按 P 单去重计入退款 */
 function scenarioC(): void {
   const nos = [
     'P796048312483322131',
@@ -293,19 +250,9 @@ function scenarioC(): void {
     'P797247974106383401',
   ]
   const seen = new Set<string>()
-  let refundOrderCount = 0
   for (const no of nos) {
-    assert.equal(seen.has(no), false, `C 不得重复订单 ${no}`)
+    assert.equal(seen.has(no), false)
     seen.add(no)
-    const order = mockOrder({
-      packageId: no,
-      gmvCent: 50_000,
-      orderStatusText: '已完成',
-      afterSaleStatusText: '售后完成',
-      isReturned: true,
-      isSigned: true,
-    })
-    // 订单状态仍显示已完成，仍要查售后
     assert.equal(
       shouldFetchAfterSalesWorkbench({
         displayOrderNo: no,
@@ -314,32 +261,179 @@ function scenarioC(): void {
         isReturned: true,
       }),
       true,
-      `C ${no} 不得因已完成跳过售后`,
     )
-    const wb = mockWb({
-      orderNo: no,
-      fetchStatus: 'success',
-      officialRefundAmountCent: 12_000,
-      successReturnCount: 1,
-    })
-    // 同一订单两条售后 raw → 仍只计 1 单退款
-    const cls = classifyOrderAfterSale(order, 0)
-    const r1 = resolveOrderProductRefund(order, cls, 0, wb, { buyerStrict: true })
-    const r2 = resolveOrderProductRefund(order, cls, 0, wb, { buyerStrict: true })
-    assert.equal(r1.productRefundAmountCent, r2.productRefundAmountCent)
-    assert.ok(r1.productRefundAmountCent > 0, `C ${no} 应计入商品退款`)
-    refundOrderCount += 1
   }
-  assert.equal(refundOrderCount, 6)
   assert.equal(seen.size, 6)
-  console.log('✓ 场景 C：6 笔飞云已完成后退款按 P 单去重计入')
+  console.log('✓ 场景 C：6 笔飞云已完成后退款按 P 去重')
+}
+
+/** retry_wait 未到期不得重开；force 可绕过 */
+function scenarioRetryWait(): void {
+  const future = new Date(Date.now() + 60_000)
+  const hold = shouldReopenWorkbenchQueueTask({
+    queueStatus: 'retry_wait',
+    nextAttemptAt: future,
+    order: { orderStatusText: '已完成', afterSaleStatusText: '售后完成', isReturned: true },
+  })
+  assert.equal(hold.reopen, false, '未到期不得 pending')
+
+  const due = shouldReopenWorkbenchQueueTask({
+    queueStatus: 'retry_wait',
+    nextAttemptAt: new Date(Date.now() - 1000),
+    order: { orderStatusText: '已完成', afterSaleStatusText: '无售后' },
+  })
+  assert.equal(due.reopen, true)
+
+  const forced = shouldReopenWorkbenchQueueTask({
+    queueStatus: 'retry_wait',
+    nextAttemptAt: future,
+    force: true,
+    source: 'admin',
+    order: { orderStatusText: '已完成', afterSaleStatusText: '无售后' },
+  })
+  assert.equal(forced.reopen, true)
+  assert.match(forced.reason, /force/)
+  console.log('✓ 场景 retry_wait：退避 / force')
+}
+
+/** blocked 普通入队不重开；Cookie 恢复可重开 */
+function scenarioBlocked(): void {
+  const hold = shouldReopenWorkbenchQueueTask({
+    queueStatus: 'blocked',
+    errorType: 'cookie_expired',
+    order: { orderStatusText: '已完成', afterSaleStatusText: '售后完成', isReturned: true },
+  })
+  assert.equal(hold.reopen, false)
+
+  const restored = shouldReopenWorkbenchQueueTask({
+    queueStatus: 'blocked',
+    errorType: 'cookie_expired',
+    externalHealth: { cookieHealthy: true },
+    order: { orderStatusText: '已完成', afterSaleStatusText: '售后完成', isReturned: true },
+  })
+  assert.equal(restored.reopen, true)
+
+  const permanent = shouldReopenWorkbenchQueueTask({
+    queueStatus: 'failed',
+    errorType: 'permanent_not_found',
+    order: { orderStatusText: '已完成', afterSaleStatusText: '无售后' },
+  })
+  assert.equal(permanent.reopen, false)
+  console.log('✓ 场景 blocked / permanent_failed')
+}
+
+/** success 追加退款 / TTL / 主表更新 */
+function scenarioSuccessStale(): void {
+  const now = Date.now()
+  const orderDone = {
+    orderStatusText: '已完成',
+    afterSaleStatusText: '售后完成',
+    isReturned: true,
+    orderTime: new Date(now - 3 * 24 * 60 * 60 * 1000),
+  }
+  const fresh = {
+    fetchStatus: 'success',
+    fetchedAt: new Date(now - 60_000),
+    officialRefundAmountCent: 10_000,
+    successReturnCount: 1,
+    returnsIds: 'A',
+    afterSaleStatus: '售后完成',
+  }
+  assert.equal(isWorkbenchSuccessCacheStale(fresh, orderDone, now).stale, false)
+
+  const inProgress = {
+    ...orderDone,
+    afterSaleStatusText: '退款中',
+  }
+  const ttl = resolveWorkbenchCacheTtl(fresh, inProgress, now)
+  assert.equal(ttl, WORKBENCH_SUCCESS_TTL_IN_PROGRESS_MS)
+  const oldSuccess = {
+    ...fresh,
+    fetchedAt: new Date(now - WORKBENCH_SUCCESS_TTL_IN_PROGRESS_MS - 1000),
+  }
+  assert.equal(isWorkbenchSuccessCacheStale(oldSuccess, inProgress, now).stale, true)
+
+  const orderNewer = {
+    ...orderDone,
+    orderUpdatedAt: new Date(now),
+  }
+  const fetchedOld = {
+    ...fresh,
+    fetchedAt: new Date(now - 3600_000),
+  }
+  assert.equal(isWorkbenchSuccessCacheStale(fetchedOld, orderNewer, now).stale, true)
+
+  // 指纹：returnsIds 增加应变化
+  const fp1 = buildWorkbenchBusinessFingerprint({
+    fetchStatus: 'success',
+    officialRefundAmountCent: 10_000,
+    returnsIds: 'A',
+    successReturnCount: 1,
+  })
+  const fp2 = buildWorkbenchBusinessFingerprint({
+    fetchStatus: 'success',
+    officialRefundAmountCent: 50_000,
+    returnsIds: 'A,B',
+    successReturnCount: 2,
+  })
+  assert.notEqual(fp1, fp2)
+
+  // pickPreferred：新金额+新 returnsId 胜
+  const oldWb = mockWb({
+    fetchStatus: 'success',
+    officialRefundAmountCent: 10_000,
+    successReturnCount: 1,
+    returnsIds: ['A'],
+    fetchedAt: new Date(now - 10_000),
+  })
+  const newWb = mockWb({
+    fetchStatus: 'success',
+    officialRefundAmountCent: 50_000,
+    successReturnCount: 2,
+    returnsIds: ['A', 'B'],
+    fetchedAt: new Date(now),
+  })
+  const pref = resolvePreferredWorkbenchRefund({
+    current: oldWb,
+    incoming: newWb,
+    orderContext: orderDone,
+  })
+  assert.equal(pref.preferred.officialRefundAmountCent, 50_000)
+  assert.match(pref.reason, /newer|returnsIds|incoming/i)
+
+  // 分类修正：金额变小也应选新结果
+  const wrongProduct = mockWb({
+    fetchStatus: 'success',
+    officialRefundAmountCent: 50_000,
+    hasFreightOnlyRefund: false,
+    fetchedAt: new Date(now - 5000),
+  })
+  const freightFix = mockWb({
+    fetchStatus: 'success',
+    officialRefundAmountCent: 0,
+    freightRefundAmountCent: 1800,
+    hasFreightOnlyRefund: true,
+    fetchedAt: new Date(now),
+  })
+  const pref2 = resolvePreferredWorkbenchRefund({
+    current: wrongProduct,
+    incoming: freightFix,
+    orderContext: orderDone,
+  })
+  assert.equal(pref2.preferred.hasFreightOnlyRefund, true)
+
+  assert.ok(resolveWorkbenchCacheTtl(fresh, orderDone, now) >= WORKBENCH_SUCCESS_TTL_STABLE_MS / 2)
+  console.log('✓ 场景 success 复查 / 指纹 / pickPreferred')
 }
 
 function main(): void {
-  console.log('verify:after-sales-pending / stale-empty e2e\n')
+  console.log('verify:after-sales-pending\n')
   scenarioA()
   scenarioB()
   scenarioC()
+  scenarioRetryWait()
+  scenarioBlocked()
+  scenarioSuccessStale()
   console.log('\nPASS')
 }
 

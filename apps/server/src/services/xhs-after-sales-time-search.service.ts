@@ -201,13 +201,14 @@ export async function syncAfterSalesTimeSearchForRange(
 }> {
   const key = rangeKey(range)
   if (!options?.force) {
-    const oldest = await prisma.xhsAfterSalesTimeSearchCache.findFirst({
+    // 以该 range 最近一次成功同步时间为准（max syncedAt）
+    const newest = await prisma.xhsAfterSalesTimeSearchCache.findFirst({
       where: { rangeKey: key },
-      orderBy: { syncedAt: 'asc' },
+      orderBy: { syncedAt: 'desc' },
       select: { syncedAt: true },
     })
-    if (oldest) {
-      const ageMs = Date.now() - oldest.syncedAt.getTime()
+    if (newest) {
+      const ageMs = Date.now() - newest.syncedAt.getTime()
       if (ageMs <= TIME_SEARCH_CACHE_TTL_MS) {
         const cached = await prisma.xhsAfterSalesTimeSearchCache.count({
           where: { rangeKey: key },
@@ -332,6 +333,12 @@ export async function syncAfterSalesTimeSearchForRange(
     by: ['orderNo'],
     where: { rangeKey: key },
   })
+  const failedShopCount = accounts.length - successfulAccountIds.size
+  if (failedShopCount > 0) {
+    warnings.push(
+      `partial_success: ${successfulAccountIds.size}/${accounts.length} 店成功；失败店保留原缓存未覆盖`,
+    )
+  }
   return {
     recordCount: totalCached,
     orderCount: orderNos.length,

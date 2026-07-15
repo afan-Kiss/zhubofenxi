@@ -99,6 +99,7 @@ export interface BoardLiveQueryResult {
     afterSaleRowsRead?: number
   }
   qualityFeedback?: QualityFeedbackPublicStatus
+  afterSalesCompleteness?: import('./after-sales-completeness.service').AfterSalesCompleteness
   dataDisplayStatus?:
     | 'ready'
     | 'syncing_with_cache'

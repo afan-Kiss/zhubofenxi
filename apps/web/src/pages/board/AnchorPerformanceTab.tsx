@@ -584,6 +584,24 @@ export const AnchorPerformanceTab: React.FC = () => {
         <div>
           <h2 className="text-xl font-semibold text-slate-900">主播业绩</h2>
           <p className="mt-0.5 text-sm text-slate-500">按订单归属汇总各主播经营表现</p>
+          {data?.afterSalesCompleteness && data.afterSalesCompleteness.status !== 'complete' ? (
+            <p
+              className={
+                data.afterSalesCompleteness.status === 'blocked'
+                  ? 'mt-1 text-xs text-amber-800'
+                  : 'mt-1 text-xs text-sky-800'
+              }
+            >
+              售后补查
+              {data.afterSalesCompleteness.status === 'pending'
+                ? '进行中'
+                : data.afterSalesCompleteness.status === 'partial'
+                  ? '部分完成'
+                  : '受阻'}
+              ：退款/签收指标可能继续变化（待补查{' '}
+              {data.afterSalesCompleteness.pendingCount + data.afterSalesCompleteness.retryWaitCount}）
+            </p>
+          ) : null}
           {selectedIsManual ? (
             <p className="mt-1 text-xs text-indigo-700">
               该主播仅统计订单明细里手动指定的归属，不受场次和排班影响。

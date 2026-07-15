@@ -13,6 +13,8 @@ import {
   getBusinessBoardCache,
   isBusinessCacheWarmupRunning,
   isBusinessBoardCachePendingBuild,
+  isBusinessBoardCacheFingerprintStale,
+  BUSINESS_CACHE_FINGERPRINT,
   buildBoardSummaryFromViews,
   type BusinessBoardCacheEntry,
 } from './business-cache.service'
@@ -27,7 +29,7 @@ import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-at
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { readBoardPresetSnapshot, buildSnapshotBoardCacheStub } from './board-preset-snapshot.service'
-import { CANONICAL_ATTRIBUTION_VERSION } from './canonical-order-attribution.service'
+import { resolveAfterSalesCompleteness } from './after-sales-completeness.service'
 
 import { AMOUNT_FORMULA_VERSION } from './order-amount-metrics.service'
 
@@ -382,19 +384,24 @@ export async function executeBoardLocalQuery(params: {
     !hasAnchorFilter &&
     (queryMode === 'overview' || queryMode === 'anchors' || queryMode === 'full')
 
-  /** 磁盘快照 / 旧归属算法版本不得直接作为主播业绩事实来源 */
+  /** 磁盘快照 / 指纹过期不得直接作为主播业绩事实来源 */
   const isAttributionStale = (entry: BusinessBoardCacheEntry | null | undefined): boolean => {
     if (!entry || entry.stale) return true
     if (entry.fallbackReason === 'disk_snapshot') return true
-    return entry.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION
+    return entry.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT
   }
 
   if (!boardCache && canUseSnapshotFastPath) {
     const snap = await readBoardPresetSnapshot(params.preset, startDate, endDate)
     if (snap) {
-      // 仅作瞬时占位；下方对归属过期快照会 await 重建
       boardCache = buildSnapshotBoardCacheStub(snap)
       void getOrBuildBusinessBoardCache({ preset: params.preset, startDate, endDate })
+    }
+  }
+
+  if (boardCache && !isAttributionStale(boardCache)) {
+    if (await isBusinessBoardCacheFingerprintStale(boardCache)) {
+      boardCache = null
     }
   }
 
@@ -409,7 +416,7 @@ export async function executeBoardLocalQuery(params: {
       if (canUseSnapshotFastPath) {
         const snap = await readBoardPresetSnapshot(params.preset, startDate, endDate)
         if (snap) {
-          boardCache = buildSnapshotBoardCacheStub(snap)
+          boardCache = { ...buildSnapshotBoardCacheStub(snap), stale: true }
         }
       }
       if (!boardCache) throw err
@@ -611,7 +618,16 @@ export async function executeBoardLocalQuery(params: {
   }
 
   if (boardCache.stale && boardCache.buildError) {
-    progressMessage = `缓存重建失败（${boardCache.buildError}），当前展示上一次成功缓存。`
+    progressMessage = `缓存重建失败（${boardCache.buildError}），当前展示上一次成功缓存，数据可能未完成更新。`
+  }
+
+  const afterSalesCompleteness = await resolveAfterSalesCompleteness()
+  if (
+    afterSalesCompleteness.status === 'pending' ||
+    afterSalesCompleteness.status === 'partial' ||
+    afterSalesCompleteness.status === 'blocked'
+  ) {
+    progressMessage = `${progressMessage} ${afterSalesCompleteness.note}`.trim()
   }
 
   if (boardCache.stale || dataDisplayStatus === 'failed_with_cache') {
@@ -706,6 +722,8 @@ export async function executeBoardLocalQuery(params: {
     },
 
     qualityFeedback,
+
+    afterSalesCompleteness,
 
     ...(fullSyncMeta ? { syncMeta: fullSyncMeta } : {}),
 

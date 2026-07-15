@@ -6,8 +6,9 @@ import { buildAnchorPerformanceViewsFromScopedViews } from './anchor-performance
 import {
   getOrBuildBusinessBoardCache,
   getBusinessBoardCache,
+  isBusinessBoardCacheFingerprintStale,
+  BUSINESS_CACHE_FINGERPRINT,
 } from './business-cache.service'
-import { CANONICAL_ATTRIBUTION_VERSION } from './canonical-order-attribution.service'
 import { filterViewsForStaffScope } from './staff-anchor-scope.service'
 
 export interface BoardScopedViewsBundle {
@@ -28,12 +29,21 @@ async function resolveBoardCacheWithViews(params: {
   forceRefresh?: boolean
 }) {
   const existing = getBusinessBoardCache(params.preset, params.startDate, params.endDate)
+  const versionStale =
+    !!existing && existing.attributionAlgorithmVersion !== BUSINESS_CACHE_FINGERPRINT
+  const fingerprintStale =
+    !!existing &&
+    !existing.stale &&
+    existing.fallbackReason !== 'disk_snapshot' &&
+    !versionStale &&
+    (await isBusinessBoardCacheFingerprintStale(existing))
   const needsRebuild =
     params.forceRefresh === true ||
     !existing ||
     existing.stale ||
     existing.fallbackReason === 'disk_snapshot' ||
-    existing.attributionAlgorithmVersion !== CANONICAL_ATTRIBUTION_VERSION ||
+    versionStale ||
+    fingerprintStale ||
     (existing.views.length === 0 && existing.orderCount > 0)
 
   if (needsRebuild) {
@@ -41,7 +51,7 @@ async function resolveBoardCacheWithViews(params: {
       preset: params.preset,
       startDate: params.startDate,
       endDate: params.endDate,
-      forceRebuild: params.forceRefresh === true,
+      forceRebuild: params.forceRefresh === true || fingerprintStale || versionStale,
     })
   }
   return existing

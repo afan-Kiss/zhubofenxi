@@ -363,6 +363,29 @@ export const OverviewTab: React.FC = () => {
           <p className="mt-0.5 text-sm text-slate-500">
             本期经营大盘 · 支付、已签收、退款、品退
           </p>
+          {data?.afterSalesCompleteness &&
+          data.afterSalesCompleteness.status !== 'complete' ? (
+            <p
+              className={
+                data.afterSalesCompleteness.status === 'blocked'
+                  ? 'mt-1 text-xs text-amber-800'
+                  : 'mt-1 text-xs text-sky-800'
+              }
+            >
+              售后补查
+              {data.afterSalesCompleteness.status === 'pending'
+                ? '进行中'
+                : data.afterSalesCompleteness.status === 'partial'
+                  ? '部分完成'
+                  : '受阻'}
+              ：{data.afterSalesCompleteness.note}
+              {data.afterSalesCompleteness.pendingCount +
+                data.afterSalesCompleteness.retryWaitCount >
+              0
+                ? `（待补查 ${data.afterSalesCompleteness.pendingCount + data.afterSalesCompleteness.retryWaitCount}）`
+                : ''}
+            </p>
+          ) : null}
           {status === 'loading' && !displaySummary ? (
             <p className="mt-1 text-xs text-slate-400">正在读取本地数据…</p>
           ) : null}

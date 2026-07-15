@@ -180,14 +180,17 @@ export async function loadOrderAfterSaleContext(
       liveAccountId,
       OR: [{ packageId: trimmed }, { orderId: trimmed }],
     },
-    select: { rawJson: true },
+    select: { rawJson: true, updatedAt: true, orderTime: true },
     orderBy: { updatedAt: 'desc' },
   })
   const raw =
     row?.rawJson && typeof row.rawJson === 'object'
       ? (row.rawJson as Record<string, unknown>)
       : {}
-  return extractOrderAfterSaleContextFromRaw(raw)
+  return extractOrderAfterSaleContextFromRaw(raw, {
+    orderUpdatedAt: row?.updatedAt ?? null,
+    orderTime: row?.orderTime ?? null,
+  })
 }
 
 export async function hasValidWorkbenchCache(
@@ -204,10 +207,21 @@ export async function hasValidWorkbenchCache(
       fetchedAt: true,
       updatedAt: true,
       officialRefundAmountCent: true,
+      expectedRefundAmountCent: true,
+      appliedAmountCent: true,
+      appliedShipFeeAmountCent: true,
       successReturnCount: true,
+      returnRefundCount: true,
+      refundOnlyCount: true,
       hasReturnRefund: true,
       hasRefundOnly: true,
-      appliedShipFeeAmountCent: true,
+      afterSaleStatus: true,
+      afterSaleReason: true,
+      afterSaleType: true,
+      returnTypeCodes: true,
+      classificationSource: true,
+      returnsIds: true,
+      refundIncludesFreight: true,
     },
   })
   if (!row) return false
@@ -217,10 +231,23 @@ export async function hasValidWorkbenchCache(
     fetchedAt: row.fetchedAt,
     updatedAt: row.updatedAt,
     officialRefundAmountCent: row.officialRefundAmountCent,
+    freightRefundAmountCent: row.appliedShipFeeAmountCent,
+    expectedRefundAmountCent: row.expectedRefundAmountCent,
+    appliedAmountCent: row.appliedAmountCent,
+    appliedShipFeeAmountCent: row.appliedShipFeeAmountCent,
     successReturnCount: row.successReturnCount,
+    returnRefundCount: row.returnRefundCount,
+    refundOnlyCount: row.refundOnlyCount,
     hasReturnRefund: row.hasReturnRefund,
     hasRefundOnly: row.hasRefundOnly,
-    freightRefundAmountCent: row.appliedShipFeeAmountCent,
+    hasFreightOnlyRefund: (row.appliedShipFeeAmountCent ?? 0) > 0 && (row.officialRefundAmountCent ?? 0) === 0,
+    afterSaleStatus: row.afterSaleStatus,
+    afterSaleReason: row.afterSaleReason,
+    afterSaleType: row.afterSaleType,
+    returnTypeCodes: row.returnTypeCodes,
+    classificationSource: row.classificationSource,
+    returnsIds: row.returnsIds,
+    refundIncludesFreight: row.refundIncludesFreight,
   }
   return isWorkbenchCacheCurrentlyValid(snapshot, ctx)
 }

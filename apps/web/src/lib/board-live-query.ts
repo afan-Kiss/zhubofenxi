@@ -191,6 +191,14 @@ export interface BoardLiveQueryData {
     formulaVersion: string
   }
   qualityFeedback?: QualityFeedbackStatus
+  afterSalesCompleteness?: {
+    status: 'complete' | 'partial' | 'pending' | 'blocked'
+    pendingCount: number
+    retryWaitCount: number
+    blockedCount: number
+    failedCount: number
+    note: string
+  }
   syncMeta?: BoardSyncMeta
   overviewMeta?: OverviewMeta
 }

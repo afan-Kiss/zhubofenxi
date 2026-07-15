@@ -45,6 +45,7 @@ export function matchTimeRule(
 ): { rule: TimeRule; anchor: Anchor } | null {
   if (!date) return null
   const minutes = getTimeMinutes(date)
+  const dateKey = date.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
   for (const rule of config.timeRules) {
     if (!rule.enabled) continue
     if (!isTimeRuleEffectiveAt(rule, date)) continue
@@ -53,6 +54,9 @@ export function matchTimeRule(
     if (!anchor) continue
     // 仅手动归属主播不参与时段自动匹配
     if (anchor.attributionMode === 'manual') continue
+    // 上岗日门槛（左闭）：effectiveFrom 之前不自动归属
+    if (anchor.effectiveFrom && dateKey < anchor.effectiveFrom) continue
+    if (anchor.effectiveTo && dateKey > anchor.effectiveTo) continue
     return { rule, anchor }
   }
   return null

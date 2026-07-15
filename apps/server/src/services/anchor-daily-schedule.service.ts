@@ -114,6 +114,7 @@ export class ScheduleSaveError extends Error {
 export interface DailyScheduleDto {
   id: string
   scheduleDate: string
+  anchorId?: string | null
   anchorName: string
   shopName: string
   liveRoomName: string
@@ -133,6 +134,7 @@ export interface DailyScheduleDto {
 function rowToDto(row: {
   id: string
   scheduleDate: string
+  anchorId?: string | null
   anchorName: string
   shopName: string
   liveRoomName: string
@@ -151,7 +153,6 @@ function rowToDto(row: {
     minute: '2-digit',
     hour12: false,
   })
-  const endMs = row.endAt.getTime()
   const endDateKey = row.endAt.toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
   const isMidnightEnd =
     row.endAt.getHours() === 0 &&
@@ -168,6 +169,7 @@ function rowToDto(row: {
   return {
     id: row.id,
     scheduleDate: row.scheduleDate,
+    anchorId: row.anchorId ?? null,
     anchorName: row.anchorName,
     shopName: row.shopName,
     liveRoomName: row.liveRoomName,
@@ -527,6 +529,7 @@ export async function generateDefaultSchedulesForDate(params: {
 export async function saveDailySchedules(params: {
   date: string
   schedules: Array<{
+    anchorId?: string | null
     anchorName: string
     shopName: string
     liveRoomName: string
@@ -587,10 +590,23 @@ export async function saveDailySchedules(params: {
 
   for (const s of draftEnabled) {
     const { startAt, endAt } = buildScheduleBounds(params.date, s.startTime, s.endTime)
+    const name = s.anchorName.trim()
+    let anchorId =
+      'anchorId' in s && typeof (s as { anchorId?: string }).anchorId === 'string'
+        ? String((s as { anchorId?: string }).anchorId).trim() || null
+        : null
+    if (!anchorId && name) {
+      const hit = await prisma.anchor.findFirst({
+        where: { name, deletedAt: null, attributionMode: 'schedule', enabled: true },
+        select: { id: true, systemKey: true },
+      })
+      if (hit && !hit.systemKey) anchorId = hit.id
+    }
     await prisma.anchorDailySchedule.create({
       data: {
         scheduleDate: params.date,
-        anchorName: s.anchorName.trim(),
+        anchorId,
+        anchorName: name,
         shopName: s.shopName.trim(),
         liveRoomName: s.liveRoomName.trim(),
         startAt,

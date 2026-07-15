@@ -81,6 +81,8 @@ export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   anchorId?: string
   systemKey?: string | null
   attributionMode?: string | null
+  /** 主播主题色（优先 Anchor.color） */
+  color?: string | null
   anchorName: string
   sessionLabel: string
   shopName: string
@@ -339,11 +341,12 @@ function buildAnchorRow(params: {
       ? params.liveTimeRange
       : buildLivePeriodText(params.sessions).replace(/~/g, '–')
     : NO_LIVE_SESSION_TEXT
+  const meta = params.config.anchors.find((a) => a.id === params.anchorId)
   return {
     anchorId: params.anchorId,
-    systemKey: params.config.anchors.find((a) => a.id === params.anchorId)?.systemKey ?? null,
-    attributionMode:
-      params.config.anchors.find((a) => a.id === params.anchorId)?.attributionMode ?? null,
+    systemKey: meta?.systemKey ?? null,
+    attributionMode: meta?.attributionMode ?? null,
+    color: meta?.color ?? null,
     anchorName: params.anchorName,
     livePeriodText: hasRealSessions ? buildLivePeriodText(params.sessions) : '—',
     liveTimeRange,

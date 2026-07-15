@@ -27,26 +27,25 @@ function todayShanghaiInput(): string {
 export const OfflineDealEntryPanel: React.FC<{
   defaultAnchorName?: string
   onCreated?: () => void
-}> = ({ defaultAnchorName, onCreated }) => {
+}> = ({ onCreated }) => {
   const [open, setOpen] = useState(false)
-  const [anchors, setAnchors] = useState<AnchorOption[]>([])
+  const [yifan, setYifan] = useState<AnchorOption | null>(null)
   const [loadingOptions, setLoadingOptions] = useState(false)
   const [saving, setSaving] = useState(false)
   const [flash, setFlash] = useState<Flash | null>(null)
   const [amount, setAmount] = useState('')
-  const [anchorName, setAnchorName] = useState(defaultAnchorName ?? '')
   const [dealAt, setDealAt] = useState(todayShanghaiInput)
   const [customerLabel, setCustomerLabel] = useState('')
   const [externalKey, setExternalKey] = useState('')
   const [note, setNote] = useState('')
   const [status, setStatus] = useState<'confirmed' | 'draft'>('confirmed')
-  const [allowPending, setAllowPending] = useState(false)
 
   const loadOptions = useCallback(async () => {
     setLoadingOptions(true)
     try {
       const res = await apiRequest<{ anchors: AnchorOption[] }>('/api/offline-deals/anchor-options')
-      setAnchors(res.anchors ?? [])
+      const hit = (res.anchors ?? [])[0] ?? null
+      setYifan(hit)
     } catch (e) {
       setFlash({
         type: 'error',
@@ -61,20 +60,16 @@ export const OfflineDealEntryPanel: React.FC<{
     if (open) void loadOptions()
   }, [open, loadOptions])
 
-  useEffect(() => {
-    if (defaultAnchorName) setAnchorName(defaultAnchorName)
-  }, [defaultAnchorName])
-
   const canSubmit = useMemo(() => {
-    if (saving) return false
+    if (saving || loadingOptions) return false
+    if (!yifan?.name) return false
     const n = Number(amount)
     if (!Number.isFinite(n) || n <= 0) return false
-    if (status === 'confirmed' && !anchorName.trim() && !allowPending) return false
     return true
-  }, [amount, anchorName, allowPending, saving, status])
+  }, [amount, loadingOptions, saving, yifan])
 
   const submit = async () => {
-    if (!canSubmit) return
+    if (!canSubmit || !yifan) return
     setSaving(true)
     setFlash(null)
     const idempotencyKey =
@@ -86,13 +81,13 @@ export const OfflineDealEntryPanel: React.FC<{
         body: JSON.stringify({
           amountYuan: Number(amount),
           dealAt: new Date(dealAt).toISOString(),
-          anchorName: anchorName.trim() || undefined,
+          anchorId: yifan.id,
+          anchorName: yifan.name,
           customerLabel: customerLabel.trim() || undefined,
           note: note.trim() || undefined,
           externalKey: externalKey.trim() || undefined,
           idempotencyKey,
           status,
-          allowPending: allowPending || undefined,
         }),
       })
       setFlash({ type: 'success', text: res.message || '已录入线下成交' })
@@ -100,7 +95,6 @@ export const OfflineDealEntryPanel: React.FC<{
       setCustomerLabel('')
       setExternalKey('')
       setNote('')
-      setAllowPending(false)
       onCreated?.()
     } catch (e) {
       setFlash({
@@ -118,7 +112,7 @@ export const OfflineDealEntryPanel: React.FC<{
         <div>
           <h3 className="text-sm font-semibold text-slate-900">线下成交录入</h3>
           <p className="mt-0.5 text-xs text-slate-500">
-            已确认且指定主播的线下成交会计入总支付金额与该主播 GMV；可归属于逸凡等仅手动归属主播。
+            已确认的线下成交固定归属逸凡，并计入总支付金额与该主播 GMV（自生效日起）。
           </p>
         </div>
         <button
@@ -158,20 +152,14 @@ export const OfflineDealEntryPanel: React.FC<{
               />
             </label>
             <label className="text-xs text-slate-600">
-              归属主播{status === 'confirmed' && !allowPending ? '*' : ''}
-              <select
-                value={anchorName}
-                onChange={(e) => setAnchorName(e.target.value)}
-                disabled={loadingOptions}
-                className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
-              >
-                <option value="">请选择主播</option>
-                {anchors.map((a) => (
-                  <option key={a.id} value={a.name}>
-                    {a.label || a.name}
-                  </option>
-                ))}
-              </select>
+              归属主播
+              <div className="mt-0.5 rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-800">
+                {loadingOptions
+                  ? '加载中…'
+                  : yifan
+                    ? `${yifan.name}（固定）`
+                    : '系统线下主播未就绪'}
+              </div>
             </label>
             <label className="text-xs text-slate-600">
               成交时间*
@@ -183,64 +171,52 @@ export const OfflineDealEntryPanel: React.FC<{
               />
             </label>
             <label className="text-xs text-slate-600">
-              客户/订单标识
+              客户备注
               <input
                 value={customerLabel}
                 onChange={(e) => setCustomerLabel(e.target.value)}
                 className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
-                placeholder="客户昵称或沟通记录编号"
+                placeholder="可选"
               />
             </label>
             <label className="text-xs text-slate-600">
-              外部唯一编号（防重复）
+              外部单号 / 幂等键
               <input
                 value={externalKey}
                 onChange={(e) => setExternalKey(e.target.value)}
                 className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
-                placeholder="可选，不可与平台 P 单冲突"
+                placeholder="可选"
               />
             </label>
             <label className="text-xs text-slate-600">
-              成交状态
+              状态
               <select
                 value={status}
                 onChange={(e) => setStatus(e.target.value as 'confirmed' | 'draft')}
                 className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
               >
                 <option value="confirmed">已确认</option>
-                <option value="draft">草稿（不计入 GMV）</option>
+                <option value="draft">草稿</option>
               </select>
             </label>
-          </div>
-
-          <label className="block text-xs text-slate-600">
-            备注
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={2}
-              className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
-            />
-          </label>
-
-          {status === 'confirmed' ? (
-            <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
+            <label className="text-xs text-slate-600 sm:col-span-2 lg:col-span-3">
+              备注
               <input
-                type="checkbox"
-                checked={allowPending}
-                onChange={(e) => setAllowPending(e.target.checked)}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                placeholder="可选"
               />
-              暂不选主播（计入未归属 GMV，显示待归属主播）
             </label>
-          ) : null}
+          </div>
 
           <button
             type="button"
             disabled={!canSubmit}
             onClick={() => void submit()}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           >
-            {saving ? '保存中…' : '保存线下成交'}
+            {saving ? '提交中…' : '确认录入'}
           </button>
         </div>
       ) : null}

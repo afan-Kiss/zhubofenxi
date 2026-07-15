@@ -17,6 +17,7 @@ function afterScheduleMutation(): void {
 
 interface ScheduleRow {
   id?: string
+  anchorId?: string | null
   anchorName: string
   shopName: string
   liveRoomName: string
@@ -25,6 +26,16 @@ interface ScheduleRow {
   source?: string
   enabled: boolean
   note?: string | null
+}
+
+interface ScheduleAnchorOption {
+  id: string
+  name: string
+  enabled: boolean
+  attributionMode?: 'schedule' | 'manual' | string | null
+  systemKey?: string | null
+  effectiveFrom?: string | null
+  effectiveTo?: string | null
 }
 
 interface ScheduleResponse {
@@ -73,6 +84,17 @@ const yesterdayKey = () => {
 const SHOP_OPTIONS = ['XY祥钰珠宝', '和田雅玉', '拾玉居和田玉', '祥钰珠宝']
 const DEFAULT_SHOP = 'XY祥钰珠宝'
 
+function isScheduleSelectableOnDate(a: ScheduleAnchorOption, dateKey: string): boolean {
+  if (!a.enabled) return false
+  if (a.systemKey) return false
+  if (a.attributionMode === 'manual') return false
+  const from = a.effectiveFrom?.trim()
+  const to = a.effectiveTo?.trim()
+  if (from && dateKey < from) return false
+  if (to && dateKey > to) return false
+  return true
+}
+
 function sourceLabel(source?: string): string {
   if (source === 'manual') return '人工排班'
   if (source === 'virtual_template') return '系统模板补齐'
@@ -105,14 +127,24 @@ export const AnchorSchedulePage: React.FC = () => {
   const [scrollToNewRow, setScrollToNewRow] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef<HTMLDivElement>(null)
+  const [anchorOptions, setAnchorOptions] = useState<ScheduleAnchorOption[]>([])
 
   const validation = useMemo(() => validateScheduleRows(rows), [rows])
   const conflictRowSet = useMemo(() => conflictIndexes(validation.conflicts), [validation.conflicts])
   const hasBlockingIssues = validation.fieldErrors.length > 0 || validation.conflicts.length > 0
 
+  const selectableAnchors = useMemo(
+    () =>
+      anchorOptions
+        .filter((a) => isScheduleSelectableOnDate(a, date))
+        .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
+    [anchorOptions, date],
+  )
+
   const applyScheduleResponse = (data: ScheduleResponse) => {
     setRows(
       data.schedules.map((s) => ({
+        anchorId: s.anchorId ?? null,
         anchorName: s.anchorName,
         shopName: s.shopName,
         liveRoomName: s.liveRoomName,
@@ -153,6 +185,17 @@ export const AnchorSchedulePage: React.FC = () => {
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const list = await apiRequest<ScheduleAnchorOption[]>('/api/anchors')
+        setAnchorOptions(Array.isArray(list) ? list : [])
+      } catch {
+        // 排班页仍可用手录历史行展示；新建需选项
+      }
+    })()
+  }, [])
 
   useEffect(() => {
     if (!scrollToNewRow) return
@@ -341,10 +384,12 @@ export const AnchorSchedulePage: React.FC = () => {
     const shop = last?.shopName?.trim() || last?.liveRoomName?.trim() || DEFAULT_SHOP
     const startTime = last?.endTime === '24:00' ? '18:00' : last?.endTime?.trim() || '09:00'
     const endTime = last ? defaultEndFromStart(startTime) : '18:00'
+    const first = selectableAnchors[0]
     setRows((prev) => [
       ...prev,
       {
-        anchorName: '',
+        anchorId: first?.id ?? null,
+        anchorName: first?.name ?? '',
         shopName: shop,
         liveRoomName: shop,
         startTime,
@@ -550,12 +595,30 @@ export const AnchorSchedulePage: React.FC = () => {
                   title={tip || undefined}
                 >
                   <td className="px-3 py-2">
-                    <input
-                      value={row.anchorName}
-                      onChange={(e) => updateRow(index, { anchorName: e.target.value })}
-                      className="w-24 rounded border border-slate-200 px-2 py-1"
-                      placeholder="主播名"
-                    />
+                    <select
+                      value={row.anchorId || row.anchorName}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        const hit = selectableAnchors.find((a) => a.id === v || a.name === v)
+                        if (hit) {
+                          updateRow(index, { anchorId: hit.id, anchorName: hit.name })
+                          return
+                        }
+                        // 历史行：姓名仍在但已不在可选列表
+                        updateRow(index, { anchorId: null, anchorName: v })
+                      }}
+                      className="min-w-[7rem] rounded border border-slate-200 px-2 py-1"
+                    >
+                      {!row.anchorId && row.anchorName ? (
+                        <option value={row.anchorName}>{row.anchorName}（历史）</option>
+                      ) : null}
+                      {!row.anchorName ? <option value="">请选择主播</option> : null}
+                      {selectableAnchors.map((a) => (
+                        <option key={a.id} value={a.id}>
+                          {a.name}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="px-3 py-2">
                     <select

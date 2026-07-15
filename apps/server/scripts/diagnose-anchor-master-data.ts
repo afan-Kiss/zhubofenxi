@@ -265,14 +265,17 @@ async function main(): Promise<void> {
     `存在于 Anchor 主表但无排班模板/日排班/种子/订单: ${inAnchorNoScheduleOrOrder.join('、') || '无'}`,
   )
 
-  // isManualOnlyAnchor trap
-  console.log('\n## 4. isManualOnlyAnchor 误判风险\n')
+  // isManualOnlyAnchor：只认 attributionMode，空规则不会再误判
+  console.log('\n## 4. isManualOnlyAnchor（已修复：仅认 attributionMode）\n')
   for (const a of liveAnchors) {
     const modeManual = a.attributionMode === 'manual'
     const noRules = a.timeRules.filter((r) => r.enabled).length === 0
-    const legacyTrap = !modeManual && noRules
+    const wouldMisclassifyAsManualIfLegacy = !modeManual && noRules
     console.log(
-      `- ${a.name}: attributionMode=${a.attributionMode}, enabledRules=${a.timeRules.filter((r) => r.enabled).length}, legacy空规则陷阱=${legacyTrap ? '是（会误判为手动）' : '否'}`,
+      `- ${a.name}: attributionMode=${a.attributionMode}, enabledRules=${a.timeRules.filter((r) => r.enabled).length}, isManualOnly=${modeManual ? '是' : '否'}` +
+        (wouldMisclassifyAsManualIfLegacy
+          ? ' · 无启用时段（按当前规则仍为自动归属，不会误判）'
+          : ''),
     )
   }
 

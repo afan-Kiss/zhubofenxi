@@ -489,6 +489,8 @@ export async function updateAnchor(
     enabled?: boolean
     sortOrder?: number
     attributionMode?: AnchorAttributionMode
+    effectiveFrom?: string | null
+    effectiveTo?: string | null
     timeRules?: Array<{
       id?: string
       startTime: string
@@ -512,6 +514,25 @@ export async function updateAnchor(
       throw new Error('系统主播归属模式不可改为自动归属')
     }
     nextMode = input.attributionMode
+  }
+
+  if (input.effectiveFrom !== undefined && input.effectiveFrom) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveFrom)) {
+      throw new Error('上岗日期格式须为 YYYY-MM-DD')
+    }
+  }
+  if (input.effectiveTo !== undefined && input.effectiveTo) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveTo)) {
+      throw new Error('下岗日期格式须为 YYYY-MM-DD')
+    }
+  }
+  if (
+    nextMode === 'schedule' &&
+    input.effectiveFrom !== undefined &&
+    !input.effectiveFrom &&
+    !existing.effectiveFrom
+  ) {
+    throw new Error('排班主播须设置上岗日期')
   }
 
   // 仅校验请求体显式提交的直播间/时段；切到 manual 时服务端会清空直播间并停用时段
@@ -543,6 +564,18 @@ export async function updateAnchor(
           enabled: input.enabled,
           sortOrder: input.sortOrder,
           attributionMode: nextMode,
+          effectiveFrom:
+            input.effectiveFrom === undefined
+              ? undefined
+              : nextMode === 'manual'
+                ? null
+                : input.effectiveFrom?.trim() || null,
+          effectiveTo:
+            input.effectiveTo === undefined
+              ? undefined
+              : nextMode === 'manual'
+                ? null
+                : input.effectiveTo?.trim() || null,
         },
       })
 

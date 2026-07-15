@@ -131,6 +131,18 @@ anchorRouter.patch('/:id', async (req, res) => {
         req.body?.attributionMode === 'manual' || req.body?.attributionMode === 'schedule'
           ? req.body.attributionMode
           : undefined,
+      effectiveFrom:
+        req.body?.effectiveFrom !== undefined
+          ? req.body.effectiveFrom == null
+            ? null
+            : String(req.body.effectiveFrom)
+          : undefined,
+      effectiveTo:
+        req.body?.effectiveTo !== undefined
+          ? req.body.effectiveTo == null
+            ? null
+            : String(req.body.effectiveTo)
+          : undefined,
       timeRules: Array.isArray(req.body?.timeRules) ? req.body.timeRules : undefined,
     })
     sendOk(res, anchor)

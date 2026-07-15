@@ -29,6 +29,8 @@ interface AnchorRow {
   sortOrder: number
   systemKey?: string | null
   attributionMode?: 'schedule' | 'manual'
+  effectiveFrom?: string | null
+  effectiveTo?: string | null
   deletedAt?: string | null
   timeRules: TimeRule[]
 }
@@ -68,6 +70,8 @@ function buildSavePayload(anchor: AnchorRow) {
     enabled: anchor.enabled,
     sortOrder: anchor.sortOrder,
     attributionMode: manual ? 'manual' : 'schedule',
+    effectiveFrom: manual ? null : anchor.effectiveFrom?.trim() || null,
+    effectiveTo: manual ? null : anchor.effectiveTo?.trim() || null,
     timeRules: manual
       ? undefined
       : anchor.timeRules.map((r, i) => ({
@@ -90,6 +94,9 @@ export const AnchorManagementPanel: React.FC = () => {
   const [newExternalId, setNewExternalId] = useState('')
   const [newLiveRoom, setNewLiveRoom] = useState('')
   const [newManualOnly, setNewManualOnly] = useState(false)
+  const [newEffectiveFrom, setNewEffectiveFrom] = useState(() =>
+    new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' }),
+  )
   const [listFilter, setListFilter] = useState<AnchorListFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -136,6 +143,10 @@ export const AnchorManagementPanel: React.FC = () => {
       setMessage({ type: 'error', text: '请输入主播名称' })
       return
     }
+    if (!newManualOnly && !newEffectiveFrom.trim()) {
+      setMessage({ type: 'error', text: '排班主播须填写上岗日期（effectiveFrom）' })
+      return
+    }
     setMessage(null)
     setCreating(true)
     try {
@@ -148,9 +159,9 @@ export const AnchorManagementPanel: React.FC = () => {
           defaultLiveRoomName: newManualOnly ? undefined : newLiveRoom.trim() || undefined,
           attributionMode: newManualOnly ? 'manual' : 'schedule',
           manualOnly: newManualOnly || undefined,
-          timeRules: newManualOnly
-            ? []
-            : [{ startTime: '00:00', endTime: '23:59', enabled: true }],
+          // 不默认创建全日时段；排班在「每日排班」配置
+          timeRules: [],
+          effectiveFrom: newManualOnly ? undefined : newEffectiveFrom.trim(),
         }),
       })
       setNewName('')
@@ -163,7 +174,7 @@ export const AnchorManagementPanel: React.FC = () => {
         type: 'success',
         text: newManualOnly
           ? `已新增「${name}」（仅手动归属）`
-          : `已新增「${name}」（自动归属）`,
+          : `已新增「${name}」（自动归属 · 自上岗日起可排班）`,
       })
     } catch (err) {
       setMessage({
@@ -367,6 +378,17 @@ export const AnchorManagementPanel: React.FC = () => {
             />
           </label>
         ) : null}
+        {!newManualOnly ? (
+          <label className="text-xs text-slate-600">
+            上岗日期*
+            <input
+              type="date"
+              value={newEffectiveFrom}
+              onChange={(e) => setNewEffectiveFrom(e.target.value)}
+              className="mt-0.5 block rounded border border-slate-200 px-2 py-1 text-sm"
+            />
+          </label>
+        ) : null}
         <label className="text-xs text-slate-600">
           颜色
           <input
@@ -528,6 +550,19 @@ export const AnchorManagementPanel: React.FC = () => {
                       placeholder="默认直播间"
                       className="w-32 rounded border border-slate-200 px-2 py-1 text-xs"
                     />
+                  ) : null}
+                  {!manual ? (
+                    <label className="text-[11px] text-slate-500">
+                      上岗
+                      <input
+                        type="date"
+                        value={a.effectiveFrom ?? ''}
+                        onChange={(e) =>
+                          updateLocal(a.id, { effectiveFrom: e.target.value || null })
+                        }
+                        className="ml-1 rounded border border-slate-200 px-1.5 py-1 text-xs"
+                      />
+                    </label>
                   ) : null}
                   <input
                     type="color"

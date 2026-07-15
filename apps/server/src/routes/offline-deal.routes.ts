@@ -9,8 +9,11 @@ import {
   reassignOfflineDeal,
   updateOfflineDealStatus,
 } from '../services/offline-deal.service'
-import { listOrderAnchorAssignOptions } from '../services/order-anchor-manual-override.service'
-import { getAnchorConfigSync, refreshAnchorConfigCache } from '../services/anchor.service'
+import {
+  getAnchorConfigSync,
+  refreshAnchorConfigCache,
+  YIFAN_SYSTEM_KEY,
+} from '../services/anchor.service'
 
 export const offlineDealRouter = Router()
 
@@ -20,29 +23,17 @@ offlineDealRouter.get('/anchor-options', async (_req, res) => {
   try {
     await refreshAnchorConfigCache()
     const config = getAnchorConfigSync()
+    // 线下成交固定归属逸凡，选项仅返回系统线下主播
     const anchors = config.anchors
-      .filter((a) => a.enabled)
+      .filter((a) => a.enabled && a.systemKey === YIFAN_SYSTEM_KEY)
       .map((a) => ({
         id: a.id,
         name: a.name,
-        attributionMode: a.attributionMode ?? 'schedule',
+        attributionMode: a.attributionMode ?? 'manual',
         systemKey: a.systemKey ?? null,
-        label: `${a.name}｜${a.attributionMode === 'manual' ? '仅手动归属' : '自动归属'}`,
+        label: `${a.name}｜线下成交固定归属`,
       }))
-    // 补充固定场次主播（API 选项与手动指定共用）
-    const assign = await listOrderAnchorAssignOptions()
-    const byName = new Map(anchors.map((a) => [a.name, a]))
-    for (const item of assign) {
-      if (byName.has(item.name)) continue
-      byName.set(item.name, {
-        id: item.id,
-        name: item.name,
-        attributionMode: item.attributionMode === 'manual' ? 'manual' : 'schedule',
-        systemKey: item.systemKey ?? null,
-        label: `${item.name}｜${item.attributionMode === 'manual' ? '仅手动归属' : '自动归属'}`,
-      })
-    }
-    sendOk(res, { anchors: [...byName.values()] })
+    sendOk(res, { anchors })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '获取主播选项失败', 500)
   }

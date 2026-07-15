@@ -1,18 +1,18 @@
-/** 6.13 起固定场次主播（与后端 ANCHOR_SESSION_DISPLAY_FROM_0613 一致） */
+/**
+ * 历史场次展示优先顺序（仅排序，不伪造不存在主播）。
+ * 新增业务主播以 /api 主数据为准，勿再扩本表。
+ */
 export const FIXED_SESSION_ANCHOR_NAMES = ['子杰', '小红', '飞云', '小艺', '小白'] as const
 
 export type AnchorAssignOption = { id: string; name: string }
 
-/** 合并 API 结果与固定场次主播，保证抽屉下拉始终有 5 人 */
+/** 以 API 选项为准；FIXED 名称仅用于稳定排序 */
 export function mergeAnchorAssignOptions(fromApi: AnchorAssignOption[]): AnchorAssignOption[] {
   const byName = new Map<string, AnchorAssignOption>()
-  for (const name of FIXED_SESSION_ANCHOR_NAMES) {
-    byName.set(name, { id: `extra-${name}`, name })
-  }
   for (const item of fromApi) {
     const name = item.name.trim()
     if (!name || name === '未归属') continue
-    byName.set(name, { id: item.id || `extra-${name}`, name })
+    byName.set(name, { id: item.id, name })
   }
 
   const result: AnchorAssignOption[] = []
@@ -23,11 +23,10 @@ export function mergeAnchorAssignOptions(fromApi: AnchorAssignOption[]): AnchorA
     seen.add(name)
     result.push(hit)
   }
-  for (const item of fromApi) {
-    const name = item.name.trim()
-    if (!name || seen.has(name)) continue
-    seen.add(name)
-    result.push({ id: item.id || `extra-${name}`, name })
+  for (const item of byName.values()) {
+    if (seen.has(item.name)) continue
+    seen.add(item.name)
+    result.push(item)
   }
   return result
 }

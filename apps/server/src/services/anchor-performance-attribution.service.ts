@@ -192,7 +192,7 @@ export function resolveDailyReportAnchorsForDate(
   if (useShopSessionRules && isReportDateOnOrAfterXiaoBaiCutoff(startDate)) {
     anchors.push(resolveXiaoBaiAnchor(config))
   }
-  // 日报为线上直播经营日报：排除线下专属主播（YIFAN_MANUAL）
+  // 日报为线上直播经营日报：排除线下专属主播（YIFAN_MANUAL），并按上岗日门槛过滤
   return anchors
     .map((a) => {
       const cfg = config.anchors.find((x) => x.id === a.anchorId || x.name === a.anchorName)
@@ -200,9 +200,16 @@ export function resolveDailyReportAnchorsForDate(
         ...a,
         systemKey: cfg?.systemKey ?? null,
         attributionMode: cfg?.attributionMode,
+        effectiveFrom: cfg?.effectiveFrom ?? null,
+        effectiveTo: cfg?.effectiveTo ?? null,
       }
     })
     .filter((a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }))
+    .filter((a) => {
+      if (a.effectiveFrom && startDate < a.effectiveFrom) return false
+      if (a.effectiveTo && startDate > a.effectiveTo) return false
+      return true
+    })
 }
 
 /** 早场 00:00–17:59，晚场 18:00–23:59（与历史默认时间段一致） */

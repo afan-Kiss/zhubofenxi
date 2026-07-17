@@ -13,14 +13,32 @@ import {
   type DailyReportImageSessionStatus,
 } from './dailyReportImageModel'
 
-const STATUS_CLASS: Record<DailyReportImageSessionStatus, string> = {
-  qualified: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  warning: 'bg-amber-50 text-amber-700 border-amber-200',
-  unqualified: 'bg-rose-50 text-rose-700 border-rose-200',
-  missing: 'bg-slate-100 text-slate-500 border-slate-200',
+const STATUS_TEXT_CLASS: Record<DailyReportImageSessionStatus, string> = {
+  qualified: 'text-emerald-700',
+  warning: 'text-amber-700',
+  unqualified: 'text-rose-700',
+  missing: 'text-slate-500',
 }
 
-function MetricCell({ label, value }: { label: string; value: React.ReactNode }) {
+function MetricCell({
+  label,
+  value,
+  emphasize,
+}: {
+  label: string
+  value: React.ReactNode
+  emphasize?: boolean
+}) {
+  if (emphasize) {
+    return (
+      <div className="min-w-0 rounded-lg border border-sky-100 bg-sky-50/80 px-1.5 py-1">
+        <div className="text-[10px] font-medium leading-4 text-sky-700/80">{label}</div>
+        <div className="mt-0.5 truncate text-[15px] font-bold tabular-nums leading-5 text-slate-900">
+          {value}
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="min-w-0">
       <div className="text-[10px] leading-4 text-slate-400">{label}</div>
@@ -31,32 +49,43 @@ function MetricCell({ label, value }: { label: string; value: React.ReactNode })
   )
 }
 
+function CoverClickRateValue({ session }: { session: DailyReportImageSession }) {
+  if (session.coverClickRate == null) {
+    return <span className={STATUS_TEXT_CLASS.missing}>数据缺失</span>
+  }
+  const statusLabel = dailyReportImageStatusLabel(session.status)
+  const statusClass = STATUS_TEXT_CLASS[session.status]
+  return (
+    <span>
+      <span className="text-slate-900">{formatRatePercent(session.coverClickRate)}</span>
+      <span className={`ml-1 text-[11px] font-semibold ${statusClass}`}>{statusLabel}</span>
+    </span>
+  )
+}
+
 function SessionCard({ session }: { session: DailyReportImageSession }) {
   return (
     <div className="flex min-h-[168px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 bg-slate-50/70 px-3 py-2.5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="truncate text-[13px] font-semibold text-slate-800">{session.shopName}</div>
-            <div className="mt-0.5 truncate text-[12px] text-slate-600">
-              主播：{formatAnchorDisplayName(session.anchorName)}
-            </div>
-            <div className="mt-0.5 text-[11px] tabular-nums text-slate-500">
-              直播时段：{session.liveTimeRange}
-            </div>
+        <div className="min-w-0">
+          <div className="truncate text-[13px] font-semibold text-slate-800">{session.shopName}</div>
+          <div className="mt-0.5 truncate text-[12px] text-slate-600">
+            主播：{formatAnchorDisplayName(session.anchorName)}
           </div>
-          <span
-            className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${STATUS_CLASS[session.status]}`}
-          >
-            {dailyReportImageStatusLabel(session.status)}
-          </span>
+          <div className="mt-0.5 text-[11px] tabular-nums text-slate-500">
+            直播时段：{session.liveTimeRange}
+          </div>
         </div>
       </div>
 
       <div className="flex flex-1 flex-col gap-3 px-3 py-3">
         <div className="grid grid-cols-4 gap-2">
           <MetricCell label="GMV" value={formatMoney(session.gmvYuan)} />
-          <MetricCell label="发货金额" value={formatMoney(session.shipmentAmountYuan)} />
+          <MetricCell
+            label="发货金额"
+            emphasize
+            value={formatMoney(session.shipmentAmountYuan)}
+          />
           <MetricCell label="订单数" value={formatOrderCount(session.orderCount)} />
           <MetricCell
             label="退款金额"
@@ -68,11 +97,8 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
         <div className="grid grid-cols-4 gap-2 border-t border-slate-100 pt-3">
           <MetricCell
             label="封面点击率"
-            value={
-              session.coverClickRate != null
-                ? formatRatePercent(session.coverClickRate)
-                : '数据缺失'
-            }
+            emphasize
+            value={<CoverClickRateValue session={session} />}
           />
           <MetricCell
             label="60s停留人数"

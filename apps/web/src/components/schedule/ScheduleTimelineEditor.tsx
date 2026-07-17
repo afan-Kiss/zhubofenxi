@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertTriangle, Maximize2, Minus, Plus, ZoomIn, ZoomOut } from 'lucide-react'
 import { resolveAnchorTheme } from '../../lib/anchor-theme'
 import {
@@ -667,17 +668,38 @@ function TimelineHoverCard({
   x: number
   y: number
 }) {
+  const cardRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ left: x + 12, top: y + 12 })
   const start = scheduleTimeToMinutes(row.startTime)
   const end = endMinutesOf(row)
   const duration =
     start != null && end != null ? formatScheduleDuration(start, end) : '—'
-  const left = Math.min(window.innerWidth - 220, Math.max(8, x + 12))
-  const top = Math.min(window.innerHeight - 160, Math.max(8, y + 12))
 
-  return (
+  useLayoutEffect(() => {
+    const el = cardRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const pad = 8
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    let left = x + 12
+    let top = y + 12
+    // 右侧不够则翻到指针左侧
+    if (left + rect.width > vw - pad) left = x - rect.width - 12
+    // 下方不够则翻到指针上方
+    if (top + rect.height > vh - pad) top = y - rect.height - 12
+    left = Math.min(vw - rect.width - pad, Math.max(pad, left))
+    top = Math.min(vh - rect.height - pad, Math.max(pad, top))
+    setPos({ left, top })
+  }, [x, y, row.anchorName, row.startTime, row.endTime, row.note, conflicts.length])
+
+  // Portal 到 body，避免被时间轴 overflow-hidden 裁切导致气泡显示不全
+  return createPortal(
     <div
-      className="pointer-events-none fixed z-[80] w-52 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 shadow-lg"
-      style={{ left, top }}
+      ref={cardRef}
+      className="pointer-events-none fixed z-[200] w-52 rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 shadow-lg"
+      style={{ left: pos.left, top: pos.top }}
+      role="tooltip"
     >
       <p className="font-semibold text-slate-900">{row.anchorName || '未选主播'}</p>
       <p className="mt-0.5 text-slate-500">{resolveTimelineShopKey(row)}</p>
@@ -686,10 +708,11 @@ function TimelineHoverCard({
         <span className="text-slate-400"> · {duration}</span>
       </p>
       <p className="mt-0.5 text-slate-500">{sourceLabel(row.source)}</p>
-      {row.note?.trim() ? <p className="mt-0.5 text-slate-500">备注：{row.note}</p> : null}
+      {row.note?.trim() ? <p className="mt-0.5 break-words text-slate-500">备注：{row.note}</p> : null}
       {conflicts.length > 0 ? (
-        <p className="mt-1 text-rose-600">{conflicts.join('；')}</p>
+        <p className="mt-1 break-words text-rose-600">{conflicts.join('；')}</p>
       ) : null}
-    </div>
+    </div>,
+    document.body,
   )
 }

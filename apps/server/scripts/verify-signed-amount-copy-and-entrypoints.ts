@@ -137,13 +137,13 @@ function checkDailyReportStatic(): void {
     path.resolve(WEB_SRC, 'components/board/DailyReportImageSheet.tsx'),
     'utf-8',
   )
-  if (text.includes('productTitle')) ok('含 productTitle')
-  else fail('缺少 productTitle')
-  if (text.includes('compareShippedOrderLines') || text.includes('localeCompare(b.anchorName')) {
-    ok('含主播名排序')
+  if (text.includes('DailyReportImageTimeline') && text.includes('DailyReportSessionCardGrid')) {
+    ok('日报图片含时间轴+场次卡片')
   } else {
-    fail('缺少主播名排序')
+    fail('日报图片缺少时间轴/场次卡片结构')
   }
+  if (text.includes('imageSessions')) ok('含 imageSessions')
+  else fail('缺少 imageSessions')
   if (text.includes('font-mono') && text.includes('order.orderNo')) {
     fail('日报图片仍展示订单号')
   } else {

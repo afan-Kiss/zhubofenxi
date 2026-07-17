@@ -1,25 +1,10 @@
-import React from 'react'
-import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
-import {
-  formatDensity,
-  formatDuration,
-  formatHourly,
-  formatIntegerMoney,
-  formatMoney,
-  formatOrderCount,
-  formatPeopleCount,
-  formatPeopleCountOrMissing,
-  formatRatePercent,
-  formatShippedSharePercent,
-  formatStayDurationSeconds,
-  resolveCoverClickRateQuality,
-} from './dailyReportFormatters'
+import React, { useMemo } from 'react'
+import { formatMoney, formatOrderCount } from './dailyReportFormatters'
 import type { AnchorLivePeriodView } from '../../lib/anchor-live-period'
-import { AnchorTrendChart } from './AnchorTrendChart'
-import { AnchorTrendCompareChart } from './AnchorTrendCompareChart'
-import type { AnchorLeaderboardRow, AnchorTrend } from '../../lib/anchor-leaderboard-row'
-import { resolveAnchorColor } from '../../lib/anchor-theme'
-import { isOfflineOnlyAnchor } from '../../lib/anchor-system-keys'
+import type { AnchorTrend } from '../../lib/anchor-leaderboard-row'
+import { DailyReportImageTimeline } from './DailyReportImageTimeline'
+import { DailyReportSessionCardGrid } from './DailyReportSessionCards'
+import type { DailyReportImageSession } from './dailyReportImageModel'
 
 export interface DailyReportShippedOrderLine {
   orderNo: string
@@ -44,7 +29,6 @@ export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   scheduleMatched?: boolean
   scheduleMatchReason?: string | null
   liveDurationText: string
-  /** 同班次平台多段时的辅助说明 */
   liveSessionPlatformNote?: string | null
   liveDurationMinutes: number
   shippedAmountYuan: number
@@ -63,13 +47,9 @@ export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   dealUserCount: number | null
   dealConversionRate: number | null
   newFollowerRate: number | null
-  /** 封面点击率（0–1） */
   coverClickRate?: number | null
-  /** 60s 停留人数 */
   stay60sUserCount?: number | null
-  /** 曝光次数 */
   impressionCount?: number | null
-  /** 观看支付率（0–1） */
   viewPayRate?: number | null
   gmvYuan?: number
   trend?: AnchorTrend
@@ -106,6 +86,8 @@ export interface DailyReportPayload {
     totalGmvYuan?: number
   }
   anchors: DailyReportAnchorRow[]
+  /** 长图场次列表；缺省时时间轴/卡片为空（不回退写死四店） */
+  imageSessions?: DailyReportImageSession[]
 }
 
 interface Props {
@@ -118,493 +100,101 @@ interface Props {
   }>
 }
 
-function toCompareLeaderboardRows(anchors: DailyReportAnchorRow[]): AnchorLeaderboardRow[] {
-  return anchors.map((row) => ({
-    anchorId: row.anchorId,
-    anchorName: row.anchorName,
-    color: row.color ?? null,
-    trend: row.trend,
-    gmv: row.gmvYuan ?? 0,
-    totalGmv: row.gmvYuan ?? 0,
-    orderCount: row.soldOrderCount,
-    paidOrderCount: row.soldOrderCount,
-  }))
+function weekdayFromDateKey(dateKey: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey.trim())
+  if (!m) return ''
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 4, 0, 0))
+  const names = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
+  return names[d.getUTCDay()] ?? ''
 }
 
-/** 日报截图用淡金色表格线，便于多卡片字段对齐阅读 */
-const GOLDEN_TABLE_BORDER = 'border-[#E5D9BC]'
-const GOLDEN_TABLE_LINE = 'border-[#F0E8D6]'
-
-function MetricTable({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div
-      className={`overflow-hidden rounded-lg border bg-white/60 ${GOLDEN_TABLE_BORDER} ${className}`}
-    >
-      {children}
-    </div>
-  )
-}
-
-function MetricLine({
-  label,
-  value,
-  strong,
-}: {
-  label: string
-  value: React.ReactNode
-  strong?: boolean
-}) {
-  return (
-    <div className={`grid grid-cols-[minmax(0,1fr)_auto] border-b ${GOLDEN_TABLE_LINE} last:border-b-0`}>
-      <div
-        className={`border-r px-3 py-1.5 text-[13px] leading-6 ${GOLDEN_TABLE_LINE} ${
-          strong ? 'font-semibold text-slate-800' : 'text-slate-500'
-        }`}
-      >
-        {label}
-      </div>
-      <div
-        className={`px-3 py-1.5 text-right text-[13px] leading-6 tabular-nums ${
-          strong ? 'text-[15px] font-semibold text-slate-900' : 'text-slate-800'
-        }`}
-      >
-        {value}
-      </div>
-    </div>
-  )
-}
-
-function CoverClickRateQualityBadge({ rate }: { rate: number | null | undefined }) {
-  const q = resolveCoverClickRateQuality(rate)
-  if (q.status === 'missing') {
-    return (
-      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[12px] font-medium bg-slate-100 text-slate-500">
-        数据缺失
-      </span>
+export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(
+  function DailyReportImageSheet({ data, shipmentPhotos }, ref) {
+    const sessions = useMemo(
+      () => (Array.isArray(data.imageSessions) ? data.imageSessions : []),
+      [data.imageSessions],
     )
-  }
-  const badgeClass =
-    q.status === 'pass'
-      ? 'bg-emerald-50 text-emerald-800'
-      : 'bg-rose-50 text-rose-700'
-  return (
-    <span
-      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] font-medium ${badgeClass}`}
-    >
-      <span className="tabular-nums">{q.pctText}</span>
-      <span>{q.label}</span>
-    </span>
-  )
-}
+    const weekday = weekdayFromDateKey(data.startDate)
+    const dateLine = weekday ? `${data.startDate} ${weekday}` : data.startDate || data.dateLabel
+    const showOffline =
+      (data.summary.offlineGmvYuan ?? 0) > 0 || (data.summary.offlineDealCount ?? 0) > 0
 
-function MetricTableNote({ children }: { children: React.ReactNode }) {
-  return (
-    <div className={`border-b px-3 py-1.5 text-[10px] leading-snug text-slate-400 ${GOLDEN_TABLE_LINE}`}>
-      {children}
-    </div>
-  )
-}
-
-function AnchorNameBadge({
-  name,
-  compact = false,
-}: {
-  name: string
-  compact?: boolean
-}) {
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center rounded-md border border-rose-200/90 bg-gradient-to-b from-rose-50 to-white px-1.5 font-sans font-medium leading-none text-rose-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] ${
-        compact ? 'py-0.5 text-[9px]' : 'py-[3px] text-[10px]'
-      }`}
-    >
-      {formatAnchorDisplayName(name)}
-    </span>
-  )
-}
-
-function LiveRoomFollowerLine({
-  liveAccountName,
-  anchorNames,
-  newFollowerCount,
-}: {
-  liveAccountName: string
-  anchorNames?: string[]
-  newFollowerCount: number
-}) {
-  return (
-    <div className={`grid grid-cols-[minmax(0,1fr)_auto] border-b ${GOLDEN_TABLE_LINE} last:border-b-0`}>
-      <div
-        className={`flex min-w-0 flex-wrap items-center gap-1.5 border-r px-3 py-1.5 text-[13px] leading-6 ${GOLDEN_TABLE_LINE}`}
-      >
-        <span className="text-slate-600">{liveAccountName}</span>
-        {(anchorNames ?? []).map((name) => (
-          <AnchorNameBadge key={`${liveAccountName}-${name}`} name={name} />
-        ))}
-      </div>
-      <span className="shrink-0 px-3 py-1.5 text-right text-[13px] leading-6 tabular-nums text-slate-800">
-        {formatPeopleCount(newFollowerCount)}
-      </span>
-    </div>
-  )
-}
-
-function compareShippedOrderLines(
-  a: DailyReportShippedOrderLine,
-  b: DailyReportShippedOrderLine,
-): number {
-  const anchorCmp = (a.anchorName ?? '').localeCompare(b.anchorName ?? '', 'zh-CN')
-  if (anchorCmp !== 0) return anchorCmp
-  return (a.productTitle ?? '').localeCompare(b.productTitle ?? '', 'zh-CN')
-}
-
-function ShippedOrdersBlock({
-  orders,
-  compact = false,
-  showAnchorName = true,
-}: {
-  orders: DailyReportShippedOrderLine[] | undefined
-  compact?: boolean
-  showAnchorName?: boolean
-}) {
-  const list = [...(orders ?? [])].sort(compareShippedOrderLines)
-  if (list.length === 0) {
     return (
-      <p className={`${compact ? 'text-[10px]' : 'text-[11px]'} text-slate-400`}>
-        真实发货订单：暂无（已剔除售后、关闭与取消单）
-      </p>
-    )
-  }
-  return (
-    <div>
       <div
-        className={`border-b px-3 py-1.5 ${compact ? 'text-[10px]' : 'text-[11px]'} text-slate-500 ${GOLDEN_TABLE_LINE}`}
+        ref={ref}
+        data-daily-report-image-sheet="1"
+        className="box-border w-[980px] bg-[#f8fafc] p-5 text-slate-800"
+        style={{ fontFamily: '"PingFang SC","Microsoft YaHei",sans-serif' }}
       >
-        真实发货订单（{list.length} 单，已剔除售后/关闭/取消）
-      </div>
-      {list.map((order) => (
-        <div
-          key={order.orderNo}
-          className={`grid grid-cols-[minmax(0,1fr)_auto] border-b ${GOLDEN_TABLE_LINE} last:border-b-0`}
-        >
-          <div
-            className={`flex min-w-0 flex-wrap items-center gap-1.5 border-r px-3 py-1 ${compact ? 'text-[10px]' : 'text-[11px]'} leading-5 ${GOLDEN_TABLE_LINE}`}
-          >
-            {showAnchorName && order.anchorName ? (
-              <AnchorNameBadge name={order.anchorName} compact={compact} />
-            ) : null}
-            <span className="min-w-0 text-slate-700">{order.productTitle || '商品名称未同步'}</span>
-          </div>
-          <span
-            className={`shrink-0 px-3 py-1 text-right tabular-nums text-slate-700 ${compact ? 'text-[10px]' : 'text-[11px]'} leading-5`}
-          >
-            {formatMoney(order.amountYuan)}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function OfflineAnchorCard({ row }: { row: DailyReportAnchorRow }) {
-  return (
-    <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50/70 to-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-base font-semibold text-slate-900">
-            {formatAnchorDisplayName(row.anchorName)}
-            {row.shopName ? ` · ${row.shopName}` : ''}
-          </p>
-          <p className="mt-0.5 text-[12px] text-slate-500">线下成交（无直播场次）</p>
-        </div>
-        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
-          线下占比 {formatShippedSharePercent(row.amountRatio, row.gmvYuan)}
-        </span>
-      </div>
-      <MetricTable className="mt-3">
-        <MetricLine label="线下支付金额" value={formatMoney(row.gmvYuan)} strong />
-        <MetricLine label="线下成交笔数" value={formatOrderCount(row.soldOrderCount)} />
-        <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />
-        {(row.shippedOrders?.length ?? 0) > 0 ? (
-          <ShippedOrdersBlock orders={row.shippedOrders} showAnchorName={false} />
-        ) : null}
-        <MetricTableNote>线下成交计入当日总支付金额；不计入线上真实发货</MetricTableNote>
-      </MetricTable>
-    </div>
-  )
-}
-
-function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
-  if (isOfflineOnlyAnchor({ systemKey: row.systemKey })) {
-    return <OfflineAnchorCard row={row} />
-  }
-  const liveTime =
-    row.liveTimeRange && row.liveTimeRange !== '—' && row.liveTimeRange !== '未读取到直播场次'
-      ? row.liveTimeRange
-      : row.livePeriodText && row.livePeriodText !== '—'
-        ? row.livePeriodText.replace(/~/g, '–')
-        : '未读取到直播场次'
-  const scheduleLine = row.scheduleTimeRange ? `排班 ${row.scheduleTimeRange}` : null
-  const liveTimeMultiline = liveTime.includes('\n')
-
-  return (
-    <div className="rounded-2xl border border-rose-100 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-base font-semibold text-slate-900">
-            {formatAnchorDisplayName(row.anchorName)}
-            {row.shopName ? ` · ${row.shopName}` : ''}
-            {row.isTemporaryAnchor ? (
-              <span className="ml-2 inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
-                临时试播
+        <header className="mb-4 rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+          <div className="text-[11px] font-medium tracking-wide text-slate-400">主播业绩日报</div>
+          <h1 className="mt-1 text-xl font-bold tracking-tight text-slate-900">{dateLine}</h1>
+          <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-slate-600">
+            <span>
+              真实发货{' '}
+              <strong className="tabular-nums text-slate-900">
+                {formatMoney(data.summary.totalShippedAmountYuan)}
+              </strong>
+            </span>
+            <span>
+              真实卖出{' '}
+              <strong className="tabular-nums text-slate-900">
+                {formatOrderCount(data.summary.totalSoldOrderCount)}
+              </strong>
+            </span>
+            {showOffline ? (
+              <span>
+                线下 GMV{' '}
+                <strong className="tabular-nums text-slate-900">
+                  {formatMoney(data.summary.offlineGmvYuan ?? 0)}
+                </strong>
               </span>
             ) : null}
-          </p>
-          {row.sessionLabel ? (
-            <p className="mt-0.5 text-[12px] text-slate-500">{row.sessionLabel}</p>
-          ) : null}
-          {scheduleLine ? (
-            <p className="mt-1 text-[13px] text-slate-600">{scheduleLine}</p>
-          ) : null}
-          <p className={`mt-1 text-[13px] text-slate-600${liveTimeMultiline ? ' whitespace-pre-line' : ''}`}>
-            直播 {liveTime}
-          </p>
-          <p className="mt-1 text-[12px] text-slate-500">{row.liveDurationText}</p>
-          {row.liveSessionPlatformNote ? (
-            <p className="mt-0.5 text-[11px] text-slate-400">{row.liveSessionPlatformNote}</p>
-          ) : null}
-        </div>
-        <div className="flex flex-col items-end gap-1">
-          <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
-            发货占比 {formatShippedSharePercent(row.amountRatio, row.shippedAmountYuan)}
-          </span>
-        </div>
-      </div>
-      <div className="mt-3">
-        <AnchorTrendChart
-          variant="report"
-          trend={row.trend}
-          color={resolveAnchorColor({
-            id: row.anchorId,
-            name: row.anchorName,
-            color: row.color,
-          })}
-          formatMoney={(v) => formatMoney(v)}
-          formatCount={(n) => formatOrderCount(n)}
-        />
-      </div>
-      <MetricTable className="mt-3">
-        <MetricLine label="真实发货" value={formatMoney(row.shippedAmountYuan)} strong />
-        {(row.shippedOrders?.length ?? 0) > 0 ? (
-          <ShippedOrdersBlock orders={row.shippedOrders} showAnchorName={false} />
-        ) : null}
-        <MetricLine label="归属支付金额" value={formatMoney(row.gmvYuan)} />
-        <MetricTableNote>归属支付按主播时段统计；真实发货已剔除售后、关闭与取消单</MetricTableNote>
-        <MetricLine label="真实卖出" value={formatOrderCount(row.soldOrderCount)} />
-        <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />
-        <MetricLine label="场观人数" value={formatPeopleCount(row.viewSessionCount)} strong />
-        <MetricLine
-          label="封面点击率"
-          value={<CoverClickRateQualityBadge rate={row.coverClickRate} />}
-          strong
-        />
-        <MetricLine
-          label="停留时长"
-          value={formatStayDurationSeconds(row.avgViewDurationSeconds)}
-          strong
-        />
-        <MetricLine label="60s停留人数" value={formatPeopleCountOrMissing(row.stay60sUserCount)} />
-        <MetricLine
-          label="曝光次数"
-          value={
-            row.impressionCount != null && Number.isFinite(row.impressionCount)
-              ? Math.round(row.impressionCount).toLocaleString('zh-CN')
-              : '数据缺失'
-          }
-        />
-        <MetricLine
-          label="观看支付率"
-          value={
-            row.viewPayRate != null && Number.isFinite(row.viewPayRate)
-              ? formatRatePercent(row.viewPayRate)
-              : '数据缺失'
-          }
-        />
-        <MetricLine label="进房人数" value={formatPeopleCount(row.joinUserCount)} />
-        <MetricLine
-          label="平均在线"
-          value={
-            row.avgOnlineUserCount != null ? formatPeopleCount(row.avgOnlineUserCount) : '--'
-          }
-        />
-        <MetricLine label="新增粉丝" value={formatPeopleCount(row.newFollowerCount)} />
-        <MetricLine label="成交率" value={formatRatePercent(row.dealConversionRate)} />
-        <MetricLine label="新增粉丝率" value={formatRatePercent(row.newFollowerRate)} />
-        <MetricLine label="时均产出" value={formatHourly(row.hourlyAmountYuan)} />
-        <MetricLine label="成交密度" value={formatDensity(row.dealDensityMinutes)} />
-        <MetricLine
-          label="本场关闭/退货单"
-          value={formatOrderCount(row.invalidOrderCount)}
-          strong={row.invalidOrderCount > 0}
-        />
-        <MetricTableNote>含本场关闭、取消、售后订单，不计入真实发货</MetricTableNote>
-      </MetricTable>
-    </div>
-  )
-}
-
-export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(function DailyReportImageSheet(
-  { data, shipmentPhotos = [] },
-  ref,
-) {
-  const readyPhotos = shipmentPhotos.filter((photo) => photo.dataUrl).slice(0, 12)
-  const extraPhotoCount = Math.max(0, shipmentPhotos.filter((photo) => photo.dataUrl).length - readyPhotos.length)
-  const photoGridCols = readyPhotos.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'
-  const photoCellHeight = readyPhotos.length <= 2 ? 'min-h-[480px]' : 'min-h-[360px]'
-  const sheetWidthClass = readyPhotos.length > 0 ? 'w-[960px]' : 'w-[700px]'
-  const visibleAnchors = data.anchors ?? []
-  const compareAnchors = visibleAnchors.filter(
-    (row) => !isOfflineOnlyAnchor({ systemKey: row.systemKey }),
-  )
-  const offlineGmvYuan = Number(data.summary.offlineGmvYuan ?? 0)
-  const showOfflineGmv = offlineGmvYuan > 0
-
-  return (
-    <div
-      ref={ref}
-      data-daily-report-sheet
-      className={`${sheetWidthClass} bg-white p-6 text-slate-900`}
-      style={{ fontFamily: '"Microsoft YaHei", "微软雅黑", sans-serif' }}
-    >
-      <div className="text-center">
-        <h1 className="text-[22px] font-bold tracking-wide text-slate-900">{data.title}</h1>
-        <p className="mt-1 text-[12px] text-slate-500">
-          {showOfflineGmv
-            ? '本日报含线上直播经营数据；若有线下成交，一并展示在日报中。'
-            : '本日报统计线上直播经营数据；当日有线下成交时会一并展示。'}
-        </p>
-      </div>
-
-      <div className="mt-5 rounded-2xl border border-rose-100 bg-gradient-to-br from-rose-50/80 to-white p-5">
-        <p className="text-[13px] text-slate-500">{data.dateLabel} 总览</p>
-        <p className="mt-2 text-[28px] font-bold leading-none text-slate-900">
-          真实发货 {formatMoney(data.summary.totalShippedAmountYuan)}
-        </p>
-        {showOfflineGmv ? (
-          <p className="mt-2 text-[18px] font-semibold leading-none text-amber-800">
-            线下 GMV {formatMoney(offlineGmvYuan)}
-            {data.summary.offlineDealCount != null
-              ? ` · ${formatOrderCount(data.summary.offlineDealCount)} 笔`
-              : ''}
-          </p>
-        ) : null}
-        <MetricTable className="mt-4">
-          <div className="grid grid-cols-2">
-            <div className={`border-r ${GOLDEN_TABLE_LINE}`}>
-              <MetricLine label="真实卖出" value={formatOrderCount(data.summary.totalSoldOrderCount)} />
-              <MetricLine
-                label="整体时均产出"
-                value={formatHourly(data.summary.overallHourlyAmountYuan)}
-              />
-            </div>
-            <div>
-              <MetricLine
-                label="直播总时长"
-                value={formatDuration(data.summary.totalLiveDurationMinutes)}
-              />
-              <MetricLine
-                label="本场关闭/退货单"
-                value={formatOrderCount(data.summary.totalInvalidOrderCount)}
-                strong={data.summary.totalInvalidOrderCount > 0}
-              />
-            </div>
+            <span>
+              直播场次{' '}
+              <strong className="tabular-nums text-slate-900">{sessions.length}</strong>
+            </span>
           </div>
-          <MetricTableNote>
-            关闭/退货单与真实发货同基础池，已剔除低价刷单；含关闭、取消、售后，不计入真实发货
-            {showOfflineGmv ? '；线下 GMV 另计，不计入真实发货' : ''}
-          </MetricTableNote>
-          {(data.summary.shippedOrders?.length ?? 0) > 0 ? (
-            <ShippedOrdersBlock orders={data.summary.shippedOrders} compact />
+          {data.summary.liveSessionAttributionNote || data.summary.unassignedShippedNote ? (
+            <p className="mt-2 text-[11px] leading-relaxed text-amber-700">
+              {[data.summary.liveSessionAttributionNote, data.summary.unassignedShippedNote]
+                .filter(Boolean)
+                .join(' ')}
+            </p>
           ) : null}
-        </MetricTable>
-        {data.summary.liveSessionAttributionNote ? (
-          <p className="mt-3 border-t border-rose-100 pt-3 text-[12px] leading-relaxed text-amber-800">
-            {data.summary.liveSessionAttributionNote}
-          </p>
-        ) : null}
-        {data.summary.unassignedShippedNote ? (
-          <p className="mt-3 border-t border-rose-100 pt-3 text-[12px] leading-relaxed text-amber-800">
-            {data.summary.unassignedShippedNote}
-          </p>
-        ) : null}
-        {(data.summary.liveRoomNewFollowers?.length ?? 0) > 0 && (
-          <div className="mt-4 border-t border-rose-100 pt-3">
-            <p className="mb-2 text-[12px] text-slate-500">各直播号新增粉丝</p>
-            <MetricTable>
-              {data.summary.liveRoomNewFollowers.map((row) => (
-                <LiveRoomFollowerLine
-                  key={row.liveAccountName}
-                  liveAccountName={row.liveAccountName}
-                  anchorNames={row.anchorNames}
-                  newFollowerCount={row.newFollowerCount}
-                />
-              ))}
-              {data.summary.liveRoomNewFollowers.length > 1 && (
-                <MetricLine
-                  label="合计"
-                  value={formatPeopleCount(data.summary.totalNewFollowerCount)}
-                  strong
-                />
-              )}
-            </MetricTable>
-          </div>
-        )}
-      </div>
+        </header>
 
-      <div className="mt-4">
-        <AnchorTrendCompareChart
-          variant="report"
-          rows={toCompareLeaderboardRows(compareAnchors)}
-          formatMoney={(v) => formatMoney(v)}
-          formatCount={(n) => formatOrderCount(n)}
-        />
-      </div>
+        <section className="mb-4">
+          <DailyReportImageTimeline sessions={sessions} />
+        </section>
 
-      <div className="mt-4 space-y-3">
-        {visibleAnchors.map((row) => (
-            <AnchorCard key={`${row.anchorName}-${row.sessionLabel}-${row.systemKey ?? ''}`} row={row} />
-        ))}
-      </div>
+        <section className="mb-4">
+          <DailyReportSessionCardGrid sessions={sessions} />
+        </section>
 
-      {readyPhotos.length > 0 ? (
-        <div className="mt-5 rounded-2xl border border-slate-100 bg-white p-4">
-          <p className="text-[14px] font-semibold text-slate-900">发货前照片</p>
-          <div className={`mt-3 grid ${photoGridCols} gap-3`}>
-            {readyPhotos.map((photo) => (
-                <div
-                  key={photo.id}
-                  data-shipment-photo-cell
-                  className={`flex flex-col overflow-hidden rounded-lg border border-slate-100 bg-slate-50 ${photoCellHeight}`}
-                >
-                  <div className="flex min-h-0 flex-1 items-center justify-center p-1">
-                    <img
-                      data-shipment-photo-img
-                      src={photo.dataUrl!}
-                      alt={photo.caption ?? '发货前照片'}
-                      className="max-h-full max-w-full object-contain"
-                    />
-                  </div>
+        {shipmentPhotos && shipmentPhotos.length > 0 ? (
+          <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h3 className="mb-2 text-sm font-semibold text-slate-800">发货前照片</h3>
+            <div className="grid grid-cols-4 gap-2">
+              {shipmentPhotos.map((photo) => (
+                <figure key={photo.id} className="overflow-hidden rounded-lg border border-slate-100">
+                  <img
+                    src={photo.dataUrl || photo.publicUrl}
+                    alt={photo.caption || '发货照片'}
+                    className="h-28 w-full object-cover"
+                    crossOrigin="anonymous"
+                  />
                   {photo.caption ? (
-                    <p className="truncate px-2 py-1 text-[11px] text-slate-600">{photo.caption}</p>
+                    <figcaption className="truncate px-1.5 py-1 text-[10px] text-slate-500">
+                      {photo.caption}
+                    </figcaption>
                   ) : null}
-                </div>
+                </figure>
               ))}
-          </div>
-          {extraPhotoCount > 0 ? (
-            <p className="mt-2 text-[12px] text-slate-500">另有 {extraPhotoCount} 张发货前照片</p>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  )
-})
+            </div>
+          </section>
+        ) : null}
+      </div>
+    )
+  },
+)

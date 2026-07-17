@@ -127,21 +127,20 @@ function checkDailyReportImageSheetStatic(): void {
   )
   const text = fs.readFileSync(filePath, 'utf-8')
   const required = [
-    '真实发货订单',
-    '已剔除售后/关闭/取消',
-    'productTitle',
-    'amountYuan',
-    '本场关闭/退货单',
-    '不计入真实发货',
+    '主播业绩日报',
+    'DailyReportImageTimeline',
+    'DailyReportSessionCardGrid',
+    'imageSessions',
+    '真实发货',
   ]
   for (const token of required) {
     if (!text.includes(token)) fail(`DailyReportImageSheet 缺少文案/字段: ${token}`)
     else ok(`含 ${token}`)
   }
-  if (text.includes('font-mono') && text.includes('order.orderNo')) {
-    fail('DailyReportImageSheet 不应在图片中展示订单号')
+  if (text.includes('TIMELINE_SHOP_ORDER') || text.includes("'祥钰珠宝'")) {
+    fail('DailyReportImageSheet 不应写死店铺列表')
   } else {
-    ok('日报图片展示商品标题而非订单号')
+    ok('日报图片未写死店铺列表')
   }
   if (text.includes('qualityReturnRate')) {
     fail('DailyReportImageSheet 不应展示品退率')

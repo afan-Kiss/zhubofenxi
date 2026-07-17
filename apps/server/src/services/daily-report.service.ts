@@ -66,6 +66,19 @@ import {
   resolveBoardPresetForSingleDay,
 } from '../utils/board-realtime-refresh.util'
 import { normalizeShopLabel, normalizeShopName } from '../utils/shop-name-normalize.util'
+import {
+  buildDailyReportImageSessionsForAnchor,
+  type DailyReportImageSession,
+} from './daily-report-image-session'
+
+export type {
+  DailyReportImageSession,
+  DailyReportImageSessionStatus,
+} from './daily-report-image-session'
+export {
+  buildDailyReportImageSessionsForAnchor,
+  resolveDailyReportImageSessionStatus,
+} from './daily-report-image-session'
 
 const NO_LIVE_SESSION_TEXT = '未读取到直播场次'
 
@@ -174,6 +187,11 @@ export interface DailyReportPayload {
     totalGmvYuan?: number
   }
   anchors: DailyReportAnchorRow[]
+  /**
+   * 日报长图专用：按「展示班次」展开的场次列表。
+   * 无直播展示班次的店铺不会出现；同一店多场 → 多条。
+   */
+  imageSessions?: DailyReportImageSession[]
 }
 
 /** 线下成交明细行（复用 shippedOrders 结构，前端按 systemKey 改文案） */
@@ -514,6 +532,8 @@ export async function buildDailyReport(params: {
     })
   ).filter((a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }))
   const usedScheduleRowIds = new Set<string>()
+  /** 组装 imageSessions 用：主播 → 归属场次快照 */
+  const sessionsByAnchorName = new Map<string, AnchorLiveSessionBrief[]>()
   for (const anchor of reportAnchors) {
     if (isOfflineOnlyAnchor({ systemKey: anchor.systemKey })) continue
     const performanceViewsRaw = await getAnchorPerformanceViews(
@@ -570,6 +590,8 @@ export async function buildDailyReport(params: {
 
     const shopName =
       scheduleAttendance.shopName || liveSchedule.primaryScheduleRow?.shopName || shopNameHint
+
+    sessionsByAnchorName.set(anchor.anchorName, sessions)
 
     anchorRows.push(
       buildAnchorRow({
@@ -789,6 +811,29 @@ export async function buildDailyReport(params: {
 
   const dateLabel = formatDailyReportDateLabel(params.startDate)
 
+  const imageSessions: DailyReportImageSession[] = []
+  for (const row of anchorRows) {
+    const sessions = sessionsByAnchorName.get(row.anchorName) ?? []
+    if (sessions.length === 0) continue
+    imageSessions.push(
+      ...buildDailyReportImageSessionsForAnchor({
+        anchorName: row.anchorName,
+        shopName: row.shopName,
+        color: row.color,
+        sessions,
+        shippedAmountYuan: row.shippedAmountYuan,
+        soldOrderCount: row.soldOrderCount,
+        gmvYuan: Number(row.gmvYuan ?? 0),
+        refundAmountYuan: null,
+      }),
+    )
+  }
+  imageSessions.sort((a, b) => {
+    const shopCmp = a.shopName.localeCompare(b.shopName, 'zh-CN')
+    if (shopCmp !== 0) return shopCmp
+    return a.startTime.localeCompare(b.startTime)
+  })
+
   return {
     dateLabel,
     title: `${dateLabel} 主播日报`,
@@ -817,5 +862,6 @@ export async function buildDailyReport(params: {
       totalGmvYuan: roundMoneyYuan(gmvSplit.onlineGmv + gmvSplit.offlineGmv),
     },
     anchors: anchorRows,
+    imageSessions,
   }
 }

@@ -16,7 +16,7 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE } from '../config/anchor-schedule.constants'
 import { findAnchorByName, matchTimeRule } from './anchor-rules.service'
 import { getAnchorConfigSync, isAutoAttributableAnchorName } from './anchor.service'
-import { isOfflineDealView } from './offline-deal.service'
+import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import {
   resolveManualAnchorOverrideForView,
 } from './order-anchor-manual-override.service'

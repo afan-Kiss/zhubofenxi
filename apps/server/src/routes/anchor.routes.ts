@@ -195,7 +195,7 @@ anchorRouter.post('/:id/reinstate', async (req, res) => {
     })
     sendOk(res, result)
   } catch (err) {
-    sendFail(res, err instanceof Error ? err.message : '撤销离职失败', 400)
+    sendFail(res, err instanceof Error ? err.message : '重新启用主播失败', 400)
   }
 })
 

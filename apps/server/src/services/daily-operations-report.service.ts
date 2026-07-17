@@ -1,6 +1,6 @@
 import type { UserRole } from '../types/roles'
 import { getAnchorConfigSync, isOfflineOnlyAnchor } from './anchor.service'
-import { isOfflineDealView } from './offline-deal.service'
+import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import {
   filterViewsByAnchorSpec,
   getAnchorPerformanceViews,

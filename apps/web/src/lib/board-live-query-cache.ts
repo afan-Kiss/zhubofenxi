@@ -43,6 +43,40 @@ export function buildLiveQueryCacheKey(params: {
   return `${params.pageScope}|${params.preset}|${params.startDate}|${params.endDate}|${anchor}`
 }
 
+/** 从缓存 key 推导 pageScope（key 形如 overview|preset|start|end|-） */
+export function parsePageScopeFromCacheKey(key: string): LiveQueryPageScope | null {
+  const scope = key.split('|')[0]
+  if (scope === 'overview' || scope === 'anchors') return scope
+  return null
+}
+
+/**
+ * 校验/补齐缓存 payload 的 pageScope + queryKey。
+ * 旧缓存无字段时可从 cacheKey 安全推导；无法确认则返回 null。
+ */
+export function resolveCachedBoardIdentity(params: {
+  data: BoardLiveQueryData
+  cacheKey: string
+  expectedPageScope: LiveQueryPageScope
+  expectedQueryKey: string
+}): BoardLiveQueryData | null {
+  const { data, cacheKey, expectedPageScope, expectedQueryKey } = params
+  const keyScope = parsePageScopeFromCacheKey(cacheKey)
+  const pageScope = data.pageScope ?? keyScope
+  if (!pageScope || pageScope !== expectedPageScope) return null
+
+  const queryKey =
+    data.queryKey ??
+    `${pageScope}|${data.preset}|${data.startDate}|${data.endDate}`
+  if (queryKey !== expectedQueryKey) return null
+
+  return {
+    ...data,
+    pageScope,
+    queryKey,
+  }
+}
+
 function entryStorageKey(key: string): string {
   return `${STORAGE_PREFIX}${key}`
 }

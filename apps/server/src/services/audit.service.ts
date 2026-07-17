@@ -1,7 +1,10 @@
 import { randomUUID } from 'node:crypto'
+import type { Prisma, PrismaClient } from '@prisma/client'
 import { prisma } from '../lib/prisma'
 import type { AuditAction, AuditModule } from '../types/audit'
 import { sanitizeMeta } from '../utils/url-sanitize'
+
+export type AuditDbClient = PrismaClient | Prisma.TransactionClient
 
 export interface WriteAuditInput {
   userId?: string | null
@@ -23,29 +26,32 @@ export function createRequestId(): string {
   return randomUUID()
 }
 
-export async function writeOperationLog(input: WriteAuditInput): Promise<void> {
-  try {
-    const metaJson = input.meta ? JSON.stringify(sanitizeMeta(input.meta)) : null
-    await prisma.operationLog.create({
-      data: {
-        userId: input.userId ?? null,
-        username: input.username ?? null,
-        role: input.role ?? null,
-        action: input.action,
-        module: input.module,
-        description: input.description,
-        ip: input.ip ?? null,
-        userAgent: input.userAgent ?? null,
-        path: input.path ?? null,
-        method: input.method ?? null,
-        requestId: input.requestId ?? null,
-        durationMs: input.durationMs ?? null,
-        metaJson,
-      },
-    })
-  } catch (err) {
-    console.error('[audit] 写入操作日志失败', err instanceof Error ? err.message : err)
-  }
+/**
+ * 写操作审计。可传入事务客户端，与业务写入同事务。
+ * 写入失败会抛出，便于事务回滚（不再吞掉错误）。
+ */
+export async function writeOperationLog(
+  input: WriteAuditInput,
+  db: AuditDbClient = prisma,
+): Promise<void> {
+  const metaJson = input.meta ? JSON.stringify(sanitizeMeta(input.meta)) : null
+  await db.operationLog.create({
+    data: {
+      userId: input.userId ?? null,
+      username: input.username ?? null,
+      role: input.role ?? null,
+      action: input.action,
+      module: input.module,
+      description: input.description,
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+      path: input.path ?? null,
+      method: input.method ?? null,
+      requestId: input.requestId ?? null,
+      durationMs: input.durationMs ?? null,
+      metaJson,
+    },
+  })
 }
 
 export async function startPageView(input: {

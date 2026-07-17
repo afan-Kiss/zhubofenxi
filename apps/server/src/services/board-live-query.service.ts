@@ -121,6 +121,11 @@ export interface BoardLiveQueryResult {
     reason: string
     coveredShopIds: string[]
     missingShopIds: string[]
+    syncingShopIds?: string[]
+    failedShopIds?: string[]
+    unknownShopIds?: string[]
+    missingShopNames?: string[]
+    evidenceJobId?: string | null
   }
   diagnostics?: Record<string, unknown>
 }

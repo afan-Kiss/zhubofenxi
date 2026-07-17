@@ -12,7 +12,7 @@ import { resolveDisplayEarnedAmountCent } from './buyer-earned-amount.service'
 import { isUnverifiedCompletedAfterSaleOrder } from './order-product-refund.service'
 import { isCompletedAfterSaleStatusText } from './completed-after-sale-status.service'
 import { extractAfterSaleNosFromSources } from './buyer-aftersale-event.util'
-import { isOfflineDealView } from './offline-deal.service'
+import { isOfflineDealView } from '../utils/offline-deal-view.util'
 
 export type BuyerAfterSaleType =
   | 'none'

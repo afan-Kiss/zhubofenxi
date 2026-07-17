@@ -330,6 +330,7 @@ function effectiveRowToDto(row: EffectiveScheduleRow, dateKey: string): DailySch
   return {
     id: row.rowId,
     scheduleDate: dateKey,
+    anchorId: row.anchorId ?? null,
     anchorName: row.anchorName,
     shopName: row.shopName,
     liveRoomName: row.liveRoomName,
@@ -343,6 +344,9 @@ function effectiveRowToDto(row: EffectiveScheduleRow, dateKey: string): DailySch
     confirmed: row.confirmed,
     confirmedAt: null,
     note: row.note ?? null,
+    isTemporaryAnchor: Boolean(row.isTemporaryAnchor),
+    temporaryAnchorKey: row.temporaryAnchorKey ?? null,
+    anchorColorSnapshot: row.anchorColorSnapshot ?? null,
   }
 }
 
@@ -389,6 +393,7 @@ export async function getEffectiveSchedulesForDate(dateKey: string) {
   const toRow = (r: EffectiveScheduleRow) => ({
     id: r.rowId,
     scheduleDate: dateKey,
+    anchorId: r.anchorId ?? null,
     anchorName: r.anchorName,
     shopName: r.shopName,
     liveRoomName: r.liveRoomName,
@@ -400,6 +405,9 @@ export async function getEffectiveSchedulesForDate(dateKey: string) {
     confirmed: r.confirmed,
     confirmedAt: null,
     note: r.note ?? null,
+    isTemporaryAnchor: Boolean(r.isTemporaryAnchor),
+    temporaryAnchorKey: r.temporaryAnchorKey ?? null,
+    anchorColorSnapshot: r.anchorColorSnapshot ?? null,
     createdAt: new Date(),
     updatedAt: new Date(),
     createdBy: null,

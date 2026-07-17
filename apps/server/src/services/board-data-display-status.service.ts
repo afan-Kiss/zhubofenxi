@@ -63,26 +63,34 @@ export function boardDataDisplayStatusMessage(
   opts?: {
     coverageStatus?: BoardRangeCoverageStatus
     preset?: string
+    missingShopNames?: string[]
   },
 ): string {
   const coverage = opts?.coverageStatus
   const preset = opts?.preset
+  const missingNames = (opts?.missingShopNames ?? []).map((n) => n.trim()).filter(Boolean)
 
   switch (status) {
     case 'syncing_with_cache':
     case 'syncing_no_cache':
       if (preset === 'today') return '正在更新今日数据'
       if (preset === 'yesterday') return '正在更新昨日数据'
+      if (coverage === 'syncing') return '部分店铺数据正在同步'
       return '经营数据正在更新。'
     case 'failed_with_cache':
       return '本次更新失败，当前展示上一次成功同步数据。'
     case 'empty':
       if (coverage === 'unknown') {
-        return '暂未查询到数据，请重新加载；系统正在确认同步状态'
+        return '暂未查询到数据，系统正在确认各店铺同步状态'
       }
       return '当前日期范围内暂无订单数据。'
-    case 'coverage_missing':
-      return '该日期范围尚未完成同步'
+    case 'coverage_missing': {
+      const base = '部分店铺尚未完成该日期范围同步'
+      if (missingNames.length > 0) {
+        return `${base}。尚未覆盖：${missingNames.join('、')}`
+      }
+      return base
+    }
     default:
       return '已从本地同步数据加载'
   }

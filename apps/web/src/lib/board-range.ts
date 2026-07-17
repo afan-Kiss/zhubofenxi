@@ -25,13 +25,23 @@ export const BOARD_RANGE_PRESETS: { key: BoardRangePreset; label: string }[] = [
 ]
 
 /** 所有 preset 均解析为具体 startDate / endDate（Asia/Shanghai） */
-/** 与后端 buildBusinessRangeKey 一致 */
+/** 与后端 buildBusinessRangeKey 一致（统计日期身份，不含页面） */
 export function buildBoardRangeKey(
   preset: string,
   startDate: string,
   endDate: string,
 ): string {
   return `${preset}|${startDate}|${endDate}`
+}
+
+/** 前端页面查询身份：含 pageScope，用于防串页与竞态 */
+export function buildBoardQueryKey(params: {
+  pageScope: 'anchors' | 'overview'
+  preset: BoardRangePreset | string
+  startDate: string
+  endDate: string
+}): string {
+  return `${params.pageScope}|${params.preset}|${params.startDate}|${params.endDate}`
 }
 
 export function resolveBoardRangeDates(

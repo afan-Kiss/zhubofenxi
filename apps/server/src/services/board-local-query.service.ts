@@ -637,9 +637,15 @@ export async function executeBoardLocalQuery(params: {
 
   const blacklistedBuyerIds = boardCache.blacklistedBuyerIds
 
+  const missingShopNames = rangeCoverage.shopEvidence
+    .filter((s) => s.status === 'not_covered' || s.status === 'failed')
+    .map((s) => s.shopName?.trim() || s.shopId)
+    .filter(Boolean)
+
   let progressMessage = boardDataDisplayStatusMessage(dataDisplayStatus, {
     coverageStatus: rangeCoverage.status,
     preset: params.preset,
+    missingShopNames,
   })
   if (cachePreparing && displayOrderCount === 0 && dataDisplayStatus !== 'coverage_missing') {
     progressMessage = boardCachePreparingMessage()
@@ -780,11 +786,24 @@ export async function executeBoardLocalQuery(params: {
     preset: params.preset,
     startDate,
     endDate,
+    requiredShopIds: rangeCoverage.coveredShopIds
+      .concat(rangeCoverage.missingShopIds)
+      .concat(rangeCoverage.syncingShopIds)
+      .concat(rangeCoverage.failedShopIds)
+      .concat(rangeCoverage.unknownShopIds)
+      .filter((id, idx, arr) => arr.indexOf(id) === idx),
+    coveredShopIds: rangeCoverage.coveredShopIds,
+    missingShopIds: rangeCoverage.missingShopIds,
+    syncingShopIds: rangeCoverage.syncingShopIds,
+    failedShopIds: rangeCoverage.failedShopIds,
+    unknownShopIds: rangeCoverage.unknownShopIds,
+    shopEvidence: rangeCoverage.shopEvidence,
+    overallCoverageStatus: rangeCoverage.status,
+    coverageDecisionReason: rangeCoverage.reason,
     rangeOrderCount: displayOrderCount,
     totalDatabaseOrderCount: totalOrderCount,
     dataDisplayStatusBeforeOverride,
     dataDisplayStatusAfterOverride: dataDisplayStatus,
-    coverageDecisionReason: rangeCoverage.reason,
     cacheSource,
     cacheKey,
     cacheOrderCount: boardCache.orderCount ?? boardCache.views?.length ?? 0,
@@ -801,15 +820,17 @@ export async function executeBoardLocalQuery(params: {
 
   const shouldLogAnchorDiag =
     process.env.BOARD_QUERY_DIAGNOSTICS === 'true' ||
-    dataDisplayStatus === 'coverage_missing' ||
-    rangeCoverage.status === 'unknown' ||
-    rangeCoverage.status === 'not_covered' ||
+    (rangeCoverage.status !== 'covered' &&
+      (dataDisplayStatus === 'coverage_missing' ||
+        rangeCoverage.status === 'unknown' ||
+        rangeCoverage.status === 'not_covered' ||
+        rangeCoverage.status === 'syncing')) ||
     cacheSource === 'stale-fallback' ||
     Boolean(boardCache.buildError)
 
   if (shouldLogAnchorDiag) {
     console.log(
-      `[anchor-board-query] requestId=${requestId} preset=${params.preset} range=${startDate}~${endDate} rangeOrderCount=${displayOrderCount} totalOrderCount=${totalOrderCount} statusBefore=${dataDisplayStatusBeforeOverride} statusAfter=${dataDisplayStatus} coverageReason=${rangeCoverage.reason} cacheSource=${cacheSource} cachePending=${diagnostics.cachePendingBuild} syncStatus=${syncMeta.businessSync.status}`,
+      `[anchor-board-query] requestId=${requestId} preset=${params.preset} range=${startDate}~${endDate} overallCoverageStatus=${rangeCoverage.status} covered=${rangeCoverage.coveredShopIds.length} missing=${rangeCoverage.missingShopIds.length} syncing=${rangeCoverage.syncingShopIds.length} unknown=${rangeCoverage.unknownShopIds.length} rangeOrderCount=${displayOrderCount} statusAfter=${dataDisplayStatus} coverageReason=${rangeCoverage.reason} cacheSource=${cacheSource}`,
     )
   }
 
@@ -832,6 +853,11 @@ export async function executeBoardLocalQuery(params: {
       reason: rangeCoverage.reason,
       coveredShopIds: rangeCoverage.coveredShopIds,
       missingShopIds: rangeCoverage.missingShopIds,
+      syncingShopIds: rangeCoverage.syncingShopIds,
+      failedShopIds: rangeCoverage.failedShopIds,
+      unknownShopIds: rangeCoverage.unknownShopIds,
+      missingShopNames,
+      evidenceJobId: rangeCoverage.evidenceJobId,
     },
     diagnostics,
     progress: {

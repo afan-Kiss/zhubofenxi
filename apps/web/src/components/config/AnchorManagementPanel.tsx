@@ -324,18 +324,30 @@ export const AnchorManagementPanel: React.FC = () => {
 
   const reinstate = async (anchor: AnchorRow) => {
     if (
-      !window.confirm('这会清空离职日期，并恢复主播参与未来排班。确定撤销离职？')
+      !window.confirm(
+        '将恢复主播在职状态并清空最后工作日；此前被截断的模板和被清理的未来排班不会自动恢复，请重新配置排班。确定重新启用主播？',
+      )
     ) {
       return
     }
     try {
-      await apiRequest(`/api/anchors/${anchor.id}/reinstate`, { method: 'POST' })
+      const result = await apiRequest<{
+        warning?: string
+        templatesRestored?: boolean
+        schedulesRestored?: boolean
+      }>(`/api/anchors/${anchor.id}/reinstate`, { method: 'POST' })
       await load()
-      setMessage({ type: 'success', text: `已撤销「${anchor.name.trim()}」离职` })
+      const warn =
+        result?.warning ||
+        '此前模板与未来排班不会自动恢复，请重新配置排班。'
+      setMessage({
+        type: 'success',
+        text: `已重新启用「${anchor.name.trim()}」。${warn}`,
+      })
     } catch (err) {
       setMessage({
         type: 'error',
-        text: err instanceof Error ? err.message : '撤销离职失败',
+        text: err instanceof Error ? err.message : '重新启用主播失败',
       })
     }
   }
@@ -744,7 +756,7 @@ export const AnchorManagementPanel: React.FC = () => {
                       onClick={() => void reinstate(a)}
                       className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800"
                     >
-                      撤销离职
+                      重新启用主播
                     </button>
                   ) : null}
                   {manual && a.enabled ? (
@@ -762,7 +774,7 @@ export const AnchorManagementPanel: React.FC = () => {
                       onClick={() => void reinstate(a)}
                       className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800"
                     >
-                      撤销离职
+                      重新启用主播
                     </button>
                   ) : null}
                   {!a.systemKey ? (

@@ -19,7 +19,7 @@ import {
 } from './live-account.service'
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
 import { isStatusSignedView } from './order-sign-status.service'
-import { isOfflineDealView } from './offline-deal.service'
+import { isOfflineDealView } from '../utils/offline-deal-view.util'
 
 export function pickProductName(raw: Record<string, unknown> | undefined): string {
   if (!raw) return '—'

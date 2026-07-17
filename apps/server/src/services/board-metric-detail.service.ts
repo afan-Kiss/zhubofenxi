@@ -41,7 +41,8 @@ import {
   getAnchorConfigSync,
   YIFAN_SYSTEM_KEY,
 } from './anchor.service'
-import { isOfflineDealView, loadOfflineDealViewsForRange } from './offline-deal.service'
+import { loadOfflineDealViewsForRange } from './offline-deal.service'
+import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import { logInfo } from '../utils/server-log'
 
 export type BoardDataSource = 'local_db' | 'live_api'

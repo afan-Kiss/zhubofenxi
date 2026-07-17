@@ -15,7 +15,7 @@ import {
   isQualityBadCaseOrderMatched,
   isQualityBadCaseMatchStatusMatched,
 } from './quality-badcase.types'
-import { isOfflineDealView } from './offline-deal.service'
+import { isOfflineDealView } from '../utils/offline-deal-view.util'
 
 function pickString(rec: Record<string, unknown>, keys: string[]): string {
   for (const k of keys) {

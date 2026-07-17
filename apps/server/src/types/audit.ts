@@ -126,6 +126,9 @@ export const AUDIT_ACTIONS = [
   'bi_view_daily_trend',
   'data_clear_all',
   'full_data_read_start',
+  'anchor_offboard',
+  'anchor_reinstate',
+  'anchor_offboard_date_patch',
   'unknown',
 ] as const
 

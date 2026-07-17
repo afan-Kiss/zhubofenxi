@@ -10,7 +10,7 @@ import React, {
 import { useLocation } from 'react-router-dom'
 import type { BoardRangePreset } from '../lib/board-range'
 import type { BoardResolvedRange } from '../lib/board-live-query'
-import { buildBoardRangeKey, resolveBoardRangeDates } from '../lib/board-range'
+import { buildBoardQueryKey, buildBoardRangeKey, resolveBoardRangeDates } from '../lib/board-range'
 import {
   BOARD_LIVE_QUERY_INVALIDATE_EVENT,
   buildLiveQueryCacheKey,
@@ -20,6 +20,7 @@ import {
   readLiveQueryCache,
   readLiveQueryCacheAsync,
   removeLiveQueryCacheEntry,
+  resolveCachedBoardIdentity,
   touchLiveQueryCacheTimestamp,
   writeLiveQueryCache,
   type LiveQueryPageScope,
@@ -50,6 +51,7 @@ interface BoardLiveQueryContextValue {
   customEnd: string
   customQueried: boolean
   rangeKey: string
+  queryKey: string
   setPreset: (p: BoardRangePreset) => void
   setCustomStart: (s: string) => void
   setCustomEnd: (s: string) => void
@@ -145,6 +147,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   const [triggerSyncBusy, setTriggerSyncBusy] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const requestSeqRef = useRef(0)
+  const currentQueryKeyRef = useRef('')
   const hasLoadedOnceRef = useRef(false)
   const wasSyncingRef = useRef(false)
   const lastSeenSuccessAtRef = useRef<string | null>(null)
@@ -162,10 +165,17 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     [preset, startDate, endDate],
   )
 
-  const loadedRangeKey = data?.rangeKey ?? null
-  const rangeMatched = loadedRangeKey === rangeKey
+  const queryKey = useMemo(() => {
+    if (!pageScope) return ''
+    return buildBoardQueryKey({ pageScope, preset, startDate, endDate })
+  }, [pageScope, preset, startDate, endDate])
+
+  currentQueryKeyRef.current = queryKey
+
+  const loadedQueryKey = data?.queryKey ?? null
+  const queryMatched = Boolean(queryKey) && loadedQueryKey === queryKey
   const isDisplayStale = Boolean(
-    displaySummary && loadedRangeKey && loadedRangeKey !== rangeKey,
+    displaySummary && loadedQueryKey && loadedQueryKey !== queryKey,
   )
 
   const activeSyncJob = syncMeta?.activeSyncJob ?? null
@@ -174,31 +184,44 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   const totalAfterSaleRecords = syncMeta?.totalAfterSaleRecords ?? 0
   const totalQualityCases = syncMeta?.totalQualityCases ?? 0
   const rollingDataHealthClose = syncMeta?.rollingDataHealthClose ?? null
-  const pageFetchedAt = rangeMatched ? data?.fetchedAt ?? null : null
+  const pageFetchedAt = queryMatched ? data?.fetchedAt ?? null : null
 
-  /** 仅当 loadedRangeKey 与当前 rangeKey 一致时，才向 UI 暴露 summary / data */
-  const showSummaryForUi = rangeMatched ? displaySummary : null
-  const showDataForUi = rangeMatched ? data : null
+  /** 仅当 loadedQueryKey 与当前 queryKey 一致时，才向 UI 暴露 summary / data */
+  const showSummaryForUi = queryMatched ? displaySummary : null
+  const showDataForUi = queryMatched ? data : null
 
   const boardSyncUiMode = deriveBoardSyncUiMode({
     hasDisplayData: Boolean(showSummaryForUi),
     businessSync: syncMeta?.businessSync,
     activeSyncJob,
     totalRawOrders,
-    isLoadingRange: !rangeMatched && status === 'loading',
+    isLoadingRange: !queryMatched && status === 'loading',
   })
 
-  const qualityFeedback = rangeMatched ? data?.qualityFeedback ?? null : null
+  const qualityFeedback = queryMatched ? data?.qualityFeedback ?? null : null
 
   const applyCachedBoardResult = useCallback(
     (params: {
       cached: BoardLiveQueryData
       expectedRangeKey: string
+      expectedQueryKey: string
+      expectedPageScope: LiveQueryPageScope
       refreshing?: boolean
     }) => {
-      const { cached, expectedRangeKey, refreshing = false } = params
+      const {
+        cached,
+        expectedRangeKey,
+        expectedQueryKey,
+        expectedPageScope,
+        refreshing = false,
+      } = params
       const summary = resolveDisplaySummary(cached)
-      setData({ ...cached, rangeKey: expectedRangeKey })
+      setData({
+        ...cached,
+        rangeKey: expectedRangeKey,
+        queryKey: expectedQueryKey,
+        pageScope: expectedPageScope,
+      })
       setDisplaySummary(summary)
       setDataDisplayStatus(cached.dataDisplayStatus ?? null)
       if (cached.syncMeta) setSyncMeta(cached.syncMeta)
@@ -242,11 +265,16 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
         return
       }
       if (displayStatus === 'coverage_missing' || result.rangeCoverage?.status === 'not_covered') {
-        setStaleMessage('该日期范围尚未完成同步')
+        const names = (result.rangeCoverage?.missingShopNames ?? []).filter(Boolean)
+        setStaleMessage(
+          names.length > 0
+            ? `部分店铺尚未完成该日期范围同步。尚未覆盖：${names.join('、')}`
+            : '部分店铺尚未完成该日期范围同步',
+        )
         return
       }
       if (displayStatus === 'empty' && result.rangeCoverage?.status === 'unknown') {
-        setStaleMessage('暂未查询到数据，请重新加载；系统正在确认同步状态')
+        setStaleMessage('暂未查询到数据，系统正在确认各店铺同步状态')
         return
       }
       if (displayStatus === 'empty') {
@@ -254,7 +282,12 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
         return
       }
       if (displayStatus === 'syncing_no_cache' || displayStatus === 'syncing_with_cache') {
-        setStaleMessage(result.progress?.message ?? '数据正在准备中')
+        setStaleMessage(
+          result.progress?.message ??
+            (result.rangeCoverage?.status === 'syncing'
+              ? '部分店铺数据正在同步'
+              : '数据正在准备中'),
+        )
         return
       }
       setStaleMessage(null)
@@ -282,17 +315,23 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       setDisplaySummary(null)
       setDataDisplayStatus(null)
       setStaleMessage(null)
+      setError(null)
+      setIsRefreshing(false)
       return
     }
 
     const fetchRangeKey = buildBoardRangeKey(preset, startDate, endDate)
+    const fetchQueryKey = buildBoardQueryKey({ pageScope, preset, startDate, endDate })
     const seq = ++requestSeqRef.current
+    currentQueryKeyRef.current = fetchQueryKey
 
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
+    // 切换 pageScope/日期：先清掉旧页面文案，避免串页
     setStaleMessage(null)
+    setError(null)
 
     const liveCacheKey = buildLiveQueryCacheKey({
       pageScope,
@@ -302,28 +341,38 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     })
     const cachedEntry =
       (await readLiveQueryCacheAsync(liveCacheKey)) ?? readLiveQueryCache(liveCacheKey)
-    const cachedRangeKey = cachedEntry?.data
-      ? resolveCachedRangeKey(cachedEntry.data)
-      : null
-    const payloadUsable = isCachedPayloadUsable(cachedEntry?.data)
+    const identityCached =
+      cachedEntry?.data &&
+      resolveCachedBoardIdentity({
+        data: cachedEntry.data,
+        cacheKey: liveCacheKey,
+        expectedPageScope: pageScope,
+        expectedQueryKey: fetchQueryKey,
+      })
+    const cachedRangeKey = identityCached ? resolveCachedRangeKey(identityCached) : null
+    const payloadUsable = isCachedPayloadUsable(identityCached)
     const hasFreshCache =
       Boolean(
-        cachedEntry &&
+        identityCached &&
           payloadUsable &&
+          cachedEntry &&
           isLiveQueryCacheFresh(cachedEntry, Date.now(), preset) &&
           cachedRangeKey === fetchRangeKey,
       )
 
-    // 切换范围：无本范围新鲜缓存时进入加载，不沿用上一范围 status 文案
+    // 无本页新鲜缓存：骨架屏，不沿用另一页面的 coverage/empty/error
     if (!hasFreshCache) {
+      setData(null)
+      setDisplaySummary(null)
       setDataDisplayStatus(null)
       setStatus('loading')
-      setError(null)
       setIsRefreshing(false)
-    } else if (cachedEntry?.data) {
+    } else if (identityCached) {
       applyCachedBoardResult({
-        cached: cachedEntry.data,
+        cached: identityCached,
         expectedRangeKey: fetchRangeKey,
+        expectedQueryKey: fetchQueryKey,
+        expectedPageScope: pageScope,
         refreshing: true,
       })
     }
@@ -333,11 +382,17 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     const canRevalidateWithEtag =
       !skipEtag &&
       Boolean(cachedEntry?.etag) &&
+      Boolean(identityCached) &&
       cachedRangeKey === fetchRangeKey &&
       payloadUsable
 
     const fetchBoard =
       pageScope === 'anchors' ? fetchBoardAnchorsDataResult : fetchBoardOverviewResult
+
+    const isStaleRequest = () =>
+      controller.signal.aborted ||
+      seq !== requestSeqRef.current ||
+      fetchQueryKey !== currentQueryKeyRef.current
 
     try {
       let fetchResult = await fetchBoard({
@@ -348,27 +403,29 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
         etag: canRevalidateWithEtag ? cachedEntry?.etag : undefined,
       })
 
-      if (controller.signal.aborted || seq !== requestSeqRef.current) return
+      if (isStaleRequest()) return
 
       if (fetchResult.notModified) {
-        if (cachedEntry?.data && payloadUsable && cachedRangeKey === fetchRangeKey) {
+        if (identityCached && payloadUsable && cachedRangeKey === fetchRangeKey) {
           applyCachedBoardResult({
-            cached: cachedEntry.data,
+            cached: identityCached,
             expectedRangeKey: fetchRangeKey,
+            expectedQueryKey: fetchQueryKey,
+            expectedPageScope: pageScope,
             refreshing: false,
           })
           touchLiveQueryCacheTimestamp(liveCacheKey)
           applyStaleMessage(
-            cachedEntry.data.syncMeta ?? null,
-            cachedEntry.data.dataDisplayStatus,
-            cachedEntry.data,
-            resolveDisplaySummary(cachedEntry.data),
+            identityCached.syncMeta ?? null,
+            identityCached.dataDisplayStatus,
+            identityCached,
+            resolveDisplaySummary(identityCached),
           )
           scheduleBoardStandardPrefetch({ preferScope: pageScope })
           return
         }
 
-        // 304 但本地不可恢复：清条目后无 ETag 补发一次
+        // 304 但 pageScope/queryKey 不匹配或本地不可恢复：清条目后无 ETag 补发
         removeLiveQueryCacheEntry(liveCacheKey)
         if (skipEtag) {
           setError('本地缓存无法恢复，请重新加载')
@@ -383,7 +440,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
           endDate,
           signal: controller.signal,
         })
-        if (controller.signal.aborted || seq !== requestSeqRef.current) return
+        if (isStaleRequest()) return
         if (fetchResult.notModified) {
           setError('本地缓存无法恢复，请重新加载')
           setStatus('failed')
@@ -411,17 +468,23 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
         return
       }
 
-      if (controller.signal.aborted || seq !== requestSeqRef.current) return
+      if (isStaleRequest()) return
 
       hasLoadedOnceRef.current = true
-      const summary = resolveDisplaySummary(result)
-      setData({ ...result, rangeKey: resultRangeKey })
+      const enriched: BoardLiveQueryData = {
+        ...result,
+        rangeKey: resultRangeKey,
+        queryKey: fetchQueryKey,
+        pageScope,
+      }
+      const summary = resolveDisplaySummary(enriched)
+      setData(enriched)
       setDisplaySummary(summary)
       setDataDisplayStatus(result.dataDisplayStatus ?? null)
       if (result.syncMeta) {
         setSyncMeta(result.syncMeta)
       }
-      writeLiveQueryCache(liveCacheKey, { ...result, rangeKey: resultRangeKey }, {
+      writeLiveQueryCache(liveCacheKey, enriched, {
         etag: fetchResult.etag,
         dataGeneration: fetchResult.dataGeneration,
       })
@@ -431,12 +494,12 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
           result.fetchedAt,
       )
       scheduleBoardStandardPrefetch({ preferScope: pageScope })
-      applyStaleMessage(result.syncMeta ?? null, result.dataDisplayStatus, result, summary)
+      applyStaleMessage(result.syncMeta ?? null, result.dataDisplayStatus, enriched, summary)
       setStatus('ready')
       setError(null)
       setIsRefreshing(false)
     } catch (e) {
-      if (controller.signal.aborted || seq !== requestSeqRef.current) return
+      if (isStaleRequest()) return
       const msg = e instanceof Error ? e.message : '加载失败'
       setError(msg)
       setStatus('failed')
@@ -489,7 +552,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   useEffect(() => {
     if (!shouldLoadBoardData) return
     void loadLocal()
-  }, [loadLocal, rangeKey, shouldLoadBoardData])
+  }, [loadLocal, queryKey, shouldLoadBoardData])
 
   useEffect(() => {
     const onInvalidate = () => {
@@ -578,11 +641,11 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   ])
 
   const resolvedRange = useMemo<BoardResolvedRange>(() => {
-    if (loadedRangeKey === rangeKey && data?.resolvedRange) {
+    if (queryMatched && data?.resolvedRange) {
       return data.resolvedRange
     }
     return { preset, startDate, endDate }
-  }, [loadedRangeKey, rangeKey, data?.resolvedRange, preset, startDate, endDate])
+  }, [queryMatched, data?.resolvedRange, preset, startDate, endDate])
 
   const value = useMemo(
     () => ({
@@ -591,19 +654,20 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       customEnd,
       customQueried,
       rangeKey,
+      queryKey,
       setPreset,
       setCustomStart,
       setCustomEnd,
       setCustomQueried,
       status,
-      error,
+      error: queryMatched ? error : null,
       data: showDataForUi,
       displayData: showDataForUi,
       displaySummary: showSummaryForUi,
       resolvedRange,
-      dataDisplayStatus: rangeMatched ? dataDisplayStatus : null,
+      dataDisplayStatus: queryMatched ? dataDisplayStatus : null,
       isLoading: status === 'loading' && !showSummaryForUi,
-      isRefreshing,
+      isRefreshing: queryMatched ? isRefreshing : false,
       isDisplayStale,
       boardSyncUiMode,
       lastSyncedAt,
@@ -616,7 +680,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       rollingDataHealthClose,
       pageFetchedAt,
       cookieHealth: syncMeta?.cookieHealth ?? null,
-      staleMessage: rangeMatched ? staleMessage : null,
+      staleMessage: queryMatched ? staleMessage : null,
       startDate,
       endDate,
       qualityFeedback,
@@ -631,10 +695,10 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       customEnd,
       customQueried,
       rangeKey,
+      queryKey,
       status,
       error,
       showDataForUi,
-      loadedRangeKey,
       showSummaryForUi,
       resolvedRange,
       dataDisplayStatus,
@@ -658,7 +722,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       reloadLocalFresh,
       triggerBusinessSync,
       triggerSyncBusy,
-      rangeMatched,
+      queryMatched,
     ],
   )
 

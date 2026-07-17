@@ -3,7 +3,10 @@
  * npx tsx apps/server/scripts/verify-anchor-board-range-status.ts
  */
 import assert from 'node:assert/strict'
-import { resolveBoardDataDisplayStatus } from '../src/services/board-data-display-status.service'
+import {
+  boardDataDisplayStatusMessage,
+  resolveBoardDataDisplayStatus,
+} from '../src/services/board-data-display-status.service'
 import { jobCoversBusinessRange } from '../src/services/board-range-coverage.service'
 
 function main() {
@@ -78,6 +81,15 @@ function main() {
     'empty',
   )
   console.log('  ✓ unknown => empty（非 coverage_missing）')
+
+  const missingMsg = boardDataDisplayStatusMessage('coverage_missing', {
+    missingShopNames: ['拾玉居'],
+  })
+  assert.ok(missingMsg.includes('部分店铺尚未完成'))
+  assert.ok(!missingMsg.includes('该日期范围尚未完成同步'))
+  const unknownMsg = boardDataDisplayStatusMessage('empty', { coverageStatus: 'unknown' })
+  assert.ok(unknownMsg.includes('确认各店铺同步状态'))
+  console.log('  ✓ coverage_missing / unknown 文案')
 
   assert.equal(
     jobCoversBusinessRange({ startDate: '2026-07-01', endDate: '2026-07-17' }, '2026-07-17', '2026-07-17'),

@@ -17,6 +17,9 @@ import {
   OFFLINE_GMV_EFFECTIVE_FROM_DATE,
 } from '../config/offline-gmv.constants'
 
+export { isOfflineDealView } from '../utils/offline-deal-view.util'
+import { isOfflineDealView } from '../utils/offline-deal-view.util'
+
 export type OfflineDealStatus = 'draft' | 'confirmed' | 'cancelled' | 'voided'
 
 const VALID_STATUSES = new Set<OfflineDealStatus>([
@@ -25,25 +28,6 @@ const VALID_STATUSES = new Set<OfflineDealStatus>([
   'cancelled',
   'voided',
 ])
-
-export function isOfflineDealView(
-  view: AnalyzedOrderView & {
-    raw?: Record<string, unknown>
-    scheduleAttributionSource?: string | null
-  },
-): boolean {
-  if (view.sourceType === 'offline_deal' || view.dealSource === 'offline') return true
-  if (view.offlineDealKey) return true
-  if (view.scheduleAttributionSource === 'offline_manual') return true
-  const raw = view.raw
-  if (raw && (raw.dealSource === 'offline' || raw.sourceType === 'offline_deal')) return true
-  const orderNo = String(
-    view.displayOrderNo || view.officialOrderNo || view.packageId || view.orderId || '',
-  ).trim()
-  if (/^OFF-/i.test(orderNo)) return true
-  if (/^offline:/i.test(orderNo)) return true
-  return false
-}
 
 function yuanToCent(amountYuan: number): number {
   return Math.round(amountYuan * 100)

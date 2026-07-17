@@ -188,6 +188,9 @@ export interface BoardLiveQueryData {
   startDate: string
   endDate: string
   rangeKey?: string
+  /** 页面查询身份：pageScope|preset|start|end */
+  queryKey?: string
+  pageScope?: 'overview' | 'anchors'
   resolvedRange?: BoardResolvedRange
   source: BoardDataSource
   isFromCache: boolean
@@ -198,6 +201,11 @@ export interface BoardLiveQueryData {
     reason?: string
     coveredShopIds?: string[]
     missingShopIds?: string[]
+    syncingShopIds?: string[]
+    failedShopIds?: string[]
+    unknownShopIds?: string[]
+    missingShopNames?: string[]
+    evidenceJobId?: string | null
   }
   diagnostics?: Record<string, unknown>
   progress: LiveQueryProgress

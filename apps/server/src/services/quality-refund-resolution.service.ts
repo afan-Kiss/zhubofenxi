@@ -7,7 +7,7 @@ import {
   type QualityRefundCrossVerify,
   type QualityVerifyStatus,
 } from './quality-refund-cross-verify.service'
-import { isOfflineDealView } from './offline-deal.service'
+import { isOfflineDealView } from '../utils/offline-deal-view.util'
 
 export type { QualityRefundCrossVerify, QualityVerifyStatus }
 export { qualityVerifyDisplayLabel, buildQualityCrossVerifySummary } from './quality-refund-cross-verify.service'

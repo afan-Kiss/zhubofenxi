@@ -1,8 +1,9 @@
 /**
- * 正式主播离职：记录 effectiveTo、截断模板、清理未来排班、写操作日志、失效缓存。
+ * 正式主播离职：记录 effectiveTo、截断模板、清理未来排班、写操作日志（同事务）、失效缓存。
  */
 import { prisma } from '../lib/prisma'
 import { writeOperationLog } from './audit.service'
+import type { AuditAction } from '../types/audit'
 import {
   assertValidOffboardDate,
   isAnchorEffectiveOnDate,
@@ -31,19 +32,30 @@ export interface OffboardAnchorResult {
   futureSchedulesCleared: number
 }
 
+export interface ReinstateAnchorResult {
+  id: string
+  name: string
+  enabled: true
+  effectiveTo: null
+  templatesRestored: false
+  schedulesRestored: false
+  warning: string
+}
+
 function normalizeName(name: string): string {
   return name.trim().toLowerCase()
 }
 
-export async function offboardAnchor(params: {
+async function offboardAnchorInternal(params: {
   id: string
   effectiveTo: string
   reason?: string
   operatorUsername?: string | null
   operatorUserId?: string | null
   operatorRole?: string | null
+  operationType: 'offboard' | 'patch_offboard_date'
   /** 仅验收注入：事务中某阶段后抛错以验证回滚 */
-  __verifyInjectFailureAfter?: 'anchor' | 'templates' | 'schedules'
+  __verifyInjectFailureAfter?: 'anchor' | 'templates' | 'schedules' | 'audit'
 }): Promise<OffboardAnchorResult> {
   const existing = await prisma.anchor.findFirst({
     where: { id: params.id, deletedAt: null },
@@ -55,13 +67,22 @@ export async function offboardAnchor(params: {
     effectiveFrom: existing.effectiveFrom,
   })
   const reason = (params.reason ?? '主播离职').trim() || '主播离职'
+  const auditAction: AuditAction =
+    params.operationType === 'patch_offboard_date'
+      ? 'anchor_offboard_date_patch'
+      : 'anchor_offboard'
+  const description =
+    params.operationType === 'patch_offboard_date'
+      ? `补录主播离职日期：${existing.name}，最后工作日 ${effectiveTo}`
+      : `主播离职：${existing.name}，最后工作日 ${effectiveTo}`
 
   let templatesTruncated = 0
   let templatesDisabled = 0
   let futureSchedulesCleared = 0
   const affectedDates: string[] = []
 
-  await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(
+    async (tx) => {
     await tx.anchor.update({
       where: { id: existing.id },
       data: {
@@ -90,7 +111,6 @@ export async function offboardAnchor(params: {
       if (!byId && !byName) continue
 
       const tplFrom = tpl.effectiveFrom?.trim() || null
-      // 模板从离职次日才开始 → 停用
       if (tplFrom && isBusinessDateKey(tplFrom) && tplFrom > effectiveTo) {
         await tx.anchorScheduleTemplate.update({
           where: { id: tpl.id },
@@ -99,7 +119,6 @@ export async function offboardAnchor(params: {
         templatesDisabled++
         continue
       }
-      // 模板覆盖离职日：将 effectiveTo 截到离职日（保留历史）
       const tplTo = tpl.effectiveTo?.trim() || null
       if (!tplTo || tplTo > effectiveTo) {
         await tx.anchorScheduleTemplate.update({
@@ -142,33 +161,54 @@ export async function offboardAnchor(params: {
     if (params.__verifyInjectFailureAfter === 'schedules') {
       throw new Error('VERIFY_INJECT: after_schedules')
     }
-  })
 
-  await writeOperationLog({
-    userId: params.operatorUserId,
-    username: params.operatorUsername,
-    role: params.operatorRole,
-    action: 'unknown',
-    module: 'settings',
-    description: `主播离职：${existing.name}，最后工作日 ${effectiveTo}`,
-    meta: {
-      anchorId: existing.id,
-      anchorName: existing.name,
-      effectiveFrom: existing.effectiveFrom,
-      effectiveTo,
-      templatesTruncated,
-      templatesDisabled,
-      futureSchedulesCleared,
-      affectedDates,
-      reason,
-    },
-  })
+    await writeOperationLog(
+      {
+        userId: params.operatorUserId,
+        username: params.operatorUsername,
+        role: params.operatorRole,
+        action: auditAction,
+        module: 'settings',
+        description,
+        meta: {
+          anchorId: existing.id,
+          anchorName: existing.name,
+          previousEnabled: existing.enabled,
+          newEnabled: false,
+          previousEffectiveTo: existing.effectiveTo,
+          newEffectiveTo: effectiveTo,
+          effectiveFrom: existing.effectiveFrom,
+          reason,
+          templatesTruncated,
+          templatesDisabled,
+          futureSchedulesCleared,
+          affectedDates,
+          operationType: params.operationType,
+        },
+      },
+      tx,
+    )
+    if (params.__verifyInjectFailureAfter === 'audit') {
+      throw new Error('VERIFY_INJECT: after_audit')
+    }
+  },
+    { timeout: 20_000 },
+  )
 
-  await refreshAnchorConfigCache()
-  invalidateBusinessBoardCache()
-  invalidateBusinessBoardCacheForDate(effectiveTo)
-  for (const d of affectedDates) {
-    invalidateBusinessBoardCacheForDate(d)
+  try {
+    if (process.env.ANCHOR_OFFBOARD_SKIP_CACHE_INVALIDATE !== '1') {
+      await refreshAnchorConfigCache()
+      invalidateBusinessBoardCache()
+      invalidateBusinessBoardCacheForDate(effectiveTo)
+      for (const d of affectedDates) {
+        invalidateBusinessBoardCacheForDate(d)
+      }
+    }
+  } catch (err) {
+    console.warn(
+      '[anchor-offboard] 事务已提交，缓存刷新失败',
+      err instanceof Error ? err.message : err,
+    )
   }
 
   return {
@@ -188,44 +228,96 @@ export async function offboardAnchor(params: {
   }
 }
 
-/** 撤销离职：清空 effectiveTo 并恢复 enabled */
+export async function offboardAnchor(params: {
+  id: string
+  effectiveTo: string
+  reason?: string
+  operatorUsername?: string | null
+  operatorUserId?: string | null
+  operatorRole?: string | null
+  __verifyInjectFailureAfter?: 'anchor' | 'templates' | 'schedules' | 'audit'
+}): Promise<OffboardAnchorResult> {
+  return offboardAnchorInternal({ ...params, operationType: 'offboard' })
+}
+
+/**
+ * 重新启用主播：仅恢复在职状态并清空最后工作日。
+ * 不恢复被截断的模板与被清理的未来排班。
+ */
 export async function reinstateAnchor(params: {
   id: string
   operatorUsername?: string | null
   operatorUserId?: string | null
   operatorRole?: string | null
-}): Promise<{ id: string; name: string }> {
+  __verifyInjectFailureAfter?: 'audit'
+}): Promise<ReinstateAnchorResult> {
   const existing = await prisma.anchor.findFirst({
     where: { id: params.id, deletedAt: null },
   })
   if (!existing) throw new Error('主播不存在')
 
-  await prisma.anchor.update({
-    where: { id: existing.id },
-    data: {
-      enabled: true,
-      effectiveTo: null,
-    },
-  })
+  const warning =
+    '此前被截断的模板和被清理的未来排班不会自动恢复，请重新配置排班。'
 
-  await writeOperationLog({
-    userId: params.operatorUserId,
-    username: params.operatorUsername,
-    role: params.operatorRole,
-    action: 'unknown',
-    module: 'settings',
-    description: `撤销主播离职：${existing.name}（已清空离职日期）`,
-    meta: {
-      anchorId: existing.id,
-      anchorName: existing.name,
-      previousEffectiveTo: existing.effectiveTo,
-    },
-  })
+  await prisma.$transaction(
+    async (tx) => {
+    await tx.anchor.update({
+      where: { id: existing.id },
+      data: {
+        enabled: true,
+        effectiveTo: null,
+      },
+    })
 
-  await refreshAnchorConfigCache()
-  invalidateBusinessBoardCache()
+    await writeOperationLog(
+      {
+        userId: params.operatorUserId,
+        username: params.operatorUsername,
+        role: params.operatorRole,
+        action: 'anchor_reinstate',
+        module: 'settings',
+        description: `重新启用主播：${existing.name}（已清空离职日期；模板与未来排班不自动恢复）`,
+        meta: {
+          anchorId: existing.id,
+          anchorName: existing.name,
+          previousEnabled: existing.enabled,
+          previousEffectiveTo: existing.effectiveTo,
+          newEnabled: true,
+          newEffectiveTo: null,
+          templatesRestored: false,
+          schedulesRestored: false,
+        },
+      },
+      tx,
+    )
+    if (params.__verifyInjectFailureAfter === 'audit') {
+      throw new Error('VERIFY_INJECT: after_audit')
+    }
+  },
+    { timeout: 20_000 },
+  )
 
-  return { id: existing.id, name: existing.name }
+  try {
+    if (process.env.ANCHOR_OFFBOARD_SKIP_CACHE_INVALIDATE !== '1') {
+      await refreshAnchorConfigCache()
+      invalidateBusinessBoardCache()
+    }
+  } catch (err) {
+    console.warn(
+      '[anchor-reinstate] 事务已提交，缓存刷新失败',
+      err instanceof Error ? err.message : err,
+    )
+  }
+
+  return {
+    id: existing.id,
+    name: existing.name,
+    enabled: true,
+    effectiveTo: null,
+    templatesRestored: false,
+    schedulesRestored: false,
+    warning,
+  }
 }
 
 /** 补录离职日期（已停用且缺日期） */
@@ -236,6 +328,7 @@ export async function patchOffboardDate(params: {
   operatorUsername?: string | null
   operatorUserId?: string | null
   operatorRole?: string | null
+  __verifyInjectFailureAfter?: 'anchor' | 'templates' | 'schedules' | 'audit'
 }): Promise<OffboardAnchorResult> {
   const existing = await prisma.anchor.findFirst({
     where: { id: params.id, deletedAt: null },
@@ -244,7 +337,7 @@ export async function patchOffboardDate(params: {
   if (existing.enabled) {
     throw new Error('主播仍在职，请使用「办理离职」')
   }
-  return offboardAnchor(params)
+  return offboardAnchorInternal({ ...params, operationType: 'patch_offboard_date' })
 }
 
 /** 正式主播是否允许安排在指定业务日（含缺离职日期的已停用拦截） */

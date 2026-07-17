@@ -5,7 +5,8 @@ import {
   getAnchorConfigSync,
   isOfflineOnlyAnchor,
 } from './anchor.service'
-import { isOfflineDealView, splitGmvByDealSource } from './offline-deal.service'
+import { splitGmvByDealSource } from './offline-deal.service'
+import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import { rangeIncludesOfflineGmvSurface } from '../config/offline-gmv.constants'
 import { centToYuan } from '../utils/money'
 import {

@@ -70,6 +70,7 @@ export type EffectiveScheduleSource = 'manual' | 'generated_default' | 'virtual_
 export interface EffectiveScheduleRow {
   rowId: string
   source: EffectiveScheduleSource
+  anchorId?: string | null
   anchorName: string
   shopName: string
   liveRoomName: string
@@ -80,6 +81,9 @@ export interface EffectiveScheduleRow {
   enabled: boolean
   confirmed: boolean
   note?: string
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
+  anchorColorSnapshot?: string | null
 }
 
 export interface EffectiveScheduleTable {
@@ -129,6 +133,9 @@ export interface DailyScheduleDto {
   confirmedAt: string | null
   note: string | null
   conflict?: boolean
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
+  anchorColorSnapshot?: string | null
 }
 
 function rowToDto(row: {
@@ -146,6 +153,9 @@ function rowToDto(row: {
   confirmed: boolean
   confirmedAt: Date | null
   note: string | null
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
+  anchorColorSnapshot?: string | null
 }): DailyScheduleDto {
   const startTime = row.startAt.toLocaleTimeString('zh-CN', {
     timeZone: 'Asia/Shanghai',
@@ -187,6 +197,9 @@ function rowToDto(row: {
     confirmed: row.confirmed,
     confirmedAt: row.confirmedAt?.toISOString() ?? null,
     note: row.note,
+    isTemporaryAnchor: Boolean(row.isTemporaryAnchor),
+    temporaryAnchorKey: row.temporaryAnchorKey ?? null,
+    anchorColorSnapshot: row.anchorColorSnapshot ?? null,
   }
 }
 
@@ -207,6 +220,7 @@ function dbRowToEffective(
   row: {
     id: string
     scheduleDate: string
+    anchorId?: string | null
     anchorName: string
     shopName: string
     liveRoomName: string
@@ -216,6 +230,9 @@ function dbRowToEffective(
     enabled: boolean
     confirmed: boolean
     note: string | null
+    isTemporaryAnchor?: boolean
+    temporaryAnchorKey?: string | null
+    anchorColorSnapshot?: string | null
   },
   source: EffectiveScheduleSource,
   dateConfirmed: boolean,
@@ -223,6 +240,7 @@ function dbRowToEffective(
   return {
     rowId: row.id,
     source,
+    anchorId: row.anchorId ?? null,
     anchorName: row.anchorName,
     shopName: row.shopName,
     liveRoomName: row.liveRoomName,
@@ -231,8 +249,11 @@ function dbRowToEffective(
     startAt: row.startAt.toISOString(),
     endAt: row.endAt.toISOString(),
     enabled: row.enabled,
-    confirmed: dateConfirmed,
+    confirmed: dateConfirmed || row.confirmed,
     note: row.note ?? undefined,
+    isTemporaryAnchor: Boolean(row.isTemporaryAnchor),
+    temporaryAnchorKey: row.temporaryAnchorKey ?? null,
+    anchorColorSnapshot: row.anchorColorSnapshot ?? null,
   }
 }
 
@@ -472,6 +493,7 @@ export async function generateDefaultSchedulesForDate(params: {
     const { startAt, endAt } = buildScheduleBounds(date, t.startTime, t.endTime)
     return {
       scheduleDate: date,
+      anchorId: t.anchorId ?? null,
       anchorName: t.anchorName,
       shopName: t.shopName,
       liveRoomName: t.liveRoomName,
@@ -483,6 +505,9 @@ export async function generateDefaultSchedulesForDate(params: {
       confirmed: false,
       note: appendHistoricalOverrideNote(t.note, historicalOverrideNote),
       createdBy: params.createdBy ?? null,
+      isTemporaryAnchor: false,
+      temporaryAnchorKey: null,
+      anchorColorSnapshot: null,
     }
   })
 
@@ -537,6 +562,9 @@ export async function saveDailySchedules(params: {
     endTime: string
     enabled?: boolean
     note?: string
+    isTemporaryAnchor?: boolean
+    temporaryAnchorKey?: string | null
+    anchorColorSnapshot?: string | null
   }>
   createdBy?: string
   confirm?: boolean
@@ -549,6 +577,10 @@ export async function saveDailySchedules(params: {
   warnings: string[]
   confirmPreviewLines: string[]
 }> {
+  const { randomUUID } = await import('node:crypto')
+  const { assertTemporaryAnchorDateAllowed } = await import('../utils/anchor-effective-date.util')
+  const { canScheduleFormalAnchorOnDate } = await import('./anchor-offboard.service')
+
   const historicalOverrideNote = await assertHistoricalScheduleChangeAllowed({
     date: params.date,
     forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
@@ -583,6 +615,74 @@ export async function saveDailySchedules(params: {
   }
 
   const draftEnabled = params.schedules.filter((s) => s.enabled !== false)
+  const formalAnchors = await prisma.anchor.findMany({
+    where: { deletedAt: null, attributionMode: 'schedule', systemKey: null },
+  })
+  const byId = new Map(formalAnchors.map((a) => [a.id, a]))
+  const byName = new Map(formalAnchors.map((a) => [a.name.trim().toLowerCase(), a]))
+
+  // 预校验正式 / 临时主播
+  const existingTempKeys = new Set(
+    (
+      await prisma.anchorDailySchedule.findMany({
+        where: {
+          scheduleDate: params.date,
+          isTemporaryAnchor: true,
+          temporaryAnchorKey: { not: null },
+        },
+        select: { temporaryAnchorKey: true },
+      })
+    )
+      .map((r) => r.temporaryAnchorKey)
+      .filter((k): k is string => Boolean(k?.trim())),
+  )
+
+  for (const s of draftEnabled) {
+    const name = s.anchorName.trim()
+    const isTemp = Boolean(s.isTemporaryAnchor)
+    if (isTemp) {
+      const key = (s.temporaryAnchorKey && String(s.temporaryAnchorKey).trim()) || ''
+      const isExistingHistoricalTemp = Boolean(key && existingTempKeys.has(key))
+      // 新建临时主播：仅今天/昨天；已存在的历史临时行允许随整表保存回写
+      if (!isExistingHistoricalTemp) {
+        assertTemporaryAnchorDateAllowed(params.date)
+      }
+      if (!name || name === '未归属') {
+        throw new ScheduleSaveError([{ type: 'anchor_overlap', message: '临时主播姓名不能为空' }])
+      }
+      const formalDup = byName.get(name.toLowerCase())
+      if (formalDup) {
+        throw new ScheduleSaveError([
+          {
+            type: 'anchor_overlap',
+            message: `临时主播不能与正式主播「${formalDup.name}」重名`,
+          },
+        ])
+      }
+      continue
+    }
+
+    let anchor =
+      s.anchorId && byId.get(String(s.anchorId).trim())
+        ? byId.get(String(s.anchorId).trim())!
+        : null
+    if (!anchor && name) {
+      anchor = byName.get(name.toLowerCase()) ?? null
+    }
+    if (anchor) {
+      const check = canScheduleFormalAnchorOnDate(anchor, params.date)
+      if (!check.ok) {
+        throw new ScheduleSaveError([
+          {
+            type: 'anchor_overlap',
+            message: check.message?.includes('最后工作日')
+              ? `主播“${anchor.name}”最后工作日为${anchor.effectiveTo}，不能安排到${params.date}。`
+              : (check.message ?? `主播“${anchor.name}”不能安排到${params.date}`),
+          },
+        ])
+      }
+    }
+  }
 
   await prisma.anchorDailySchedule.deleteMany({
     where: { scheduleDate: params.date },
@@ -591,16 +691,41 @@ export async function saveDailySchedules(params: {
   for (const s of draftEnabled) {
     const { startAt, endAt } = buildScheduleBounds(params.date, s.startTime, s.endTime)
     const name = s.anchorName.trim()
-    let anchorId =
-      'anchorId' in s && typeof (s as { anchorId?: string }).anchorId === 'string'
-        ? String((s as { anchorId?: string }).anchorId).trim() || null
-        : null
-    if (!anchorId && name) {
-      const hit = await prisma.anchor.findFirst({
-        where: { name, deletedAt: null, attributionMode: 'schedule', enabled: true },
-        select: { id: true, systemKey: true },
+    const isTemp = Boolean(s.isTemporaryAnchor)
+
+    if (isTemp) {
+      const key =
+        (s.temporaryAnchorKey && String(s.temporaryAnchorKey).trim()) ||
+        `temp:${params.date}:${randomUUID()}`
+      await prisma.anchorDailySchedule.create({
+        data: {
+          scheduleDate: params.date,
+          anchorId: null,
+          anchorName: name,
+          shopName: s.shopName.trim(),
+          liveRoomName: s.liveRoomName.trim(),
+          startAt,
+          endAt,
+          source: 'manual',
+          enabled: true,
+          locked: false,
+          confirmed: false,
+          note: appendHistoricalOverrideNote(s.note?.trim() || null, historicalOverrideNote),
+          createdBy: params.createdBy ?? null,
+          isTemporaryAnchor: true,
+          temporaryAnchorKey: key,
+          anchorColorSnapshot: s.anchorColorSnapshot?.trim() || null,
+        },
       })
-      if (hit && !hit.systemKey) anchorId = hit.id
+      continue
+    }
+
+    let anchorId =
+      'anchorId' in s && typeof s.anchorId === 'string' ? s.anchorId.trim() || null : null
+    let anchor = anchorId ? byId.get(anchorId) ?? null : null
+    if (!anchor && name) {
+      anchor = byName.get(name.toLowerCase()) ?? null
+      if (anchor) anchorId = anchor.id
     }
     await prisma.anchorDailySchedule.create({
       data: {
@@ -617,6 +742,9 @@ export async function saveDailySchedules(params: {
         confirmed: false,
         note: appendHistoricalOverrideNote(s.note?.trim() || null, historicalOverrideNote),
         createdBy: params.createdBy ?? null,
+        isTemporaryAnchor: false,
+        temporaryAnchorKey: null,
+        anchorColorSnapshot: null,
       },
     })
   }
@@ -644,6 +772,8 @@ export async function copyDailySchedules(params: {
   forceHistoricalScheduleChange?: boolean
   changeReason?: string
 }): Promise<{ date: string; schedules: DailyScheduleDto[]; warnings: string[] }> {
+  const { canScheduleFormalAnchorOnDate } = await import('./anchor-offboard.service')
+
   const historicalOverrideNote = await assertHistoricalScheduleChangeAllowed({
     date: params.toDate,
     forceHistoricalScheduleChange: params.forceHistoricalScheduleChange,
@@ -659,11 +789,42 @@ export async function copyDailySchedules(params: {
     throw new Error(`${params.fromDate} 没有可复制的排班，请先生成或保存排班`)
   }
 
+  const warnings: string[] = []
+  const formalAnchors = await prisma.anchor.findMany({
+    where: { deletedAt: null, attributionMode: 'schedule', systemKey: null },
+  })
+  const byId = new Map(formalAnchors.map((a) => [a.id, a]))
+  const byName = new Map(formalAnchors.map((a) => [a.name.trim().toLowerCase(), a]))
+
+  const toCopy = []
+  for (const row of source) {
+    if (row.isTemporaryAnchor) {
+      warnings.push(
+        `已跳过临时主播“${row.anchorName}”，临时主播仅在${params.fromDate}有效。`,
+      )
+      continue
+    }
+    const anchor =
+      (row.anchorId && byId.get(row.anchorId)) ||
+      byName.get(row.anchorName.trim().toLowerCase()) ||
+      null
+    if (anchor) {
+      const check = canScheduleFormalAnchorOnDate(anchor, params.toDate)
+      if (!check.ok) {
+        warnings.push(
+          `已跳过主播“${anchor.name}”，其最后工作日为${anchor.effectiveTo ?? '未知'}。`,
+        )
+        continue
+      }
+    }
+    toCopy.push(row)
+  }
+
   await prisma.anchorDailySchedule.deleteMany({
     where: { scheduleDate: params.toDate, locked: false },
   })
 
-  for (const row of source) {
+  for (const row of toCopy) {
     const startHm = row.startAt.toLocaleTimeString('zh-CN', {
       timeZone: 'Asia/Shanghai',
       hour: '2-digit',
@@ -684,6 +845,7 @@ export async function copyDailySchedules(params: {
     await prisma.anchorDailySchedule.create({
       data: {
         scheduleDate: params.toDate,
+        anchorId: row.anchorId,
         anchorName: row.anchorName,
         shopName: row.shopName,
         liveRoomName: row.liveRoomName,
@@ -698,12 +860,17 @@ export async function copyDailySchedules(params: {
           historicalOverrideNote,
         ),
         createdBy: params.createdBy ?? null,
+        isTemporaryAnchor: false,
+        temporaryAnchorKey: null,
+        anchorColorSnapshot: null,
       },
     })
   }
 
   await invalidateBusinessBoardCacheForDate(params.toDate)
-  return listDailySchedulesForDate(params.toDate)
+  const result = await listDailySchedulesForDate(params.toDate)
+  result.warnings.push(...warnings)
+  return result
 }
 
 export async function validateDailySchedulesBody(params: {

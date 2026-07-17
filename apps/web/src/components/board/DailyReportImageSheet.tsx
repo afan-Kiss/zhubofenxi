@@ -73,6 +73,7 @@ export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   viewPayRate?: number | null
   gmvYuan?: number
   trend?: AnchorTrend
+  isTemporaryAnchor?: boolean
 }
 
 export interface DailyReportPayload {
@@ -353,6 +354,11 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
           <p className="text-base font-semibold text-slate-900">
             {formatAnchorDisplayName(row.anchorName)}
             {row.shopName ? ` · ${row.shopName}` : ''}
+            {row.isTemporaryAnchor ? (
+              <span className="ml-2 inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+                临时试播
+              </span>
+            ) : null}
           </p>
           {row.sessionLabel ? (
             <p className="mt-0.5 text-[12px] text-slate-500">{row.sessionLabel}</p>

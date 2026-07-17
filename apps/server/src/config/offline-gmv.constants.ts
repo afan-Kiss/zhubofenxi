@@ -5,8 +5,8 @@
  */
 export const OFFLINE_GMV_EFFECTIVE_FROM_DATE = '2026-07-14' as const
 
-/** 缓存指纹：线下 GMV 口径版本 */
-export const OFFLINE_GMV_METRICS_VERSION = 'offline-gmv-effective-2026-07-14' as const
+/** 缓存指纹：线下 GMV 口径 + 品退隔离版本 */
+export const OFFLINE_GMV_METRICS_VERSION = 'offline-gmv-quality-isolation-2026-07-17' as const
 
 /** 主播主数据版本（表结构 / 生效区间 / attributionMode 语义） */
 export const ANCHOR_MASTER_DATA_VERSION = 'anchor-master-v2-effective-range-2026-07-15' as const

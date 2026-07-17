@@ -42,6 +42,7 @@ import {
 import { useDataFreshness } from '../../hooks/useDataFreshness'
 import {
   formatBoardDataUpdatedLine,
+  formatBoardNextDataUpdateLine,
   resolveBoardDataUpdatedAt,
 } from '../../lib/data-freshness'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
@@ -260,6 +261,7 @@ export const AnchorPerformanceTab: React.FC = () => {
     endDate,
     resolvedRange,
     reload,
+    reloadLocalFresh,
     boardSyncUiMode,
     activeSyncJob,
     totalRawOrders,
@@ -460,6 +462,12 @@ export const AnchorPerformanceTab: React.FC = () => {
     data?.fetchedAt,
   ])
 
+  const nextDataUpdateLine = useMemo(() => {
+    if (isSyncingNow) return null
+    if (syncMeta?.businessSync?.enabled === false) return null
+    return formatBoardNextDataUpdateLine(syncMeta?.businessSync?.nextRunAt)
+  }, [isSyncingNow, syncMeta?.businessSync?.enabled, syncMeta?.businessSync?.nextRunAt])
+
   const freshnessLine = dataUpdatedLine
 
   const summaryTransitionKey = [
@@ -515,12 +523,21 @@ export const AnchorPerformanceTab: React.FC = () => {
     !hasPerformanceData &&
     boardSyncUiMode === 'synced_idle' &&
     (dataDisplayStatus === 'empty' || dataDisplayStatus === 'ready') &&
+    data?.rangeCoverage?.status !== 'unknown' &&
     !showProgressCard
 
   const showCoverageMissing =
     !hasPerformanceData &&
-    dataDisplayStatus === 'coverage_missing' &&
+    (dataDisplayStatus === 'coverage_missing' ||
+      data?.rangeCoverage?.status === 'not_covered') &&
     !showProgressCard
+
+  const showCoverageUnknown =
+    !hasPerformanceData &&
+    dataDisplayStatus === 'empty' &&
+    data?.rangeCoverage?.status === 'unknown' &&
+    !showProgressCard &&
+    !showRangeEmptyOnly
 
   const renderAnchorCardValue = (card: AnchorSummaryCardDef): React.ReactNode => {
     const className = 'inline-block font-bold tracking-tight text-slate-900'
@@ -620,7 +637,12 @@ export const AnchorPerformanceTab: React.FC = () => {
             </p>
           ) : null}
           {!dataFreshnessLoading && !isSyncingNow && freshnessLine ? (
-            <p className="mt-1 text-xs text-slate-400">{freshnessLine}</p>
+            <div className="mt-1 space-y-0.5">
+              <p className="text-xs text-slate-400">{freshnessLine}</p>
+              {nextDataUpdateLine ? (
+                <p className="text-xs text-slate-400">{nextDataUpdateLine}</p>
+              ) : null}
+            </div>
           ) : null}
           {isSyncingNow ? (
             <p className="mt-1 text-xs text-rose-600">
@@ -791,11 +813,41 @@ export const AnchorPerformanceTab: React.FC = () => {
         </div>
       ) : null}
 
+      {showCoverageUnknown ? (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-8 text-center">
+          <p className="text-sm text-slate-600">
+            暂未查询到数据，请重新加载；系统正在确认同步状态
+          </p>
+          <button
+            type="button"
+            onClick={() => void reloadLocalFresh()}
+            className="mt-4 rounded-full border border-slate-200 bg-white px-4 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+          >
+            重新加载
+          </button>
+        </div>
+      ) : null}
+
       {showCoverageMissing ? (
         <div className="rounded-2xl border border-dashed border-amber-200 bg-amber-50/60 p-8 text-center">
-          <p className="text-sm text-amber-900">
-            该日期范围本地数据尚未准备完整，请稍后重试或前往系统设置触发经营数据同步。
-          </p>
+          <p className="text-sm text-amber-900">该日期范围尚未完成同步</p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-3">
+            <button
+              type="button"
+              onClick={() => void reloadLocalFresh()}
+              className="rounded-full border border-amber-200 bg-white px-4 py-1.5 text-sm text-amber-900 hover:bg-amber-50"
+            >
+              重新加载
+            </button>
+            <button
+              type="button"
+              disabled={triggerSyncBusy}
+              onClick={() => void triggerBusinessSync()}
+              className="rounded-full bg-amber-700 px-4 py-1.5 text-sm text-white hover:bg-amber-800 disabled:opacity-60"
+            >
+              {triggerSyncBusy ? '同步中…' : '触发经营数据同步'}
+            </button>
+          </div>
         </div>
       ) : null}
 

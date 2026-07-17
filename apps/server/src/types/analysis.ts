@@ -299,6 +299,8 @@ export interface AnalyzedOrderView {
   isSizeMismatch: boolean
   returnAmountWarning?: string | null
   reasonText: string
+  /** 线下成交台账备注（不得作为售后/品退原因） */
+  offlineDealNote?: string
   /** 有效 GMV（统一口径，看板/排行/报表均使用） */
   effectiveGmvCent: number
   paymentBaseCent: number

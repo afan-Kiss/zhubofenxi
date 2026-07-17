@@ -13,7 +13,10 @@ import { prisma } from '../lib/prisma'
 import { getLatestWorkbenchCacheUpdatedAt, getLatestTimeSearchCacheUpdatedAt } from './xhs-after-sales-workbench.service'
 import { logInfo, logWarn, presetLabel } from '../utils/server-log'
 import { printStartupSummary } from './startup-summary.service'
-import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
+import {
+  ensureAnchorPerformanceLeaderboardSlots,
+  ensureAnchorPerformanceLeaderboardSlotsWithTemporary,
+} from './anchor-performance-attribution.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
@@ -398,9 +401,16 @@ export async function buildAndSetBusinessBoardCache(params: {
       liveSessions,
       qualityRefundViews,
     })
-    const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
-      anchorLeaderboard as import('./board-metrics.service').BoardAnchorMetrics[],
-      range.endDate,
+    const anchorLeaderboardRaw = (
+      range.startDate === range.endDate
+        ? await ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
+            anchorLeaderboard as import('./board-metrics.service').BoardAnchorMetrics[],
+            range.endDate,
+          )
+        : ensureAnchorPerformanceLeaderboardSlots(
+            anchorLeaderboard as import('./board-metrics.service').BoardAnchorMetrics[],
+            range.endDate,
+          )
     ) as unknown as Array<Record<string, unknown>>
     const anchorLeaderboardWithLate = await enrichAnchorLeaderboardWithLateStatus(
       anchorLeaderboardRaw,

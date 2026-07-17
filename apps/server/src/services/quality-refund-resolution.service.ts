@@ -7,6 +7,7 @@ import {
   type QualityRefundCrossVerify,
   type QualityVerifyStatus,
 } from './quality-refund-cross-verify.service'
+import { isOfflineDealView } from './offline-deal.service'
 
 export type { QualityRefundCrossVerify, QualityVerifyStatus }
 export { qualityVerifyDisplayLabel, buildQualityCrossVerifySummary } from './quality-refund-cross-verify.service'
@@ -70,6 +71,7 @@ export function applyOfficialQualityToView(
   cases: NormalizedQualityBadCase[],
 ): AnalyzedOrderView {
   if (!cases.length) return v
+  if (isOfflineDealView(v)) return v
   const primary = cases[0]!
   return {
     ...v,

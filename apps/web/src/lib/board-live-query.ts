@@ -193,6 +193,13 @@ export interface BoardLiveQueryData {
   isFromCache: boolean
   fetchedAt: string
   dataDisplayStatus?: BoardDataDisplayStatus
+  rangeCoverage?: {
+    status: 'covered' | 'not_covered' | 'syncing' | 'unknown'
+    reason?: string
+    coveredShopIds?: string[]
+    missingShopIds?: string[]
+  }
+  diagnostics?: Record<string, unknown>
   progress: LiveQueryProgress
   summary: Record<string, unknown>
   anchorPerformanceSummary?: Record<string, unknown>

@@ -19,6 +19,7 @@ import {
 } from './live-account.service'
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
 import { isStatusSignedView } from './order-sign-status.service'
+import { isOfflineDealView } from './offline-deal.service'
 
 export function pickProductName(raw: Record<string, unknown> | undefined): string {
   if (!raw) return '—'
@@ -155,6 +156,8 @@ export interface BoardOrderRow {
   qualityFeedbackTime?: string | null
   qualityPackagePayTime?: string | null
   qualityItemName?: string
+  /** 线下成交备注（台账展示，非售后原因） */
+  offlineDealNote?: string
   unitPriceCentForBrushCheck?: number
   isLowPriceBrushOrder?: boolean
   lowPriceBrushReason?: string | null
@@ -246,6 +249,14 @@ function resolveAfterSaleReasonFields(v: AnalyzedOrderView & { raw?: Record<stri
   refundReason: string
   afterSalesWorkbenchReason: string
 } {
+  if (isOfflineDealView(v)) {
+    return {
+      afterSaleReason: '—',
+      afterSaleReasonText: '—',
+      refundReason: '—',
+      afterSalesWorkbenchReason: '—',
+    }
+  }
   const ext = v as AnalyzedOrderView & {
     afterSalesWorkbenchReason?: string
     afterSaleReasonText?: string
@@ -326,6 +337,7 @@ export function mapViewToBoardOrderRow(
   const displayOrderNo = resolveDisplayOrderNoForView(v)
   const reasonFields = resolveAfterSaleReasonFields(v)
   const qualityInfo = resolveQualityRefundInfo({ view: v })
+  const offline = isOfflineDealView(v)
   const liveAccountCtx = opts?.liveAccountContext ?? getLiveAccountRowMapperContext()
   const resolvedLive = resolveLiveAccountDisplayName(
     v.liveAccountId,
@@ -348,10 +360,16 @@ export function mapViewToBoardOrderRow(
     String(displayOrderNo).startsWith('OFF-')
       ? 'offline'
       : 'online'
-  const qualityAttributionAnchorName =
-    remapped.qualityAttributionAnchorName != null
+  const qualityAttributionAnchorName = offline
+    ? null
+    : remapped.qualityAttributionAnchorName != null
       ? String(remapped.qualityAttributionAnchorName).trim() || null
       : paymentAnchorName // 唯一归属后：品退主播默认等于订单主播
+  const isQualityReturn = offline
+    ? false
+    : opts?.useBuyerRefund
+      ? resolveBuyerOrderQualityRefund(v).isQualityRefund
+      : viewCountsAsQualityRefund(v)
 
   return {
     orderNo: displayOrderNo,
@@ -394,9 +412,7 @@ export function mapViewToBoardOrderRow(
     isUnpaid: viewIsUnpaid(v),
     isSigned: v.isSigned,
     isRefunded: viewIsRefunded(v),
-    isQualityReturn: opts?.useBuyerRefund
-      ? resolveBuyerOrderQualityRefund(v).isQualityRefund
-      : viewCountsAsQualityRefund(v),
+    isQualityReturn,
     includedInGmv: v.includedInGmv,
     gmvExcludeReason: v.gmvExcludeReason?.trim() || null,
     anchorName: v.anchorName?.trim() || '未归属',
@@ -408,32 +424,41 @@ export function mapViewToBoardOrderRow(
     afterSaleDisplayType: afterSaleStatus,
     statusText,
     isActualSigned: isEffectiveSignedView(v),
-    officialQualityBadCase: v.officialQualityBadCase === true,
-    officialQualityReason: (v.officialQualityReasons ?? []).join('、') || undefined,
-    officialQualityFeedbackContent: v.officialQualityFeedbackContent,
-    officialQualityFeedbackTime: v.officialQualityFeedbackTime ?? null,
-    officialQualitySourceBizId: v.officialQualitySourceBizId,
+    officialQualityBadCase: offline ? false : v.officialQualityBadCase === true,
+    officialQualityReason: offline
+      ? undefined
+      : (v.officialQualityReasons ?? []).join('、') || undefined,
+    officialQualityFeedbackContent: offline ? undefined : v.officialQualityFeedbackContent,
+    officialQualityFeedbackTime: offline ? null : v.officialQualityFeedbackTime ?? null,
+    officialQualitySourceBizId: offline ? undefined : v.officialQualitySourceBizId,
     qualityMatchStatus:
-      v.officialQualityMatchStatus != null
+      !offline && v.officialQualityMatchStatus != null
         ? matchStatusLabel(
             v.officialQualityMatchStatus as NormalizedQualityBadCase['matchStatus'],
           )
         : undefined,
-    qualitySource: qualityInfo.qualityMainSource,
-    qualitySourceLabel: qualityInfo.isQualityRefund
-      ? qualityInfo.verifyDisplayLabel
-      : qualityInfo.suspectedQualityRefund
-        ? qualityVerifyDisplayLabel('after_sale_only')
-        : undefined,
-    qualityVerifyStatus: qualityInfo.qualityVerifyStatus,
-    qualityVerifyDisplayLabel: qualityInfo.verifyDisplayLabel,
-    qualityReasonText: qualityInfo.qualityReasonText || undefined,
-    officialReasonText: qualityInfo.officialReasonText || undefined,
-    afterSaleSuccessTime: qualityInfo.afterSaleSuccessTime || null,
-    qualityFeedbackContent: qualityInfo.qualityFeedbackContent || undefined,
-    qualityFeedbackTime: qualityInfo.qualityFeedbackTime || null,
-    qualityPackagePayTime: qualityInfo.qualityPackagePayTime || null,
-    qualityItemName: qualityInfo.qualityItemName || undefined,
+    qualitySource: offline ? undefined : qualityInfo.qualityMainSource,
+    qualitySourceLabel: offline
+      ? undefined
+      : qualityInfo.isQualityRefund
+        ? qualityInfo.verifyDisplayLabel
+        : qualityInfo.suspectedQualityRefund
+          ? qualityVerifyDisplayLabel('after_sale_only')
+          : undefined,
+    qualityVerifyStatus: offline ? 'none' : qualityInfo.qualityVerifyStatus,
+    qualityVerifyDisplayLabel: offline ? '—' : qualityInfo.verifyDisplayLabel,
+    qualityReasonText: offline ? undefined : qualityInfo.qualityReasonText || undefined,
+    officialReasonText: offline ? undefined : qualityInfo.officialReasonText || undefined,
+    afterSaleSuccessTime: offline ? null : qualityInfo.afterSaleSuccessTime || null,
+    qualityFeedbackContent: offline ? undefined : qualityInfo.qualityFeedbackContent || undefined,
+    qualityFeedbackTime: offline ? null : qualityInfo.qualityFeedbackTime || null,
+    qualityPackagePayTime: offline ? null : qualityInfo.qualityPackagePayTime || null,
+    qualityItemName: offline ? undefined : qualityInfo.qualityItemName || undefined,
+    offlineDealNote:
+      (v as AnalyzedOrderView & { offlineDealNote?: string }).offlineDealNote?.trim() ||
+      (rawRec.offlineDealNote != null ? String(rawRec.offlineDealNote) : '') ||
+      (rawRec.note != null ? String(rawRec.note) : '') ||
+      undefined,
     ...resolveLowPriceBrushDebugFields(v),
     attributionSource,
     attributionExplain: remapped.scheduleAttributionExplain?.trim() || null,

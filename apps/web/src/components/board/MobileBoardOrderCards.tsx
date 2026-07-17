@@ -243,9 +243,11 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
                   <FieldRow label="订单归属主播">
                     {formatAnchorDisplayName(r.paymentAnchorName || r.anchorName)}
                   </FieldRow>
-                  <FieldRow label="品退归属主播">
-                    {formatAnchorDisplayName(r.qualityAttributionAnchorName || r.anchorName)}
-                  </FieldRow>
+                  {r.isQualityReturn ? (
+                    <FieldRow label="品退归属主播">
+                      {formatAnchorDisplayName(r.qualityAttributionAnchorName || r.anchorName)}
+                    </FieldRow>
+                  ) : null}
                   <FieldRow label="归属来源">
                     <span
                       className="line-clamp-2 text-right"

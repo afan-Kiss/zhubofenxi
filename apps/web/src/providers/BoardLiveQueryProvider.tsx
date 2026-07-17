@@ -15,9 +15,11 @@ import {
   BOARD_LIVE_QUERY_INVALIDATE_EVENT,
   buildLiveQueryCacheKey,
   invalidateBuyerProfileCache,
+  invalidateLiveQueryCacheEntry,
   isLiveQueryCacheFresh,
   readLiveQueryCache,
   readLiveQueryCacheAsync,
+  removeLiveQueryCacheEntry,
   touchLiveQueryCacheTimestamp,
   writeLiveQueryCache,
   type LiveQueryPageScope,
@@ -80,11 +82,43 @@ interface BoardLiveQueryContextValue {
   endDate: string
   qualityFeedback: QualityFeedbackStatus | null
   reload: () => Promise<void>
+  /** 清除当前范围浏览器缓存后无 ETag 重拉（不触发平台同步） */
+  reloadLocalFresh: () => Promise<void>
   triggerBusinessSync: () => Promise<void>
   triggerSyncBusy: boolean
 }
 
 const BoardLiveQueryContext = createContext<BoardLiveQueryContextValue | null>(null)
+
+function resolveDisplaySummary(cached: BoardLiveQueryData): Record<string, unknown> | null {
+  const rawCachedSummary =
+    Object.keys(cached.summary ?? {}).length > 0 ? cached.summary : null
+  if (
+    rawCachedSummary &&
+    (cached.dataDisplayStatus !== 'empty' || boardSummaryHasOrderData(rawCachedSummary))
+  ) {
+    return rawCachedSummary
+  }
+  return boardSummaryHasOrderData(rawCachedSummary) ? rawCachedSummary : null
+}
+
+function isCachedPayloadUsable(data: BoardLiveQueryData | null | undefined): boolean {
+  if (!data) return false
+  if (!data.preset || !data.startDate || !data.endDate) return false
+  if (!data.summary || typeof data.summary !== 'object') return false
+  return true
+}
+
+function resolveCachedRangeKey(cached: BoardLiveQueryData): string {
+  return (
+    cached.rangeKey ??
+    buildBoardRangeKey(
+      cached.preset as BoardRangePreset,
+      cached.startDate,
+      cached.endDate,
+    )
+  )
+}
 
 export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
@@ -113,6 +147,10 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   const requestSeqRef = useRef(0)
   const hasLoadedOnceRef = useRef(false)
   const wasSyncingRef = useRef(false)
+  const lastSeenSuccessAtRef = useRef<string | null>(null)
+  const lastSeenFinishedJobIdRef = useRef<string | null>(null)
+  const refreshInFlightRef = useRef(false)
+  const skipEtagOnceRef = useRef(false)
 
   const { startDate, endDate } = useMemo(
     () => resolveBoardRangeDates(preset, customStart, customEnd),
@@ -151,6 +189,78 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   })
 
   const qualityFeedback = rangeMatched ? data?.qualityFeedback ?? null : null
+
+  const applyCachedBoardResult = useCallback(
+    (params: {
+      cached: BoardLiveQueryData
+      expectedRangeKey: string
+      refreshing?: boolean
+    }) => {
+      const { cached, expectedRangeKey, refreshing = false } = params
+      const summary = resolveDisplaySummary(cached)
+      setData({ ...cached, rangeKey: expectedRangeKey })
+      setDisplaySummary(summary)
+      setDataDisplayStatus(cached.dataDisplayStatus ?? null)
+      if (cached.syncMeta) setSyncMeta(cached.syncMeta)
+      setLastSyncedAt(
+        cached.overviewMeta?.lastQianfanSyncAt ??
+          cached.syncMeta?.businessSync.lastSuccessAt ??
+          cached.fetchedAt,
+      )
+      setStatus('ready')
+      setError(null)
+      setIsRefreshing(refreshing)
+      hasLoadedOnceRef.current = true
+    },
+    [],
+  )
+
+  const applyStaleMessage = useCallback(
+    (
+      meta: BoardSyncMeta | null,
+      displayStatus: BoardDataDisplayStatus | null | undefined,
+      result: BoardLiveQueryData,
+      summary: Record<string, unknown> | null,
+    ) => {
+      if (result.overviewMeta?.cacheStale || result.overviewMeta?.fallbackReason) {
+        setStaleMessage('缓存重建失败，当前展示上一次成功数据。')
+        return
+      }
+      const uiMode = deriveBoardSyncUiMode({
+        hasDisplayData: Boolean(summary),
+        businessSync: meta?.businessSync ?? result.syncMeta?.businessSync,
+        activeSyncJob: meta?.activeSyncJob,
+        totalRawOrders: meta?.totalRawOrders ?? 0,
+      })
+
+      if (uiMode === 'first_sync' || uiMode === 'empty_idle' || uiMode === 'syncing_with_data') {
+        setStaleMessage(null)
+        return
+      }
+      if (displayStatus === 'failed_with_cache') {
+        setStaleMessage('本次更新失败，当前展示上一次成功数据。')
+        return
+      }
+      if (displayStatus === 'coverage_missing' || result.rangeCoverage?.status === 'not_covered') {
+        setStaleMessage('该日期范围尚未完成同步')
+        return
+      }
+      if (displayStatus === 'empty' && result.rangeCoverage?.status === 'unknown') {
+        setStaleMessage('暂未查询到数据，请重新加载；系统正在确认同步状态')
+        return
+      }
+      if (displayStatus === 'empty') {
+        setStaleMessage('当前日期范围内暂无订单数据')
+        return
+      }
+      if (displayStatus === 'syncing_no_cache' || displayStatus === 'syncing_with_cache') {
+        setStaleMessage(result.progress?.message ?? '数据正在准备中')
+        return
+      }
+      setStaleMessage(null)
+    },
+    [],
+  )
 
   const refreshSyncMeta = useCallback(async () => {
     try {
@@ -192,71 +302,94 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     })
     const cachedEntry =
       (await readLiveQueryCacheAsync(liveCacheKey)) ?? readLiveQueryCache(liveCacheKey)
-    const cachedRangeKey =
-      cachedEntry?.data?.rangeKey ??
-      (cachedEntry?.data
-        ? buildBoardRangeKey(
-            cachedEntry.data.preset as BoardRangePreset,
-            cachedEntry.data.startDate,
-            cachedEntry.data.endDate,
-          )
-        : null)
+    const cachedRangeKey = cachedEntry?.data
+      ? resolveCachedRangeKey(cachedEntry.data)
+      : null
+    const payloadUsable = isCachedPayloadUsable(cachedEntry?.data)
     const hasFreshCache =
       Boolean(
         cachedEntry &&
+          payloadUsable &&
           isLiveQueryCacheFresh(cachedEntry, Date.now(), preset) &&
-          cachedRangeKey === fetchRangeKey &&
-          Object.keys(cachedEntry.data.summary ?? {}).length > 0,
+          cachedRangeKey === fetchRangeKey,
       )
 
-    if (hasFreshCache && cachedEntry) {
-      const cached = cachedEntry.data
-      const rawCachedSummary =
-        Object.keys(cached.summary ?? {}).length > 0 ? cached.summary : null
-      const summary =
-        rawCachedSummary &&
-        (cached.dataDisplayStatus !== 'empty' || boardSummaryHasOrderData(rawCachedSummary))
-          ? rawCachedSummary
-          : boardSummaryHasOrderData(rawCachedSummary)
-            ? rawCachedSummary
-            : null
-      setData({ ...cached, rangeKey: fetchRangeKey })
-      setDisplaySummary(summary)
-      setDataDisplayStatus(cached.dataDisplayStatus ?? null)
-      if (cached.syncMeta) setSyncMeta(cached.syncMeta)
-      setLastSyncedAt(
-        cached.overviewMeta?.lastQianfanSyncAt ??
-          cached.syncMeta?.businessSync.lastSuccessAt ??
-          cached.fetchedAt,
-      )
-      setStatus('ready')
-      setError(null)
-      setIsRefreshing(true)
-      hasLoadedOnceRef.current = true
-    } else {
+    // 切换范围：无本范围新鲜缓存时进入加载，不沿用上一范围 status 文案
+    if (!hasFreshCache) {
+      setDataDisplayStatus(null)
       setStatus('loading')
       setError(null)
       setIsRefreshing(false)
+    } else if (cachedEntry?.data) {
+      applyCachedBoardResult({
+        cached: cachedEntry.data,
+        expectedRangeKey: fetchRangeKey,
+        refreshing: true,
+      })
     }
 
+    const skipEtag = skipEtagOnceRef.current
+    skipEtagOnceRef.current = false
+    const canRevalidateWithEtag =
+      !skipEtag &&
+      Boolean(cachedEntry?.etag) &&
+      cachedRangeKey === fetchRangeKey &&
+      payloadUsable
+
+    const fetchBoard =
+      pageScope === 'anchors' ? fetchBoardAnchorsDataResult : fetchBoardOverviewResult
+
     try {
-      const fetchBoard =
-        pageScope === 'anchors' ? fetchBoardAnchorsDataResult : fetchBoardOverviewResult
-      const fetchResult = await fetchBoard({
+      let fetchResult = await fetchBoard({
         preset,
         startDate,
         endDate,
         signal: controller.signal,
-        etag: cachedEntry?.etag,
+        etag: canRevalidateWithEtag ? cachedEntry?.etag : undefined,
       })
+
       if (controller.signal.aborted || seq !== requestSeqRef.current) return
 
-      if (fetchResult.notModified && cachedEntry?.data) {
-        touchLiveQueryCacheTimestamp(liveCacheKey)
-        setIsRefreshing(false)
-        setStatus('ready')
-        scheduleBoardStandardPrefetch({ preferScope: pageScope })
-        return
+      if (fetchResult.notModified) {
+        if (cachedEntry?.data && payloadUsable && cachedRangeKey === fetchRangeKey) {
+          applyCachedBoardResult({
+            cached: cachedEntry.data,
+            expectedRangeKey: fetchRangeKey,
+            refreshing: false,
+          })
+          touchLiveQueryCacheTimestamp(liveCacheKey)
+          applyStaleMessage(
+            cachedEntry.data.syncMeta ?? null,
+            cachedEntry.data.dataDisplayStatus,
+            cachedEntry.data,
+            resolveDisplaySummary(cachedEntry.data),
+          )
+          scheduleBoardStandardPrefetch({ preferScope: pageScope })
+          return
+        }
+
+        // 304 但本地不可恢复：清条目后无 ETag 补发一次
+        removeLiveQueryCacheEntry(liveCacheKey)
+        if (skipEtag) {
+          setError('本地缓存无法恢复，请重新加载')
+          setStatus('failed')
+          setIsRefreshing(false)
+          setStaleMessage('缓存恢复失败，请重新加载本地结果')
+          return
+        }
+        fetchResult = await fetchBoard({
+          preset,
+          startDate,
+          endDate,
+          signal: controller.signal,
+        })
+        if (controller.signal.aborted || seq !== requestSeqRef.current) return
+        if (fetchResult.notModified) {
+          setError('本地缓存无法恢复，请重新加载')
+          setStatus('failed')
+          setIsRefreshing(false)
+          return
+        }
       }
 
       const result = fetchResult.data
@@ -278,18 +411,10 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
         return
       }
 
+      if (controller.signal.aborted || seq !== requestSeqRef.current) return
+
       hasLoadedOnceRef.current = true
-
-      const rawSummary =
-        Object.keys(result.summary).length > 0 ? result.summary : null
-      const summary =
-        rawSummary &&
-        (result.dataDisplayStatus !== 'empty' || boardSummaryHasOrderData(rawSummary))
-          ? rawSummary
-          : boardSummaryHasOrderData(rawSummary)
-            ? rawSummary
-            : null
-
+      const summary = resolveDisplaySummary(result)
       setData({ ...result, rangeKey: resultRangeKey })
       setDisplaySummary(summary)
       setDataDisplayStatus(result.dataDisplayStatus ?? null)
@@ -306,47 +431,7 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
           result.fetchedAt,
       )
       scheduleBoardStandardPrefetch({ preferScope: pageScope })
-
-      const applyStaleMessage = (
-        meta: BoardSyncMeta | null,
-        displayStatus: BoardDataDisplayStatus | null | undefined,
-        progressMessage?: string,
-        overviewMetaStale?: boolean,
-        overviewFallback?: string | null,
-      ) => {
-        if (overviewMetaStale || overviewFallback) {
-          setStaleMessage('缓存重建失败，当前展示上一次成功数据。')
-          return
-        }
-        const uiMode = deriveBoardSyncUiMode({
-          hasDisplayData: Boolean(summary),
-          businessSync: meta?.businessSync ?? result.syncMeta?.businessSync,
-          activeSyncJob: meta?.activeSyncJob,
-          totalRawOrders: meta?.totalRawOrders ?? 0,
-        })
-
-        if (uiMode === 'first_sync' || uiMode === 'empty_idle') {
-          setStaleMessage(null)
-        } else if (uiMode === 'syncing_with_data') {
-          setStaleMessage(null)
-        } else if (displayStatus === 'failed_with_cache') {
-          setStaleMessage('本次更新失败，当前展示上一次成功数据。')
-        } else if (displayStatus === 'coverage_missing') {
-          setStaleMessage('该日期范围本地数据尚未准备完整，请稍后重试或触发同步。')
-        } else if (displayStatus === 'empty') {
-          setStaleMessage('当前日期范围内暂无订单。')
-        } else {
-          setStaleMessage(null)
-        }
-      }
-
-      applyStaleMessage(
-        result.syncMeta ?? null,
-        result.dataDisplayStatus,
-        result.progress.message,
-        result.overviewMeta?.cacheStale,
-        result.overviewMeta?.fallbackReason,
-      )
+      applyStaleMessage(result.syncMeta ?? null, result.dataDisplayStatus, result, summary)
       setStatus('ready')
       setError(null)
       setIsRefreshing(false)
@@ -368,7 +453,21 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     endDate,
     pageScope,
     shouldLoadBoardData,
+    applyCachedBoardResult,
+    applyStaleMessage,
   ])
+
+  const reloadLocalFresh = useCallback(async () => {
+    if (!pageScope) return
+    invalidateLiveQueryCacheEntry({
+      pageScope,
+      preset,
+      startDate,
+      endDate,
+    })
+    skipEtagOnceRef.current = true
+    await loadLocal()
+  }, [pageScope, preset, startDate, endDate, loadLocal])
 
   useEffect(() => {
     void refreshSyncMeta()
@@ -417,21 +516,46 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   useEffect(() => {
     const biz = syncMeta?.businessSync
     const syncing = isBusinessSyncActive(biz?.status)
-    const hasData = Boolean(displaySummary)
     const intervalMs = syncing ? 5000 : 60_000
+
+    const maybeReloadAfterSyncChange = (meta: BoardSyncMeta) => {
+      const stillSyncing = isBusinessSyncActive(meta.businessSync.status)
+      const syncJustFinished = wasSyncingRef.current && !stillSyncing
+      wasSyncingRef.current = stillSyncing
+
+      const successAt = meta.businessSync.lastSuccessAt ?? null
+      const finishedJobId = meta.activeSyncJob?.id ?? null
+      const successChanged =
+        Boolean(successAt) && successAt !== lastSeenSuccessAtRef.current
+      const jobChanged =
+        Boolean(finishedJobId) &&
+        !stillSyncing &&
+        finishedJobId !== lastSeenFinishedJobIdRef.current
+
+      if (!syncJustFinished && !successChanged && !jobChanged) return
+      if (refreshInFlightRef.current) return
+
+      if (successAt) lastSeenSuccessAtRef.current = successAt
+      if (finishedJobId && !stillSyncing) {
+        lastSeenFinishedJobIdRef.current = finishedJobId
+      }
+
+      refreshInFlightRef.current = true
+      void loadLocal()
+        .then(() => {
+          invalidateBuyerProfileCache('business-sync-finished')
+        })
+        .finally(() => {
+          refreshInFlightRef.current = false
+        })
+    }
 
     const timer = window.setInterval(() => {
       void (async () => {
         try {
           const meta = await refreshSyncMeta()
           if (!meta) return
-          const stillSyncing = isBusinessSyncActive(meta.businessSync.status)
-          const syncJustFinished = wasSyncingRef.current && !stillSyncing
-          wasSyncingRef.current = stillSyncing
-          if (syncJustFinished) {
-            void loadLocal()
-            invalidateBuyerProfileCache('business-sync-finished')
-          }
+          maybeReloadAfterSyncChange(meta)
         } catch {
           /* ignore */
         }
@@ -439,13 +563,16 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
     }, intervalMs)
 
     wasSyncingRef.current = syncing
+    if (biz?.lastSuccessAt && !lastSeenSuccessAtRef.current) {
+      lastSeenSuccessAtRef.current = biz.lastSuccessAt
+    }
 
     return () => window.clearInterval(timer)
   }, [
     syncMeta?.businessSync.status,
+    syncMeta?.businessSync.lastSuccessAt,
     syncMeta?.businessSync.currentTask,
     syncMeta?.activeSyncJob,
-    Boolean(displaySummary),
     loadLocal,
     refreshSyncMeta,
   ])
@@ -489,11 +616,12 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       rollingDataHealthClose,
       pageFetchedAt,
       cookieHealth: syncMeta?.cookieHealth ?? null,
-      staleMessage,
+      staleMessage: rangeMatched ? staleMessage : null,
       startDate,
       endDate,
       qualityFeedback,
       reload: loadLocal,
+      reloadLocalFresh,
       triggerBusinessSync,
       triggerSyncBusy,
     }),
@@ -527,8 +655,10 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
       endDate,
       qualityFeedback,
       loadLocal,
+      reloadLocalFresh,
       triggerBusinessSync,
       triggerSyncBusy,
+      rangeMatched,
     ],
   )
 

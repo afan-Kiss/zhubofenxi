@@ -29,6 +29,7 @@ import {
   ANCHOR_SESSION_DISPLAY_FROM_0613,
   isReportDateOnOrAfterShopSessionCutoff,
   resolveDailyReportAnchorsForDate,
+  resolveDailyReportAnchorsForDateAsync,
 } from './anchor-performance-attribution.service'
 import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
@@ -58,7 +59,7 @@ import {
 import { aggregateAnchorLeaderboard } from './board-metrics.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend, buildLeaderboardRowIntradayTrend, resolveAnchorTrendMode, type AnchorTrend } from './anchor-card-trend.service'
-import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
+import { ensureAnchorPerformanceLeaderboardSlotsWithTemporary } from './anchor-performance-attribution.service'
 import {
   isRealtimeBoardPreset,
   resolveBoardPresetForSingleDay,
@@ -133,6 +134,9 @@ export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   impressionCount: number | null
   /** 观看支付率（0–1） */
   viewPayRate: number | null
+  /** 临时试播主播 */
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
   /** 与主播卡片「本期销售额」一致，供走势对账 */
   gmvYuan?: number
   /** 与主播业绩页 anchorLeaderboard.trend 同源 */
@@ -348,6 +352,9 @@ function buildAnchorRow(params: {
   scheduleTimeRange: string | null
   scheduleMatched: boolean
   scheduleMatchReason: string | null
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
+  colorOverride?: string | null
 }): DailyReportAnchorRow {
   const liveDurationMinutes = params.sessions.reduce((sum, s) => sum + s.durationMinutes, 0)
   const liveHours = safeDivide(liveDurationMinutes, 60)
@@ -392,8 +399,10 @@ function buildAnchorRow(params: {
     anchorId: params.anchorId,
     systemKey: meta?.systemKey ?? null,
     attributionMode: meta?.attributionMode ?? null,
-    color: meta?.color ?? null,
+    color: params.colorOverride ?? meta?.color ?? null,
     anchorName: params.anchorName,
+    isTemporaryAnchor: Boolean(params.isTemporaryAnchor),
+    temporaryAnchorKey: params.temporaryAnchorKey ?? null,
     livePeriodText: hasRealSessions ? displayPeriodText : '—',
     liveTimeRange,
     liveStartTime: hasRealSessions ? params.liveStartTime : null,
@@ -471,18 +480,33 @@ export async function buildDailyReport(params: {
   const storeWideShipped = sumDailyReportShippedFromViews(allPerformanceViews)
   const storeWideInvalid = countDailyReportOrders(allPerformanceViews).invalidOrderCount
 
-  const reportAnchors = resolveDailyReportAnchorsForDate(config, params.startDate).filter(
-    (a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }),
-  )
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
   const liveAssignment = await resolveDailyReportLiveSessionAssignments(params.startDate)
+  const orderNames = [
+    ...new Set(
+      remappedAll
+        .map((v) => (v.anchorName ?? '').trim())
+        .filter((n) => n && n !== '未归属'),
+    ),
+  ]
+  const liveNames = [
+    ...new Set(
+      [...liveAssignment.byAnchor.keys()].map((n) => n.trim()).filter(Boolean),
+    ),
+  ]
+  const reportAnchors = (
+    await resolveDailyReportAnchorsForDateAsync(config, params.startDate, {
+      orderAnchorNames: orderNames,
+      liveSessionAnchorNames: liveNames,
+    })
+  ).filter((a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }))
   const usedScheduleRowIds = new Set<string>()
   for (const anchor of reportAnchors) {
     if (isOfflineOnlyAnchor({ systemKey: anchor.systemKey })) continue
     const performanceViewsRaw = await getAnchorPerformanceViews(
       scoped.views,
       scoped.rawByMatch,
-      anchor.anchorId,
+      anchor.isTemporaryAnchor ? undefined : anchor.anchorId,
       anchor.anchorName,
     )
     const performanceViews = performanceViewsRaw.filter((v) => !isOfflineDealView(v))
@@ -514,7 +538,17 @@ export async function buildDailyReport(params: {
       performanceViews.length > 0
 
     // 6.13 起固定场次主播：与主播业绩一致，无数据也保留空行（含 6.18 起的小白）
-    if (!hasData && !useShopSessionRules) continue
+    // 临时试播：有排班或直播场次也保留空行
+    const keepEmptySlot =
+      useShopSessionRules ||
+      Boolean(anchor.isTemporaryAnchor && (sessions.length > 0 || scheduleTable.rows.some(
+        (r) =>
+          r.anchorName === anchor.anchorName ||
+          (anchor.temporaryAnchorKey &&
+            (r as { temporaryAnchorKey?: string | null }).temporaryAnchorKey ===
+              anchor.temporaryAnchorKey),
+      )))
+    if (!hasData && !keepEmptySlot) continue
 
     const shopNameHint =
       fixedDisplay?.shopName ?? resolveAnchorShopName(anchorAllViews, sessions)
@@ -543,6 +577,9 @@ export async function buildDailyReport(params: {
         scheduleAttendance,
         liveTimeRange: liveSchedule.liveTimeRange,
         liveStartTime: liveSchedule.liveStartTime,
+        isTemporaryAnchor: Boolean(anchor.isTemporaryAnchor),
+        temporaryAnchorKey: anchor.temporaryAnchorKey ?? null,
+        colorOverride: anchor.color ?? null,
         liveEndTime: liveSchedule.liveEndTime,
         scheduleTimeRange: liveSchedule.scheduleTimeRange,
         scheduleMatched: liveSchedule.scheduleMatched,
@@ -592,10 +629,10 @@ export async function buildDailyReport(params: {
 
   const totalSoldOrderCount = storeWideShipped.soldOrderCount
   const totalInvalidOrderCount = storeWideInvalid
-  let leaderboardRows = ensureAnchorPerformanceLeaderboardSlots(
+  let leaderboardRows = (await ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
     aggregateAnchorLeaderboard(allPerformanceViews),
     params.startDate,
-  ) as unknown as Array<Record<string, unknown>>
+  )) as unknown as Array<Record<string, unknown>>
   leaderboardRows = await enrichAnchorLeaderboardWithLateStatus(leaderboardRows, {
     startDate: params.startDate,
     endDate: params.endDate,

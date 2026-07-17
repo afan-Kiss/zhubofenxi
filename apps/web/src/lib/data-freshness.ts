@@ -60,6 +60,14 @@ export function formatBoardDataUpdatedLine(updatedAt: string | null | undefined)
   return `数据更新 ${formatDataFreshnessTime(updatedAt)}`
 }
 
+/** 经营自动同步（默认约 180 分钟）的下次拉取时间 */
+export function formatBoardNextDataUpdateLine(
+  nextRunAt: string | null | undefined,
+): string | null {
+  if (!nextRunAt) return null
+  return `下次数据更新 ${formatDataFreshnessTime(nextRunAt)}`
+}
+
 export function resolveOperationsReportDateRange(input: {
   tab: 'daily' | 'weekly' | 'monthly' | 'rankings'
   dailyDate: string

@@ -12,6 +12,7 @@ import { anchorNamesMatch, normalizeAnchorName } from './anchor-name-normalize.u
 export interface DbScheduleRowLike {
   id: string
   scheduleDate: string
+  anchorId?: string | null
   anchorName: string
   shopName: string
   liveRoomName: string
@@ -21,6 +22,9 @@ export interface DbScheduleRowLike {
   enabled: boolean
   confirmed: boolean
   note: string | null
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
+  anchorColorSnapshot?: string | null
 }
 
 export interface BuildEffectiveScheduleRowsResult {
@@ -54,6 +58,7 @@ function dbRowToEffective(
   return {
     rowId: row.id,
     source,
+    anchorId: row.anchorId ?? null,
     anchorName: row.anchorName,
     shopName: row.shopName,
     liveRoomName: row.liveRoomName,
@@ -64,6 +69,9 @@ function dbRowToEffective(
     enabled: row.enabled,
     confirmed: dateConfirmed,
     note: row.note ?? undefined,
+    isTemporaryAnchor: Boolean(row.isTemporaryAnchor),
+    temporaryAnchorKey: row.temporaryAnchorKey ?? null,
+    anchorColorSnapshot: row.anchorColorSnapshot ?? null,
   }
 }
 
@@ -225,6 +233,7 @@ export function buildEffectiveScheduleRowsForDate(params: {
     ...filtered.kept.map((v) => ({
       rowId: v.id,
       source: 'virtual_template' as const,
+      anchorId: v.anchorId ?? null,
       anchorName: v.anchorName,
       shopName: v.shopName,
       liveRoomName: v.liveRoomName,
@@ -235,6 +244,9 @@ export function buildEffectiveScheduleRowsForDate(params: {
       enabled: true,
       confirmed: dateConfirmed,
       note: v.note ?? '系统模板补齐',
+      isTemporaryAnchor: false,
+      temporaryAnchorKey: null,
+      anchorColorSnapshot: null,
     })),
   ].sort((a, b) => a.startAt.localeCompare(b.startAt))
 

@@ -146,7 +146,7 @@ async function main() {
   assert.equal(resolved.canonicalAnchorName, yifan.name)
   setCanonicalAttributionTestFixtures(null)
 
-  // 5. 未指定主播不进默认主播
+  // 5. 未指定主播：线下成交固定归属系统线下主播逸凡（不允许待归属）
   const pendingKey = `accept-pending-${Date.now()}`
   const pending = await createOfflineDeal({
     amountYuan: 500,
@@ -157,14 +157,16 @@ async function main() {
     idempotencyKey: pendingKey,
     operator: 'accept-script',
   })
-  assert.equal(pending.pendingAttribution, true)
+  assert.equal(pending.pendingAttribution, false)
+  assert.equal(pending.anchorName, yifan.name)
   const pendingView = offlineDealToAnalyzedView(
     await prisma.offlineDeal.findUniqueOrThrow({ where: { id: pending.id } }),
   )
-  assert.equal(pendingView.anchorName, '未归属')
+  assert.equal(pendingView.anchorName, yifan.name)
   assert.equal(pendingView.includedInGmv, true)
   const pendingSplit = splitGmvByDealSource([pendingView])
-  assert.equal(Number(pendingSplit.unassignedGmv.toFixed(2)), 500)
+  assert.equal(Number(pendingSplit.offlineGmv.toFixed(2)), 500)
+  assert.equal(Number(pendingSplit.unassignedGmv.toFixed(2)), 0)
 
   // 6. 重复提交
   await assert.rejects(
@@ -181,44 +183,17 @@ async function main() {
     /已存在|冲突/,
   )
 
-  // 7+8. 改归属：总 GMV 不变，金额只在新主播
-  const other =
-    (await prisma.anchor.findFirst({
-      where: { deletedAt: null, enabled: true, name: { not: yifan.name } },
-    })) ?? null
-  if (other) {
-    const beforeTotal = calculateBusinessMetrics([
-      online,
-      offlineDealToAnalyzedView(await prisma.offlineDeal.findUniqueOrThrow({ where: { id: created.id } })),
-    ]).totalGmv
-    const reassigned = await reassignOfflineDeal({
-      dealId: created.id,
-      anchorName: other.name,
-      operator: 'accept-script',
-      reason: '验收改归属',
-    })
-    assert.match(reassigned.message ?? '', /归属已从/)
-    const afterView = offlineDealToAnalyzedView(
-      await prisma.offlineDeal.findUniqueOrThrow({ where: { id: created.id } }),
-    )
-    const afterTotal = calculateBusinessMetrics([online, afterView]).totalGmv
-    assert.equal(Number(afterTotal.toFixed(2)), Number(beforeTotal.toFixed(2)), '7. 改归属总 GMV 不变')
-    assert.equal(afterView.anchorName, other.name, '改归属后视图主播应为新主播')
-    assert.equal(afterView.includedInGmv, true)
-    assert.equal(afterView.paymentBaseCent, 300000)
-    const afterBoard = aggregateAnchorLeaderboard([afterView]) // 单笔视图，避免与线上同主播混淆
-    const oldRow = afterBoard.find((r) => r.anchorName === yifan.name)
-    const newRow = afterBoard.find((r) => r.anchorName === afterView.anchorName)
-    assert.ok(!oldRow, '8. 原主播不再出现该笔')
-    assert.ok(newRow, `8. 排行榜应有新主播 ${afterView.anchorName}`)
-    assert.equal(Number(newRow!.totalGmv ?? newRow!.gmv), 3000, '8. 新主播含该笔 3000')
-    // 改回逸凡便于后续
-    await reassignOfflineDeal({
-      dealId: created.id,
-      anchorName: yifan.name,
-      operator: 'accept-script',
-    })
-  }
+  // 7+8. 改归属：线下成交固定逸凡，禁止改归其他主播
+  await assert.rejects(
+    () =>
+      reassignOfflineDeal({
+        dealId: created.id,
+        anchorName: '子杰',
+        operator: 'accept-script',
+        reason: '验收改归属',
+      }),
+    /不允许改归|固定归属/,
+  )
 
   // 9. 作废不计入
   const voidKey = `accept-void-${Date.now()}`

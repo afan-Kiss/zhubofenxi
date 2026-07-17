@@ -104,6 +104,9 @@ type EffectiveScheduleCacheRow = {
   endAt: Date
   confirmed: boolean
   source: EffectiveScheduleSource
+  anchorId?: string | null
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
 }
 
 const effectiveScheduleCache = new Map<string, Promise<EffectiveScheduleCacheRow[]>>()
@@ -138,6 +141,9 @@ export type CanonicalAttributionTestFixtures = {
     endAt: Date
     confirmed?: boolean
     source?: EffectiveScheduleSource
+    anchorId?: string | null
+    isTemporaryAnchor?: boolean
+    temporaryAnchorKey?: string | null
   }>
 }
 
@@ -197,6 +203,15 @@ function resolveAnchorId(anchorName: string): string {
   const config = getAnchorConfigSync()
   const found = findAnchorByName(config, anchorName)
   return found?.id ?? `extra-${anchorName}`
+}
+
+/** 临时主播用 temporaryAnchorKey；正式主播优先排班行 anchorId */
+function resolveScheduleCanonicalAnchorId(row: EffectiveScheduleCacheRow): string {
+  if (row.isTemporaryAnchor && row.temporaryAnchorKey?.trim()) {
+    return row.temporaryAnchorKey.trim()
+  }
+  if (row.anchorId?.trim()) return row.anchorId.trim()
+  return resolveAnchorId(row.anchorName)
 }
 
 function pickLiveAccount(
@@ -304,6 +319,9 @@ async function loadEffectiveSchedules(dateKey: string): Promise<EffectiveSchedul
           endAt: new Date(r.endAt),
           confirmed: r.confirmed,
           source: r.source,
+          anchorId: r.anchorId ?? null,
+          isTemporaryAnchor: Boolean(r.isTemporaryAnchor),
+          temporaryAnchorKey: r.temporaryAnchorKey ?? null,
         })),
     )
     effectiveScheduleCache.set(dateKey, pending)
@@ -482,6 +500,7 @@ async function resolveByEffectiveSchedule(
   hit: {
     id: string
     anchorName: string
+    canonicalAnchorId: string
     explain: string
     attributionType: ScheduleCanonicalType
   } | null
@@ -499,6 +518,14 @@ async function resolveByEffectiveSchedule(
         endAt: r.endAt,
         confirmed: r.confirmed !== false,
         source: r.source ?? 'manual',
+        anchorId: 'anchorId' in r ? (r as { anchorId?: string | null }).anchorId ?? null : null,
+        isTemporaryAnchor: Boolean(
+          'isTemporaryAnchor' in r && (r as { isTemporaryAnchor?: boolean }).isTemporaryAnchor,
+        ),
+        temporaryAnchorKey:
+          'temporaryAnchorKey' in r
+            ? (r as { temporaryAnchorKey?: string | null }).temporaryAnchorKey ?? null
+            : null,
       }))
     : await loadEffectiveSchedules(dateKey)
   if (opts?.onlySources?.length) {
@@ -531,6 +558,7 @@ async function resolveByEffectiveSchedule(
     hit: {
       id: best.id,
       anchorName: best.anchorName,
+      canonicalAnchorId: resolveScheduleCanonicalAnchorId(best),
       attributionType,
       explain: `命中 ${dateKey} ${scheduleSourceLabel(best.source)}：${best.liveRoomName} → ${best.anchorName}`,
     },
@@ -641,7 +669,7 @@ export async function resolveCanonicalOrderAttribution(
   }
   if (manualScheduleHit.hit) {
     return {
-      canonicalAnchorId: resolveAnchorId(manualScheduleHit.hit.anchorName),
+      canonicalAnchorId: manualScheduleHit.hit.canonicalAnchorId,
       canonicalAnchorName: manualScheduleHit.hit.anchorName,
       attributionType: 'manual_schedule',
       attributionTime: formatAttributionTime(create.ms, create.text),
@@ -693,7 +721,7 @@ export async function resolveCanonicalOrderAttribution(
   }
   if (scheduleHit.hit) {
     return {
-      canonicalAnchorId: resolveAnchorId(scheduleHit.hit.anchorName),
+      canonicalAnchorId: scheduleHit.hit.canonicalAnchorId,
       canonicalAnchorName: scheduleHit.hit.anchorName,
       attributionType: scheduleHit.hit.attributionType,
       attributionTime: formatAttributionTime(create.ms, create.text),

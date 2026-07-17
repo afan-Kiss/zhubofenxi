@@ -186,7 +186,17 @@ export function resolveDailyReportAnchors(
 export function resolveDailyReportAnchorsForDate(
   config: AnchorConfig,
   startDate: string,
-): Array<{ anchorId: string; anchorName: string; systemKey?: string | null; attributionMode?: string }> {
+): Array<{
+  anchorId: string
+  anchorName: string
+  systemKey?: string | null
+  attributionMode?: string
+  effectiveFrom?: string | null
+  effectiveTo?: string | null
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
+  color?: string | null
+}> {
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(startDate)
   const anchors = resolveDailyReportAnchors(config, useShopSessionRules)
   if (useShopSessionRules && isReportDateOnOrAfterXiaoBaiCutoff(startDate)) {
@@ -202,6 +212,9 @@ export function resolveDailyReportAnchorsForDate(
         attributionMode: cfg?.attributionMode,
         effectiveFrom: cfg?.effectiveFrom ?? null,
         effectiveTo: cfg?.effectiveTo ?? null,
+        isTemporaryAnchor: false as boolean,
+        temporaryAnchorKey: null as string | null,
+        color: cfg?.color ?? null,
       }
     })
     .filter((a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }))
@@ -210,6 +223,62 @@ export function resolveDailyReportAnchorsForDate(
       if (a.effectiveTo && startDate > a.effectiveTo) return false
       return true
     })
+}
+
+/** 含临时试播与当日排班/归属的异步候选（日报事实源） */
+export async function resolveDailyReportAnchorsForDateAsync(
+  config: AnchorConfig,
+  startDate: string,
+  extras?: { orderAnchorNames?: string[]; liveSessionAnchorNames?: string[] },
+): Promise<
+  Array<{
+    anchorId: string
+    anchorName: string
+    systemKey?: string | null
+    attributionMode?: string
+    effectiveFrom?: string | null
+    effectiveTo?: string | null
+    isTemporaryAnchor?: boolean
+    temporaryAnchorKey?: string | null
+    color?: string | null
+  }>
+> {
+  const base = resolveDailyReportAnchorsForDate(config, startDate)
+  const { resolveAnchorCandidatesForDate } = await import('./anchor-date-candidates.service')
+  const candidates = await resolveAnchorCandidatesForDate(startDate, extras)
+  const byName = new Map(base.map((a) => [a.anchorName, a]))
+
+  for (const c of candidates) {
+    if (c.isTemporaryAnchor && c.temporaryAnchorKey) {
+      if (![...byName.values()].some((x) => x.temporaryAnchorKey === c.temporaryAnchorKey)) {
+        byName.set(`__temp__${c.temporaryAnchorKey}`, {
+          anchorId: c.temporaryAnchorKey,
+          anchorName: c.anchorName,
+          systemKey: null,
+          attributionMode: 'schedule',
+          effectiveFrom: startDate,
+          effectiveTo: startDate,
+          isTemporaryAnchor: true,
+          temporaryAnchorKey: c.temporaryAnchorKey,
+          color: c.color,
+        })
+      }
+      continue
+    }
+    if (!byName.has(c.anchorName) && c.anchorName !== '未归属') {
+      byName.set(c.anchorName, {
+        anchorId: c.anchorId ?? `extra-${c.anchorName}`,
+        anchorName: c.anchorName,
+        systemKey: null,
+        attributionMode: 'schedule',
+        isTemporaryAnchor: false,
+        temporaryAnchorKey: null,
+        color: c.color,
+      })
+    }
+  }
+
+  return [...byName.values()].filter((a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }))
 }
 
 /** 早场 00:00–17:59，晚场 18:00–23:59（与历史默认时间段一致） */
@@ -377,7 +446,7 @@ export function remapViewsForAnchorPerformance(
   })
 }
 
-function createEmptyAnchorLeaderboardRow(
+export function createEmptyAnchorLeaderboardRow(
   anchorId: string,
   anchorName: string,
   color: string,
@@ -414,6 +483,15 @@ export function ensureAnchorPerformanceLeaderboardSlots(
     fixedNames.push('小白')
   }
 
+  // 按业务日过滤：离职次日不再补空卡
+  const effectiveFixedNames = fixedNames.filter((anchorName) => {
+    const found = findAnchorByName(config, anchorName)
+    if (!found) return true
+    if (found.effectiveFrom && endDate < found.effectiveFrom) return false
+    if (found.effectiveTo && endDate > found.effectiveTo) return false
+    return true
+  })
+
   const manualOnlyNames = config.anchors
     .filter(
       (a) =>
@@ -421,13 +499,12 @@ export function ensureAnchorPerformanceLeaderboardSlots(
         a.name.trim() &&
         !isOfflineOnlyAnchor(a) &&
         (a.attributionMode === 'manual' ||
-          // 兼容未写 attributionMode 的缓存：无任何启用时段 → 手动槽位
           (!a.attributionMode &&
             !config.timeRules.some((r) => r.enabled && r.anchorId === a.id))),
     )
     .map((a) => a.name.trim())
 
-  const slotNames = [...fixedNames]
+  const slotNames = [...effectiveFixedNames]
   for (const name of manualOnlyNames) {
     if (!slotNames.includes(name)) slotNames.push(name)
   }
@@ -439,6 +516,8 @@ export function ensureAnchorPerformanceLeaderboardSlots(
     if (byName.has(anchorName)) continue
     const found = findAnchorByName(config, anchorName)
     if (found && isOfflineOnlyAnchor(found)) continue
+    if (found?.effectiveTo && endDate > found.effectiveTo) continue
+    if (found?.effectiveFrom && endDate < found.effectiveFrom) continue
     merged.push(
       createEmptyAnchorLeaderboardRow(
         found?.id ?? `extra-${anchorName}`,
@@ -459,11 +538,34 @@ export function ensureAnchorPerformanceLeaderboardSlots(
     if (b.anchorName === '未归属' && a.anchorName !== '未归属') return -1
     const orderA = config.anchors.findIndex((x) => x.name === a.anchorName)
     const orderB = config.anchors.findIndex((x) => x.name === b.anchorName)
-    const ia = orderA >= 0 ? orderA : fixedNames.indexOf(a.anchorName)
-    const ib = orderB >= 0 ? orderB : fixedNames.indexOf(b.anchorName)
+    const ia = orderA >= 0 ? orderA : effectiveFixedNames.indexOf(a.anchorName)
+    const ib = orderB >= 0 ? orderB : effectiveFixedNames.indexOf(b.anchorName)
     const safeIa = ia >= 0 ? ia : 999
     const safeIb = ib >= 0 ? ib : 999
     if (safeIa !== safeIb) return safeIa - safeIb
     return a.anchorName.localeCompare(b.anchorName, 'zh-CN')
   })
+}
+
+/** 异步：在 ensure 基础上再补当日临时试播空卡 */
+export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
+  rows: BoardAnchorMetrics[],
+  dateKey: string,
+): Promise<BoardAnchorMetrics[]> {
+  const base = ensureAnchorPerformanceLeaderboardSlots(rows, dateKey)
+  const { resolveAnchorCandidatesForDate } = await import('./anchor-date-candidates.service')
+  const candidates = await resolveAnchorCandidatesForDate(dateKey)
+  const byName = new Map(base.map((r) => [r.anchorName, r]))
+  const merged = [...base]
+  for (const c of candidates) {
+    if (!c.isTemporaryAnchor || !c.temporaryAnchorKey) continue
+    if (byName.has(c.anchorName)) continue
+    merged.push(
+      createEmptyAnchorLeaderboardRow(c.temporaryAnchorKey, c.anchorName, c.color ?? '#94a3b8', {
+        systemKey: null,
+        attributionMode: 'schedule',
+      }),
+    )
+  }
+  return merged
 }

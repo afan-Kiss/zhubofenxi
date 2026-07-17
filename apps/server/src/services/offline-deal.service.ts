@@ -27,12 +27,22 @@ const VALID_STATUSES = new Set<OfflineDealStatus>([
 ])
 
 export function isOfflineDealView(
-  view: AnalyzedOrderView & { raw?: Record<string, unknown> },
+  view: AnalyzedOrderView & {
+    raw?: Record<string, unknown>
+    scheduleAttributionSource?: string | null
+  },
 ): boolean {
   if (view.sourceType === 'offline_deal' || view.dealSource === 'offline') return true
   if (view.offlineDealKey) return true
+  if (view.scheduleAttributionSource === 'offline_manual') return true
   const raw = view.raw
-  return Boolean(raw && (raw.dealSource === 'offline' || raw.sourceType === 'offline_deal'))
+  if (raw && (raw.dealSource === 'offline' || raw.sourceType === 'offline_deal')) return true
+  const orderNo = String(
+    view.displayOrderNo || view.officialOrderNo || view.packageId || view.orderId || '',
+  ).trim()
+  if (/^OFF-/i.test(orderNo)) return true
+  if (/^offline:/i.test(orderNo)) return true
+  return false
 }
 
 function yuanToCent(amountYuan: number): number {
@@ -217,7 +227,9 @@ export function offlineDealToAnalyzedView(deal: {
             : deal.status
   const refundCent = Math.max(0, deal.refundCent)
   const netCent = offlineDealNetCent(deal)
+  const offlineDealNote = deal.note?.trim() || ''
 
+  // 计入 GMV 且未全额退款 → 视为已签收（线下无物流签收态，用有效签收金额口径）
   const signed = included && refundCent < deal.amountCent
   return {
     orderId: deal.dealKey,
@@ -241,11 +253,14 @@ export function offlineDealToAnalyzedView(deal: {
     actualPaidCent: deal.amountCent,
     actualSellerReceiveAmountCent: deal.amountCent,
     actualSignedAmountCent: netCent,
+    actualSignAmountCent: signed ? netCent : 0,
     orderStatusText: statusText,
-    afterSaleStatusText: refundCent > 0 ? '有退款' : '—',
+    afterSaleStatusText: refundCent > 0 ? '线下退款' : '—',
     isSigned: signed,
     isReturned: refundCent > 0,
     isActualSigned: signed,
+    isEffectiveSigned: signed,
+    statusSigned: signed,
     isQualityReturn: false,
     returnAmountCent: refundCent,
     productRefundAmountCent: refundCent,
@@ -256,11 +271,15 @@ export function offlineDealToAnalyzedView(deal: {
     isReturnRefund: false,
     isRefundOnly: false,
     isRealProductRefund: refundCent > 0,
-    afterSaleCategory: refundCent > 0 ? 'refund' : 'none',
-    afterSaleStatusLabel: refundCent > 0 ? '有退款' : '—',
-    afterSaleDisplayType: refundCent > 0 ? '有退款' : '—',
+    afterSaleCategory: refundCent > 0 ? 'offline_refund' : 'none',
+    afterSaleStatusLabel: refundCent > 0 ? '线下退款' : '—',
+    afterSaleDisplayType: refundCent > 0 ? '线下退款' : '—',
     isSizeMismatch: false,
-    reasonText: deal.note?.trim() || '',
+    // 线下备注不得流入售后/品退原因链路
+    reasonText: '',
+    finalAfterSaleReason: '',
+    afterSalesWorkbenchReason: '',
+    offlineDealNote,
     effectiveGmvCent: included ? netCent : 0,
     paymentBaseCent: included ? deal.amountCent : 0,
     paymentBaseSource: 'offline_deal',
@@ -291,6 +310,7 @@ export function offlineDealToAnalyzedView(deal: {
       attributedBy: deal.updatedBy ?? deal.createdBy,
       attributedAt: deal.updatedAt?.toISOString?.() ?? null,
       note: deal.note,
+      offlineDealNote,
       refundCent,
       createTime: deal.dealAt.toISOString(),
       payTime: deal.dealAt.toISOString(),

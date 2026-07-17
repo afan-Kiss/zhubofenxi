@@ -10,8 +10,12 @@ import {
   type NormalizedLiveSession,
 } from './xhs-api-sync/xhs-json-normalizer.service'
 import { buildShopLiveSessionWhere } from './xhs-api-sync/xhs-live-session-query.util'
-import { resolveDateRange } from '../utils/date-range'
-import { formatDateTimeShanghai, parseLiveSessionTimeMs } from '../utils/business-timezone'
+import {
+  endOfDayMsShanghai,
+  formatDateTimeShanghai,
+  parseLiveSessionTimeMs,
+  startOfDayMsShanghai,
+} from '../utils/business-timezone'
 import {
   extractLiveSessionTrafficFromSession,
   type LiveSessionTrafficMetrics,
@@ -234,7 +238,13 @@ export async function loadPerShopDailyReportLiveSessions(params: {
   startDate: string
   endDate: string
 }): Promise<DailyReportLiveSession[]> {
-  const range = resolveDateRange('custom', params.startDate, params.endDate)
+  // 归属链路按业务日读场次：不得走 resolveDateRange 的「结束日截到今天」，
+  // 否则 dateKey > today 时会出现 start>end 直接抛错。
+  const startTimeMs = startOfDayMsShanghai(params.startDate)
+  const endTimeMs = endOfDayMsShanghai(params.endDate)
+  if (params.startDate > params.endDate) {
+    throw new Error('开始日期不能晚于结束日期')
+  }
   const collected: DailyReportLiveSession[] = []
 
   for (const shop of GOOD_REVIEW_SHOPS) {
@@ -259,8 +269,8 @@ export async function loadPerShopDailyReportLiveSessions(params: {
         officialAccountId: account.id,
         shopKey: shop.shopKey,
         shopName,
-        startTimeGte: new Date(range.startTimeMs - RAW_LIVE_RANGE_DB_BUFFER_MS),
-        startTimeLte: new Date(range.endTimeMs + RAW_LIVE_RANGE_DB_BUFFER_MS),
+        startTimeGte: new Date(startTimeMs - RAW_LIVE_RANGE_DB_BUFFER_MS),
+        startTimeLte: new Date(endTimeMs + RAW_LIVE_RANGE_DB_BUFFER_MS),
       }),
       orderBy: { updatedAt: 'desc' },
     })
@@ -281,7 +291,7 @@ export async function loadPerShopDailyReportLiveSessions(params: {
       if (!brief) continue
       const startMs = parseLiveSessionTimeMs(brief.startTime)
       if (startMs == null) continue
-      if (startMs < range.startTimeMs || startMs > range.endTimeMs) continue
+      if (startMs < startTimeMs || startMs > endTimeMs) continue
       inRange.push(brief)
     }
 

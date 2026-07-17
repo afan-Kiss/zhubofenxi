@@ -8,6 +8,7 @@ import {
   resolveAnchorColor,
 } from '../../lib/anchor-theme'
 import { ScheduleTimePicker } from '../ui/ScheduleTimePicker'
+import { ViewportModal } from '../ui/ViewportModal'
 
 type AnchorListFilter = 'all' | 'enabled' | 'disabled' | 'schedule' | 'manual'
 
@@ -31,6 +32,8 @@ interface AnchorRow {
   attributionMode?: 'schedule' | 'manual'
   effectiveFrom?: string | null
   effectiveTo?: string | null
+  offboardDate?: string | null
+  offboardDateMissing?: boolean
   deletedAt?: string | null
   timeRules: TimeRule[]
 }
@@ -60,14 +63,21 @@ function isManualMode(anchor: AnchorRow): boolean {
   return anchor.attributionMode === 'manual' || Boolean(anchor.systemKey)
 }
 
+function todayShanghai(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Shanghai' })
+}
+
+function resolveOffboardDate(anchor: AnchorRow): string | null {
+  return anchor.offboardDate?.trim() || anchor.effectiveTo?.trim() || null
+}
+
 function buildSavePayload(anchor: AnchorRow) {
   const manual = isManualMode(anchor)
-  return {
+  const payload: Record<string, unknown> = {
     name: anchor.name.trim(),
     externalId: anchor.externalId?.trim() || null,
     defaultLiveRoomName: manual ? null : anchor.defaultLiveRoomName?.trim() || null,
     color: anchor.color?.trim() || '#94a3b8',
-    enabled: anchor.enabled,
     sortOrder: anchor.sortOrder,
     attributionMode: manual ? 'manual' : 'schedule',
     effectiveFrom: manual ? null : anchor.effectiveFrom?.trim() || null,
@@ -81,6 +91,10 @@ function buildSavePayload(anchor: AnchorRow) {
           sortOrder: i,
         })),
   }
+  if (anchor.enabled) {
+    payload.enabled = true
+  }
+  return payload
 }
 
 export const AnchorManagementPanel: React.FC = () => {
@@ -99,6 +113,18 @@ export const AnchorManagementPanel: React.FC = () => {
   )
   const [listFilter, setListFilter] = useState<AnchorListFilter>('all')
   const [searchQuery, setSearchQuery] = useState('')
+  const [offboardModal, setOffboardModal] = useState<{
+    id: string
+    name: string
+    effectiveTo: string
+    reason: string
+  } | null>(null)
+  const [patchOffboardModal, setPatchOffboardModal] = useState<{
+    id: string
+    name: string
+    effectiveTo: string
+  } | null>(null)
+  const [offboardSubmitting, setOffboardSubmitting] = useState(false)
 
   const filteredAnchors = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
@@ -219,16 +245,97 @@ export const AnchorManagementPanel: React.FC = () => {
     }
   }
 
-  const disable = async (id: string) => {
-    if (!window.confirm('确定停用该主播？停用后筛选与归属不再使用，历史明细仍保留原名称。')) return
+  const openOffboardModal = (anchor: AnchorRow) => {
+    setOffboardModal({
+      id: anchor.id,
+      name: anchor.name,
+      effectiveTo: todayShanghai(),
+      reason: '主播离职',
+    })
+  }
+
+  const submitOffboard = async () => {
+    if (!offboardModal) return
+    const effectiveTo = offboardModal.effectiveTo.trim()
+    if (!effectiveTo) {
+      setMessage({ type: 'error', text: '请填写离职日期' })
+      return
+    }
+    setOffboardSubmitting(true)
+    setMessage(null)
     try {
-      await apiRequest(`/api/anchors/${id}/disable`, { method: 'POST' })
+      const res = await apiRequest<{
+        truncatedTemplateCount?: number
+        templatesTruncated?: number
+        removedFutureScheduleCount?: number
+        futureSchedulesCleared?: number
+        disabledTemplateCount?: number
+      }>(`/api/anchors/${offboardModal.id}/disable`, {
+        method: 'POST',
+        body: JSON.stringify({
+          effectiveTo,
+          reason: offboardModal.reason.trim() || '主播离职',
+        }),
+      })
+      setOffboardModal(null)
       await load()
-      setMessage({ type: 'success', text: '已停用主播' })
+      const truncated = Number(res?.truncatedTemplateCount ?? res?.templatesTruncated ?? 0)
+      const removed = Number(res?.removedFutureScheduleCount ?? res?.futureSchedulesCleared ?? 0)
+      setMessage({
+        type: 'success',
+        text: `已办理「${offboardModal.name.trim()}」离职；最后工作日：${effectiveTo}；已截断默认排班模板 ${truncated} 条；已清理未来排班 ${removed} 条`,
+      })
     } catch (err) {
       setMessage({
         type: 'error',
-        text: err instanceof Error ? err.message : '停用失败',
+        text: err instanceof Error ? err.message : '办理离职失败',
+      })
+    } finally {
+      setOffboardSubmitting(false)
+    }
+  }
+
+  const submitPatchOffboardDate = async () => {
+    if (!patchOffboardModal) return
+    const effectiveTo = patchOffboardModal.effectiveTo.trim()
+    if (!effectiveTo) {
+      setMessage({ type: 'error', text: '请填写离职日期' })
+      return
+    }
+    setOffboardSubmitting(true)
+    setMessage(null)
+    try {
+      await apiRequest(`/api/anchors/${patchOffboardModal.id}/patch-offboard-date`, {
+        method: 'POST',
+        body: JSON.stringify({ effectiveTo, reason: '补录离职日期' }),
+      })
+      setPatchOffboardModal(null)
+      await load()
+      setMessage({ type: 'success', text: `已补录「${patchOffboardModal.name.trim()}」离职日期` })
+    } catch (err) {
+      setMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : '补录离职日期失败',
+      })
+    } finally {
+      setOffboardSubmitting(false)
+    }
+  }
+
+  const reinstate = async (anchor: AnchorRow) => {
+    if (
+      !window.confirm('这会清空离职日期，并恢复主播参与未来排班。确定撤销离职？')
+    ) {
+      return
+    }
+    try {
+      await apiRequest(`/api/anchors/${anchor.id}/reinstate`, { method: 'POST' })
+      await load()
+      setMessage({ type: 'success', text: `已撤销「${anchor.name.trim()}」离职` })
+    } catch (err) {
+      setMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : '撤销离职失败',
       })
     }
   }
@@ -487,6 +594,8 @@ export const AnchorManagementPanel: React.FC = () => {
           {filteredAnchors.map((a) => {
             const index = anchors.findIndex((row) => row.id === a.id)
             const manual = isManualMode(a)
+            const offboardDate = resolveOffboardDate(a)
+            const showOffboardStatus = !a.enabled && manual === false
             return (
               <div
                 key={a.id}
@@ -570,14 +679,33 @@ export const AnchorManagementPanel: React.FC = () => {
                     onChange={(e) => updateLocal(a.id, { color: e.target.value })}
                     className="h-8 w-10"
                   />
-                  <label className="flex items-center gap-1 text-xs text-slate-600">
-                    <input
-                      type="checkbox"
-                      checked={a.enabled}
-                      onChange={(e) => updateLocal(a.id, { enabled: e.target.checked })}
-                    />
-                    启用
-                  </label>
+                  {manual ? (
+                    <label className="flex items-center gap-1 text-xs text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={a.enabled}
+                        onChange={(e) => {
+                          if (e.target.checked) updateLocal(a.id, { enabled: true })
+                        }}
+                      />
+                      启用
+                    </label>
+                  ) : null}
+                  {showOffboardStatus ? (
+                    a.offboardDateMissing ? (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">
+                        已停用，但离职日期待补录
+                      </span>
+                    ) : offboardDate ? (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                        已离职 / 最后工作日：{offboardDate}
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
+                        已停用
+                      </span>
+                    )
+                  ) : null}
                   <button
                     type="button"
                     disabled={savingId === a.id}
@@ -586,15 +714,57 @@ export const AnchorManagementPanel: React.FC = () => {
                   >
                     {savingId === a.id ? '保存中…' : '保存'}
                   </button>
-                  {a.enabled && (
+                  {!manual && a.enabled ? (
                     <button
                       type="button"
-                      onClick={() => void disable(a.id)}
+                      onClick={() => openOffboardModal(a)}
                       className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                     >
-                      停用
+                      办理离职
                     </button>
-                  )}
+                  ) : null}
+                  {!manual && !a.enabled && a.offboardDateMissing ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPatchOffboardModal({
+                          id: a.id,
+                          name: a.name,
+                          effectiveTo: todayShanghai(),
+                        })
+                      }
+                      className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                    >
+                      补录离职日期
+                    </button>
+                  ) : null}
+                  {!manual && !a.enabled && !a.offboardDateMissing && offboardDate ? (
+                    <button
+                      type="button"
+                      onClick={() => void reinstate(a)}
+                      className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800"
+                    >
+                      撤销离职
+                    </button>
+                  ) : null}
+                  {manual && a.enabled ? (
+                    <button
+                      type="button"
+                      onClick={() => openOffboardModal(a)}
+                      className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                    >
+                      办理离职
+                    </button>
+                  ) : null}
+                  {manual && !a.enabled && offboardDate ? (
+                    <button
+                      type="button"
+                      onClick={() => void reinstate(a)}
+                      className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs text-emerald-800"
+                    >
+                      撤销离职
+                    </button>
+                  ) : null}
                   {!a.systemKey ? (
                     <button
                       type="button"
@@ -667,6 +837,118 @@ export const AnchorManagementPanel: React.FC = () => {
           })}
         </div>
       )}
+
+      <ViewportModal
+        open={offboardModal != null}
+        onClose={() => {
+          if (!offboardSubmitting) setOffboardModal(null)
+        }}
+        panelClassName="max-w-md"
+      >
+        <div className="p-5">
+          <h4 className="text-base font-semibold text-slate-900">主播离职</h4>
+          {offboardModal ? (
+            <>
+              <p className="mt-2 text-sm text-slate-600">
+                主播：<span className="font-medium text-slate-900">{offboardModal.name}</span>
+              </p>
+              <label className="mt-4 block text-xs text-slate-600">
+                最后工作日
+                <input
+                  type="date"
+                  value={offboardModal.effectiveTo}
+                  onChange={(e) =>
+                    setOffboardModal((prev) =>
+                      prev ? { ...prev, effectiveTo: e.target.value } : prev,
+                    )
+                  }
+                  className="mt-1 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <label className="mt-3 block text-xs text-slate-600">
+                原因
+                <input
+                  value={offboardModal.reason}
+                  onChange={(e) =>
+                    setOffboardModal((prev) =>
+                      prev ? { ...prev, reason: e.target.value } : prev,
+                    )
+                  }
+                  className="mt-1 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={offboardSubmitting}
+                  onClick={() => setOffboardModal(null)}
+                  className="rounded border border-slate-200 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={offboardSubmitting}
+                  onClick={() => void submitOffboard()}
+                  className="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {offboardSubmitting ? '提交中…' : '确认离职'}
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </ViewportModal>
+
+      <ViewportModal
+        open={patchOffboardModal != null}
+        onClose={() => {
+          if (!offboardSubmitting) setPatchOffboardModal(null)
+        }}
+        panelClassName="max-w-md"
+      >
+        <div className="p-5">
+          <h4 className="text-base font-semibold text-slate-900">补录离职日期</h4>
+          {patchOffboardModal ? (
+            <>
+              <p className="mt-2 text-sm text-slate-600">
+                主播：<span className="font-medium text-slate-900">{patchOffboardModal.name}</span>
+              </p>
+              <label className="mt-4 block text-xs text-slate-600">
+                最后工作日
+                <input
+                  type="date"
+                  value={patchOffboardModal.effectiveTo}
+                  onChange={(e) =>
+                    setPatchOffboardModal((prev) =>
+                      prev ? { ...prev, effectiveTo: e.target.value } : prev,
+                    )
+                  }
+                  className="mt-1 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+                />
+              </label>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  type="button"
+                  disabled={offboardSubmitting}
+                  onClick={() => setPatchOffboardModal(null)}
+                  className="rounded border border-slate-200 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-50"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  disabled={offboardSubmitting}
+                  onClick={() => void submitPatchOffboardDate()}
+                  className="rounded bg-amber-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {offboardSubmitting ? '提交中…' : '确认补录'}
+                </button>
+              </div>
+            </>
+          ) : null}
+        </div>
+      </ViewportModal>
     </section>
   )
 }

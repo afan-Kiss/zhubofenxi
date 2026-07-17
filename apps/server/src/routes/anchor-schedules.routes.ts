@@ -20,6 +20,30 @@ export const anchorSchedulesRouter = Router()
 
 anchorSchedulesRouter.use(attachRequestUser, requireAuth)
 
+anchorSchedulesRouter.get('/anchor-options', async (req, res, next) => {
+  try {
+    const date = String(req.query.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date 参数', 400)
+      return
+    }
+    const { listScheduleFormalAnchorOptions } = await import(
+      '../services/anchor-date-candidates.service'
+    )
+    const { isTemporaryAnchorDateAllowed } = await import(
+      '../utils/anchor-effective-date.util'
+    )
+    const options = await listScheduleFormalAnchorOptions(date)
+    sendOk(res, {
+      date,
+      options,
+      temporaryAnchorAllowed: isTemporaryAnchorDateAllowed(date),
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
 anchorSchedulesRouter.get('/', async (req, res, next) => {
   try {
     const date = String(req.query.date ?? '').trim()

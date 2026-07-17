@@ -19,6 +19,12 @@ import type { BoardRangePreset } from './board-range'
 let prefetchRunning = false
 const prefetchQueued = new Set<string>()
 
+function logPrefetchDev(message: string, detail?: unknown): void {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.DEV) {
+    console.warn(`[board-prefetch] ${message}`, detail ?? '')
+  }
+}
+
 export function scheduleBoardStandardPrefetch(options?: {
   preferScope?: LiveQueryPageScope
 }): void {
@@ -55,11 +61,11 @@ async function drainPrefetchQueue(): Promise<void> {
       try {
         const fetchFn =
           pageScope === 'anchors' ? fetchBoardAnchorsDataResult : fetchBoardOverviewResult
+        // 预取不带 ETag，避免 304 无体；低优先级延迟排队
         const result = await fetchFn({
           preset,
           startDate: dates.startDate,
           endDate: dates.endDate,
-          etag: hit?.etag,
         })
         if (result.notModified) {
           continue
@@ -68,10 +74,10 @@ async function drainPrefetchQueue(): Promise<void> {
           etag: result.etag,
           dataGeneration: result.dataGeneration,
         })
-      } catch {
-        /* ignore prefetch errors */
+      } catch (err) {
+        logPrefetchDev(`${pageScope}/${preset} failed`, err)
       }
-      await new Promise((r) => setTimeout(r, 80))
+      await new Promise((r) => setTimeout(r, 120))
     }
   } finally {
     prefetchRunning = false

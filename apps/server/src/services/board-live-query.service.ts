@@ -116,6 +116,13 @@ export interface BoardLiveQueryResult {
     | 'failed_with_cache'
     | 'empty'
     | 'coverage_missing'
+  rangeCoverage?: {
+    status: 'covered' | 'not_covered' | 'syncing' | 'unknown'
+    reason: string
+    coveredShopIds: string[]
+    missingShopIds: string[]
+  }
+  diagnostics?: Record<string, unknown>
 }
 
 function resolveLiveQueryRange(params: BoardLiveQueryParams): {

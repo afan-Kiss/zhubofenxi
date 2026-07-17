@@ -15,6 +15,7 @@ import {
   isQualityBadCaseOrderMatched,
   isQualityBadCaseMatchStatusMatched,
 } from './quality-badcase.types'
+import { isOfflineDealView } from './offline-deal.service'
 
 function pickString(rec: Record<string, unknown>, keys: string[]): string {
   for (const k of keys) {
@@ -325,7 +326,40 @@ export function resolveQualityRefundCrossVerify(params: {
   officialCase?: NormalizedQualityBadCase
   verifySource?: 'after_sale_time_search' | 'after_sale_workbench'
 }): QualityRefundCrossVerify {
-  const { view: v, matchedOfficialPackageIds, officialCase } = params
+  const { view: v } = params
+
+  // 线下成交硬隔离：不参与官方品退 / 售后关键词 / 疑似品退
+  if (isOfflineDealView(v)) {
+    return {
+      isQualityRefund: false,
+      qualityMainSource: 'none',
+      qualityVerifySource: 'none',
+      qualityVerifyStatus: 'none',
+      qualityReasonText: '',
+      officialReasonText: '',
+      afterSaleReasonText: '',
+      officialPackageId: '',
+      afterSaleOrderNo: '',
+      afterSaleStatus: '',
+      afterSaleType: '',
+      afterSaleRefundAmountCent: 0,
+      afterSaleSuccessTime: '',
+      qualityFeedbackContent: '',
+      qualityFeedbackTime: '',
+      qualityPackagePayTime: '',
+      qualityItemId: '',
+      qualityItemName: '',
+      qualitySourceBizId: '',
+      suspectedQualityRefund: false,
+      verifyDisplayLabel: '—',
+      officialQualityReasonText: '',
+      afterSaleFinalReasonText: '',
+      afterSaleReasonChanged: false,
+      extraHint: '',
+    }
+  }
+
+  const { matchedOfficialPackageIds, officialCase } = params
   let afterSaleRecords = mergeAfterSaleRecordsForQualityResolution(
     params.afterSaleRecords ?? [],
     {

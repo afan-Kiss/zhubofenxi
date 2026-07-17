@@ -11,7 +11,8 @@ import { invalidateBoardLiveQueryCache } from '../../lib/board-live-query-cache'
 import { useBoardLiveQuery } from '../../providers/BoardLiveQueryProvider'
 import { ScheduleTimeRangePicker } from '../../components/ui/ScheduleTimePicker'
 import { ScheduleTimelineEditor } from '../../components/schedule/ScheduleTimelineEditor'
-import { resolveAnchorTheme } from '../../lib/anchor-theme'
+import { resolveAnchorTheme, ANCHOR_COLOR_PALETTE } from '../../lib/anchor-theme'
+import { ViewportModal } from '../../components/ui/ViewportModal'
 
 function afterScheduleMutation(): void {
   invalidateBoardLiveQueryCache('anchor-schedule')
@@ -28,17 +29,27 @@ interface ScheduleRow {
   source?: string
   enabled: boolean
   note?: string | null
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
+  anchorColorSnapshot?: string | null
 }
 
 interface ScheduleAnchorOption {
   id: string
   name: string
-  enabled: boolean
-  color?: string | null
-  attributionMode?: 'schedule' | 'manual' | string | null
-  systemKey?: string | null
-  effectiveFrom?: string | null
-  effectiveTo?: string | null
+  color: string | null
+  effectiveFrom: string | null
+  effectiveTo: string | null
+  currentEnabled: boolean
+  effectiveOnSelectedDate: boolean
+  historical: boolean
+  offboardDateMissing: boolean
+}
+
+interface AnchorOptionsResponse {
+  date: string
+  options: ScheduleAnchorOption[]
+  temporaryAnchorAllowed: boolean
 }
 
 interface ScheduleResponse {
@@ -87,15 +98,8 @@ const yesterdayKey = () => {
 const SHOP_OPTIONS = ['XY祥钰珠宝', '和田雅玉', '拾玉居和田玉', '祥钰珠宝']
 const DEFAULT_SHOP = 'XY祥钰珠宝'
 
-function isScheduleSelectableOnDate(a: ScheduleAnchorOption, dateKey: string): boolean {
-  if (!a.enabled) return false
-  if (a.systemKey) return false
-  if (a.attributionMode === 'manual') return false
-  const from = a.effectiveFrom?.trim()
-  const to = a.effectiveTo?.trim()
-  if (from && dateKey < from) return false
-  if (to && dateKey > to) return false
-  return true
+function clientTemporaryAnchorAllowed(dateKey: string): boolean {
+  return dateKey === todayKey() || dateKey === yesterdayKey()
 }
 
 function sourceLabel(source?: string): string {
@@ -134,6 +138,16 @@ export const AnchorSchedulePage: React.FC = () => {
   const [moreOpen, setMoreOpen] = useState(false)
   const moreRef = useRef<HTMLDivElement>(null)
   const [anchorOptions, setAnchorOptions] = useState<ScheduleAnchorOption[]>([])
+  const [temporaryAnchorAllowed, setTemporaryAnchorAllowed] = useState(false)
+  const [tempModalOpen, setTempModalOpen] = useState(false)
+  const [tempForm, setTempForm] = useState({
+    name: '',
+    shopName: DEFAULT_SHOP,
+    startTime: '09:00',
+    endTime: '18:00',
+    color: ANCHOR_COLOR_PALETTE[0] ?? '#94a3b8',
+    note: '',
+  })
 
   const validation = useMemo(() => validateScheduleRows(rows), [rows])
   const conflictRowSet = useMemo(() => conflictIndexes(validation.conflicts), [validation.conflicts])
@@ -146,10 +160,12 @@ export const AnchorSchedulePage: React.FC = () => {
   const selectableAnchors = useMemo(
     () =>
       anchorOptions
-        .filter((a) => isScheduleSelectableOnDate(a, date))
+        .filter((a) => a.effectiveOnSelectedDate && !a.offboardDateMissing)
         .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
-    [anchorOptions, date],
+    [anchorOptions],
   )
+
+  const canAddTemporaryAnchor = temporaryAnchorAllowed || clientTemporaryAnchorAllowed(date)
 
   const anchorColorById = useMemo(() => {
     const map = new Map<string, string>()
@@ -162,6 +178,9 @@ export const AnchorSchedulePage: React.FC = () => {
 
   const resolveRowColor = useCallback(
     (row: ScheduleRow): string | null => {
+      if (row.isTemporaryAnchor && row.anchorColorSnapshot) {
+        return row.anchorColorSnapshot
+      }
       if (row.anchorId && anchorColorById.has(row.anchorId)) {
         return anchorColorById.get(row.anchorId) ?? null
       }
@@ -195,6 +214,9 @@ export const AnchorSchedulePage: React.FC = () => {
         source: s.source,
         enabled: s.enabled,
         note: s.note,
+        isTemporaryAnchor: s.isTemporaryAnchor,
+        temporaryAnchorKey: s.temporaryAnchorKey ?? null,
+        anchorColorSnapshot: s.anchorColorSnapshot ?? null,
       })),
     )
     setWarnings(data.warnings ?? [])
@@ -231,13 +253,17 @@ export const AnchorSchedulePage: React.FC = () => {
   useEffect(() => {
     void (async () => {
       try {
-        const list = await apiRequest<ScheduleAnchorOption[]>('/api/anchors')
-        setAnchorOptions(Array.isArray(list) ? list : [])
+        const data = await apiRequest<AnchorOptionsResponse>(
+          `/anchor-schedules/anchor-options?date=${encodeURIComponent(date)}`,
+        )
+        setAnchorOptions(Array.isArray(data.options) ? data.options : [])
+        setTemporaryAnchorAllowed(Boolean(data.temporaryAnchorAllowed))
       } catch {
-        // 排班页仍可用手录历史行展示；新建需选项
+        setAnchorOptions([])
+        setTemporaryAnchorAllowed(clientTemporaryAnchorAllowed(date))
       }
     })()
-  }, [])
+  }, [date])
 
   useEffect(() => {
     if (!scrollToNewRow) return
@@ -342,8 +368,18 @@ export const AnchorSchedulePage: React.FC = () => {
         body: JSON.stringify({
           date,
           schedules: rows.map((r) => ({
-            ...r,
+            anchorId: r.anchorId ?? null,
+            anchorName: r.anchorName,
+            shopName: r.shopName,
+            liveRoomName: r.liveRoomName,
+            startTime: r.startTime,
+            endTime: r.endTime,
+            enabled: r.enabled,
+            note: r.note ?? null,
             source: 'manual',
+            isTemporaryAnchor: Boolean(r.isTemporaryAnchor),
+            temporaryAnchorKey: r.temporaryAnchorKey ?? null,
+            anchorColorSnapshot: r.anchorColorSnapshot ?? null,
           })),
           confirm,
         }),
@@ -479,6 +515,49 @@ export const AnchorSchedulePage: React.FC = () => {
     setScrollToNewRow(true)
   }
 
+  const openTempModal = () => {
+    const last = rows[rows.length - 1]
+    setTempForm({
+      name: '',
+      shopName: last?.shopName?.trim() || last?.liveRoomName?.trim() || DEFAULT_SHOP,
+      startTime: last?.startTime?.trim() || '09:00',
+      endTime: last?.endTime?.trim() || '18:00',
+      color: ANCHOR_COLOR_PALETTE[0] ?? '#94a3b8',
+      note: '',
+    })
+    setTempModalOpen(true)
+  }
+
+  const confirmAddTemporaryAnchor = () => {
+    const name = tempForm.name.trim()
+    if (!name) {
+      setError('请填写临时主播名称')
+      return
+    }
+    setError(null)
+    setWarnings([])
+    const tempKey = `temp:${date}:${crypto.randomUUID()}`
+    setRows((prev) => [
+      ...prev,
+      {
+        anchorId: null,
+        anchorName: name,
+        shopName: tempForm.shopName,
+        liveRoomName: tempForm.shopName,
+        startTime: tempForm.startTime,
+        endTime: tempForm.endTime,
+        enabled: true,
+        note: tempForm.note.trim(),
+        source: 'manual',
+        isTemporaryAnchor: true,
+        temporaryAnchorKey: tempKey,
+        anchorColorSnapshot: tempForm.color,
+      },
+    ])
+    setTempModalOpen(false)
+    setScrollToNewRow(true)
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-4 p-4" data-testid="anchor-schedule-page">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -548,6 +627,15 @@ export const AnchorSchedulePage: React.FC = () => {
           >
             <Plus size={14} />
             新增
+          </button>
+          <button
+            type="button"
+            disabled={!canAddTemporaryAnchor}
+            onClick={openTempModal}
+            className="inline-flex items-center gap-1 rounded bg-violet-50 px-3 py-1.5 text-sm text-violet-800 hover:bg-violet-100 disabled:opacity-50"
+          >
+            <Plus size={14} />
+            新增临时主播
           </button>
           <button
             type="button"
@@ -686,9 +774,13 @@ export const AnchorSchedulePage: React.FC = () => {
                 name: row.anchorName,
                 color: resolveRowColor(row),
               })
+              const rowKey =
+                row.temporaryAnchorKey ||
+                row.id ||
+                `${row.anchorName}-${index}-${row.startTime}-${row.endTime}`
               return (
                 <tr
-                  key={`${row.anchorName}-${index}-${row.startTime}-${row.endTime}`}
+                  key={rowKey}
                   ref={(el) => {
                     rowRefs.current[index] = el
                   }}
@@ -715,29 +807,46 @@ export const AnchorSchedulePage: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                    <select
-                      value={row.anchorId || row.anchorName}
-                      onChange={(e) => {
-                        const v = e.target.value
-                        const hit = selectableAnchors.find((a) => a.id === v || a.name === v)
-                        if (hit) {
-                          updateRow(index, { anchorId: hit.id, anchorName: hit.name })
-                          return
-                        }
-                        updateRow(index, { anchorId: null, anchorName: v })
-                      }}
-                      className="min-w-[7rem] rounded border border-slate-200 px-2 py-1"
-                    >
-                      {!row.anchorId && row.anchorName ? (
-                        <option value={row.anchorName}>{row.anchorName}（历史）</option>
-                      ) : null}
-                      {!row.anchorName ? <option value="">请选择主播</option> : null}
-                      {selectableAnchors.map((a) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
-                    </select>
+                    {row.isTemporaryAnchor ? (
+                      <div className="space-y-1">
+                        <input
+                          value={row.anchorName}
+                          onChange={(e) => updateRow(index, { anchorName: e.target.value })}
+                          className="min-w-[7rem] rounded border border-slate-200 px-2 py-1"
+                          placeholder="临时主播名称"
+                        />
+                        <span className="inline-flex rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+                          临时试播 · 仅当日
+                        </span>
+                      </div>
+                    ) : (
+                      <select
+                        value={row.anchorId || row.anchorName}
+                        onChange={(e) => {
+                          const v = e.target.value
+                          const hit = selectableAnchors.find((a) => a.id === v || a.name === v)
+                          if (hit) {
+                            updateRow(index, { anchorId: hit.id, anchorName: hit.name })
+                            return
+                          }
+                          updateRow(index, { anchorId: null, anchorName: v })
+                        }}
+                        className="min-w-[7rem] rounded border border-slate-200 px-2 py-1"
+                      >
+                        {!row.anchorId && row.anchorName ? (
+                          <option value={row.anchorName}>
+                            {row.anchorName}（历史）
+                          </option>
+                        ) : null}
+                        {!row.anchorName ? <option value="">请选择主播</option> : null}
+                        {selectableAnchors.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                            {a.historical ? '（历史）' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </td>
                   <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <select
@@ -796,6 +905,107 @@ export const AnchorSchedulePage: React.FC = () => {
           </tbody>
         </table>
       </div>
+
+      <ViewportModal open={tempModalOpen} onClose={() => setTempModalOpen(false)} panelClassName="max-w-md">
+        <div className="p-5">
+          <h4 className="text-base font-semibold text-slate-900">新增临时主播</h4>
+          <p className="mt-1 text-xs text-slate-500">临时试播仅当日有效，不会写入主播档案。</p>
+          <label className="mt-4 block text-xs text-slate-600">
+            名称
+            <input
+              value={tempForm.name}
+              onChange={(e) => setTempForm((prev) => ({ ...prev, name: e.target.value }))}
+              className="mt-1 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              placeholder="临时主播名称"
+            />
+          </label>
+          <label className="mt-3 block text-xs text-slate-600">
+            店铺/直播间
+            <select
+              value={tempForm.shopName}
+              onChange={(e) => setTempForm((prev) => ({ ...prev, shopName: e.target.value }))}
+              className="mt-1 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+            >
+              {SHOP_OPTIONS.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <label className="block text-xs text-slate-600">
+              开始时间
+              <input
+                type="time"
+                value={tempForm.startTime}
+                onChange={(e) => setTempForm((prev) => ({ ...prev, startTime: e.target.value }))}
+                className="mt-1 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              />
+            </label>
+            <label className="block text-xs text-slate-600">
+              结束时间
+              <input
+                type="time"
+                value={tempForm.endTime === '24:00' ? '23:59' : tempForm.endTime}
+                onChange={(e) => setTempForm((prev) => ({ ...prev, endTime: e.target.value }))}
+                className="mt-1 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              />
+            </label>
+          </div>
+          <label className="mt-3 block text-xs text-slate-600">
+            颜色
+            <div className="mt-1 flex items-center gap-2">
+              <input
+                type="color"
+                value={tempForm.color}
+                onChange={(e) => setTempForm((prev) => ({ ...prev, color: e.target.value }))}
+                className="h-8 w-12 cursor-pointer"
+              />
+              <div className="flex flex-wrap gap-1">
+                {ANCHOR_COLOR_PALETTE.slice(0, 8).map((swatch) => (
+                  <button
+                    key={swatch}
+                    type="button"
+                    title={swatch}
+                    onClick={() => setTempForm((prev) => ({ ...prev, color: swatch }))}
+                    className={`h-5 w-5 rounded-full border ${
+                      tempForm.color.toLowerCase() === swatch.toLowerCase()
+                        ? 'border-slate-700 ring-1 ring-slate-400'
+                        : 'border-slate-200'
+                    }`}
+                    style={{ backgroundColor: swatch }}
+                  />
+                ))}
+              </div>
+            </div>
+          </label>
+          <label className="mt-3 block text-xs text-slate-600">
+            备注
+            <input
+              value={tempForm.note}
+              onChange={(e) => setTempForm((prev) => ({ ...prev, note: e.target.value }))}
+              className="mt-1 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+            />
+          </label>
+          <div className="mt-5 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setTempModalOpen(false)}
+              className="rounded border border-slate-200 px-3 py-1.5 text-sm text-slate-700"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              onClick={confirmAddTemporaryAnchor}
+              className="rounded bg-violet-600 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              确认新增
+            </button>
+          </div>
+        </div>
+      </ViewportModal>
     </div>
   )
 }

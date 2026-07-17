@@ -886,32 +886,39 @@ model AnchorScheduleTemplate {
 
 /// 每日主播排班（手动覆盖或生成的默认排班）
 model AnchorDailySchedule {
-  id           String    @id @default(cuid())
-  scheduleDate String
+  id                  String    @id @default(cuid())
+  scheduleDate        String
   /** 稳定关联 Anchor.id；匹配优先用此字段 */
-  anchorId     String?
+  anchorId            String?
   /** 姓名快照；正式匹配优先 anchorId */
-  anchorName   String
-  shopName     String
-  liveRoomName String
-  startAt      DateTime
-  endAt        DateTime
-  source       String    @default("manual")
-  enabled      Boolean   @default(true)
-  locked       Boolean   @default(false)
-  confirmed    Boolean   @default(false)
-  confirmedAt  DateTime?
-  confirmedBy  String?
-  confirmNote  String?
-  note         String?
-  createdBy    String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  anchorName          String
+  shopName            String
+  liveRoomName        String
+  startAt             DateTime
+  endAt               DateTime
+  source              String    @default("manual")
+  enabled             Boolean   @default(true)
+  locked              Boolean   @default(false)
+  confirmed           Boolean   @default(false)
+  confirmedAt         DateTime?
+  confirmedBy         String?
+  confirmNote         String?
+  note                String?
+  createdBy           String?
+  /** 仅属于 scheduleDate 当天的临时试播主播 */
+  isTemporaryAnchor   Boolean   @default(false)
+  /** 当天稳定身份，如 temp:2026-07-17:<uuid> */
+  temporaryAnchorKey  String?
+  /** 业绩卡片/时间轴/日报颜色快照 */
+  anchorColorSnapshot String?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   @@index([scheduleDate])
   @@index([scheduleDate, enabled])
   @@index([scheduleDate, confirmed])
   @@index([anchorId])
+  @@index([scheduleDate, temporaryAnchorKey])
 }
 
 /// 日报发货前照片（按日期归档，文件存 data 目录）

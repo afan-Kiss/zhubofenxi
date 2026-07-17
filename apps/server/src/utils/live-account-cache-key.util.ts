@@ -50,6 +50,10 @@ export function buildLiveAccountOrderQueries(
     displayOrderNo?: string
     officialOrderNo?: string
     packageId?: string
+    sourceType?: string | null
+    dealSource?: string | null
+    offlineDealKey?: string | null
+    raw?: Record<string, unknown>
   }>,
 ): LiveAccountOrderQuery[] {
   const seen = new Set<string>()
@@ -57,6 +61,10 @@ export function buildLiveAccountOrderQueries(
   for (const o of orders) {
     const orderNo = (o.displayOrderNo || o.officialOrderNo || o.packageId || '').trim()
     if (!orderNo) continue
+    // 线下成交无平台订单号，禁止进入千帆售后查询
+    if (/^OFF-/i.test(orderNo) || /^offline:/i.test(orderNo)) continue
+    if (o.dealSource === 'offline' || o.sourceType === 'offline_deal' || o.offlineDealKey) continue
+    if (o.raw && (o.raw.dealSource === 'offline' || o.raw.sourceType === 'offline_deal')) continue
     const liveAccountId = resolveLiveAccountId(o.liveAccountId)
     const key = liveAccountOrderKey(liveAccountId, orderNo)
     if (seen.has(key)) continue

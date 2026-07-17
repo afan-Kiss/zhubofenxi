@@ -396,21 +396,40 @@ export async function listActiveTemplatesForDate(dateKey: string) {
     where: { enabled: true },
     orderBy: [{ sortOrder: 'asc' }, { anchorName: 'asc' }],
   })
-  return rows.filter((t) =>
-    templateAppliesOnDate(
-      {
-        anchorName: t.anchorName,
-        shopName: t.shopName,
-        liveRoomName: t.liveRoomName,
-        startTime: t.startTime,
-        endTime: t.endTime,
-        effectiveFrom: t.effectiveFrom,
-        effectiveTo: t.effectiveTo,
-        sortOrder: t.sortOrder,
-      },
-      dateKey,
-    ),
-  )
+  const anchors = await prisma.anchor.findMany({
+    where: { deletedAt: null, attributionMode: 'schedule', systemKey: null },
+  })
+  const byId = new Map(anchors.map((a) => [a.id, a]))
+  const byName = new Map(anchors.map((a) => [a.name.trim().toLowerCase(), a]))
+  const { isAnchorEffectiveOnDate } = await import('../utils/anchor-effective-date.util')
+  const { isOffboardDateMissing } = await import('../utils/anchor-effective-date.util')
+
+  return rows.filter((t) => {
+    if (
+      !templateAppliesOnDate(
+        {
+          anchorName: t.anchorName,
+          shopName: t.shopName,
+          liveRoomName: t.liveRoomName,
+          startTime: t.startTime,
+          endTime: t.endTime,
+          effectiveFrom: t.effectiveFrom,
+          effectiveTo: t.effectiveTo,
+          sortOrder: t.sortOrder,
+        },
+        dateKey,
+      )
+    ) {
+      return false
+    }
+    const anchor =
+      (t.anchorId && byId.get(t.anchorId)) ||
+      byName.get(t.anchorName.trim().toLowerCase()) ||
+      null
+    if (!anchor) return true
+    if (isOffboardDateMissing(anchor)) return false
+    return isAnchorEffectiveOnDate(anchor, dateKey)
+  })
 }
 
 export function buildVirtualSchedulesFromTemplates(
@@ -422,6 +441,7 @@ export function buildVirtualSchedulesFromTemplates(
     return {
       id: `virtual-${t.id}`,
       scheduleDate: dateKey,
+      anchorId: t.anchorId ?? null,
       anchorName: t.anchorName,
       shopName: t.shopName,
       liveRoomName: t.liveRoomName,

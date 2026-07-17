@@ -1,15 +1,22 @@
 import { apiRequest } from './api'
 
+/** 线下成交无千帆订单详情，禁止用 OFF-* / offline:* 换票 */
 export function isQianfanOrderDetailAvailable(orderNo: string | null | undefined): boolean {
   const trimmed = orderNo?.trim() ?? ''
-  return Boolean(trimmed && trimmed !== '—')
+  if (!trimmed || trimmed === '—') return false
+  if (/^OFF-/i.test(trimmed) || /^offline:/i.test(trimmed)) return false
+  return true
 }
 
 /** 经营看板抽屉：换票后打开千帆订单详情（与运营报表抽屉同接口） */
 export async function openQianfanOrderDetail(orderNo: string): Promise<void> {
   const trimmed = orderNo.trim()
   if (!isQianfanOrderDetailAvailable(trimmed)) {
-    throw new Error('订单号无效')
+    throw new Error(
+      /^OFF-/i.test(trimmed) || /^offline:/i.test(trimmed)
+        ? '线下成交无千帆订单详情'
+        : '订单号无效',
+    )
   }
   const newWin = window.open('about:blank', '_blank')
   if (!newWin) {

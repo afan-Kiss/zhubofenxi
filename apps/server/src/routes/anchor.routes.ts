@@ -3,13 +3,13 @@ import { attachRequestUser } from '../middleware/local-viewer.middleware'
 import { requireAuth } from '../middleware/auth.middleware'
 import {
   createAnchor,
-  disableAnchor,
   listAnchorFilterOptions,
   listAnchorsForAdmin,
   reorderAnchors,
   softDeleteAnchor,
   updateAnchor,
 } from '../services/anchor.service'
+import { isOffboardDateMissing } from '../utils/anchor-effective-date.util'
 import { sendFail, sendOk } from '../utils/response'
 import { buildAnchorMetricDetail } from '../services/anchor-metric-detail.service'
 import type { AnchorMetricType } from '../services/anchor-metric-detail.service'
@@ -31,7 +31,14 @@ anchorRouter.get('/', async (req, res) => {
   try {
     const includeDeleted = req.query.includeDeleted === '1'
     const list = await listAnchorsForAdmin(includeDeleted)
-    sendOk(res, list)
+    sendOk(
+      res,
+      list.map((a) => ({
+        ...a,
+        offboardDate: a.effectiveTo ?? null,
+        offboardDateMissing: isOffboardDateMissing(a),
+      })),
+    )
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '获取主播列表失败', 500)
   }
@@ -153,10 +160,61 @@ anchorRouter.patch('/:id', async (req, res) => {
 
 anchorRouter.post('/:id/disable', async (req, res) => {
   try {
-    const anchor = await disableAnchor(req.params.id)
-    sendOk(res, anchor)
+    const effectiveTo = req.body?.effectiveTo != null ? String(req.body.effectiveTo) : ''
+    const reason = req.body?.reason != null ? String(req.body.reason) : undefined
+    const { offboardAnchor } = await import('../services/anchor-offboard.service')
+    const result = await offboardAnchor({
+      id: req.params.id,
+      effectiveTo,
+      reason,
+      operatorUserId: (req as { user?: { id?: string } }).user?.id ?? null,
+      operatorUsername: (req as { user?: { username?: string } }).user?.username ?? null,
+      operatorRole: (req as { user?: { role?: string } }).user?.role ?? null,
+    })
+    const anchor = await import('../services/anchor.service').then((m) =>
+      m.listAnchorsForAdmin().then((list) => list.find((a) => a.id === result.id) ?? null),
+    )
+    sendOk(res, {
+      ...result,
+      offboardDate: result.effectiveTo,
+      anchor,
+    })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '停用主播失败', 400)
+  }
+})
+
+anchorRouter.post('/:id/reinstate', async (req, res) => {
+  try {
+    const { reinstateAnchor } = await import('../services/anchor-offboard.service')
+    const result = await reinstateAnchor({
+      id: req.params.id,
+      operatorUserId: (req as { user?: { id?: string } }).user?.id ?? null,
+      operatorUsername: (req as { user?: { username?: string } }).user?.username ?? null,
+      operatorRole: (req as { user?: { role?: string } }).user?.role ?? null,
+    })
+    sendOk(res, result)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '撤销离职失败', 400)
+  }
+})
+
+anchorRouter.post('/:id/patch-offboard-date', async (req, res) => {
+  try {
+    const effectiveTo = req.body?.effectiveTo != null ? String(req.body.effectiveTo) : ''
+    const reason = req.body?.reason != null ? String(req.body.reason) : undefined
+    const { patchOffboardDate } = await import('../services/anchor-offboard.service')
+    const result = await patchOffboardDate({
+      id: req.params.id,
+      effectiveTo,
+      reason,
+      operatorUserId: (req as { user?: { id?: string } }).user?.id ?? null,
+      operatorUsername: (req as { user?: { username?: string } }).user?.username ?? null,
+      operatorRole: (req as { user?: { role?: string } }).user?.role ?? null,
+    })
+    sendOk(res, result)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '补录离职日期失败', 400)
   }
 })
 

@@ -260,8 +260,9 @@ export async function ensureYifanManualAnchor(options?: {
  * 禁止在此函数内 create / update / delete 主播或规则。
  */
 export async function refreshAnchorConfigCache(): Promise<AnchorConfig> {
+  // 含已停用主播：历史日归属 / 离职日当天仍须能按 id/姓名解析
   const rows = await prisma.anchor.findMany({
-    where: { deletedAt: null, enabled: true },
+    where: { deletedAt: null },
     orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     include: { timeRules: { orderBy: [{ sortOrder: 'asc' }] } },
   })
@@ -516,6 +517,15 @@ export async function updateAnchor(
     nextMode = input.attributionMode
   }
 
+  if (input.enabled === false && input.effectiveTo === undefined) {
+    throw new Error('停用主播须通过「办理离职」并填写离职日期，不能仅提交 enabled=false')
+  }
+  if (input.enabled === false && input.effectiveTo !== undefined) {
+    if (!input.effectiveTo || !String(input.effectiveTo).trim()) {
+      throw new Error('离职日期不能为空')
+    }
+  }
+
   if (input.effectiveFrom !== undefined && input.effectiveFrom) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveFrom)) {
       throw new Error('上岗日期格式须为 YYYY-MM-DD')
@@ -525,6 +535,14 @@ export async function updateAnchor(
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.effectiveTo)) {
       throw new Error('下岗日期格式须为 YYYY-MM-DD')
     }
+  }
+  if (
+    input.effectiveTo &&
+    (input.effectiveFrom || existing.effectiveFrom) &&
+    String(input.effectiveTo).trim() <
+      String(input.effectiveFrom ?? existing.effectiveFrom).trim()
+  ) {
+    throw new Error('离职日期不得早于上岗日期')
   }
   if (
     nextMode === 'schedule' &&
@@ -619,9 +637,24 @@ export async function updateAnchor(
   })
 }
 
-/** 停用主播（enabled=false，历史数据保留）。系统主播允许停用，不会被初始化强制拉起。 */
-export async function disableAnchor(id: string) {
-  return updateAnchor(id, { enabled: false })
+/** @deprecated 请使用 offboardAnchor；保留别名以免旧调用崩溃 */
+export async function disableAnchor(
+  id: string,
+  opts?: { effectiveTo?: string; reason?: string },
+) {
+  if (!opts?.effectiveTo?.trim()) {
+    throw new Error('停用主播须提供离职日期 effectiveTo（YYYY-MM-DD）')
+  }
+  const { offboardAnchor } = await import('./anchor-offboard.service')
+  await offboardAnchor({
+    id,
+    effectiveTo: opts.effectiveTo,
+    reason: opts.reason,
+  })
+  return prisma.anchor.findUnique({
+    where: { id },
+    include: { timeRules: { orderBy: [{ sortOrder: 'asc' }] } },
+  })
 }
 
 /** 逻辑删除（系统主播禁止删除） */

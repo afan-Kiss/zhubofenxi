@@ -19,7 +19,7 @@ import {
 } from './after-sale-status-signal.service'
 /** 全站经营指标统一计算（看板 / 排行 / 钻取 / 导出共用） */
 
-export const BUSINESS_METRICS_VERSION = 'v11-valid-revenue-pool-2026-06'
+export const BUSINESS_METRICS_VERSION = 'v12-offline-quality-isolation-2026-07-17'
 
 
 

@@ -168,6 +168,17 @@ export function canSkipAfterSalesWorkbenchFetch(input: ShouldFetchWorkbenchInput
 export function shouldFetchAfterSalesWorkbench(input: ShouldFetchWorkbenchInput): boolean {
   const orderNo = norm(input.displayOrderNo || input.officialOrderNo)
   if (!orderNo || !/^P/i.test(orderNo)) return false
+  if (/^OFF-/i.test(orderNo) || /^offline:/i.test(orderNo)) return false
+  const raw = input.raw
+  if (
+    raw &&
+    (raw.dealSource === 'offline' ||
+      raw.sourceType === 'offline_deal' ||
+      Boolean(raw.offlineDealKey) ||
+      Boolean(raw.offlineDealId))
+  ) {
+    return false
+  }
 
   if (isCompletedAfterSaleStatusText(input.afterSaleStatusText)) return true
 

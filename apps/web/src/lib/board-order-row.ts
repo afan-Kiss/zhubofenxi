@@ -81,6 +81,7 @@ export interface BoardDrillOrderRow {
   manualOverride?: boolean
   dealSource?: 'online' | 'offline' | string | null
   offlineDealKey?: string | null
+  offlineDealNote?: string | null
   attributedBy?: string | null
   attributedAt?: string | null
 }
@@ -144,6 +145,14 @@ export function displayYesNo(v: unknown): string {
 }
 
 export function displayAfterSaleReason(row: BoardDrillOrderRow): string {
+  const isOffline =
+    String(row.dealSource ?? '') === 'offline' ||
+    String(row.orderNo ?? '').startsWith('OFF-') ||
+    Boolean(row.offlineDealKey)
+  if (isOffline) {
+    const note = row.offlineDealNote?.trim() || ''
+    return note || '—'
+  }
   const text =
     row.afterSaleReasonText?.trim() ||
     row.afterSaleReason?.trim() ||
@@ -288,6 +297,8 @@ export function normalizeBoardOrderRow(raw: Record<string, unknown>): BoardDrill
           : 'online',
     offlineDealKey:
       raw.offlineDealKey != null ? String(raw.offlineDealKey).trim() || null : null,
+    offlineDealNote:
+      raw.offlineDealNote != null ? String(raw.offlineDealNote).trim() || null : null,
     attributedBy: raw.attributedBy != null ? String(raw.attributedBy).trim() || null : null,
     attributedAt: raw.attributedAt != null ? String(raw.attributedAt).trim() || null : null,
     manualOverride: Boolean(

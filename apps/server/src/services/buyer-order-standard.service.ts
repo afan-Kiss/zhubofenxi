@@ -12,6 +12,7 @@ import { resolveDisplayEarnedAmountCent } from './buyer-earned-amount.service'
 import { isUnverifiedCompletedAfterSaleOrder } from './order-product-refund.service'
 import { isCompletedAfterSaleStatusText } from './completed-after-sale-status.service'
 import { extractAfterSaleNosFromSources } from './buyer-aftersale-event.util'
+import { isOfflineDealView } from './offline-deal.service'
 
 export type BuyerAfterSaleType =
   | 'none'
@@ -19,6 +20,7 @@ export type BuyerAfterSaleType =
   | 'return_refund'
   | 'shipping_compensation'
   | 'other_after_sale'
+  | 'offline_refund'
 
 export type BuyerOrderTabKey =
   | 'all'
@@ -281,6 +283,8 @@ function afterSaleTypeLabel(type: BuyerAfterSaleType): string {
       return '运费补偿'
     case 'other_after_sale':
       return '其他售后'
+    case 'offline_refund':
+      return '线下退款'
     default:
       return '—'
   }
@@ -406,6 +410,7 @@ export function resolveBuyerOrderRowRefundAmountCent(row: BuyerOrderStandardRow)
 /** 订单是否计入退款单数（与 buildBuyerOrderSummary 共用） */
 export function buyerOrderRowCountsAsRefundOrder(row: BuyerOrderStandardRow): boolean {
   if (row.afterSaleType === 'shipping_compensation') return false
+  if (row.afterSaleType === 'offline_refund') return resolveBuyerOrderRowRefundAmountCent(row) > 0
   if (row.isQualityRefund) return true
   if (
     row.afterSaleType === 'return_refund' ||
@@ -463,6 +468,14 @@ function resolveBuyerOrderRefundAmountCentFromView(
 }
 
 export function resolveBuyerAfterSaleType(v: AnalyzedOrderView): BuyerAfterSaleType {
+  if (isOfflineDealView(v)) {
+    const offlineRefund =
+      (v.successfulRefundAmountCent ?? 0) > 0 ||
+      (v.productRefundAmountCent ?? 0) > 0 ||
+      (v.returnAmountCent ?? 0) > 0 ||
+      (v.buyerProductRefundAmountCent ?? 0) > 0
+    return offlineRefund ? 'offline_refund' : 'none'
+  }
   const refundCent = v.buyerProductRefundAmountCent ?? 0
   const quality = resolveBuyerOrderQualityRefund(v)
   if (v.isFreightRefundOnly && (v.freightRefundAmountCent ?? 0) > 0) return 'shipping_compensation'
@@ -510,12 +523,14 @@ export function mapViewToBuyerOrderStandard(
     v.afterSaleDisplayType && v.afterSaleDisplayType !== '—'
       ? v.afterSaleDisplayType
       : v.afterSaleStatusLabel || v.afterSaleStatusText || '—'
-  const afterSaleReason = (
-    v.finalAfterSaleReason ||
-    v.afterSalesWorkbenchReason ||
-    v.reasonText ||
-    ''
-  ).trim() || '—'
+  const afterSaleReason = isOfflineDealView(v)
+    ? '—'
+    : (
+        v.finalAfterSaleReason ||
+        v.afterSalesWorkbenchReason ||
+        v.reasonText ||
+        ''
+      ).trim() || '—'
   const display = deriveAfterSaleDisplay({
     refundAmountCent,
     refundSource,

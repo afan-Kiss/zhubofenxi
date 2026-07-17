@@ -378,10 +378,14 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                             主播：
                             {formatAnchorDisplayName(r.paymentAnchorName || r.anchorName)}
                           </div>
-                          <div>
-                            品退归属主播：
-                            {formatAnchorDisplayName(r.qualityAttributionAnchorName || r.anchorName)}
-                          </div>
+                          {r.isQualityReturn ? (
+                            <div>
+                              品退归属主播：
+                              {formatAnchorDisplayName(
+                                r.qualityAttributionAnchorName || r.anchorName,
+                              )}
+                            </div>
+                          ) : null}
                           <div
                             className="max-w-[160px] truncate"
                             title={formatAttributionBasis(

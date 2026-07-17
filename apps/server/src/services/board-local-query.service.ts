@@ -25,7 +25,10 @@ import {
 import { aggregateAnchorLeaderboard } from './board-metrics.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
-import { ensureAnchorPerformanceLeaderboardSlots } from './anchor-performance-attribution.service'
+import {
+  ensureAnchorPerformanceLeaderboardSlots,
+  ensureAnchorPerformanceLeaderboardSlotsWithTemporary,
+} from './anchor-performance-attribution.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
 import { readBoardPresetSnapshot, buildSnapshotBoardCacheStub } from './board-preset-snapshot.service'
@@ -72,6 +75,10 @@ import {
   resolveBoardDataDisplayStatus,
   type BoardDataDisplayStatus,
 } from './board-data-display-status.service'
+import {
+  resolveBusinessRangeCoverage,
+  type BoardRangeCoverageStatus,
+} from './board-range-coverage.service'
 import { buildOverviewMeta, type OverviewMeta } from './overview-meta.service'
 import {
   applyLastMonthStableSummary,
@@ -508,12 +515,25 @@ export async function executeBoardLocalQuery(params: {
     boardCache,
   )
 
-  let dataDisplayStatus = resolveBoardDataDisplayStatus({
+  const cachePreparing =
+    isBusinessCacheWarmupRunning() ||
+    isBusinessBoardCachePendingBuild(params.preset, startDate, endDate) ||
+    isDiskSnapshot
+
+  const rangeCoverage = await resolveBusinessRangeCoverage({
+    startDate,
+    endDate,
+  })
+
+  const dataDisplayStatusBeforeOverride = resolveBoardDataDisplayStatus({
     orderCountInRange: displayOrderCount,
     totalOrderCount,
     lastSuccessAt: syncMeta.businessSync.lastSuccessAt,
     syncStatus: syncMeta.businessSync.status,
+    coverageStatus: rangeCoverage.status,
+    cachePreparing,
   })
+  let dataDisplayStatus = dataDisplayStatusBeforeOverride
 
   if (boardCache.stale) {
     dataDisplayStatus = 'failed_with_cache'
@@ -526,38 +546,15 @@ export async function executeBoardLocalQuery(params: {
       : 'ready'
   }
 
+  // 仅在明确未覆盖、且非「正在准备缓存」时，才允许触发/保持 coverage_missing
+  // 严禁：rangeOrderCount===0 && totalOrderCount>0 => coverage_missing
   if (
     AUTO_SYNC_ON_VIEW_MISSING &&
     (dataDisplayStatus === 'syncing_no_cache' ||
-      (displayOrderCount === 0 && totalOrderCount > 0 && syncMeta.businessSync.status === 'running'))
+      (dataDisplayStatus === 'coverage_missing' && syncMeta.businessSync.status === 'running'))
   ) {
     void handleLocalDataCoverageMissing()
     syncMeta = await getBusinessSyncStatus()
-  } else if (
-    !AUTO_SYNC_ON_VIEW_MISSING &&
-    dataDisplayStatus === 'syncing_no_cache'
-  ) {
-    const cachePreparing =
-      isBusinessCacheWarmupRunning() ||
-      isBusinessBoardCachePendingBuild(params.preset, startDate, endDate) ||
-      isDiskSnapshot
-    if (!cachePreparing) {
-      dataDisplayStatus = 'coverage_missing'
-    }
-  } else if (
-    !AUTO_SYNC_ON_VIEW_MISSING &&
-    displayOrderCount === 0 &&
-    totalOrderCount > 0 &&
-    syncMeta.businessSync.status !== 'running' &&
-    syncMeta.businessSync.status !== 'queued'
-  ) {
-    const cachePreparing =
-      isBusinessCacheWarmupRunning() ||
-      isBusinessBoardCachePendingBuild(params.preset, startDate, endDate) ||
-      isDiskSnapshot
-    if (!cachePreparing) {
-      dataDisplayStatus = 'coverage_missing'
-    }
   }
 
   let recalculatedSummary = shouldUseBoardCacheSummary(
@@ -595,16 +592,21 @@ export async function executeBoardLocalQuery(params: {
       const remappedCoreViewsForQuality = await remapViewsWithScheduleOverlay(
         attachRawByMatchToViews(scopedAllViews, rawByMatch),
       )
-      const anchorLeaderboardRaw = ensureAnchorPerformanceLeaderboardSlots(
-        aggregateAnchorLeaderboard(
-          performanceViews,
-          {
-            scope: 'local-query-anchor-performance',
-            dateRange: { startDate, endDate, preset: params.preset },
-          },
-          { liveSessions: cacheLiveSessions, qualityRefundViews: remappedCoreViewsForQuality },
-        ) as import('./board-metrics.service').BoardAnchorMetrics[],
-        endDate,
+      const aggregatedLeaderboard = aggregateAnchorLeaderboard(
+        performanceViews,
+        {
+          scope: 'local-query-anchor-performance',
+          dateRange: { startDate, endDate, preset: params.preset },
+        },
+        { liveSessions: cacheLiveSessions, qualityRefundViews: remappedCoreViewsForQuality },
+      ) as import('./board-metrics.service').BoardAnchorMetrics[]
+      const anchorLeaderboardRaw = (
+        startDate === endDate
+          ? await ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
+              aggregatedLeaderboard,
+              endDate,
+            )
+          : ensureAnchorPerformanceLeaderboardSlots(aggregatedLeaderboard, endDate)
       ) as unknown as Array<Record<string, unknown>>
 
       const anchorLeaderboardWithLate = await enrichAnchorLeaderboardWithLateStatus(
@@ -635,7 +637,13 @@ export async function executeBoardLocalQuery(params: {
 
   const blacklistedBuyerIds = boardCache.blacklistedBuyerIds
 
-  let progressMessage = boardDataDisplayStatusMessage(dataDisplayStatus)
+  let progressMessage = boardDataDisplayStatusMessage(dataDisplayStatus, {
+    coverageStatus: rangeCoverage.status,
+    preset: params.preset,
+  })
+  if (cachePreparing && displayOrderCount === 0 && dataDisplayStatus !== 'coverage_missing') {
+    progressMessage = boardCachePreparingMessage()
+  }
   const cacheHit = memoryHit || isDiskSnapshot
 
   const fullSyncMeta =
@@ -762,81 +770,93 @@ export async function executeBoardLocalQuery(params: {
     )
   }
 
+  const cacheKey = `board|${params.preset}|${startDate}|${endDate}`
+  const dataGenerationToken = boardCache.dataGeneration
+    ? `${boardCache.dataGeneration.ordersGeneration}:${boardCache.dataGeneration.workbenchGeneration}:${boardCache.dataGeneration.scheduleGeneration}`
+    : null
 
+  const diagnostics = {
+    requestId,
+    preset: params.preset,
+    startDate,
+    endDate,
+    rangeOrderCount: displayOrderCount,
+    totalDatabaseOrderCount: totalOrderCount,
+    dataDisplayStatusBeforeOverride,
+    dataDisplayStatusAfterOverride: dataDisplayStatus,
+    coverageDecisionReason: rangeCoverage.reason,
+    cacheSource,
+    cacheKey,
+    cacheOrderCount: boardCache.orderCount ?? boardCache.views?.length ?? 0,
+    cacheViewCount: boardCache.views?.length ?? 0,
+    cachePendingBuild: isBusinessBoardCachePendingBuild(params.preset, startDate, endDate),
+    cacheWarmupRunning: isBusinessCacheWarmupRunning(),
+    cacheStale: Boolean(boardCache.stale),
+    cacheBuildError: boardCache.buildError ?? null,
+    syncStatus: syncMeta.businessSync.status,
+    lastSyncSuccessAt: syncMeta.businessSync.lastSuccessAt,
+    dataGeneration: dataGenerationToken,
+    etag: null as string | null,
+  }
+
+  const shouldLogAnchorDiag =
+    process.env.BOARD_QUERY_DIAGNOSTICS === 'true' ||
+    dataDisplayStatus === 'coverage_missing' ||
+    rangeCoverage.status === 'unknown' ||
+    rangeCoverage.status === 'not_covered' ||
+    cacheSource === 'stale-fallback' ||
+    Boolean(boardCache.buildError)
+
+  if (shouldLogAnchorDiag) {
+    console.log(
+      `[anchor-board-query] requestId=${requestId} preset=${params.preset} range=${startDate}~${endDate} rangeOrderCount=${displayOrderCount} totalOrderCount=${totalOrderCount} statusBefore=${dataDisplayStatusBeforeOverride} statusAfter=${dataDisplayStatus} coverageReason=${rangeCoverage.reason} cacheSource=${cacheSource} cachePending=${diagnostics.cachePendingBuild} syncStatus=${syncMeta.businessSync.status}`,
+    )
+  }
 
   return {
-
     requestId,
-
     preset: params.preset,
-
     startDate,
-
     endDate,
-
     rangeKey,
-
     resolvedRange,
-
     source: 'local_db',
     isFromCache: cacheHit,
-
     fetchedAt:
-
       syncMeta.businessSync.lastSuccessAt ??
-
       syncMeta.businessSync.lastRunAt ??
-
       new Date().toISOString(),
-
     dataDisplayStatus,
-
+    rangeCoverage: {
+      status: rangeCoverage.status as BoardRangeCoverageStatus,
+      reason: rangeCoverage.reason,
+      coveredShopIds: rangeCoverage.coveredShopIds,
+      missingShopIds: rangeCoverage.missingShopIds,
+    },
+    diagnostics,
     progress: {
-
       totalPages: displayOrderCount > 0 ? 1 : 0,
-
       fetchedPages: displayOrderCount > 0 ? 1 : 0,
-
       totalOrders: displayOrderCount,
-
       message: progressMessage,
-
     },
-
     summary,
-
     anchorPerformanceSummary,
-
     anchorLeaderboard: anchorLeaderboard as unknown as Array<Record<string, unknown>>,
-
     orders: [],
-
     allOrders: [],
-
     ordersTotal: displayOrderCount,
-
     page,
-
     pageSize,
-
     blacklistedBuyerIds,
-
     debug: {
-
       orderNos: [],
-
       includedOrderNos: [],
-
       excludedOrderNos: [],
-
       gmvField: 'merchantReceivableAmount',
-
       formulaVersion: `local-db-v1/${AMOUNT_FORMULA_VERSION}`,
-
     },
-
     qualityFeedback,
-
     afterSalesCompleteness,
     globalAfterSalesCompleteness,
     cacheStatus: {
@@ -847,17 +867,11 @@ export async function executeBoardLocalQuery(params: {
       buildDurationMs: boardCache.buildDurationMs,
       attributionAlgorithmVersion: boardCache.attributionAlgorithmVersion,
     },
-
     ...(fullSyncMeta ? { syncMeta: fullSyncMeta } : {}),
-
     ...(overviewMeta ? { overviewMeta } : {}),
-
     ...(forcedAnchor ? { forcedAnchorName: forcedAnchor } : {}),
-
     ...scopeMeta,
-
   }
-
 }
 
 

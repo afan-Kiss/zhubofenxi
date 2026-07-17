@@ -228,6 +228,32 @@ export function clearBoardLiveQueryCache(): void {
   void idbClear()
 }
 
+export function removeLiveQueryCacheEntry(key: string): void {
+  memory.delete(key)
+  try {
+    localStorage.removeItem(entryStorageKey(key))
+    const raw = localStorage.getItem(INDEX_KEY)
+    if (raw) {
+      const index = JSON.parse(raw) as string[]
+      const next = index.filter((k) => k !== key)
+      localStorage.setItem(INDEX_KEY, JSON.stringify(next))
+    }
+  } catch {
+    /* ignore */
+  }
+  void idbDelete(key).catch(() => undefined)
+}
+
+/** 仅清除某一 pageScope+preset+range 的浏览器缓存（不触发全量失效） */
+export function invalidateLiveQueryCacheEntry(params: {
+  pageScope: LiveQueryPageScope
+  preset: BoardRangePreset
+  startDate: string
+  endDate: string
+}): void {
+  removeLiveQueryCacheEntry(buildLiveQueryCacheKey(params))
+}
+
 /** 清缓存并通知各页面重新拉取 */
 export function invalidateBoardLiveQueryCache(reason?: string): void {
   clearBoardLiveQueryCache()
@@ -361,9 +387,11 @@ export const BOARD_STANDARD_PREFETCH_TARGETS: Array<{
   preset: BoardRangePreset
 }> = [
   { pageScope: 'overview', preset: 'today' },
+  { pageScope: 'overview', preset: 'yesterday' },
   { pageScope: 'overview', preset: 'thisMonth' },
   { pageScope: 'overview', preset: 'lastMonth' },
   { pageScope: 'anchors', preset: 'today' },
+  { pageScope: 'anchors', preset: 'yesterday' },
   { pageScope: 'anchors', preset: 'thisMonth' },
   { pageScope: 'anchors', preset: 'lastMonth' },
 ]

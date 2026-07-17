@@ -18,7 +18,7 @@ export function isYifanManualSystemAnchor(anchor: {
   return (anchor.systemKey ?? '').trim() === YIFAN_SYSTEM_KEY
 }
 
-/** 仅线下展示：不进日报/普通直播主播榜 */
+/** 仅线下展示：不进普通直播主播榜；有线下出单时会出现在日报图片 */
 export function isOfflineOnlyAnchor(anchor: {
   systemKey?: string | null
   attributionMode?: string | null

@@ -1,7 +1,13 @@
 import type { AnchorConfig, AnalyzedOrderView } from '../types/analysis'
 import type { UserRole } from '../types/roles'
-import { getAnchorConfigSync, isOfflineOnlyAnchor } from './anchor.service'
-import { isOfflineDealView } from './offline-deal.service'
+import {
+  findYifanManualSystemAnchor,
+  getAnchorConfigSync,
+  isOfflineOnlyAnchor,
+} from './anchor.service'
+import { isOfflineDealView, splitGmvByDealSource } from './offline-deal.service'
+import { rangeIncludesOfflineGmvSurface } from '../config/offline-gmv.constants'
+import { centToYuan } from '../utils/money'
 import {
   filterViewsByAnchorSpec,
   getAnchorPerformanceViews,
@@ -147,8 +153,41 @@ export interface DailyReportPayload {
     overallHourlyAmountYuan: number | null
     liveRoomNewFollowers: LiveRoomNewFollowerRow[]
     totalNewFollowerCount: number
+    /** 线上支付 GMV（不含线下） */
+    onlineGmvYuan?: number
+    /** 线下支付 GMV（逸凡等），有出单时写入日报 */
+    offlineGmvYuan?: number
+    offlineDealCount?: number
+    /** 线上 + 线下支付 GMV */
+    totalGmvYuan?: number
   }
   anchors: DailyReportAnchorRow[]
+}
+
+/** 线下成交明细行（复用 shippedOrders 结构，前端按 systemKey 改文案） */
+function listOfflineDealOrderLines(
+  views: AnalyzedOrderView[],
+  anchorName?: string,
+): DailyReportShippedOrderLine[] {
+  const lines: DailyReportShippedOrderLine[] = []
+  for (const v of views) {
+    if (!isOfflineDealView(v) || !v.includedInGmv) continue
+    if ((v.paymentBaseCent ?? 0) <= 0) continue
+    const orderNo = String(v.offlineDealKey || v.orderId || '').trim()
+    if (!orderNo) continue
+    const title =
+      String(v.reasonText || '').trim() ||
+      String(v.buyerDisplayName || v.buyerNickname || '').trim() ||
+      '线下成交'
+    const resolvedAnchorName = (anchorName ?? v.anchorName ?? '').trim()
+    lines.push({
+      orderNo,
+      productTitle: title,
+      amountYuan: roundMoneyYuan(centToYuan(v.paymentBaseCent)),
+      ...(resolvedAnchorName ? { anchorName: resolvedAnchorName } : {}),
+    })
+  }
+  return lines.sort((a, b) => a.productTitle.localeCompare(b.productTitle, 'zh-CN'))
 }
 
 function formatDailyReportDateLabel(dateKey: string): string {
@@ -410,12 +449,17 @@ export async function buildDailyReport(params: {
     await remapViewsWithScheduleOverlay(attachRawByMatchToViews(scoped.views, scoped.rawByMatch))
   ).filter((v) => !isOfflineDealView(v))
   /**
-   * 日报图片 = 线上直播经营日报。
-   * 线下成交不进汇总；经营看板总 GMV 仍 = 线上 + 线下。
+   * 真实发货 / 直播指标仍只统计线上。
+   * 线下成交单独汇总；有出单时追加逸凡卡片到日报图片。
    */
-  const allPerformanceViews = (
-    await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
-  ).filter((v) => !isOfflineDealView(v))
+  const allPerformanceViewsWithOffline = await getAnchorPerformanceViews(
+    scoped.views,
+    scoped.rawByMatch,
+  )
+  const allPerformanceViews = allPerformanceViewsWithOffline.filter((v) => !isOfflineDealView(v))
+  const gmvSplit = splitGmvByDealSource(allPerformanceViewsWithOffline)
+  const showOfflineOnReport =
+    rangeIncludesOfflineGmvSurface(params.startDate, params.endDate) && gmvSplit.offlineGmv > 0
   const storeWideShipped = sumDailyReportShippedFromViews(allPerformanceViews)
   const storeWideInvalid = countDailyReportOrders(allPerformanceViews).invalidOrderCount
 
@@ -595,6 +639,58 @@ export async function buildDailyReport(params: {
     }
   }
 
+  if (showOfflineOnReport) {
+    const yifan = findYifanManualSystemAnchor(config)
+    if (yifan) {
+      const offlineViews = allPerformanceViewsWithOffline.filter(
+        (v) => isOfflineDealView(v) && v.includedInGmv,
+      )
+      const offlineAmountYuan = roundMoneyYuan(gmvSplit.offlineGmv)
+      const offlineDealCount = gmvSplit.offlineDealCount
+      if (offlineAmountYuan > 0 || offlineDealCount > 0) {
+        const already = anchorRows.some(
+          (row) =>
+            row.anchorId === yifan.id || isOfflineOnlyAnchor({ systemKey: row.systemKey }),
+        )
+        if (!already) {
+          const totalForRatio = storeWideShipped.shippedAmountYuan + offlineAmountYuan
+          const row = buildAnchorRow({
+            config,
+            anchorId: yifan.id,
+            anchorName: yifan.name,
+            shopName: '线下成交',
+            reportDate: params.startDate,
+            sessionLabel: '线下',
+            shippedAmountYuan: 0,
+            soldOrderCount: offlineDealCount,
+            invalidOrderCount: 0,
+            shippedOrders: listOfflineDealOrderLines(offlineViews, yifan.name),
+            sessions: [],
+            totalShippedAmountYuan: totalForRatio,
+            scheduleAttendance: {
+              ...EMPTY_SCHEDULE_ATTENDANCE,
+              sessionLabel: '线下',
+              shopName: '线下成交',
+              displaySessionLabel: '线下',
+            },
+            liveTimeRange: '线下成交（无直播场次）',
+            liveStartTime: null,
+            liveEndTime: null,
+            scheduleTimeRange: null,
+            scheduleMatched: false,
+            scheduleMatchReason: null,
+          })
+          row.gmvYuan = offlineAmountYuan
+          row.amountRatio = safeRatioPercent(offlineAmountYuan, totalForRatio)
+          row.avgOrderAmountYuan = roundMoneyYuan(
+            safeDivide(offlineAmountYuan, offlineDealCount) ?? 0,
+          )
+          anchorRows.push(row)
+        }
+      }
+    }
+  }
+
   anchorRows.sort((a, b) => {
     const gmvDiff = Number(b.gmvYuan ?? 0) - Number(a.gmvYuan ?? 0)
     if (gmvDiff !== 0) return gmvDiff
@@ -657,6 +753,10 @@ export async function buildDailyReport(params: {
       ),
       liveRoomNewFollowers,
       totalNewFollowerCount,
+      onlineGmvYuan: roundMoneyYuan(gmvSplit.onlineGmv),
+      offlineGmvYuan: roundMoneyYuan(gmvSplit.offlineGmv),
+      offlineDealCount: gmvSplit.offlineDealCount,
+      totalGmvYuan: roundMoneyYuan(gmvSplit.onlineGmv + gmvSplit.offlineGmv),
     },
     anchors: anchorRows,
   }

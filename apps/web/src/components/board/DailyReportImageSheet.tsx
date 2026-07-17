@@ -96,6 +96,10 @@ export interface DailyReportPayload {
       anchorNames?: string[]
     }>
     totalNewFollowerCount: number
+    onlineGmvYuan?: number
+    offlineGmvYuan?: number
+    offlineDealCount?: number
+    totalGmvYuan?: number
   }
   anchors: DailyReportAnchorRow[]
 }
@@ -267,7 +271,38 @@ function ShippedOrdersBlock({
   )
 }
 
+function OfflineAnchorCard({ row }: { row: DailyReportAnchorRow }) {
+  return (
+    <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50/70 to-white p-4 shadow-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-base font-semibold text-slate-900">
+            {formatAnchorDisplayName(row.anchorName)}
+            {row.shopName ? ` · ${row.shopName}` : ''}
+          </p>
+          <p className="mt-0.5 text-[12px] text-slate-500">线下成交（无直播场次）</p>
+        </div>
+        <span className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800">
+          线下占比 {formatShippedSharePercent(row.amountRatio, row.gmvYuan)}
+        </span>
+      </div>
+      <MetricTable className="mt-3">
+        <MetricLine label="线下支付金额" value={formatMoney(row.gmvYuan)} strong />
+        <MetricLine label="线下成交笔数" value={formatOrderCount(row.soldOrderCount)} />
+        <MetricLine label="客单价" value={formatIntegerMoney(row.avgOrderAmountYuan)} />
+        {(row.shippedOrders?.length ?? 0) > 0 ? (
+          <ShippedOrdersBlock orders={row.shippedOrders} showAnchorName={false} />
+        ) : null}
+        <MetricTableNote>线下成交计入当日总支付金额；不计入线上真实发货</MetricTableNote>
+      </MetricTable>
+    </div>
+  )
+}
+
 function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
+  if (isOfflineOnlyAnchor({ systemKey: row.systemKey })) {
+    return <OfflineAnchorCard row={row} />
+  }
   const liveTime =
     row.liveTimeRange && row.liveTimeRange !== '—' && row.liveTimeRange !== '未读取到直播场次'
       ? row.liveTimeRange
@@ -377,10 +412,12 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
   const photoGridCols = readyPhotos.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'
   const photoCellHeight = readyPhotos.length <= 2 ? 'min-h-[480px]' : 'min-h-[360px]'
   const sheetWidthClass = readyPhotos.length > 0 ? 'w-[960px]' : 'w-[700px]'
-  /** 防御：即使后端旧缓存仍带 YIFAN_MANUAL，图片侧也不渲染；禁止用展示名过滤 */
-  const visibleAnchors = (data.anchors ?? []).filter(
+  const visibleAnchors = data.anchors ?? []
+  const compareAnchors = visibleAnchors.filter(
     (row) => !isOfflineOnlyAnchor({ systemKey: row.systemKey }),
   )
+  const offlineGmvYuan = Number(data.summary.offlineGmvYuan ?? 0)
+  const showOfflineGmv = offlineGmvYuan > 0
 
   return (
     <div
@@ -392,7 +429,9 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
       <div className="text-center">
         <h1 className="text-[22px] font-bold tracking-wide text-slate-900">{data.title}</h1>
         <p className="mt-1 text-[12px] text-slate-500">
-          本日报统计线上直播经营数据，线下成交请在主播业绩页的「线下 GMV」中查看。
+          {showOfflineGmv
+            ? '本日报含线上直播经营数据；若有线下成交，一并展示在日报中。'
+            : '本日报统计线上直播经营数据；当日有线下成交时会一并展示。'}
         </p>
       </div>
 
@@ -401,6 +440,14 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
         <p className="mt-2 text-[28px] font-bold leading-none text-slate-900">
           真实发货 {formatMoney(data.summary.totalShippedAmountYuan)}
         </p>
+        {showOfflineGmv ? (
+          <p className="mt-2 text-[18px] font-semibold leading-none text-amber-800">
+            线下 GMV {formatMoney(offlineGmvYuan)}
+            {data.summary.offlineDealCount != null
+              ? ` · ${formatOrderCount(data.summary.offlineDealCount)} 笔`
+              : ''}
+          </p>
+        ) : null}
         <MetricTable className="mt-4">
           <div className="grid grid-cols-2">
             <div className={`border-r ${GOLDEN_TABLE_LINE}`}>
@@ -424,6 +471,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
           </div>
           <MetricTableNote>
             关闭/退货单与真实发货同基础池，已剔除低价刷单；含关闭、取消、售后，不计入真实发货
+            {showOfflineGmv ? '；线下 GMV 另计，不计入真实发货' : ''}
           </MetricTableNote>
           {(data.summary.shippedOrders?.length ?? 0) > 0 ? (
             <ShippedOrdersBlock orders={data.summary.shippedOrders} compact />
@@ -466,7 +514,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(fun
       <div className="mt-4">
         <AnchorTrendCompareChart
           variant="report"
-          rows={toCompareLeaderboardRows(visibleAnchors)}
+          rows={toCompareLeaderboardRows(compareAnchors)}
           formatMoney={(v) => formatMoney(v)}
           formatCount={(n) => formatOrderCount(n)}
         />

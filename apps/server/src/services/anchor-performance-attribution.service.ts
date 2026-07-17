@@ -192,7 +192,7 @@ export function resolveDailyReportAnchorsForDate(
   if (useShopSessionRules && isReportDateOnOrAfterXiaoBaiCutoff(startDate)) {
     anchors.push(resolveXiaoBaiAnchor(config))
   }
-  // 日报为线上直播经营日报：排除线下专属主播（YIFAN_MANUAL），并按上岗日门槛过滤
+  // 日报直播主播候选：排除线下专属主播（YIFAN_MANUAL）；有线下出单时由 buildDailyReport 单独追加
   return anchors
     .map((a) => {
       const cfg = config.anchors.find((x) => x.id === a.anchorId || x.name === a.anchorName)

@@ -1,5 +1,7 @@
 /**
- * 逸凡线下 GMV 下钻 + 日报排除验收
+ * 逸凡线下 GMV 下钻 + 日报口径验收
+ * - 直播主播候选 resolveDailyReportAnchorsForDate 仍排除 YIFAN_MANUAL
+ * - buildDailyReport 在当日有线下出单时追加逸凡卡片与 offlineGmvYuan
  * 运行：OFFLINE_DEAL_SKIP_CACHE_INVALIDATE=1 npx tsx apps/server/scripts/accept-yifan-offline-gmv-drill.ts
  */
 import assert from 'node:assert/strict'
@@ -22,6 +24,8 @@ import { resolveDailyReportAnchorsForDate } from '../src/services/anchor-perform
 import { getAnchorConfigSync } from '../src/services/anchor.service'
 import { buildBoardMetricDetail } from '../src/services/board-metric-detail.service'
 import { calculateBusinessMetrics } from '../src/services/business-metrics.service'
+import { buildDailyReport } from '../src/services/daily-report.service'
+import { getOrBuildBusinessBoardCache } from '../src/services/business-cache.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
 
 const DAY = '2026-07-15'
@@ -55,15 +59,15 @@ async function main() {
   assert.equal(yifan.systemKey, YIFAN_SYSTEM_KEY)
   assert.ok(isOfflineOnlyAnchor(yifan))
 
-  // 1. 日报主播列表排除 YIFAN_MANUAL（禁止用展示名）
+  // 1. 直播主播候选列表排除 YIFAN_MANUAL（禁止用展示名）；日报出单时由 buildDailyReport 单独追加
   const reportAnchors = resolveDailyReportAnchorsForDate(config, DAY)
   assert.ok(
     reportAnchors.every((a) => a.systemKey !== YIFAN_SYSTEM_KEY),
-    '日报 reportAnchors 不得含 YIFAN_MANUAL',
+    '日报直播候选 reportAnchors 不得含 YIFAN_MANUAL',
   )
   assert.ok(
     reportAnchors.every((a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey })),
-    '日报 reportAnchors 不得含线下专属主播',
+    '日报直播候选 reportAnchors 不得含线下专属主播',
   )
 
   const stamp = Date.now()
@@ -235,10 +239,37 @@ async function main() {
   assert.ok(renamed)
   assert.equal(renamed!.systemKey, YIFAN_SYSTEM_KEY)
 
+  // 有线下出单时，日报图片 payload 含线下 GMV + 逸凡卡片（不计入真实发货）
+  await getOrBuildBusinessBoardCache({
+    preset: 'custom',
+    startDate: DAY,
+    endDate: DAY,
+    forceRebuild: true,
+  })
+  const dailyReport = await buildDailyReport({
+    preset: 'custom',
+    startDate: DAY,
+    endDate: DAY,
+  })
+  assert.ok(
+    Number(dailyReport.summary.offlineGmvYuan ?? 0) >= 1888.5 - 0.02,
+    '日报 summary.offlineGmvYuan 应含确认线下单',
+  )
+  assert.ok(
+    Number(dailyReport.summary.totalShippedAmountYuan ?? 0) >= 0,
+    '真实发货字段仍存在',
+  )
+  const yifanRow = dailyReport.anchors.find((a) => a.systemKey === YIFAN_SYSTEM_KEY)
+  assert.ok(yifanRow, '有线下出单时日报 anchors 应含 YIFAN_MANUAL')
+  assert.ok(Number(yifanRow!.gmvYuan ?? 0) >= 1888.5 - 0.02)
+  assert.equal(Number(yifanRow!.shippedAmountYuan ?? 0), 0, '逸凡线下不计入真实发货')
+
   console.log('OK accept-yifan-offline-gmv-drill', {
     offlineGmvCard: detail.summary.valueRaw,
     drillRows: detail.pagination.total,
     reportAnchorCount: reportAnchors.length,
+    dailyReportOfflineGmv: dailyReport.summary.offlineGmvYuan,
+    dailyReportHasYifan: Boolean(yifanRow),
     otherOfflineExcluded: otherDealAmount > 0,
   })
 }

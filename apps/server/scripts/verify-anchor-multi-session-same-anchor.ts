@@ -115,8 +115,36 @@ async function main(): Promise<void> {
   )
 
   const xiaoyiSessions = assignment.byAnchor.get('小艺') ?? []
-  assert.equal(xiaoyiSessions.length, 2, '同主播两场不重叠直播都应保留')
-  console.log('  ✓ 同主播同一天两场不重叠直播都被保留')
+  assert.equal(xiaoyiSessions.length, 2, '同主播两场不重叠直播都应保留（归属层）')
+  console.log('  ✓ 同主播同一天两场不重叠直播都被保留（归属层）')
+
+  // 展示层：不同排班行 → 仍显示 2 个班次
+  const {
+    collapseDailyReportDisplaySessions,
+    buildLiveSessionDisplaySummary,
+  } = await import('../src/services/daily-report-session-display.util')
+  const displayGroups = collapseDailyReportDisplaySessions(xiaoyiSessions)
+  assert.equal(displayGroups.length, 2, '不同排班行展示仍为 2 班次')
+  const displaySummary = buildLiveSessionDisplaySummary(displayGroups)
+  assert.ok(displaySummary.liveDurationText.includes('直播 2 场'), '不同排班行文案为直播2场')
+  console.log('  ✓ 展示层：不同排班行仍显示直播 2 场')
+
+  // 展示层：同一排班断播重开 → 合并为 1
+  const reconnectA = liveSession('live-re1', '09:35', '11:00')
+  const reconnectB = liveSession('live-re2', '11:10', '13:50')
+  const assignmentReconnect = assignDailyReportLiveSessionsToAnchors(
+    [reconnectA, reconnectB],
+    [schedules[0]!],
+    DATE,
+  )
+  const reconnectSessions = assignmentReconnect.byAnchor.get('小艺') ?? []
+  assert.ok(reconnectSessions.length >= 2, '归属层保留断播两段')
+  const reconnectGroups = collapseDailyReportDisplaySessions(reconnectSessions)
+  assert.equal(reconnectGroups.length, 1, '同一排班断播重开展示合并为 1')
+  const reconnectSummary = buildLiveSessionDisplaySummary(reconnectGroups)
+  assert.equal(reconnectSummary.liveDurationText.includes('直播'), false)
+  assert.equal(reconnectSummary.platformRecordNote, '平台记录2段')
+  console.log('  ✓ 展示层：同一排班断播重开合并为 1，文案不含直播2场')
 
   const totalDuration = sumUniqueDailyReportLiveDurationMinutes(assignment.assignedSessions)
   const expectedDuration = xiaoyiSessions.reduce((s, x) => s + x.durationMinutes, 0)

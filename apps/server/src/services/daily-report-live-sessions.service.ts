@@ -9,6 +9,7 @@ import {
   normalizeXhsLiveSession,
   type NormalizedLiveSession,
 } from './xhs-api-sync/xhs-json-normalizer.service'
+import { buildShopLiveSessionWhere } from './xhs-api-sync/xhs-live-session-query.util'
 import { resolveDateRange } from '../utils/date-range'
 import { formatDateTimeShanghai, parseLiveSessionTimeMs } from '../utils/business-timezone'
 import {
@@ -254,13 +255,13 @@ export async function loadPerShopDailyReportLiveSessions(params: {
     }
 
     const rows = await prisma.xhsRawLiveSession.findMany({
-      where: {
-        liveAccountId: account.id,
-        startTime: {
-          gte: new Date(range.startTimeMs - RAW_LIVE_RANGE_DB_BUFFER_MS),
-          lte: new Date(range.endTimeMs + RAW_LIVE_RANGE_DB_BUFFER_MS),
-        },
-      },
+      where: buildShopLiveSessionWhere({
+        officialAccountId: account.id,
+        shopKey: shop.shopKey,
+        shopName,
+        startTimeGte: new Date(range.startTimeMs - RAW_LIVE_RANGE_DB_BUFFER_MS),
+        startTimeLte: new Date(range.endTimeMs + RAW_LIVE_RANGE_DB_BUFFER_MS),
+      }),
       orderBy: { updatedAt: 'desc' },
     })
 

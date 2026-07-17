@@ -69,6 +69,39 @@ const AVG_STAY_KEYS = [
   'perWatchDuration',
 ] as const
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return null
+}
+
+/**
+ * 收集 CTR / 比率字段可能出现的嵌套对象（扁平 raw + room_data_info 等）。
+ * 不修改原 raw。
+ */
+export function collectLiveMetricSourceRecords(
+  raw: Record<string, unknown> | undefined,
+): Array<{ path: string; record: Record<string, unknown> }> {
+  const root = raw ?? {}
+  const out: Array<{ path: string; record: Record<string, unknown> }> = [{ path: 'raw', record: root }]
+
+  const tryPush = (path: string, value: unknown) => {
+    const rec = asRecord(value)
+    if (rec) out.push({ path, record: rec })
+  }
+
+  tryPush('raw.room_data_info', root.room_data_info)
+  tryPush('raw.data', root.data)
+  const data = asRecord(root.data)
+  if (data) tryPush('raw.data.room_data_info', data.room_data_info)
+  tryPush('raw.realtimeMetric', root.realtimeMetric)
+  const realtime = asRecord(root.realtimeMetric)
+  if (realtime) tryPush('raw.realtimeMetric.room_data_info', realtime.room_data_info)
+
+  return out
+}
+
 function extractLiveFieldValue(item: Record<string, unknown>, fieldName: string): unknown {
   const field = item[fieldName]
   if (field && typeof field === 'object' && !Array.isArray(field)) {
@@ -83,15 +116,41 @@ function extractLiveFieldValue(item: Record<string, unknown>, fieldName: string)
   return item[fieldName]
 }
 
+/** 解析比率：0–1 小数、0–100 百分数、带 % 字符串 */
+export function parseLiveRateValue(value: unknown): number | null {
+  if (value == null || value === '') return null
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const o = value as Record<string, unknown>
+    if (o.value != null && o.value !== '') return parseLiveRateValue(o.value)
+    if (o.displayValue != null && o.displayValue !== '') return parseLiveRateValue(o.displayValue)
+    return null
+  }
+  const raw = String(value).trim()
+  const hasPercent = raw.includes('%')
+  const num = typeof value === 'number' ? value : Number(raw.replace(/%/g, '').replace(/,/g, ''))
+  if (!Number.isFinite(num)) return null
+  if (hasPercent) {
+    if (num < 0 || num > 100) return null
+    return num / 100
+  }
+  if (num > 1 && num <= 100) return num / 100
+  if (num >= 0 && num <= 1) return num
+  return null
+}
+
 function pickLiveRawCountNullable(
   raw: Record<string, unknown>,
   ...keys: readonly string[]
 ): { value: number | null; key: string | null } {
-  for (const k of keys) {
-    const v = extractLiveFieldValue(raw, k)
-    if (v == null || v === '') continue
-    const num = typeof v === 'number' ? v : Number(String(v).replace(/,/g, ''))
-    if (Number.isFinite(num)) return { value: Math.round(num), key: k }
+  for (const { path, record } of collectLiveMetricSourceRecords(raw)) {
+    for (const k of keys) {
+      const v = extractLiveFieldValue(record, k)
+      if (v == null || v === '') continue
+      const num = typeof v === 'number' ? v : Number(String(v).replace(/,/g, ''))
+      if (Number.isFinite(num)) {
+        return { value: Math.round(num), key: path === 'raw' ? k : `${path}.${k}` }
+      }
+    }
   }
   return { value: null, key: null }
 }
@@ -103,18 +162,19 @@ function pickLiveRawNumber(
   return pickLiveRawCountNullable(raw, ...keys)
 }
 
-/** 比率字段：支持 0–1 小数，或偶发的百分数写法（>1 且 ≤100 时按百分数折算） */
+/** 比率字段：支持嵌套 room_data_info、value/displayValue 包装 */
 function pickLiveRawRate(
   raw: Record<string, unknown>,
   ...keys: readonly string[]
 ): { value: number | null; key: string | null } {
-  for (const k of keys) {
-    const v = extractLiveFieldValue(raw, k)
-    if (v == null || v === '') continue
-    const num = typeof v === 'number' ? v : Number(String(v).replace(/%/g, '').replace(/,/g, ''))
-    if (!Number.isFinite(num)) continue
-    if (num > 1 && num <= 100) return { value: num / 100, key: k }
-    if (num >= 0 && num <= 1) return { value: num, key: k }
+  for (const { path, record } of collectLiveMetricSourceRecords(raw)) {
+    for (const k of keys) {
+      const v = extractLiveFieldValue(record, k)
+      if (v == null || v === '') continue
+      const parsed = parseLiveRateValue(v)
+      if (parsed == null) continue
+      return { value: parsed, key: path === 'raw' ? k : `${path}.${k}` }
+    }
   }
   return { value: null, key: null }
 }

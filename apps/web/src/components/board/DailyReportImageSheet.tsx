@@ -1,7 +1,6 @@
 import React from 'react'
 import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import {
-  formatCoverClickRateWithQuality,
   formatDensity,
   formatDuration,
   formatHourly,
@@ -9,9 +8,11 @@ import {
   formatMoney,
   formatOrderCount,
   formatPeopleCount,
+  formatPeopleCountOrMissing,
   formatRatePercent,
   formatShippedSharePercent,
   formatStayDurationSeconds,
+  resolveCoverClickRateQuality,
 } from './dailyReportFormatters'
 import type { AnchorLivePeriodView } from '../../lib/anchor-live-period'
 import { AnchorTrendChart } from './AnchorTrendChart'
@@ -43,6 +44,8 @@ export interface DailyReportAnchorRow extends AnchorLivePeriodView {
   scheduleMatched?: boolean
   scheduleMatchReason?: string | null
   liveDurationText: string
+  /** 同班次平台多段时的辅助说明 */
+  liveSessionPlatformNote?: string | null
   liveDurationMinutes: number
   shippedAmountYuan: number
   soldOrderCount: number
@@ -141,7 +144,15 @@ function MetricTable({ children, className = '' }: { children: React.ReactNode; 
   )
 }
 
-function MetricLine({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
+function MetricLine({
+  label,
+  value,
+  strong,
+}: {
+  label: string
+  value: React.ReactNode
+  strong?: boolean
+}) {
   return (
     <div className={`grid grid-cols-[minmax(0,1fr)_auto] border-b ${GOLDEN_TABLE_LINE} last:border-b-0`}>
       <div
@@ -159,6 +170,29 @@ function MetricLine({ label, value, strong }: { label: string; value: string; st
         {value}
       </div>
     </div>
+  )
+}
+
+function CoverClickRateQualityBadge({ rate }: { rate: number | null | undefined }) {
+  const q = resolveCoverClickRateQuality(rate)
+  if (q.status === 'missing') {
+    return (
+      <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[12px] font-medium bg-slate-100 text-slate-500">
+        数据缺失
+      </span>
+    )
+  }
+  const badgeClass =
+    q.status === 'pass'
+      ? 'bg-emerald-50 text-emerald-800'
+      : 'bg-rose-50 text-rose-700'
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] font-medium ${badgeClass}`}
+    >
+      <span className="tabular-nums">{q.pctText}</span>
+      <span>{q.label}</span>
+    </span>
   )
 }
 
@@ -330,6 +364,9 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
             直播 {liveTime}
           </p>
           <p className="mt-1 text-[12px] text-slate-500">{row.liveDurationText}</p>
+          {row.liveSessionPlatformNote ? (
+            <p className="mt-0.5 text-[11px] text-slate-400">{row.liveSessionPlatformNote}</p>
+          ) : null}
         </div>
         <div className="flex flex-col items-end gap-1">
           <span className="rounded-full bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
@@ -362,7 +399,7 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
         <MetricLine label="场观人数" value={formatPeopleCount(row.viewSessionCount)} strong />
         <MetricLine
           label="封面点击率"
-          value={formatCoverClickRateWithQuality(row.coverClickRate)}
+          value={<CoverClickRateQualityBadge rate={row.coverClickRate} />}
           strong
         />
         <MetricLine
@@ -370,16 +407,23 @@ function AnchorCard({ row }: { row: DailyReportAnchorRow }) {
           value={formatStayDurationSeconds(row.avgViewDurationSeconds)}
           strong
         />
-        <MetricLine label="60s停留人数" value={formatPeopleCount(row.stay60sUserCount)} />
+        <MetricLine label="60s停留人数" value={formatPeopleCountOrMissing(row.stay60sUserCount)} />
         <MetricLine
           label="曝光次数"
           value={
             row.impressionCount != null && Number.isFinite(row.impressionCount)
               ? Math.round(row.impressionCount).toLocaleString('zh-CN')
-              : '--'
+              : '数据缺失'
           }
         />
-        <MetricLine label="观看支付率" value={formatRatePercent(row.viewPayRate)} />
+        <MetricLine
+          label="观看支付率"
+          value={
+            row.viewPayRate != null && Number.isFinite(row.viewPayRate)
+              ? formatRatePercent(row.viewPayRate)
+              : '数据缺失'
+          }
+        />
         <MetricLine label="进房人数" value={formatPeopleCount(row.joinUserCount)} />
         <MetricLine
           label="平均在线"

@@ -11,6 +11,7 @@ import {
 } from './xhs-live-sync.service'
 import { getApiDefinition, isApiConfigured } from './xhs-api-registry'
 import { requestXhsApi } from './xhs-api-client.service'
+import { mergePreserveRealtimeMetricFields } from './xhs-live-realtime-metric.service'
 
 const DEFAULT_MAX_PAGES = 100
 
@@ -52,7 +53,7 @@ async function saveLiveSessionItem(
   const id = `${liveAccountId}::${baseId}`
   const existing = await prisma.xhsRawLiveSession.findUnique({
     where: { id },
-    select: { id: true },
+    select: { id: true, rawJson: true },
   })
   const liveId = pickLiveField(item, 'liveId')
   const liveName = pickLiveField(item, 'liveName')
@@ -60,7 +61,9 @@ async function saveLiveSessionItem(
     pickLiveField(item, 'nickName') ?? pickLiveField(item, 'userId')
   const startTime = parseLiveDateTime(extractFieldValue(item, 'liveStartTime'))
   const endTime = parseLiveDateTime(extractFieldValue(item, 'liveEndTime'))
-  const rawJson = item as Prisma.InputJsonValue
+  // 保留已补齐的大屏指标，避免 sellerLiveDetailData 整表覆盖冲掉 live_ctr / 60s
+  const mergedRaw = mergePreserveRealtimeMetricFields(existing?.rawJson, item)
+  const rawJson = mergedRaw as Prisma.InputJsonValue
 
   await prisma.xhsRawLiveSession.upsert({
     where: { id },
@@ -241,11 +244,12 @@ export async function syncLiveSessionListOnlyWithSave(
         liveAccountName,
         context: params.context,
         maxRequests: 40,
+        invalidateCache: true,
       })
-      if (enrich.enriched > 0) {
-        warnings.push(`大屏指标已补齐 ${enrich.enriched} 场`)
-      }
-      warnings.push(...enrich.warnings.slice(0, 5))
+      warnings.push(
+        `大屏指标补齐：成功 ${enrich.enriched} / 跳过 ${enrich.skipped} / 失败 ${enrich.failed} / 请求 ${enrich.attempted}`,
+      )
+      warnings.push(...enrich.warnings.slice(0, 8))
     } catch (err) {
       warnings.push(
         `大屏指标补齐异常：${err instanceof Error ? err.message : String(err)}`.slice(0, 160),

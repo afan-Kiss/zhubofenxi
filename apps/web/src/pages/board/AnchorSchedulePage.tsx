@@ -10,6 +10,8 @@ import {
 import { invalidateBoardLiveQueryCache } from '../../lib/board-live-query-cache'
 import { useBoardLiveQuery } from '../../providers/BoardLiveQueryProvider'
 import { ScheduleTimeRangePicker } from '../../components/ui/ScheduleTimePicker'
+import { ScheduleTimelineEditor } from '../../components/schedule/ScheduleTimelineEditor'
+import { resolveAnchorTheme } from '../../lib/anchor-theme'
 
 function afterScheduleMutation(): void {
   invalidateBoardLiveQueryCache('anchor-schedule')
@@ -32,6 +34,7 @@ interface ScheduleAnchorOption {
   id: string
   name: string
   enabled: boolean
+  color?: string | null
   attributionMode?: 'schedule' | 'manual' | string | null
   systemKey?: string | null
   effectiveFrom?: string | null
@@ -112,9 +115,12 @@ function defaultEndFromStart(startTime: string): string {
 export const AnchorSchedulePage: React.FC = () => {
   const { reload } = useBoardLiveQuery()
   const [searchParams] = useSearchParams()
-  const tableEndRef = useRef<HTMLTableRowElement>(null)
+  const rowRefs = useRef<Array<HTMLTableRowElement | null>>([])
   const [date, setDate] = useState(() => resolveInitialScheduleDate(searchParams))
   const [rows, setRows] = useState<ScheduleRow[]>([])
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
+  /** 仅表格选中 / 新增时递增，驱动时间轴按需滚到可见区（点时间轴本身不触发，避免跳动） */
+  const [timelineFocusKey, setTimelineFocusKey] = useState(0)
   const [warnings, setWarnings] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -132,6 +138,10 @@ export const AnchorSchedulePage: React.FC = () => {
   const validation = useMemo(() => validateScheduleRows(rows), [rows])
   const conflictRowSet = useMemo(() => conflictIndexes(validation.conflicts), [validation.conflicts])
   const hasBlockingIssues = validation.fieldErrors.length > 0 || validation.conflicts.length > 0
+  const conflictMessagesByRow = useMemo(
+    () => rows.map((_, index) => rowConflictMessages(index, validation.conflicts)),
+    [rows, validation.conflicts],
+  )
 
   const selectableAnchors = useMemo(
     () =>
@@ -139,6 +149,38 @@ export const AnchorSchedulePage: React.FC = () => {
         .filter((a) => isScheduleSelectableOnDate(a, date))
         .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')),
     [anchorOptions, date],
+  )
+
+  const anchorColorById = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const a of anchorOptions) {
+      if (a.id && a.color) map.set(a.id, a.color)
+      if (a.name && a.color) map.set(`name:${a.name}`, a.color)
+    }
+    return map
+  }, [anchorOptions])
+
+  const resolveRowColor = useCallback(
+    (row: ScheduleRow): string | null => {
+      if (row.anchorId && anchorColorById.has(row.anchorId)) {
+        return anchorColorById.get(row.anchorId) ?? null
+      }
+      const name = row.anchorName?.trim()
+      if (name && anchorColorById.has(`name:${name}`)) {
+        return anchorColorById.get(`name:${name}`) ?? null
+      }
+      return null
+    },
+    [anchorColorById],
+  )
+
+  const timelineRows = useMemo(
+    () =>
+      rows.map((row) => ({
+        ...row,
+        color: resolveRowColor(row),
+      })),
+    [rows, resolveRowColor],
   )
 
   const applyScheduleResponse = (data: ScheduleResponse) => {
@@ -199,7 +241,12 @@ export const AnchorSchedulePage: React.FC = () => {
 
   useEffect(() => {
     if (!scrollToNewRow) return
-    tableEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    const lastIndex = rows.length - 1
+    if (lastIndex >= 0) {
+      setSelectedIndex(lastIndex)
+      setTimelineFocusKey((k) => k + 1)
+      rowRefs.current[lastIndex]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
     setScrollToNewRow(false)
   }, [scrollToNewRow, rows.length])
 
@@ -363,6 +410,24 @@ export const AnchorSchedulePage: React.FC = () => {
     )
   }
 
+  const handleTimelineTimeChange = useCallback(
+    (index: number, patch: { startTime?: string; endTime?: string }) => {
+      setWarnings([])
+      setRows((prev) =>
+        prev.map((r, i) =>
+          i === index
+            ? {
+                ...r,
+                ...patch,
+                source: 'manual',
+              }
+            : r,
+        ),
+      )
+    },
+    [],
+  )
+
   const deleteRow = (index: number) => {
     const row = rows[index]
     if (!row) return
@@ -375,15 +440,27 @@ export const AnchorSchedulePage: React.FC = () => {
       return
     }
     setRows((prev) => prev.filter((_, i) => i !== index))
+    setSelectedIndex((prev) => {
+      if (prev == null) return null
+      if (prev === index) return null
+      if (prev > index) return prev - 1
+      return prev
+    })
     setWarnings([])
   }
 
-  const addRow = () => {
+  const addRow = (preset?: { shopName: string; startTime: string; endTime: string }) => {
     setWarnings([])
     const last = rows[rows.length - 1]
-    const shop = last?.shopName?.trim() || last?.liveRoomName?.trim() || DEFAULT_SHOP
-    const startTime = last?.endTime === '24:00' ? '18:00' : last?.endTime?.trim() || '09:00'
-    const endTime = last ? defaultEndFromStart(startTime) : '18:00'
+    const shop =
+      preset?.shopName?.trim() ||
+      last?.shopName?.trim() ||
+      last?.liveRoomName?.trim() ||
+      DEFAULT_SHOP
+    const startTime =
+      preset?.startTime ||
+      (last?.endTime === '24:00' ? '18:00' : last?.endTime?.trim() || '09:00')
+    const endTime = preset?.endTime || (last ? defaultEndFromStart(startTime) : '18:00')
     const first = selectableAnchors[0]
     setRows((prev) => [
       ...prev,
@@ -444,7 +521,7 @@ export const AnchorSchedulePage: React.FC = () => {
       </div>
 
       <div className="rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-900">
-        编辑下方排班后点「保存并确认」，系统会按新排班重算当天业绩，并用于日报排班对照。
+        可在上方时间轴拖动调整时段，或在下方明细表精确编辑。完成后点「保存并确认」，系统会按新排班重算当天业绩。
         {effectiveSummary ? <span className="mt-1 block text-sky-800">{effectiveSummary}</span> : null}
       </div>
 
@@ -466,7 +543,7 @@ export const AnchorSchedulePage: React.FC = () => {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={addRow}
+            onClick={() => addRow()}
             className="inline-flex items-center gap-1 rounded bg-slate-100 px-3 py-1.5 text-sm hover:bg-slate-200"
           >
             <Plus size={14} />
@@ -570,10 +647,26 @@ export const AnchorSchedulePage: React.FC = () => {
         </div>
       ) : null}
 
+      <ScheduleTimelineEditor
+        date={date}
+        rows={timelineRows}
+        selectedIndex={selectedIndex}
+        focusRequestKey={timelineFocusKey}
+        conflictRowIndexes={conflictRowSet}
+        conflictMessagesByRow={conflictMessagesByRow}
+        onSelectedIndexChange={setSelectedIndex}
+        onRowTimeChange={handleTimelineTimeChange}
+        onAddAt={(payload) => addRow(payload)}
+      />
+
       <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+        <div className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
+          排班明细与精确编辑（与上方时间轴双向同步）
+        </div>
         <table className="min-w-full text-sm">
           <thead className="bg-slate-50 text-left text-slate-600">
             <tr>
+              <th className="px-3 py-2 w-10">#</th>
               <th className="px-3 py-2">主播</th>
               <th className="px-3 py-2">店铺/直播间</th>
               <th className="px-3 py-2">时段</th>
@@ -585,16 +678,43 @@ export const AnchorSchedulePage: React.FC = () => {
           <tbody>
             {rows.map((row, index) => {
               const isConflict = conflictRowSet.has(index)
-              const rowTips = rowConflictMessages(index, validation.conflicts)
+              const isSelected = selectedIndex === index
+              const rowTips = conflictMessagesByRow[index] ?? []
               const tip = rowTips.join('\n')
+              const theme = resolveAnchorTheme({
+                id: row.anchorId,
+                name: row.anchorName,
+                color: resolveRowColor(row),
+              })
               return (
                 <tr
-                  key={`${row.anchorName}-${index}-${row.startTime}`}
-                  ref={index === rows.length - 1 ? tableEndRef : undefined}
-                  className={`border-t border-slate-100 ${isConflict ? 'bg-rose-50/80' : ''}`}
+                  key={`${row.anchorName}-${index}-${row.startTime}-${row.endTime}`}
+                  ref={(el) => {
+                    rowRefs.current[index] = el
+                  }}
+                  className={`border-t border-slate-100 cursor-pointer ${
+                    isConflict
+                      ? 'bg-rose-50/80'
+                      : isSelected
+                        ? 'bg-sky-50/90'
+                        : 'hover:bg-slate-50/80'
+                  }`}
                   title={tip || undefined}
+                  onClick={() => {
+                    setSelectedIndex(index)
+                    setTimelineFocusKey((k) => k + 1)
+                  }}
                 >
                   <td className="px-3 py-2">
+                    <span
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+                      style={{ backgroundColor: theme.main }}
+                      aria-hidden
+                    >
+                      {index + 1}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <select
                       value={row.anchorId || row.anchorName}
                       onChange={(e) => {
@@ -604,7 +724,6 @@ export const AnchorSchedulePage: React.FC = () => {
                           updateRow(index, { anchorId: hit.id, anchorName: hit.name })
                           return
                         }
-                        // 历史行：姓名仍在但已不在可选列表
                         updateRow(index, { anchorId: null, anchorName: v })
                       }}
                       className="min-w-[7rem] rounded border border-slate-200 px-2 py-1"
@@ -620,7 +739,7 @@ export const AnchorSchedulePage: React.FC = () => {
                       ))}
                     </select>
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <select
                       value={row.liveRoomName}
                       onChange={(e) => {
@@ -636,7 +755,7 @@ export const AnchorSchedulePage: React.FC = () => {
                       ))}
                     </select>
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <ScheduleTimeRangePicker
                       startTime={row.startTime}
                       endTime={row.endTime}
@@ -645,7 +764,7 @@ export const AnchorSchedulePage: React.FC = () => {
                     />
                   </td>
                   <td className="px-3 py-2 text-slate-500">{sourceLabel(row.source)}</td>
-                  <td className="px-3 py-2" title={tip || undefined}>
+                  <td className="px-3 py-2" title={tip || undefined} onClick={(e) => e.stopPropagation()}>
                     <input
                       value={row.note ?? ''}
                       onChange={(e) => updateRow(index, { note: e.target.value })}
@@ -654,7 +773,7 @@ export const AnchorSchedulePage: React.FC = () => {
                     />
                     {tip ? <p className="mt-1 text-xs text-rose-600">{tip}</p> : null}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
                       onClick={() => deleteRow(index)}
@@ -669,7 +788,7 @@ export const AnchorSchedulePage: React.FC = () => {
             })}
             {!loading && rows.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
                   当天暂无排班，可点「更多 → 生成默认排班」或「新增」
                 </td>
               </tr>

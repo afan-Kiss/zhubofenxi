@@ -53,6 +53,12 @@ export function formatPeopleCount(count: number | null | undefined): string {
   return `${Math.round(count).toLocaleString('zh-CN')}人`
 }
 
+/** 大屏人数指标：缺失时显示「数据缺失」，禁止把 null 显示成 0 人或 -- */
+export function formatPeopleCountOrMissing(count: number | null | undefined): string {
+  if (count == null || !Number.isFinite(count)) return '数据缺失'
+  return `${Math.round(count).toLocaleString('zh-CN')}人`
+}
+
 export function formatRatePercent(ratio: number | null | undefined): string {
   if (ratio == null || !Number.isFinite(ratio)) return '--'
   return `${(ratio * 100).toFixed(1)}%`
@@ -61,11 +67,28 @@ export function formatRatePercent(ratio: number | null | undefined): string {
 /** 封面点击率合格线：≥7% */
 export const COVER_CLICK_RATE_PASS_THRESHOLD = 0.07
 
-export function formatCoverClickRateWithQuality(ratio: number | null | undefined): string {
-  if (ratio == null || !Number.isFinite(ratio)) return '--'
-  const pct = `${(ratio * 100).toFixed(1)}%`
+export type CoverClickRateQualityStatus = 'pass' | 'fail' | 'missing'
+
+export function resolveCoverClickRateQuality(
+  ratio: number | null | undefined,
+): { status: CoverClickRateQualityStatus; pctText: string | null; label: string } {
+  if (ratio == null || !Number.isFinite(ratio)) {
+    return { status: 'missing', pctText: null, label: '数据缺失' }
+  }
+  const pctText = `${(ratio * 100).toFixed(1)}%`
   const ok = ratio >= COVER_CLICK_RATE_PASS_THRESHOLD
-  return ok ? `${pct} 合格` : `${pct} 不合格`
+  return {
+    status: ok ? 'pass' : 'fail',
+    pctText,
+    label: ok ? '合格' : '不合格',
+  }
+}
+
+/** 纯文本（兼容旧调用）；缺失为「数据缺失」而非「--」 */
+export function formatCoverClickRateWithQuality(ratio: number | null | undefined): string {
+  const q = resolveCoverClickRateQuality(ratio)
+  if (q.status === 'missing') return '数据缺失'
+  return `${q.pctText} ${q.label}`
 }
 
 export function formatStayDurationSeconds(seconds: number | null | undefined): string {

@@ -45,7 +45,12 @@ import {
   type DailyReportShippedOrderLine,
 } from './daily-report-order.util'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
-import { buildDailyReportLiveScheduleFields, buildLiveSessionCountSummary, buildPerSessionLivePeriodText } from './daily-report-live-schedule-match.service'
+import { buildDailyReportLiveScheduleFields } from './daily-report-live-schedule-match.service'
+import {
+  buildDisplayLivePeriodText,
+  buildLiveSessionDisplaySummary,
+  collapseDailyReportDisplaySessions,
+} from './daily-report-session-display.util'
 import {
   resolveFallbackSessionDisplay,
   type AnchorAttendanceStatusPayload,
@@ -100,6 +105,8 @@ export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   scheduleMatched: boolean
   scheduleMatchReason: string | null
   liveDurationText: string
+  /** 同一展示班次内平台多段记录时的辅助说明，如「平台记录2段」 */
+  liveSessionPlatformNote?: string | null
   liveDurationMinutes: number
   shippedAmountYuan: number
   soldOrderCount: number
@@ -204,11 +211,6 @@ function resolveSessionLabel(config: AnchorConfig, anchorId: string): string {
   if (startHour >= 18) return '晚场'
   if (startHour >= 12) return '午场'
   return '早场'
-}
-
-function buildLivePeriodText(sessions: AnchorLiveSessionBrief[]): string {
-  if (sessions.length === 0) return '—'
-  return buildPerSessionLivePeriodText(sessions)
 }
 
 function pickShopNameFromRaw(raw: Record<string, unknown> | undefined): string {
@@ -352,6 +354,13 @@ function buildAnchorRow(params: {
   const traffic =
     params.sessions.length > 0 ? aggregateAnchorLiveSessionTraffic(params.sessions) : null
   const hasRealSessions = params.sessions.length > 0
+  const displayGroups = hasRealSessions
+    ? collapseDailyReportDisplaySessions(params.sessions)
+    : []
+  const displaySummary = buildLiveSessionDisplaySummary(displayGroups)
+  const displayPeriodText = hasRealSessions
+    ? buildDisplayLivePeriodText(displayGroups)
+    : '—'
   const sessionLabel =
     params.scheduleAttendance.displaySessionLabel ||
     params.sessionLabel ||
@@ -374,11 +383,9 @@ function buildAnchorRow(params: {
           dateKey: params.reportDate,
         }).shopName
       : '')
-  const liveDurationText = hasRealSessions ? buildLiveSessionCountSummary(params.sessions) : '—'
+  const liveDurationText = hasRealSessions ? displaySummary.liveDurationText : '—'
   const liveTimeRange = hasRealSessions
-    ? params.liveTimeRange && params.liveTimeRange !== '—'
-      ? params.liveTimeRange
-      : buildLivePeriodText(params.sessions).replace(/~/g, '–')
+    ? displayPeriodText.replace(/~/g, '–')
     : NO_LIVE_SESSION_TEXT
   const meta = params.config.anchors.find((a) => a.id === params.anchorId)
   return {
@@ -387,7 +394,7 @@ function buildAnchorRow(params: {
     attributionMode: meta?.attributionMode ?? null,
     color: meta?.color ?? null,
     anchorName: params.anchorName,
-    livePeriodText: hasRealSessions ? buildLivePeriodText(params.sessions) : '—',
+    livePeriodText: hasRealSessions ? displayPeriodText : '—',
     liveTimeRange,
     liveStartTime: hasRealSessions ? params.liveStartTime : null,
     liveEndTime: hasRealSessions ? params.liveEndTime : null,
@@ -395,6 +402,7 @@ function buildAnchorRow(params: {
     scheduleMatched: params.scheduleMatched,
     scheduleMatchReason: params.scheduleMatchReason,
     liveDurationText,
+    liveSessionPlatformNote: displaySummary.platformRecordNote,
     liveDurationMinutes,
     shippedAmountYuan: params.shippedAmountYuan,
     soldOrderCount: params.soldOrderCount,

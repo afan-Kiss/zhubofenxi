@@ -19,6 +19,10 @@ import {
   buildPerSessionLivePeriodText,
   matchLiveSessionToBestScheduleRow,
 } from '../src/services/daily-report-live-schedule-match.service'
+import {
+  buildLiveSessionDisplaySummary,
+  collapseDailyReportDisplaySessions,
+} from '../src/services/daily-report-session-display.util'
 
 const DATE = '2026-07-01'
 
@@ -297,8 +301,9 @@ const feiyunSessions = assignment.byAnchor.get('飞云') ?? []
 assertAnchorSessions('子杰', zijieSessions, {
   count: 1,
   liveId: '570343544189288405',
-  timeLines: ['09:44~14:00'],
-  forbiddenTimeLines: ['09:55~13:57', '14:19~14:30', '14:20~14:30', '09:44~14:12'],
+  // 排班 09:30–14:00 + 尾部 grace，裁剪到真实结束
+  timeLines: ['09:44:18~14:12:55'],
+  forbiddenTimeLines: ['09:55~13:57', '14:19~14:30', '14:20~14:30'],
   incomeYuan: 7179,
   dealOrderCnt: 5,
   refundAmtYuan: 0,
@@ -307,19 +312,32 @@ assertAnchorSessions('子杰', zijieSessions, {
 assertAnchorSessions('飞云', feiyunSessions, {
   count: 1,
   liveId: '570344088694093157',
-  timeLines: ['18:35~23:00'],
+  timeLines: ['18:35:24~23:09:16'],
   incomeYuan: 11347,
   dealOrderCnt: 5,
   refundAmtYuan: 1999,
 })
 
-// 若误混入伪场次，子杰不应出现 4 场
+// 若误混入伪场次：归属层 keep_all 可保留多段；展示层同排班短间隙合并为 1
 const polluted = dedupeDailyReportLiveSessions([...SHIYUJU_REAL_SESSIONS, ...PSEUDO_SESSIONS])
 assert.equal(polluted.length, 4, 'polluted input merges overlap pseudo-0955 into real morning session')
 const pollutedAssignment = assignDailyReportLiveSessionsToAnchors(polluted, SCHEDULES, DATE)
 const pollutedZijie = pollutedAssignment.byAnchor.get('子杰') ?? []
-assert.equal(pollutedZijie.length, 1, `子杰 must stay 1 session when pseudo overlap mixed in, got ${pollutedZijie.length}`)
-console.log(`PASS polluted mix: 子杰 has ${pollutedZijie.length} session`)
+assert.ok(
+  pollutedZijie.length >= 1,
+  `子杰归属层至少保留真实早场，got ${pollutedZijie.length}`,
+)
+const pollutedDisplay = collapseDailyReportDisplaySessions(pollutedZijie)
+assert.equal(
+  pollutedDisplay.length,
+  1,
+  `子杰展示层应合并同排班短间隙伪场次为 1，got ${pollutedDisplay.length}`,
+)
+const pollutedSummary = buildLiveSessionDisplaySummary(pollutedDisplay)
+assert.equal(pollutedSummary.liveDurationText.includes('直播'), false)
+console.log(
+  `PASS polluted mix: 归属 ${pollutedZijie.length} 段 → 展示 ${pollutedDisplay.length} 班次 (${pollutedSummary.platformRecordNote ?? '无平台分段注'})`,
+)
 
 // 全系统合并：四店各 2 场 → 合计 8（模拟，非写死全系统=2）
 const allShopsMock: DailyReportLiveSession[] = []

@@ -12,8 +12,10 @@ import {
 import {
   extractRoomDataInfo,
   liveRawNeedsRealtimeMetric,
+  liveRawShouldFetchRealtimeMetric,
   mergePreserveRealtimeMetricFields,
   mergeRealtimeMetricIntoLiveRaw,
+  REALTIME_METRIC_RETRY_COOLDOWN_MS,
 } from '../src/services/xhs-api-sync/xhs-live-realtime-metric.service'
 import {
   formatCoverClickRateWithQuality,
@@ -146,6 +148,37 @@ function main(): void {
     issues,
   )
   assert(!liveRawNeedsRealtimeMetric(merged), '两个字段齐全后不应再需要补齐', issues)
+  assert(!liveRawShouldFetchRealtimeMetric(merged), '字段齐全后不应再请求', issues)
+
+  // 8b. 冷却：仍缺字段但刚失败/刚成功空字段 → 暂不请求
+  {
+    const failedRaw = {
+      liveViewSessionCnt: { value: 10 },
+      _realtimeMetricFailedAt: new Date().toISOString(),
+    }
+    assert(liveRawNeedsRealtimeMetric(failedRaw), '失败戳不影响 needs', issues)
+    assert(
+      !liveRawShouldFetchRealtimeMetric(failedRaw),
+      '冷却期内失败场次不应再请求',
+      issues,
+    )
+    const oldFail = {
+      ...failedRaw,
+      _realtimeMetricFailedAt: new Date(Date.now() - REALTIME_METRIC_RETRY_COOLDOWN_MS - 1000).toISOString(),
+    }
+    assert(liveRawShouldFetchRealtimeMetric(oldFail), '冷却过后应允许再请求', issues)
+
+    const emptySuccess = mergeRealtimeMetricIntoLiveRaw(
+      { liveViewSessionCnt: { value: 10 } },
+      { join_uv: 1 },
+    )
+    assert(liveRawNeedsRealtimeMetric(emptySuccess), '无 CTR/60s 仍 needs', issues)
+    assert(
+      !liveRawShouldFetchRealtimeMetric(emptySuccess),
+      '刚成功但字段空时应冷却，避免狂打',
+      issues,
+    )
+  }
 
   // 9. 已有有效字段不会被列表同步冲掉；且 needs=false 表示可跳过重复请求
   {

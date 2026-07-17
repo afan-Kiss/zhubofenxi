@@ -78,15 +78,29 @@ function jobOverlapsRange(
   return job.startDate <= endDate && job.endDate >= startDate
 }
 
-/** 从任务警告中解析失败店铺展示名，例如「拾玉居」Cookie 已失效 */
+/** 从任务警告中解析真正失败的店铺展示名，例如「拾玉居」Cookie 已失效。
+ * 不得把「店名」+ 大屏补齐/BI 跳过等提示误判为店铺同步失败。
+ */
 export function parseFailedShopNamesFromJobMessage(message: string | null | undefined): string[] {
   if (!message) return []
   const names = new Set<string>()
-  const re = /「([^」]+)」/g
+  const re = /「([^」]+)」([^「]*)/g
   let m: RegExpExecArray | null
   while ((m = re.exec(message)) !== null) {
     const name = m[1]?.trim()
-    if (name) names.add(name)
+    const ctx = (m[2] ?? '').trim()
+    if (!name) continue
+    // 信息性警告：有店名括号，但不是账号同步失败
+    if (/大屏指标补齐|settlementSkippedForBusinessBI|经营BI同步已跳过|结算单/.test(ctx)) {
+      continue
+    }
+    if (
+      /Cookie|失效|权限|限流|跳过该账号|同步失败|超时|失败|未配置|401|403|429|406|unauthorized/i.test(
+        ctx,
+      )
+    ) {
+      names.add(name)
+    }
   }
   return [...names]
 }
@@ -446,7 +460,7 @@ export async function resolveBusinessRangeCoverage(params: {
           }
           break
         }
-        if (shopFailed) {
+        if (shopFailed && !rawEvidence.has(shop.id) && !lastSyncWithinJobWindow(shop, job)) {
           best = {
             shopId: shop.id,
             shopName: shop.name,
@@ -472,7 +486,9 @@ export async function resolveBusinessRangeCoverage(params: {
             startDate: job.startDate,
             endDate: job.endDate,
             lastSuccessAt: job.finishedAt?.toISOString() ?? null,
-            reason: 'shop_succeeded_in_partial_success',
+            reason: shopFailed
+              ? 'shop_raw_evidence_overrides_warning_name'
+              : 'shop_succeeded_in_partial_success',
           }
           break
         }
@@ -509,7 +525,7 @@ export async function resolveBusinessRangeCoverage(params: {
       }
 
       if (job.status === 'success') {
-        if (shopFailed) {
+        if (shopFailed && !rawEvidence.has(shop.id) && !lastSyncWithinJobWindow(shop, job)) {
           best = {
             shopId: shop.id,
             shopName: shop.name,
@@ -533,7 +549,9 @@ export async function resolveBusinessRangeCoverage(params: {
             startDate: job.startDate,
             endDate: job.endDate,
             lastSuccessAt: job.finishedAt?.toISOString() ?? null,
-            reason: 'shop_raw_synced_in_success_job',
+            reason: shopFailed
+              ? 'shop_raw_evidence_overrides_warning_name'
+              : 'shop_raw_synced_in_success_job',
           }
           break
         }

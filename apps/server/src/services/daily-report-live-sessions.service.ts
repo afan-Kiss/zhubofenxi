@@ -534,6 +534,19 @@ export async function loadAndAssignDailyReportLiveSessions(params: {
   endDate: string
   scheduleRows: EffectiveScheduleRow[]
 }): Promise<DailyReportLiveSessionAssignment> {
+  // 运营日报打开时补齐大屏字段（按 reportDate；区间扫天交给同步/回填）
+  try {
+    const { ensureLiveRealtimeMetricsForReportDate } = await import(
+      './xhs-api-sync/xhs-live-realtime-metric.service'
+    )
+    await ensureLiveRealtimeMetricsForReportDate(params.reportDate)
+  } catch (err) {
+    console.warn(
+      '[daily-report-live-sessions] realtime metric ensure failed',
+      err instanceof Error ? err.message : String(err),
+    )
+  }
+
   const sessions = await loadPerShopDailyReportLiveSessions({
     reportDate: params.reportDate,
     startDate: params.startDate,

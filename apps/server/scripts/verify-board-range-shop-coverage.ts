@@ -25,6 +25,17 @@ function unitMain() {
     '拾玉居',
     'XY祥钰珠宝',
   ])
+  assert.deepEqual(
+    parseFailedShopNamesFromJobMessage(
+      '经营BI同步已跳过待结算/已结算账单（settlementSkippedForBusinessBI）；「拾玉居和田玉」大屏指标补齐：成功 40 / 跳过 39 / 失败 0 / 请求 40；「拾玉居和田玉」大屏指标补齐已达上限 40，其余场次跳过',
+    ),
+    [],
+    '大屏补齐警告不得解析为失败店铺',
+  )
+  assert.deepEqual(
+    parseFailedShopNamesFromJobMessage('直播号「拾玉居和田玉」Cookie 失效，本轮已跳过该账号'),
+    ['拾玉居和田玉'],
+  )
   assert.equal(
     canParsePartialSuccessShopLevel({ errorMessage: null, shopsWithRawEvidence: new Set() }),
     false,

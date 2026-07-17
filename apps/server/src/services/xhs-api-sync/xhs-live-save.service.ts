@@ -243,8 +243,11 @@ export async function syncLiveSessionListOnlyWithSave(
         liveAccountId: params.liveAccountId,
         liveAccountName,
         context: params.context,
-        maxRequests: 40,
+        maxRequests: 80,
         invalidateCache: true,
+        // 同步本批尽量打满；冷却留给日报二次补齐
+        respectCooldown: false,
+        requestGapMs: 120,
       })
       warnings.push(
         `大屏指标补齐：成功 ${enrich.enriched} / 跳过 ${enrich.skipped} / 失败 ${enrich.failed} / 请求 ${enrich.attempted}`,

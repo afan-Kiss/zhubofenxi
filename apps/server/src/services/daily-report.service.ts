@@ -482,6 +482,18 @@ export async function buildDailyReport(params: {
   const storeWideInvalid = countDailyReportOrders(allPerformanceViews).invalidOrderCount
 
   const scheduleTable = await getEffectiveScheduleTableForDate(params.startDate)
+  // 打开昨日日报前补齐封面点击率 / 60s，降低「数据缺失」
+  try {
+    const { ensureLiveRealtimeMetricsForReportDate } = await import(
+      './xhs-api-sync/xhs-live-realtime-metric.service'
+    )
+    await ensureLiveRealtimeMetricsForReportDate(params.startDate)
+  } catch (err) {
+    console.warn(
+      '[daily-report] realtime metric ensure failed',
+      err instanceof Error ? err.message : String(err),
+    )
+  }
   const liveAssignment = await resolveDailyReportLiveSessionAssignments(params.startDate)
   const orderNames = [
     ...new Set(

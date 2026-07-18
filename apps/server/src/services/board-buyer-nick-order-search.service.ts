@@ -117,9 +117,11 @@ function resolveSessionLabel(params: {
   orderTime: string
   shopName: string
   anchorName: string
+  matchedScheduleId?: string | null
   matchedLiveStartTime?: string | null
   matchedLiveEndTime?: string | null
   scheduleRows: Array<{
+    rowId?: string
     anchorName: string
     shopName: string
     liveRoomName: string
@@ -133,6 +135,18 @@ function resolveSessionLabel(params: {
   const payMs = parseLiveSessionTimeMs(params.orderTime)
   const shop = params.shopName.trim()
   const anchor = params.anchorName.trim()
+  const hasNamedAnchor = Boolean(anchor && anchor !== '未归属' && anchor !== '—')
+
+  // 优先用 canonical 命中的排班行，避免「主播A + 场次B」错配
+  const matchedId = String(params.matchedScheduleId ?? '').trim()
+  if (matchedId) {
+    const hit = params.scheduleRows.find((row) => String(row.rowId ?? '').trim() === matchedId)
+    if (hit) {
+      if (!hasNamedAnchor || hit.anchorName.trim() === anchor) {
+        return `${hit.anchorName} ${hit.startTime}-${hit.endTime}`
+      }
+    }
+  }
 
   if (payMs != null) {
     const inGrace = (row: (typeof params.scheduleRows)[number]): boolean => {
@@ -148,11 +162,11 @@ function resolveSessionLabel(params: {
     }
 
     let candidates = params.scheduleRows.filter((row) => inGrace(row) && shopOk(row))
+    // 已有归属主播时，只展示该主播场次；绝不用别的主播场次凑数
+    if (hasNamedAnchor) {
+      candidates = candidates.filter((row) => row.anchorName.trim() === anchor)
+    }
     if (candidates.length > 0) {
-      if (anchor && anchor !== '未归属' && anchor !== '—') {
-        const byAnchor = candidates.filter((row) => row.anchorName.trim() === anchor)
-        if (byAnchor.length > 0) candidates = byAnchor
-      }
       const best = [...candidates].sort((a, b) => {
         const aStart = parseLiveSessionTimeMs(a.startAt) ?? 0
         const bStart = parseLiveSessionTimeMs(b.startAt) ?? 0
@@ -164,7 +178,7 @@ function resolveSessionLabel(params: {
 
   const startHm = clockHm(params.matchedLiveStartTime)
   const endHm = clockHm(params.matchedLiveEndTime)
-  if (anchor && startHm && endHm) return `${anchor} ${startHm}-${endHm}`
+  if (hasNamedAnchor && startHm && endHm) return `${anchor} ${startHm}-${endHm}`
   return null
 }
 
@@ -340,12 +354,18 @@ export async function searchBoardOrdersByBuyerNick(
       }
       scheduleRows = cached
     }
+    const remappedMeta = v as typeof v & {
+      matchedScheduleId?: string | null
+      matchedLiveStartTime?: string | null
+      matchedLiveEndTime?: string | null
+    }
     const sessionLabel = resolveSessionLabel({
       orderTime: row.orderTime,
       shopName,
       anchorName,
-      matchedLiveStartTime: v.matchedLiveStartTime,
-      matchedLiveEndTime: v.matchedLiveEndTime,
+      matchedScheduleId: remappedMeta.matchedScheduleId,
+      matchedLiveStartTime: remappedMeta.matchedLiveStartTime ?? v.matchedLiveStartTime,
+      matchedLiveEndTime: remappedMeta.matchedLiveEndTime ?? v.matchedLiveEndTime,
       scheduleRows,
     })
     items.push({

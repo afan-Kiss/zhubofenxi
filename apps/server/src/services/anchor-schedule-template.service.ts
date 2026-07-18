@@ -396,13 +396,16 @@ export async function listActiveTemplatesForDate(dateKey: string) {
     where: { enabled: true },
     orderBy: [{ sortOrder: 'asc' }, { anchorName: 'asc' }],
   })
+  // 含软删除：否则已删主播查不到，旧逻辑会误把模板当成「无主播约束」继续虚排
   const anchors = await prisma.anchor.findMany({
-    where: { deletedAt: null, attributionMode: 'schedule', systemKey: null },
+    where: { attributionMode: 'schedule', systemKey: null },
   })
   const byId = new Map(anchors.map((a) => [a.id, a]))
   const byName = new Map(anchors.map((a) => [a.name.trim().toLowerCase(), a]))
-  const { isAnchorEffectiveOnDate } = await import('../utils/anchor-effective-date.util')
-  const { isOffboardDateMissing } = await import('../utils/anchor-effective-date.util')
+  const { isAnchorEffectiveOnDate, isOffboardDateMissing } = await import(
+    '../utils/anchor-effective-date.util'
+  )
+  const { formatDateKeyShanghai } = await import('../utils/business-timezone')
 
   return rows.filter((t) => {
     if (
@@ -426,7 +429,21 @@ export async function listActiveTemplatesForDate(dateKey: string) {
       (t.anchorId && byId.get(t.anchorId)) ||
       byName.get(t.anchorName.trim().toLowerCase()) ||
       null
-    if (!anchor) return true
+    // 库里无此主播：不虚排（避免幽灵模板）
+    if (!anchor) return false
+    // 软删除日及之后不再虚排；删除前的历史日仍可按区间生效
+    if (anchor.deletedAt) {
+      const deletedDay = formatDateKeyShanghai(new Date(anchor.deletedAt))
+      if (dateKey >= deletedDay) return false
+      return isAnchorEffectiveOnDate(
+        {
+          enabled: true,
+          effectiveFrom: anchor.effectiveFrom,
+          effectiveTo: anchor.effectiveTo,
+        },
+        dateKey,
+      )
+    }
     if (isOffboardDateMissing(anchor)) return false
     return isAnchorEffectiveOnDate(anchor, dateKey)
   })

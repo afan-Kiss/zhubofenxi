@@ -664,11 +664,41 @@ export async function softDeleteAnchor(id: string) {
   if (existing.systemKey) {
     throw new Error('系统主播不可删除，如需停用请使用停用')
   }
-  await prisma.anchor.update({
-    where: { id },
-    data: { deletedAt: new Date(), enabled: false },
+  const { shanghaiYesterdayDateKey } = await import('../utils/anchor-effective-date.util')
+  const lastDay = existing.effectiveTo?.trim() || shanghaiYesterdayDateKey()
+  await prisma.$transaction(async (tx) => {
+    await tx.anchor.update({
+      where: { id },
+      data: {
+        deletedAt: new Date(),
+        enabled: false,
+        effectiveTo: lastDay,
+      },
+    })
+    // 截断仍生效的模板，避免删除后继续虚排到今日及以后
+    const templates = await tx.anchorScheduleTemplate.findMany({
+      where: {
+        enabled: true,
+        OR: [{ anchorId: id }, { anchorName: existing.name }],
+      },
+    })
+    for (const tpl of templates) {
+      const tplTo = tpl.effectiveTo?.trim() || null
+      if (!tplTo || tplTo > lastDay) {
+        await tx.anchorScheduleTemplate.update({
+          where: { id: tpl.id },
+          data: { effectiveTo: lastDay },
+        })
+      }
+    }
   })
   await refreshAnchorConfigCache()
+  try {
+    const { invalidateBusinessBoardCache } = await import('./business-cache.service')
+    invalidateBusinessBoardCache()
+  } catch {
+    /* ignore */
+  }
   return { id, deleted: true }
 }
 

@@ -110,9 +110,14 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ preset, startDate, endDa
 
       {result && result.items.length > 0 ? (
         <div className="mt-3 max-h-80 space-y-2 overflow-y-auto">
-          {result.items.map((item) => (
+          {result.items.map((item, idx) => {
+            const afterSale =
+              item.afterSaleStatus && item.afterSaleStatus !== '—'
+                ? item.afterSaleStatus
+                : ''
+            return (
             <article
-              key={`${item.orderNo}-${item.orderTime}`}
+              key={`${item.orderNo}-${item.orderTime}-${item.buyerId}-${idx}`}
               className="rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-2.5 text-sm"
             >
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -136,11 +141,12 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ preset, startDate, endDa
               <p className="mt-0.5 truncate text-xs text-slate-500">商品：{item.productName}</p>
               <p className="mt-0.5 text-xs text-slate-500">
                 状态：{item.orderStatus || item.statusText || '—'}
-                {item.afterSaleStatus ? ` · 售后 ${item.afterSaleStatus}` : ''}
+                {afterSale ? ` · 售后 ${afterSale}` : ''}
                 {item.refundAmount > 0 ? ` · 退款 ${formatMoney(item.refundAmount)}` : ''}
               </p>
             </article>
-          ))}
+            )
+          })}
         </div>
       ) : null}
     </div>

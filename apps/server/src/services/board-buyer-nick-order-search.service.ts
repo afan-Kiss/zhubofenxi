@@ -15,10 +15,15 @@ import {
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
 import { parseLiveSessionTimeMs } from '../utils/business-timezone'
-import { resolveBuyerIdentityFromView } from './buyer-identity.service'
+import {
+  pickBuyerNicknameFromRaw,
+  pickBuyerNicknameFromView,
+  resolveBuyerIdentityFromView,
+} from './buyer-identity.service'
 
 const MAX_RESULTS = 40
 const MIN_KEYWORD_LEN = 1
+const SESSION_GRACE_MS = 30 * 60_000
 
 export interface BuyerNickOrderSearchHit {
   orderNo: string
@@ -39,17 +44,19 @@ export interface BuyerNickOrderSearchHit {
   statusText: string
 }
 
+/** 仅真实买家昵称可搜；排除「未知买家」展示名，避免误命中 */
 function nickOfView(v: AnalyzedOrderView, raw?: Record<string, unknown>): string {
   const identity = resolveBuyerIdentityFromView(
     Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
   )
-  return (
+  const nick =
     identity?.buyerNickname?.trim() ||
-    identity?.buyerDisplayName?.trim() ||
+    pickBuyerNicknameFromView(v) ||
+    pickBuyerNicknameFromRaw(raw) ||
     v.buyerNickname?.trim() ||
-    v.buyerDisplayName?.trim() ||
     ''
-  )
+  if (!nick || nick === '未知买家' || nick === '—') return ''
+  return nick
 }
 
 function orderDateKeyShanghai(orderTime: string): string | null {
@@ -64,6 +71,8 @@ function orderDateKeyShanghai(orderTime: string): string | null {
 function resolveSessionLabel(params: {
   orderTime: string
   shopName: string
+  /** 订单归属主播，优先用其排班行，避免交接窗误配 */
+  anchorName: string
   scheduleRows: Array<{
     anchorName: string
     shopName: string
@@ -78,19 +87,34 @@ function resolveSessionLabel(params: {
   const payMs = parseLiveSessionTimeMs(params.orderTime)
   if (payMs == null) return null
   const shop = params.shopName.trim()
-  const candidates = params.scheduleRows.filter((row) => {
+  const anchor = params.anchorName.trim()
+  const inGrace = (
+    row: (typeof params.scheduleRows)[number],
+  ): boolean => {
     if (row.enabled === false) return false
-    if (shop && shop !== '—' && !orderLiveRoomMatchesSchedule(shop, row.shopName, row.liveRoomName)) {
-      return false
-    }
     const startMs = parseLiveSessionTimeMs(row.startAt)
     const endMs = parseLiveSessionTimeMs(row.endAt)
     if (startMs == null || endMs == null) return false
-    const grace = 30 * 60_000
-    return payMs >= startMs - grace && payMs < endMs + grace
-  })
+    return payMs >= startMs - SESSION_GRACE_MS && payMs < endMs + SESSION_GRACE_MS
+  }
+  const shopOk = (row: (typeof params.scheduleRows)[number]): boolean => {
+    if (!shop || shop === '—') return true
+    return orderLiveRoomMatchesSchedule(shop, row.shopName, row.liveRoomName)
+  }
+
+  let candidates = params.scheduleRows.filter((row) => inGrace(row) && shopOk(row))
   if (candidates.length === 0) return null
-  const best = candidates[0]!
+
+  if (anchor && anchor !== '未归属' && anchor !== '—') {
+    const byAnchor = candidates.filter((row) => row.anchorName.trim() === anchor)
+    if (byAnchor.length > 0) candidates = byAnchor
+  }
+
+  const best = [...candidates].sort((a, b) => {
+    const aStart = parseLiveSessionTimeMs(a.startAt) ?? 0
+    const bStart = parseLiveSessionTimeMs(b.startAt) ?? 0
+    return Math.abs(payMs - aStart) - Math.abs(payMs - bStart)
+  })[0]!
   return `${best.anchorName} ${best.startTime}-${best.endTime}`
 }
 
@@ -139,7 +163,7 @@ export async function searchBoardOrdersByBuyerNick(
   })
 
   const kwLower = keyword.toLowerCase()
-  let matched = cached.views.filter((v) => {
+  const matched = cached.views.filter((v) => {
     if (forcedAnchor && v.anchorName !== forcedAnchor) return false
     const raw = cached.rawByMatch.get(v.matchOrderId || v.orderId)
     const nick = nickOfView(v, raw)
@@ -151,7 +175,10 @@ export async function searchBoardOrdersByBuyerNick(
     String(b.orderTimeText ?? '').localeCompare(String(a.orderTimeText ?? '')),
   )
 
-  const limit = Math.min(MAX_RESULTS, Math.max(1, q.limit ?? MAX_RESULTS))
+  const requested = Number(q.limit)
+  const limit = Number.isFinite(requested)
+    ? Math.min(MAX_RESULTS, Math.max(1, Math.floor(requested)))
+    : MAX_RESULTS
   const slice = matched.slice(0, limit)
 
   const scheduleByDate = new Map<
@@ -166,9 +193,10 @@ export async function searchBoardOrdersByBuyerNick(
       Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
     )
     const shopName =
-      String(v.liveAccountName ?? '').trim() ||
       String(row.liveAccountName ?? '').trim() ||
+      String(v.liveAccountName ?? '').trim() ||
       '—'
+    const anchorName = row.anchorName || v.anchorName || '未归属'
     const dateKey = orderDateKeyShanghai(row.orderTime)
     let sessionLabel: string | null = null
     if (dateKey) {
@@ -181,6 +209,7 @@ export async function searchBoardOrdersByBuyerNick(
       sessionLabel = resolveSessionLabel({
         orderTime: row.orderTime,
         shopName,
+        anchorName,
         scheduleRows: rows,
       })
     }
@@ -188,7 +217,7 @@ export async function searchBoardOrdersByBuyerNick(
       orderNo: row.orderNo,
       displayOrderNo: row.displayOrderNo || row.orderNo,
       orderTime: row.orderTime,
-      anchorName: row.anchorName || v.anchorName || '未归属',
+      anchorName,
       shopName,
       sessionLabel,
       buyerNickname: nickOfView(v, raw) || row.buyerNickname || '—',

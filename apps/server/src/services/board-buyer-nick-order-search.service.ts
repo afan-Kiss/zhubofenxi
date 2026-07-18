@@ -1,13 +1,10 @@
 /**
- * 按买家昵称搜索经营缓存中的订单（主播业绩 · 自定义日期）。
- * 匹配规则：缓存 view.buyerNickname，以及 raw 中的买家昵称（同一字段口径）。
+ * 按买家昵称搜索本地全量订单缓存（不随日期 tabs 过滤）。
+ * 匹配规则：经营分析缓存中的 buyerNickname / raw 买家昵称。
  */
 import type { UserRole } from '../types/roles'
 import type { AnalyzedOrderView } from '../types/analysis'
 import { mapViewToBoardOrderRow } from './order-row-mapper.service'
-import { normalizeBoardPreset } from './board-metrics.service'
-import { resolveBusinessRange } from '../utils/business-range'
-import { getOrBuildBusinessBoardCache } from './business-cache.service'
 import {
   isStaffUnbound,
   staffAnchorFilter,
@@ -17,10 +14,21 @@ import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.servic
 import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
 import { parseLiveSessionTimeMs } from '../utils/business-timezone'
 import { pickBuyerNicknameFromRaw } from './buyer-identity.service'
+import { buildRawAnalyzeBundleAll } from './xhs-api-sync/xhs-analysis-from-raw.service'
+import { prepareAnalysisArtifactsFromRaw } from './business-analysis.service'
+import { loadOfflineDealViewsForRange } from './offline-deal.service'
+import {
+  bootstrapWorkbenchCache,
+  getWorkbenchRefundMapForOrders,
+  loadWorkbenchRefundMapFromDb,
+  mergeWorkbenchRefundMaps,
+  buildLiveAccountOrderQueries,
+} from './xhs-after-sales-workbench.service'
 
 const MAX_RESULTS = 40
 const MIN_KEYWORD_LEN = 1
 const SESSION_GRACE_MS = 30 * 60_000
+const ALL_ORDERS_CACHE_TTL_MS = 5 * 60_000
 
 export interface BuyerNickOrderSearchHit {
   orderNo: string
@@ -40,6 +48,15 @@ export interface BuyerNickOrderSearchHit {
   afterSaleReason: string
   statusText: string
 }
+
+type AllOrdersSearchPool = {
+  builtAt: number
+  views: AnalyzedOrderView[]
+  rawByMatch: Map<string, Record<string, unknown>>
+}
+
+let allOrdersPool: AllOrdersSearchPool | null = null
+let allOrdersPoolBuild: Promise<AllOrdersSearchPool> | null = null
 
 function lookupRaw(
   v: AnalyzedOrderView,
@@ -61,7 +78,7 @@ function lookupRaw(
   return undefined
 }
 
-/** 经营缓存中的买家昵称（view 优先，再回落 raw） */
+/** 缓存中的买家昵称（view 优先，再回落 raw） */
 function cacheBuyerNickname(
   v: AnalyzedOrderView,
   rawByMatch: Map<string, Record<string, unknown>>,
@@ -129,12 +146,55 @@ function resolveSessionLabel(params: {
   return `${best.anchorName} ${best.startTime}-${best.endTime}`
 }
 
+async function getAllOrdersSearchPool(): Promise<AllOrdersSearchPool> {
+  const now = Date.now()
+  if (allOrdersPool && now - allOrdersPool.builtAt < ALL_ORDERS_CACHE_TTL_MS) {
+    return allOrdersPool
+  }
+  if (allOrdersPoolBuild) return allOrdersPoolBuild
+
+  allOrdersPoolBuild = (async () => {
+    const bundle = await buildRawAnalyzeBundleAll()
+    const rawByMatch = new Map<string, Record<string, unknown>>()
+    let views: AnalyzedOrderView[] = []
+
+    if (bundle && bundle.orders.length > 0) {
+      const orderQueries = buildLiveAccountOrderQueries(bundle.orders)
+      await bootstrapWorkbenchCache()
+      const fromDb = await loadWorkbenchRefundMapFromDb(orderQueries)
+      const fromMem = getWorkbenchRefundMapForOrders(orderQueries)
+      const workbenchByOrderNo = mergeWorkbenchRefundMaps(fromDb, fromMem)
+      const artifacts = prepareAnalysisArtifactsFromRaw(bundle, { workbenchByOrderNo })
+      views = artifacts?.views ?? []
+      for (const o of artifacts?.dedupe.uniqueOrders ?? []) {
+        if (o.raw) rawByMatch.set(o.matchOrderId, o.raw as Record<string, unknown>)
+      }
+    }
+
+    const offlineViews = await loadOfflineDealViewsForRange('2020-01-01', '2099-12-31')
+    if (offlineViews.length > 0) {
+      views = [...views, ...offlineViews]
+    }
+
+    const pool: AllOrdersSearchPool = {
+      builtAt: Date.now(),
+      views,
+      rawByMatch,
+    }
+    allOrdersPool = pool
+    return pool
+  })()
+
+  try {
+    return await allOrdersPoolBuild
+  } finally {
+    allOrdersPoolBuild = null
+  }
+}
+
 export async function searchBoardOrdersByBuyerNick(
   q: {
     keyword: string
-    preset?: string
-    startDate?: string
-    endDate?: string
     limit?: number
   },
   role: UserRole,
@@ -161,22 +221,12 @@ export async function searchBoardOrdersByBuyerNick(
   }
 
   const forcedAnchor = staffAnchorFilter(role, username)
-  const preset = normalizeBoardPreset(q.preset ?? 'custom')
-  const range = resolveBusinessRange(
-    preset as import('../utils/business-range').BusinessRangePreset,
-    q.startDate,
-    q.endDate,
-  )
-  const cached = await getOrBuildBusinessBoardCache({
-    preset: q.preset ?? 'custom',
-    startDate: range.startDate,
-    endDate: range.endDate,
-  })
+  const pool = await getAllOrdersSearchPool()
 
   const kwLower = keyword.toLowerCase()
-  const matched = cached.views.filter((v) => {
+  const matched = pool.views.filter((v) => {
     if (forcedAnchor && v.anchorName !== forcedAnchor) return false
-    const nick = cacheBuyerNickname(v, cached.rawByMatch)
+    const nick = cacheBuyerNickname(v, pool.rawByMatch)
     if (!nick) return false
     return nick.toLowerCase().includes(kwLower)
   })
@@ -198,7 +248,7 @@ export async function searchBoardOrdersByBuyerNick(
 
   const items: BuyerNickOrderSearchHit[] = []
   for (const v of slice) {
-    const raw = lookupRaw(v, cached.rawByMatch)
+    const raw = lookupRaw(v, pool.rawByMatch)
     const row = mapViewToBoardOrderRow(
       Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
     )
@@ -230,7 +280,7 @@ export async function searchBoardOrdersByBuyerNick(
       anchorName,
       shopName,
       sessionLabel,
-      buyerNickname: cacheBuyerNickname(v, cached.rawByMatch) || row.buyerNickname || '—',
+      buyerNickname: cacheBuyerNickname(v, pool.rawByMatch) || row.buyerNickname || '—',
       buyerId: row.buyerId,
       productName: row.productName,
       payAmount: row.payAmount,

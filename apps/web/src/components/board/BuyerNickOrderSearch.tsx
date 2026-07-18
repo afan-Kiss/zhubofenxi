@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { Search } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
@@ -29,25 +29,13 @@ interface SearchResult {
   message?: string
 }
 
-interface Props {
-  preset: string
-  startDate: string
-  endDate: string
-}
-
-export const BuyerNickOrderSearch: React.FC<Props> = ({ preset, startDate, endDate }) => {
+/** 全量订单按买家昵称搜索（与日期 tabs 无关） */
+export const BuyerNickOrderSearch: React.FC = () => {
   const { formatMoney } = useAmountDisplay()
   const [keyword, setKeyword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<SearchResult | null>(null)
-
-  const rangeReady = Boolean(startDate && endDate && startDate <= endDate)
-
-  useEffect(() => {
-    setResult(null)
-    setError(null)
-  }, [preset, startDate, endDate])
 
   const runSearch = useCallback(async () => {
     const q = keyword.trim()
@@ -56,26 +44,16 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ preset, startDate, endDa
       setResult(null)
       return
     }
-    if (!rangeReady) {
-      setError('请先选定日期范围')
-      setResult(null)
-      return
-    }
     setLoading(true)
     setError(null)
     try {
-      const qs = new URLSearchParams({
-        keyword: q,
-        preset,
-        startDate,
-        endDate,
-      })
+      const qs = new URLSearchParams({ keyword: q })
       const data = await apiRequest<SearchResult>(
         `/api/board/order-search-by-buyer-nick?${qs.toString()}`,
       )
       setResult(data)
       if (data.total === 0) {
-        setError(data.message || '当前日期范围内未找到匹配昵称的订单')
+        setError(data.message || '全量订单中未找到匹配昵称')
       }
     } catch (e) {
       setResult(null)
@@ -83,7 +61,7 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ preset, startDate, endDa
     } finally {
       setLoading(false)
     }
-  }, [keyword, preset, startDate, endDate, rangeReady])
+  }, [keyword])
 
   return (
     <div className="min-w-[200px]">
@@ -95,14 +73,14 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ preset, startDate, endDa
           onKeyDown={(e) => {
             if (e.key === 'Enter') void runSearch()
           }}
-          placeholder="买家昵称"
-          disabled={!rangeReady || loading}
+          placeholder="买家昵称（全量）"
+          disabled={loading}
           aria-label="按买家昵称查订单"
           className="min-w-[120px] flex-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100 disabled:opacity-50"
         />
         <button
           type="button"
-          disabled={!rangeReady || loading}
+          disabled={loading}
           onClick={() => void runSearch()}
           className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-40"
         >

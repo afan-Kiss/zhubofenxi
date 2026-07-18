@@ -18,6 +18,7 @@ import {
   anchorRowSignedCount,
   isHighRefundRate,
   anchorRowTrend,
+  anchorRowShopName,
   type AnchorLeaderboardRow,
 } from '../../lib/anchor-leaderboard-row'
 import { anchorCardTestId } from '../../lib/anchor-test-id'
@@ -185,6 +186,11 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                     />
                   ) : null}
                   {name}
+                  {(() => {
+                    const shop = anchorRowShopName(a)
+                    if (!shop || isUnassigned) return null
+                    return <span className="font-normal text-slate-500"> · {shop}</span>
+                  })()}
                 </p>
                 {isUnassigned ? (
                   <p className="mt-1 text-[11px] leading-snug text-amber-800/90">{UNASSIGNED_ANCHOR_HINT}</p>

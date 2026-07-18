@@ -34,6 +34,7 @@ import {
   DailyReportShipmentPhotos,
   type DailyReportImageItem,
 } from '../../components/board/DailyReportShipmentPhotos'
+import { BuyerNickOrderSearch } from '../../components/board/BuyerNickOrderSearch'
 import { AnchorEffectiveSchedulePanel } from '../../components/board/AnchorEffectiveSchedulePanel'
 import {
   BoardMetricDrawer,
@@ -763,6 +764,11 @@ export const AnchorPerformanceTab: React.FC = () => {
               shipmentPhotoDataUrls={preset === 'yesterday' ? {} : shipmentPhotoDataUrls}
               photosStale={preset === 'yesterday' ? false : reportPhotosStale}
               onGenerated={() => setReportPhotosStale(false)}
+            />
+            <BuyerNickOrderSearch
+              preset={preset}
+              startDate={startDate}
+              endDate={endDate}
             />
           </div>
           {preset !== 'yesterday' ? (

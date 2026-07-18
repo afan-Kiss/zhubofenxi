@@ -16,6 +16,7 @@ import {
   anchorRowLivePeriodLines,
   anchorRowActualSignedAmount,
   anchorRowSignedCount,
+  anchorRowShopName,
   isHighRefundRate,
   type AnchorLeaderboardRow,
 } from '../../lib/anchor-leaderboard-row'
@@ -207,6 +208,13 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                             />
                           ) : null}
                           {formatAnchorDisplayName(String(a.anchorName))}
+                          {(() => {
+                            const shop = anchorRowShopName(a)
+                            if (!shop || isUnassigned) return null
+                            return (
+                              <span className="font-normal text-slate-500"> · {shop}</span>
+                            )
+                          })()}
                         </span>
                         {isUnassigned ? (
                           <>

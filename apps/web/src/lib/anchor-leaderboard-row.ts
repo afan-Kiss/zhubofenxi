@@ -74,6 +74,15 @@ export function anchorRowPaidCount(row: AnchorLeaderboardRow): number {
   return Number(v ?? 0)
 }
 
+/** 单日业绩 enrichment 写入的店铺名；多日或未归属时可能为空 */
+export function anchorRowShopName(row: AnchorLeaderboardRow): string | null {
+  const raw = row.shopName
+  if (raw == null) return null
+  const text = String(raw).trim()
+  if (!text || text === '—' || text === '线下成交') return null
+  return text
+}
+
 export function anchorRowRefundAmount(row: AnchorLeaderboardRow): number {
   const v = row.returnAmount ?? row.refundAmount
   return Number(v ?? 0)

@@ -528,6 +528,40 @@ boardRouter.get('/daily-report', async (req, res) => {
   }
 })
 
+/** 按买家昵称搜索当前区间订单（主播业绩「主播日报」框） */
+boardRouter.get('/order-search-by-buyer-nick', async (req, res) => {
+  try {
+    const keyword = req.query.keyword ? String(req.query.keyword) : ''
+    const startDate = req.query.startDate ? String(req.query.startDate) : ''
+    const endDate = req.query.endDate ? String(req.query.endDate) : ''
+    if (!keyword.trim()) {
+      sendFail(res, '请输入买家昵称', 400)
+      return
+    }
+    if (!startDate || !endDate) {
+      sendFail(res, '请提供 startDate 与 endDate', 400)
+      return
+    }
+    const { searchBoardOrdersByBuyerNick } = await import(
+      '../services/board-buyer-nick-order-search.service'
+    )
+    const data = await searchBoardOrdersByBuyerNick(
+      {
+        keyword,
+        preset: req.query.preset ? String(req.query.preset) : 'custom',
+        startDate,
+        endDate,
+        limit: req.query.limit ? Number(req.query.limit) : undefined,
+      },
+      req.user!.role as import('../types/roles').UserRole,
+      req.user!.username,
+    )
+    sendOk(res, data)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '按昵称搜索订单失败', 500)
+  }
+})
+
 boardRouter.get('/daily-report/debug-live-sessions', async (req, res) => {
   try {
     const date = req.query.date ? String(req.query.date).trim() : ''

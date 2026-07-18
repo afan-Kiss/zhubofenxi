@@ -31,6 +31,7 @@ import {
   isReportDateOnOrAfterShopSessionCutoff,
   resolveDailyReportAnchorsForDate,
   resolveDailyReportAnchorsForDateAsync,
+  shouldPadEmptyAnchorSlot,
 } from './anchor-performance-attribution.service'
 import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
@@ -570,17 +571,34 @@ export async function buildDailyReport(params: {
       sessions.length > 0 ||
       performanceViews.length > 0
 
-    // 6.13 起固定场次主播：与主播业绩一致，无数据也保留空行（含 6.18 起的小白）
+    // 固定场次空行：仅在职有效日保留；已删除/离职后的新日期不展示空卡
     // 临时试播：有排班或直播场次也保留空行
+    const cfgAnchor = config.anchors.find(
+      (a) => a.id === anchor.anchorId || a.name === anchor.anchorName,
+    )
     const keepEmptySlot =
-      useShopSessionRules ||
-      Boolean(anchor.isTemporaryAnchor && (sessions.length > 0 || scheduleTable.rows.some(
-        (r) =>
-          r.anchorName === anchor.anchorName ||
-          (anchor.temporaryAnchorKey &&
-            (r as { temporaryAnchorKey?: string | null }).temporaryAnchorKey ===
-              anchor.temporaryAnchorKey),
-      )))
+      Boolean(
+        fixedDisplay &&
+          shouldPadEmptyAnchorSlot(
+            cfgAnchor ?? {
+              enabled: true,
+              effectiveFrom: anchor.effectiveFrom,
+              effectiveTo: anchor.effectiveTo,
+            },
+            params.startDate,
+          ),
+      ) ||
+      Boolean(
+        anchor.isTemporaryAnchor &&
+          (sessions.length > 0 ||
+            scheduleTable.rows.some(
+              (r) =>
+                r.anchorName === anchor.anchorName ||
+                (anchor.temporaryAnchorKey &&
+                  (r as { temporaryAnchorKey?: string | null }).temporaryAnchorKey ===
+                    anchor.temporaryAnchorKey),
+            )),
+      )
     if (!hasData && !keepEmptySlot) continue
 
     const shopNameHint =

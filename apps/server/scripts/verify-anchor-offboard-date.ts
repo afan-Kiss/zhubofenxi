@@ -56,6 +56,32 @@ function unitMain() {
   assert.equal(isOffboardDateMissing({ enabled: false, effectiveTo: '2026-07-17' }), false)
   console.log('  ✓ 缺离职日期检测')
 
+  const { shouldPadEmptyAnchorSlot } = require('../src/services/anchor-performance-attribution.service') as typeof import('../src/services/anchor-performance-attribution.service')
+  assert.equal(shouldPadEmptyAnchorSlot(null, '2026-07-18'), false)
+  assert.equal(
+    shouldPadEmptyAnchorSlot({ enabled: false, effectiveTo: null }, '2026-07-18'),
+    false,
+  )
+  assert.equal(
+    shouldPadEmptyAnchorSlot(
+      { enabled: false, effectiveFrom: '2026-01-01', effectiveTo: '2026-07-17' },
+      '2026-07-18',
+    ),
+    false,
+  )
+  assert.equal(
+    shouldPadEmptyAnchorSlot(
+      { enabled: false, effectiveFrom: '2026-01-01', effectiveTo: '2026-07-17' },
+      '2026-07-17',
+    ),
+    true,
+  )
+  assert.equal(
+    shouldPadEmptyAnchorSlot({ enabled: true, effectiveFrom: null, effectiveTo: null }, '2026-07-18'),
+    true,
+  )
+  console.log('  ✓ 空卡补位：已删除/离职次日/缺离职日不补')
+
   assert.equal(
     assertValidOffboardDate({ effectiveTo: '2026-07-17', effectiveFrom: '2026-01-01' }),
     '2026-07-17',

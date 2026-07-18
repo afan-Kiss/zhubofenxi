@@ -16,6 +16,10 @@ import {
   aggregateViewsMetrics,
   type BoardAnchorMetrics,
 } from './board-metrics.service'
+import {
+  isAnchorEffectiveOnDate,
+  isOffboardDateMissing,
+} from '../utils/anchor-effective-date.util'
 
 export {
   SHOP_SESSION_ANCHOR_CUTOFF_MS,
@@ -161,7 +165,31 @@ function resolveXiaoBaiAnchor(config: AnchorConfig): { anchorId: string; anchorN
   return { anchorId: found?.id ?? 'extra-小白', anchorName: '小白' }
 }
 
-/** 日报使用的主播列表：6.13 前走后台配置，6.13 起固定四人场次 */
+/**
+ * 是否应为该主播补「无数据空卡」。
+ * - 配置里已不存在（删除）→ 不补
+ * - 已停用且缺离职日期 → 不补
+ * - 不在 [effectiveFrom, effectiveTo] 内 → 不补
+ * 有真实订单/场次时仍会由聚合结果自然出现，不依赖空卡。
+ */
+export function shouldPadEmptyAnchorSlot(
+  anchor:
+    | {
+        enabled?: boolean
+        effectiveFrom?: string | null
+        effectiveTo?: string | null
+      }
+    | null
+    | undefined,
+  dateKey: string,
+): boolean {
+  if (!anchor) return false
+  if (isOffboardDateMissing(anchor)) return false
+  if (anchor.enabled === false && !String(anchor.effectiveTo ?? '').trim()) return false
+  return isAnchorEffectiveOnDate(anchor, dateKey)
+}
+
+/** 日报使用的主播列表：6.13 前走后台配置，6.13 起固定场次（仅保留仍在配置中的主播） */
 export function resolveDailyReportAnchors(
   config: AnchorConfig,
   useShopSessionRules: boolean,
@@ -174,12 +202,11 @@ export function resolveDailyReportAnchors(
   const names = Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613).filter(
     (name) => name !== '小白',
   )
-  return names.map((anchorName) => {
+  return names.flatMap((anchorName) => {
     const found = findAnchorByName(config, anchorName)
-    return {
-      anchorId: found?.id ?? `extra-${anchorName}`,
-      anchorName,
-    }
+    // 已删除/不在配置中的固定名单主播：不再强制进日报候选
+    if (!found) return []
+    return [{ anchorId: found.id, anchorName }]
   })
 }
 
@@ -200,7 +227,9 @@ export function resolveDailyReportAnchorsForDate(
   const useShopSessionRules = isReportDateOnOrAfterShopSessionCutoff(startDate)
   const anchors = resolveDailyReportAnchors(config, useShopSessionRules)
   if (useShopSessionRules && isReportDateOnOrAfterXiaoBaiCutoff(startDate)) {
-    anchors.push(resolveXiaoBaiAnchor(config))
+    const xb = resolveXiaoBaiAnchor(config)
+    const xbCfg = findAnchorByName(config, xb.anchorName)
+    if (xbCfg) anchors.push(xb)
   }
   // 日报直播主播候选：排除线下专属主播（YIFAN_MANUAL）；有线下出单时由 buildDailyReport 单独追加
   return anchors
@@ -212,17 +241,23 @@ export function resolveDailyReportAnchorsForDate(
         attributionMode: cfg?.attributionMode,
         effectiveFrom: cfg?.effectiveFrom ?? null,
         effectiveTo: cfg?.effectiveTo ?? null,
+        enabled: cfg?.enabled,
         isTemporaryAnchor: false as boolean,
         temporaryAnchorKey: null as string | null,
         color: cfg?.color ?? null,
       }
     })
     .filter((a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }))
-    .filter((a) => {
-      if (a.effectiveFrom && startDate < a.effectiveFrom) return false
-      if (a.effectiveTo && startDate > a.effectiveTo) return false
-      return true
-    })
+    .filter((a) =>
+      shouldPadEmptyAnchorSlot(
+        {
+          enabled: a.enabled,
+          effectiveFrom: a.effectiveFrom,
+          effectiveTo: a.effectiveTo,
+        },
+        startDate,
+      ),
+    )
 }
 
 /** 含临时试播与当日排班/归属的异步候选（日报事实源） */
@@ -483,13 +518,10 @@ export function ensureAnchorPerformanceLeaderboardSlots(
     fixedNames.push('小白')
   }
 
-  // 按业务日过滤：离职次日不再补空卡
+  // 按业务日过滤：已删除 / 离职次日 / 停用缺离职日 → 不再补空卡
   const effectiveFixedNames = fixedNames.filter((anchorName) => {
     const found = findAnchorByName(config, anchorName)
-    if (!found) return true
-    if (found.effectiveFrom && endDate < found.effectiveFrom) return false
-    if (found.effectiveTo && endDate > found.effectiveTo) return false
-    return true
+    return shouldPadEmptyAnchorSlot(found, endDate)
   })
 
   const manualOnlyNames = config.anchors
@@ -498,6 +530,7 @@ export function ensureAnchorPerformanceLeaderboardSlots(
         a.enabled &&
         a.name.trim() &&
         !isOfflineOnlyAnchor(a) &&
+        shouldPadEmptyAnchorSlot(a, endDate) &&
         (a.attributionMode === 'manual' ||
           (!a.attributionMode &&
             !config.timeRules.some((r) => r.enabled && r.anchorId === a.id))),
@@ -516,8 +549,7 @@ export function ensureAnchorPerformanceLeaderboardSlots(
     if (byName.has(anchorName)) continue
     const found = findAnchorByName(config, anchorName)
     if (found && isOfflineOnlyAnchor(found)) continue
-    if (found?.effectiveTo && endDate > found.effectiveTo) continue
-    if (found?.effectiveFrom && endDate < found.effectiveFrom) continue
+    if (!shouldPadEmptyAnchorSlot(found, endDate)) continue
     merged.push(
       createEmptyAnchorLeaderboardRow(
         found?.id ?? `extra-${anchorName}`,

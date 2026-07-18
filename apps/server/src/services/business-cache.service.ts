@@ -751,6 +751,9 @@ export function invalidateBusinessBoardCacheForPresets(
     }
   }
   void bumpBoardSourceGenerations()
+  void import('./board-buyer-nick-order-search.service')
+    .then((m) => m.invalidateBuyerNickOrderSearchPool())
+    .catch(() => undefined)
   // 售后范围失效不主动清排班归属缓存；全量 invalidate 才清
   logInfo('经营缓存', `已清理预设缓存：${presets.join(', ')}`)
 }
@@ -781,6 +784,9 @@ export function invalidateBusinessBoardCache(): void {
   pendingBuilds.clear()
   clearScheduleAttributionCache()
   void bumpBoardSourceGenerations()
+  void import('./board-buyer-nick-order-search.service')
+    .then((m) => m.invalidateBuyerNickOrderSearchPool())
+    .catch(() => undefined)
   logInfo('经营缓存', '已清空全部缓存条目')
 }
 

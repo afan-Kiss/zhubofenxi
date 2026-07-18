@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useRef, useState } from 'react'
 import { Search } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
@@ -36,6 +36,7 @@ export const BuyerNickOrderSearch: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<SearchResult | null>(null)
+  const reqSeq = useRef(0)
 
   const runSearch = useCallback(async () => {
     const q = keyword.trim()
@@ -44,6 +45,7 @@ export const BuyerNickOrderSearch: React.FC = () => {
       setResult(null)
       return
     }
+    const seq = ++reqSeq.current
     setLoading(true)
     setError(null)
     try {
@@ -51,15 +53,17 @@ export const BuyerNickOrderSearch: React.FC = () => {
       const data = await apiRequest<SearchResult>(
         `/api/board/order-search-by-buyer-nick?${qs.toString()}`,
       )
+      if (seq !== reqSeq.current) return
       setResult(data)
       if (data.total === 0) {
         setError(data.message || '全量订单中未找到匹配昵称')
       }
     } catch (e) {
+      if (seq !== reqSeq.current) return
       setResult(null)
       setError(e instanceof Error ? e.message : '搜索失败')
     } finally {
-      setLoading(false)
+      if (seq === reqSeq.current) setLoading(false)
     }
   }, [keyword])
 

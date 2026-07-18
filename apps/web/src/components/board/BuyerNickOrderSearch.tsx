@@ -74,10 +74,10 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ preset, startDate, endDa
   }, [keyword, preset, startDate, endDate])
 
   return (
-    <div className="mt-4 border-t border-rose-50 pt-3">
+    <div>
       <p className="text-sm font-medium text-slate-800">按买家昵称查订单</p>
       <p className="mt-0.5 text-xs text-slate-500">
-        在当前日期范围内搜索，可看到对应主播、场次与订单详情
+        在当前所选日期范围（含本月、上月）内搜索，可看到对应主播、场次与订单详情
       </p>
       <div className="mt-2 flex flex-wrap gap-2">
         <input

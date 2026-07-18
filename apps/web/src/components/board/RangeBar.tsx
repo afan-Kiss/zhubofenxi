@@ -12,10 +12,10 @@ interface Props {
   onQuery?: () => void
   customQueried?: boolean
   showCustomQuery?: boolean
-  /** 放在「自定义」右侧，例如线下录入按钮 */
+  /** 放在日期 tabs（含「自定义」）右侧，例如买家昵称搜索 */
+  afterPresets?: React.ReactNode
+  /** 再右侧，例如线下录入按钮 */
   trailing?: React.ReactNode
-  /** 自定义日期面板下方扩展区（如买家昵称搜索） */
-  customExtra?: React.ReactNode
 }
 
 export const RangeBar: React.FC<Props> = ({
@@ -28,8 +28,8 @@ export const RangeBar: React.FC<Props> = ({
   onQuery,
   customQueried,
   showCustomQuery = true,
+  afterPresets,
   trailing,
-  customExtra,
 }) => {
   const validCustom = Boolean(customStart && customEnd && customStart <= customEnd)
 
@@ -38,7 +38,7 @@ export const RangeBar: React.FC<Props> = ({
   return (
     <div className="flex flex-col gap-2.5">
       <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-0 flex-1 rounded-2xl border border-slate-100/90 bg-white/90 p-1.5 shadow-sm">
+        <div className="min-w-0 rounded-2xl border border-slate-100/90 bg-white/90 p-1.5 shadow-sm">
           <AnimatedTabs
             items={tabItems}
             activeKey={preset}
@@ -48,6 +48,7 @@ export const RangeBar: React.FC<Props> = ({
             testIdPrefix="range-preset"
           />
         </div>
+        {afterPresets ? <div className="min-w-0 flex-1">{afterPresets}</div> : null}
         {trailing ? <div className="shrink-0">{trailing}</div> : null}
       </div>
       {preset === 'custom' && (
@@ -80,7 +81,6 @@ export const RangeBar: React.FC<Props> = ({
           {preset === 'custom' && !customQueried && validCustom && (
             <span className="text-slate-400">请选择日期后点击查询</span>
           )}
-          {customExtra ? <div className="w-full basis-full">{customExtra}</div> : null}
         </div>
       )}
     </div>

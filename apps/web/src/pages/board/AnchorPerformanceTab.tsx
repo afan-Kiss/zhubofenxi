@@ -674,10 +674,14 @@ export const AnchorPerformanceTab: React.FC = () => {
         onCustomEnd={setCustomEnd}
         customQueried={customQueried}
         onQuery={() => setCustomQueried(true)}
-        trailing={<OfflineDealEntryPanel onCreated={() => void reload()} />}
-        customExtra={
-          <BuyerNickOrderSearch startDate={customStart} endDate={customEnd} />
+        afterPresets={
+          <BuyerNickOrderSearch
+            preset={preset}
+            startDate={preset === 'custom' ? customStart : startDate}
+            endDate={preset === 'custom' ? customEnd : endDate}
+          />
         }
+        trailing={<OfflineDealEntryPanel onCreated={() => void reload()} />}
       />
       {showMetrics ? (
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">

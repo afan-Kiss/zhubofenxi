@@ -30,12 +30,12 @@ interface SearchResult {
 }
 
 interface Props {
-  /** 自定义区间起止；未选齐时不可搜 */
+  preset: string
   startDate: string
   endDate: string
 }
 
-export const BuyerNickOrderSearch: React.FC<Props> = ({ startDate, endDate }) => {
+export const BuyerNickOrderSearch: React.FC<Props> = ({ preset, startDate, endDate }) => {
   const { formatMoney } = useAmountDisplay()
   const [keyword, setKeyword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -47,7 +47,7 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ startDate, endDate }) =>
   useEffect(() => {
     setResult(null)
     setError(null)
-  }, [startDate, endDate])
+  }, [preset, startDate, endDate])
 
   const runSearch = useCallback(async () => {
     const q = keyword.trim()
@@ -57,7 +57,7 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ startDate, endDate }) =>
       return
     }
     if (!rangeReady) {
-      setError('请先选择自定义起止日期')
+      setError('请先选定日期范围')
       setResult(null)
       return
     }
@@ -66,7 +66,7 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ startDate, endDate }) =>
     try {
       const qs = new URLSearchParams({
         keyword: q,
-        preset: 'custom',
+        preset,
         startDate,
         endDate,
       })
@@ -75,7 +75,7 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ startDate, endDate }) =>
       )
       setResult(data)
       if (data.total === 0) {
-        setError(data.message || '该自定义日期范围内未找到匹配昵称的订单')
+        setError(data.message || '当前日期范围内未找到匹配昵称的订单')
       }
     } catch (e) {
       setResult(null)
@@ -83,15 +83,11 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ startDate, endDate }) =>
     } finally {
       setLoading(false)
     }
-  }, [keyword, startDate, endDate, rangeReady])
+  }, [keyword, preset, startDate, endDate, rangeReady])
 
   return (
-    <div className="mt-2 border-t border-slate-100 pt-2.5">
-      <p className="text-xs font-medium text-slate-700">按买家昵称查订单</p>
-      <p className="mt-0.5 text-[11px] text-slate-500">
-        匹配所选自定义区间经营缓存中的买家昵称
-      </p>
-      <div className="mt-1.5 flex flex-wrap gap-2">
+    <div className="min-w-[200px]">
+      <div className="flex flex-wrap items-center gap-1.5">
         <input
           type="search"
           value={keyword}
@@ -99,30 +95,31 @@ export const BuyerNickOrderSearch: React.FC<Props> = ({ startDate, endDate }) =>
           onKeyDown={(e) => {
             if (e.key === 'Enter') void runSearch()
           }}
-          placeholder="输入买家昵称"
+          placeholder="买家昵称"
           disabled={!rangeReady || loading}
-          className="min-w-[160px] flex-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100 disabled:opacity-50"
+          aria-label="按买家昵称查订单"
+          className="min-w-[120px] flex-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100 disabled:opacity-50"
         />
         <button
           type="button"
           disabled={!rangeReady || loading}
           onClick={() => void runSearch()}
-          className="inline-flex items-center gap-1 rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-40"
+          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-rose-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-40"
         >
           <Search size={12} />
-          {loading ? '搜索中…' : '搜索'}
+          {loading ? '…' : '搜索'}
         </button>
       </div>
 
       {error && (!result || result.total === 0) ? (
-        <p className="mt-1.5 text-[11px] text-amber-700">{error}</p>
+        <p className="mt-1 text-[11px] text-amber-700">{error}</p>
       ) : null}
       {result?.message && result.total > 0 ? (
-        <p className="mt-1.5 text-[11px] text-slate-500">{result.message}</p>
+        <p className="mt-1 text-[11px] text-slate-500">{result.message}</p>
       ) : null}
 
       {result && result.items.length > 0 ? (
-        <div className="mt-2 max-h-72 space-y-1.5 overflow-y-auto">
+        <div className="mt-1.5 max-h-72 space-y-1.5 overflow-y-auto rounded-xl border border-slate-100 bg-white p-2 shadow-sm">
           {result.items.map((item, idx) => {
             const afterSale =
               item.afterSaleStatus && item.afterSaleStatus !== '—'

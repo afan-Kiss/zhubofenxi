@@ -433,15 +433,6 @@ export const AnchorPerformanceTab: React.FC = () => {
     (preset !== 'custom' || customQueried) &&
     boardDataVisible &&
     status !== 'failed'
-  /** 买家昵称查单：本月/上月为主；单日区间也保留 */
-  const showBuyerNickSearch =
-    Boolean(startDate && endDate) &&
-    (preset !== 'custom' || customQueried) &&
-    boardDataVisible &&
-    status !== 'failed' &&
-    (preset === 'thisMonth' ||
-      preset === 'lastMonth' ||
-      isSingleDayPreset(preset, startDate, endDate))
   const dailyReportDateLabel = useMemo(() => {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(startDate.trim())
     if (!m) return startDate
@@ -684,6 +675,9 @@ export const AnchorPerformanceTab: React.FC = () => {
         customQueried={customQueried}
         onQuery={() => setCustomQueried(true)}
         trailing={<OfflineDealEntryPanel onCreated={() => void reload()} />}
+        customExtra={
+          <BuyerNickOrderSearch startDate={customStart} endDate={customEnd} />
+        }
       />
       {showMetrics ? (
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -782,16 +776,6 @@ export const AnchorPerformanceTab: React.FC = () => {
             />
           ) : null}
         </>
-      ) : null}
-
-      {showBuyerNickSearch ? (
-        <div className="rounded-2xl border border-rose-100/60 bg-white p-4 shadow-sm">
-          <BuyerNickOrderSearch
-            preset={preset}
-            startDate={startDate}
-            endDate={endDate}
-          />
-        </div>
       ) : null}
 
       {showProgressCard ? (

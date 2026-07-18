@@ -14,6 +14,8 @@ interface Props {
   showCustomQuery?: boolean
   /** 放在「自定义」右侧，例如线下录入按钮 */
   trailing?: React.ReactNode
+  /** 自定义日期面板下方扩展区（如买家昵称搜索） */
+  customExtra?: React.ReactNode
 }
 
 export const RangeBar: React.FC<Props> = ({
@@ -27,6 +29,7 @@ export const RangeBar: React.FC<Props> = ({
   customQueried,
   showCustomQuery = true,
   trailing,
+  customExtra,
 }) => {
   const validCustom = Boolean(customStart && customEnd && customStart <= customEnd)
 
@@ -77,6 +80,7 @@ export const RangeBar: React.FC<Props> = ({
           {preset === 'custom' && !customQueried && validCustom && (
             <span className="text-slate-400">请选择日期后点击查询</span>
           )}
+          {customExtra ? <div className="w-full basis-full">{customExtra}</div> : null}
         </div>
       )}
     </div>

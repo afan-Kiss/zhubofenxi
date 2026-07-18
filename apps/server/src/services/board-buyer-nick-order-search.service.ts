@@ -1,5 +1,6 @@
 /**
- * 按买家昵称搜索当前日期范围内的订单（主播业绩页「主播日报」框内）。
+ * 按买家昵称搜索经营缓存中的订单（主播业绩 · 自定义日期）。
+ * 匹配规则：缓存 view.buyerNickname，以及 raw 中的买家昵称（同一字段口径）。
  */
 import type { UserRole } from '../types/roles'
 import type { AnalyzedOrderView } from '../types/analysis'
@@ -15,11 +16,7 @@ import {
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
 import { orderLiveRoomMatchesSchedule } from '../utils/shop-name-normalize.util'
 import { parseLiveSessionTimeMs } from '../utils/business-timezone'
-import {
-  pickBuyerNicknameFromRaw,
-  pickBuyerNicknameFromView,
-  resolveBuyerIdentityFromView,
-} from './buyer-identity.service'
+import { pickBuyerNicknameFromRaw } from './buyer-identity.service'
 
 const MAX_RESULTS = 40
 const MIN_KEYWORD_LEN = 1
@@ -44,19 +41,36 @@ export interface BuyerNickOrderSearchHit {
   statusText: string
 }
 
-/** 仅真实买家昵称可搜；排除「未知买家」展示名，避免误命中 */
-function nickOfView(v: AnalyzedOrderView, raw?: Record<string, unknown>): string {
-  const identity = resolveBuyerIdentityFromView(
-    Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
-  )
-  const nick =
-    identity?.buyerNickname?.trim() ||
-    pickBuyerNicknameFromView(v) ||
-    pickBuyerNicknameFromRaw(raw) ||
-    v.buyerNickname?.trim() ||
-    ''
-  if (!nick || nick === '未知买家' || nick === '—') return ''
-  return nick
+function lookupRaw(
+  v: AnalyzedOrderView,
+  rawByMatch: Map<string, Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  const keys = [
+    v.matchOrderId,
+    v.orderId,
+    v.packageId,
+    v.displayOrderNo,
+    v.officialOrderNo,
+  ]
+  for (const key of keys) {
+    const k = String(key ?? '').trim()
+    if (!k || k === '—') continue
+    const raw = rawByMatch.get(k)
+    if (raw) return raw
+  }
+  return undefined
+}
+
+/** 经营缓存中的买家昵称（view 优先，再回落 raw） */
+function cacheBuyerNickname(
+  v: AnalyzedOrderView,
+  rawByMatch: Map<string, Record<string, unknown>>,
+): string {
+  const fromView = String(v.buyerNickname ?? '').trim()
+  if (fromView && fromView !== '—' && fromView !== '未知买家') return fromView
+  const fromRaw = pickBuyerNicknameFromRaw(lookupRaw(v, rawByMatch))
+  if (fromRaw && fromRaw !== '—' && fromRaw !== '未知买家') return fromRaw
+  return ''
 }
 
 function orderDateKeyShanghai(orderTime: string): string | null {
@@ -71,7 +85,6 @@ function orderDateKeyShanghai(orderTime: string): string | null {
 function resolveSessionLabel(params: {
   orderTime: string
   shopName: string
-  /** 订单归属主播，优先用其排班行，避免交接窗误配 */
   anchorName: string
   scheduleRows: Array<{
     anchorName: string
@@ -88,9 +101,7 @@ function resolveSessionLabel(params: {
   if (payMs == null) return null
   const shop = params.shopName.trim()
   const anchor = params.anchorName.trim()
-  const inGrace = (
-    row: (typeof params.scheduleRows)[number],
-  ): boolean => {
+  const inGrace = (row: (typeof params.scheduleRows)[number]): boolean => {
     if (row.enabled === false) return false
     const startMs = parseLiveSessionTimeMs(row.startAt)
     const endMs = parseLiveSessionTimeMs(row.endAt)
@@ -165,8 +176,7 @@ export async function searchBoardOrdersByBuyerNick(
   const kwLower = keyword.toLowerCase()
   const matched = cached.views.filter((v) => {
     if (forcedAnchor && v.anchorName !== forcedAnchor) return false
-    const raw = cached.rawByMatch.get(v.matchOrderId || v.orderId)
-    const nick = nickOfView(v, raw)
+    const nick = cacheBuyerNickname(v, cached.rawByMatch)
     if (!nick) return false
     return nick.toLowerCase().includes(kwLower)
   })
@@ -188,7 +198,7 @@ export async function searchBoardOrdersByBuyerNick(
 
   const items: BuyerNickOrderSearchHit[] = []
   for (const v of slice) {
-    const raw = cached.rawByMatch.get(v.matchOrderId || v.orderId)
+    const raw = lookupRaw(v, cached.rawByMatch)
     const row = mapViewToBoardOrderRow(
       Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
     )
@@ -220,7 +230,7 @@ export async function searchBoardOrdersByBuyerNick(
       anchorName,
       shopName,
       sessionLabel,
-      buyerNickname: nickOfView(v, raw) || row.buyerNickname || '—',
+      buyerNickname: cacheBuyerNickname(v, cached.rawByMatch) || row.buyerNickname || '—',
       buyerId: row.buyerId,
       productName: row.productName,
       payAmount: row.payAmount,

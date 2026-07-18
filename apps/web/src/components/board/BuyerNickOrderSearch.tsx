@@ -29,7 +29,7 @@ interface SearchResult {
   message?: string
 }
 
-/** 全量订单按买家昵称搜索（与日期 tabs 无关） */
+/** 全量订单按买家昵称 / 订单号搜索（与日期 tabs 无关） */
 export const BuyerNickOrderSearch: React.FC = () => {
   const { formatMoney } = useAmountDisplay()
   const [keyword, setKeyword] = useState('')
@@ -41,7 +41,7 @@ export const BuyerNickOrderSearch: React.FC = () => {
   const runSearch = useCallback(async () => {
     const q = keyword.trim()
     if (!q) {
-      setError('请输入买家昵称')
+      setError('请输入买家昵称或订单号')
       setResult(null)
       return
     }
@@ -56,7 +56,7 @@ export const BuyerNickOrderSearch: React.FC = () => {
       if (seq !== reqSeq.current) return
       setResult(data)
       if (data.total === 0) {
-        setError(data.message || '全量订单中未找到匹配昵称')
+        setError(data.message || '全量订单中未找到匹配结果')
       }
     } catch (e) {
       if (seq !== reqSeq.current) return
@@ -77,9 +77,9 @@ export const BuyerNickOrderSearch: React.FC = () => {
           onKeyDown={(e) => {
             if (e.key === 'Enter') void runSearch()
           }}
-          placeholder="买家昵称（全量）"
+          placeholder="昵称 / 订单号P…"
           disabled={loading}
-          aria-label="按买家昵称查订单"
+          aria-label="按买家昵称或订单号查订单"
           className="min-w-[120px] flex-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs outline-none focus:border-rose-300 focus:ring-2 focus:ring-rose-100 disabled:opacity-50"
         />
         <button

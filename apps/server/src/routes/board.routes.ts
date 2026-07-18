@@ -528,12 +528,12 @@ boardRouter.get('/daily-report', async (req, res) => {
   }
 })
 
-/** 按买家昵称搜索全量本地订单（不限日期 tabs） */
+/** 按买家昵称或订单号搜索全量本地订单（不限日期 tabs） */
 boardRouter.get('/order-search-by-buyer-nick', async (req, res) => {
   try {
     const keyword = req.query.keyword ? String(req.query.keyword) : ''
     if (!keyword.trim()) {
-      sendFail(res, '请输入买家昵称', 400)
+      sendFail(res, '请输入买家昵称或订单号', 400)
       return
     }
     const { searchBoardOrdersByBuyerNick } = await import(
@@ -549,7 +549,7 @@ boardRouter.get('/order-search-by-buyer-nick', async (req, res) => {
     )
     sendOk(res, data)
   } catch (err) {
-    sendFail(res, err instanceof Error ? err.message : '按昵称搜索订单失败', 500)
+    sendFail(res, err instanceof Error ? err.message : '搜索订单失败', 500)
   }
 })
 

@@ -1,6 +1,6 @@
 /**
- * 按买家昵称搜索本地全量订单（不随日期 tabs 过滤）。
- * 匹配规则：分析缓存中的 buyerNickname / raw 买家昵称。
+ * 按买家昵称或订单号搜索本地全量订单（不随日期 tabs 过滤）。
+ * 匹配：buyerNickname / raw 昵称，以及 P 开头展示单号、packageId、matchOrderId 等。
  */
 import type { UserRole } from '../types/roles'
 import type { AnalyzedOrderView } from '../types/analysis'
@@ -94,6 +94,39 @@ function cacheBuyerNickname(
   const fromRaw = pickBuyerNicknameFromRaw(lookupRaw(v, rawByMatch))
   if (fromRaw && fromRaw !== '—' && fromRaw !== '未知买家') return fromRaw
   return ''
+}
+
+/** 可检索的订单号字段（含 P 开头包裹号） */
+function orderSearchKeys(v: AnalyzedOrderView): string[] {
+  const keys = [
+    v.displayOrderNo,
+    v.packageId,
+    v.matchOrderId,
+    v.officialOrderNo,
+    v.orderId,
+  ]
+  const out: string[] = []
+  const seen = new Set<string>()
+  for (const key of keys) {
+    const k = String(key ?? '').trim()
+    if (!k || k === '—' || seen.has(k)) continue
+    seen.add(k)
+    out.push(k)
+  }
+  return out
+}
+
+function viewMatchesSearchKeyword(
+  v: AnalyzedOrderView,
+  rawByMatch: Map<string, Record<string, unknown>>,
+  kwLower: string,
+): boolean {
+  const nick = cacheBuyerNickname(v, rawByMatch)
+  if (nick && nick.toLowerCase().includes(kwLower)) return true
+  for (const id of orderSearchKeys(v)) {
+    if (id.toLowerCase().includes(kwLower)) return true
+  }
+  return false
 }
 
 function orderDateKeyShanghai(orderTime: string): string | null {
@@ -265,7 +298,7 @@ export async function searchBoardOrdersByBuyerNick(
 }> {
   const keyword = q.keyword.trim()
   if (keyword.length < MIN_KEYWORD_LEN) {
-    return { keyword, total: 0, items: [], message: '请输入买家昵称' }
+    return { keyword, total: 0, items: [], message: '请输入买家昵称或订单号' }
   }
   if (isStaffUnbound(role, username)) {
     return {
@@ -281,11 +314,9 @@ export async function searchBoardOrdersByBuyerNick(
   const pool = await getAllOrdersSearchPool()
 
   const kwLower = keyword.toLowerCase()
-  const matched = pool.views.filter((v) => {
-    const nick = cacheBuyerNickname(v, pool.rawByMatch)
-    if (!nick) return false
-    return nick.toLowerCase().includes(kwLower)
-  })
+  const matched = pool.views.filter((v) =>
+    viewMatchesSearchKeyword(v, pool.rawByMatch, kwLower),
+  )
 
   matched.sort((a, b) =>
     String(b.orderTimeText ?? '').localeCompare(String(a.orderTimeText ?? '')),

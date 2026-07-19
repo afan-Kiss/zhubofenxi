@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { CheckSquare, Copy, ExternalLink, Gift, Info, Loader2, RefreshCw, Square, Truck, X } from 'lucide-react'
 import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
+import { resolveAnchorTheme } from '../../lib/anchor-theme'
 import { apiRequest } from '../../lib/api'
 import { openQianfanLuckyGift } from '../../lib/lucky-gift-qianfan'
 import { useAuth } from '../../providers/AuthProvider'
@@ -40,6 +41,17 @@ interface ShopStat {
   fetchedWinnerCount?: number
 }
 
+interface AnchorStat {
+  anchorId: string
+  anchorName: string
+  drawCount: number
+  winnerCount: number
+  pending: number
+  noAddress: number
+  incompleteAddress: number
+  shipped: number
+}
+
 interface SummaryPayload {
   pending: number
   noAddress: number
@@ -64,6 +76,7 @@ interface SummaryPayload {
     statusChangeCount: number
   }
   shops: ShopStat[]
+  anchors?: AnchorStat[]
 }
 
 interface LuckyGiftItem {
@@ -430,6 +443,7 @@ export const LuckyGiftsPage: React.FC = () => {
         qs.set('pageSize', '100')
 
         const [sum, list] = await Promise.all([
+          // summary 始终四店汇总（店铺 pill / 主播卡）；列表才按 shopKey 过滤
           apiRequest<SummaryPayload>('/api/board/lucky-gifts/summary'),
           apiRequest<{ items: LuckyGiftItem[]; total: number; canViewPii: boolean }>(
             `/api/board/lucky-gifts?${qs.toString()}`,
@@ -759,11 +773,63 @@ export const LuckyGiftsPage: React.FC = () => {
           >
             <span className="text-sm font-medium leading-tight">{s.shopName}</span>
             <span className={`mt-0.5 text-[11px] leading-snug ${shopKey === s.shopKey ? 'text-slate-200' : 'text-slate-500'}`}>
-              活动 {s.drawCount}｜待发 {s.pending}｜缺地址 {s.noAddress + s.incompleteAddress}
+              福袋场次 {s.drawCount}｜待发 {s.pending}｜缺地址 {s.noAddress + s.incompleteAddress}
             </span>
           </button>
         ))}
       </section>
+
+      {/* 3b. 主播福袋场次 */}
+      {(summary?.anchors?.length ?? 0) > 0 && (
+        <section className="space-y-2" data-testid="lucky-gift-anchor-cards">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-medium text-slate-800">主播福袋</h2>
+            <p className="text-xs text-slate-400">
+              按直播排班归属统计；「福袋场次」= 该主播发出的福袋活动场数（不是中奖人数）
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {(summary?.anchors ?? []).map((a) => {
+              const theme = resolveAnchorTheme({
+                id: a.anchorId,
+                anchorId: a.anchorId,
+                name: a.anchorName,
+                anchorName: a.anchorName,
+              })
+              const missingAddr = a.noAddress + a.incompleteAddress
+              return (
+                <div
+                  key={a.anchorId || a.anchorName}
+                  className="rounded-2xl border bg-white px-3 py-3 shadow-sm"
+                  style={{ borderColor: theme.border, backgroundColor: theme.softBackground }}
+                >
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="h-2.5 w-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: theme.main }}
+                      aria-hidden
+                    />
+                    <span className="truncate text-sm font-medium text-slate-900">
+                      {formatAnchorDisplayName(a.anchorName)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-end justify-between gap-2">
+                    <div>
+                      <div className="text-[11px] text-slate-500">福袋场次</div>
+                      <div className="text-2xl font-semibold tabular-nums text-slate-900">{a.drawCount}</div>
+                    </div>
+                    <div className="text-right text-[11px] leading-relaxed text-slate-500">
+                      <div>中奖 {a.winnerCount}</div>
+                      <div>待发 {a.pending}</div>
+                      {missingAddr > 0 ? <div>缺地址 {missingAddr}</div> : null}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </section>
+      )}
 
       {/* 4. 筛选 / 操作区 */}
       <section className="space-y-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">

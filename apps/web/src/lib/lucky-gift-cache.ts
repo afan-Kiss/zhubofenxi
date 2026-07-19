@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'lucky-gift-page-cache-v1'
+const STORAGE_KEY = 'lucky-gift-page-cache-v2'
 
 export interface LuckyGiftListCachePayload {
   items: unknown[]

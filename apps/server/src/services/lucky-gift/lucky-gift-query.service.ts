@@ -109,6 +109,163 @@ async function resolveAccountIdFilter(accountId?: string): Promise<string[] | nu
   return [accountId]
 }
 
+/** 按主播聚合：福袋场次（distinct draw）+ 中奖人发货状态 */
+async function buildLuckyGiftAnchorStats(
+  winners: Array<{
+    id: string
+    liveAccountId: string
+    liveAccountName: string
+    luckyDrawId: string
+    winTime: Date | null
+    draw: { roomId: string } | null
+    shipment: { shipmentStatus: string } | null
+  }>,
+  accountIds: string[] | null,
+) {
+  type Acc = {
+    anchorId: string
+    anchorName: string
+    drawKeys: Set<string>
+    winnerCount: number
+    pending: number
+    noAddress: number
+    incompleteAddress: number
+    shipped: number
+  }
+  const byKey = new Map<string, Acc>()
+
+  function ensure(anchorId: string, anchorName: string): Acc {
+    const key = anchorId || anchorName
+    let acc = byKey.get(key)
+    if (!acc) {
+      acc = {
+        anchorId,
+        anchorName,
+        drawKeys: new Set(),
+        winnerCount: 0,
+        pending: 0,
+        noAddress: 0,
+        incompleteAddress: 0,
+        shipped: 0,
+      }
+      byKey.set(key, acc)
+    }
+    return acc
+  }
+
+  const coveredDraws = new Set(winners.map((w) => `${w.liveAccountId}::${w.luckyDrawId}`))
+  const allDraws = await prisma.xhsLuckyDraw.findMany({
+    where: accountIds ? { liveAccountId: { in: accountIds } } : undefined,
+    select: {
+      id: true,
+      liveAccountId: true,
+      liveAccountName: true,
+      luckyDrawId: true,
+      roomId: true,
+      startTime: true,
+      createTime: true,
+    },
+  })
+  const orphanDraws = allDraws
+    .filter((d) => !coveredDraws.has(`${d.liveAccountId}::${d.luckyDrawId}`))
+    .map((d) => ({
+      id: `orphan-draw:${d.id}`,
+      liveAccountId: d.liveAccountId,
+      liveAccountName: d.liveAccountName,
+      luckyDrawId: d.luckyDrawId,
+      winTime: d.startTime ?? d.createTime,
+      draw: { roomId: d.roomId },
+    }))
+
+  const resolveRows = [
+    ...winners.map((w) => ({
+      id: w.id,
+      liveAccountId: w.liveAccountId,
+      liveAccountName: w.liveAccountName,
+      winTime: w.winTime,
+      draw: w.draw ? { roomId: w.draw.roomId } : null,
+    })),
+    ...orphanDraws.map((d) => ({
+      id: d.id,
+      liveAccountId: d.liveAccountId,
+      liveAccountName: d.liveAccountName,
+      winTime: d.winTime,
+      draw: d.draw,
+    })),
+  ]
+  const anchorMap = await resolveLuckyGiftAnchorsBatch(resolveRows)
+
+  // 同一场福袋若中奖人归属不一致，取票数最多的主播
+  const drawVotes = new Map<string, Map<string, { anchorId: string; anchorName: string; n: number }>>()
+  const vote = (drawKey: string, anchorId: string, anchorName: string, weight = 1) => {
+    let votes = drawVotes.get(drawKey)
+    if (!votes) {
+      votes = new Map()
+      drawVotes.set(drawKey, votes)
+    }
+    const aKey = anchorId || anchorName
+    const cur = votes.get(aKey)
+    if (cur) cur.n += weight
+    else votes.set(aKey, { anchorId: anchorId || aKey, anchorName, n: weight })
+  }
+
+  for (const w of winners) {
+    const att = anchorMap.get(w.id)
+    const name = att?.anchorName?.trim()
+    if (!att || !name) continue
+    vote(`${w.liveAccountId}::${w.luckyDrawId}`, att.anchorId ?? name, name)
+  }
+  for (const d of orphanDraws) {
+    const drawKey = `${d.liveAccountId}::${d.luckyDrawId}`
+    if (drawVotes.has(drawKey)) continue
+    const att = anchorMap.get(d.id)
+    const name = att?.anchorName?.trim()
+    if (!att || !name) continue
+    vote(drawKey, att.anchorId ?? name, name)
+  }
+
+  for (const [drawKey, votes] of drawVotes) {
+    let best: { anchorId: string; anchorName: string; n: number } | null = null
+    for (const v of votes.values()) {
+      if (!best || v.n > best.n) best = v
+    }
+    if (!best) continue
+    ensure(best.anchorId, best.anchorName).drawKeys.add(drawKey)
+  }
+
+  for (const w of winners) {
+    const att = anchorMap.get(w.id)
+    const name = att?.anchorName?.trim()
+    if (!att || !name) continue
+    const acc = ensure(att.anchorId ?? name, name)
+    acc.winnerCount += 1
+    const st = (w.shipment?.shipmentStatus || 'no_address') as LuckyGiftShipmentStatus
+    if (st === 'pending') acc.pending += 1
+    else if (st === 'no_address') acc.noAddress += 1
+    else if (st === 'incomplete_address') acc.incompleteAddress += 1
+    else if (st === 'shipped') acc.shipped += 1
+  }
+
+  return [...byKey.values()]
+    .map((a) => ({
+      anchorId: a.anchorId,
+      anchorName: a.anchorName,
+      drawCount: a.drawKeys.size,
+      winnerCount: a.winnerCount,
+      pending: a.pending,
+      noAddress: a.noAddress,
+      incompleteAddress: a.incompleteAddress,
+      shipped: a.shipped,
+    }))
+    .filter((a) => a.drawCount > 0 || a.winnerCount > 0)
+    .sort(
+      (a, b) =>
+        b.drawCount - a.drawCount ||
+        b.winnerCount - a.winnerCount ||
+        a.anchorName.localeCompare(b.anchorName, 'zh-CN'),
+    )
+}
+
 export async function getLuckyGiftSummary(params?: { accountId?: string }) {
   const accountIds = await resolveAccountIdFilter(params?.accountId)
   const winnerWhere = accountIds ? { liveAccountId: { in: accountIds } } : {}
@@ -133,6 +290,7 @@ export async function getLuckyGiftSummary(params?: { accountId?: string }) {
   const drawCount = await prisma.xhsLuckyDraw.count({
     where: accountIds ? { liveAccountId: { in: accountIds } } : undefined,
   })
+  const anchors = await buildLuckyGiftAnchorStats(winners, accountIds)
   const run = await prisma.luckyGiftSyncRun.findUnique({ where: { id: 'default' } })
   const metas = await prisma.luckyGiftSyncMeta.findMany()
   let lastSummary: {
@@ -231,6 +389,7 @@ export async function getLuckyGiftSummary(params?: { accountId?: string }) {
       statusChangeCount: run?.statusChangeCount ?? 0,
     },
     shops: shopStats,
+    anchors,
   }
 }
 

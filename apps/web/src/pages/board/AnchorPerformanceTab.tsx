@@ -48,6 +48,7 @@ import {
 } from '../../lib/data-freshness'
 import type { BoardMetricExplainKey } from '../../lib/metricExplain'
 import { apiRequest } from '../../lib/api'
+import { FloatingToast } from '../../components/ui/ViewportModal'
 import { OfflineDealEntryPanel } from '../../components/board/OfflineDealEntryPanel'
 import { isOfflineOnlyAnchor } from '../../lib/anchor-system-keys'
 
@@ -275,6 +276,9 @@ export const AnchorPerformanceTab: React.FC = () => {
   const [anchorFilter, setAnchorFilter] = useState('全部')
   const [toolsOpen, setToolsOpen] = useState(false)
   const [leaveToggleBusyKey, setLeaveToggleBusyKey] = useState<string | null>(null)
+  /** 点击后立刻翻转 UI，等接口/刷新完成再交给服务端数据 */
+  const [leaveOverrides, setLeaveOverrides] = useState<Record<string, boolean>>({})
+  const [leaveToast, setLeaveToast] = useState<string | null>(null)
   const [anchorDrawer, setAnchorDrawer] = useState<{
     anchorName: string
     anchorId?: string
@@ -382,11 +386,20 @@ export const AnchorPerformanceTab: React.FC = () => {
     Boolean(selectedConfigAnchor?.systemKey)
 
   const anchors = useMemo(() => {
-    if (anchorFilter === '全部') return visibleLiveAnchorRows
-    return visibleLiveAnchorRows.filter(
-      (a) => String(a.anchorName) === anchorFilter || String(a.anchorName).includes(anchorFilter),
-    )
-  }, [visibleLiveAnchorRows, anchorFilter])
+    const base =
+      anchorFilter === '全部'
+        ? visibleLiveAnchorRows
+        : visibleLiveAnchorRows.filter(
+            (a) =>
+              String(a.anchorName) === anchorFilter || String(a.anchorName).includes(anchorFilter),
+          )
+    if (Object.keys(leaveOverrides).length === 0) return base
+    return base.map((a) => {
+      const key = String(a.anchorId ?? '').trim() || String(a.anchorName ?? '').trim()
+      if (!key || !(key in leaveOverrides)) return a
+      return { ...a, isOnLeave: leaveOverrides[key] }
+    })
+  }, [visibleLiveAnchorRows, anchorFilter, leaveOverrides])
 
   const performanceSummary = data?.anchorPerformanceSummary
   const filteredPerformanceSummary = useMemo(() => {
@@ -453,7 +466,11 @@ export const AnchorPerformanceTab: React.FC = () => {
       const id = String(row.anchorId ?? '').trim()
       const busyKey = id || name
       if (!busyKey || name === '未归属') return
+      if (leaveToggleBusyKey) return
       setLeaveToggleBusyKey(busyKey)
+      // 立刻翻转勾选与水印，避免等接口时「点了没反应」
+      setLeaveOverrides((prev) => ({ ...prev, [busyKey]: isOnLeave }))
+      setLeaveToast(isOnLeave ? '已标记休假，正在保存…' : '已取消休假，正在保存…')
       try {
         await apiRequest('/anchor-schedules/leave', {
           method: 'POST',
@@ -468,14 +485,36 @@ export const AnchorPerformanceTab: React.FC = () => {
               : `主播业绩取消休假：${name}`,
           }),
         })
-        await reload()
+        setLeaveToast('排班已更新，经营数据后台重算中…')
+        await reloadLocalFresh()
+        setLeaveToast(
+          isOnLeave
+            ? '休假已生效；指标将随缓存刷新更新'
+            : '已取消休假；指标将随缓存刷新更新',
+        )
+        window.setTimeout(() => setLeaveToast(null), 2800)
+        // 缓存可能仍短暂滞后：多留一会儿乐观状态，避免勾选闪回
+        window.setTimeout(() => {
+          setLeaveOverrides((prev) => {
+            if (prev[busyKey] !== isOnLeave) return prev
+            const next = { ...prev }
+            delete next[busyKey]
+            return next
+          })
+        }, 2000)
       } catch (err) {
+        setLeaveOverrides((prev) => {
+          const next = { ...prev }
+          delete next[busyKey]
+          return next
+        })
+        setLeaveToast(null)
         window.alert(err instanceof Error ? err.message : '标记休假失败')
       } finally {
         setLeaveToggleBusyKey(null)
       }
     },
-    [reload, startDate],
+    [leaveToggleBusyKey, reloadLocalFresh, startDate],
   )
   const isSyncingNow =
     isRealtimePreset &&
@@ -1140,6 +1179,8 @@ export const AnchorPerformanceTab: React.FC = () => {
           }
         />
       ) : null}
+
+      <FloatingToast message={leaveToast} />
     </div>
   )
 }

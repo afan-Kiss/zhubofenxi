@@ -249,32 +249,40 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               {allowLeaveToggle && !isUnassigned && onLeaveToggle ? (
                 <button
                   type="button"
-                  className={`relative z-20 flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[12px] ${
+                  className={`relative z-20 flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[12px] transition ${
                     onLeave
                       ? 'border-rose-300 bg-rose-50 font-semibold text-rose-700'
                       : 'border-rose-100 bg-white text-slate-700'
+                  } ${
+                    leaveToggleBusyKey === leaveBusyKey
+                      ? 'opacity-70'
+                      : 'active:scale-95 hover:border-rose-200'
                   }`}
-                  disabled={leaveToggleBusyKey === leaveBusyKey}
+                  disabled={Boolean(leaveToggleBusyKey)}
+                  aria-busy={leaveToggleBusyKey === leaveBusyKey}
                   aria-pressed={onLeave}
                   onPointerDown={stopCardActivation}
                   onMouseDown={stopCardActivation}
                   onClick={(e) => {
                     e.preventDefault()
                     e.stopPropagation()
+                    if (leaveToggleBusyKey) return
                     onLeaveToggle(a, !onLeave)
                   }}
                 >
                   <span
                     className={`inline-flex h-4 w-4 items-center justify-center rounded border ${
-                      onLeave
-                        ? 'border-rose-600 bg-rose-600 text-[10px] text-white'
-                        : 'border-slate-300 bg-white'
+                      leaveToggleBusyKey === leaveBusyKey
+                        ? 'animate-pulse border-rose-400 bg-rose-100 text-[10px] text-rose-600'
+                        : onLeave
+                          ? 'border-rose-600 bg-rose-600 text-[10px] text-white'
+                          : 'border-slate-300 bg-white'
                     }`}
                     aria-hidden
                   >
-                    {onLeave ? '✓' : ''}
+                    {leaveToggleBusyKey === leaveBusyKey ? '…' : onLeave ? '✓' : ''}
                   </span>
-                  休假
+                  {leaveToggleBusyKey === leaveBusyKey ? '保存中' : '休假'}
                 </button>
               ) : null}
             </div>

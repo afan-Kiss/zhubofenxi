@@ -684,6 +684,7 @@ export async function saveDailySchedules(params: {
   const deletedByName = new Map(
     deletedFormal.map((a) => [a.name.trim().toLowerCase(), a] as const),
   )
+  const { isBusinessDateKey } = await import('../utils/anchor-effective-date.util')
 
   // 预校验正式 / 临时主播
   const existingTempKeys = new Set(
@@ -736,13 +737,17 @@ export async function saveDailySchedules(params: {
     if (!anchor && name) {
       const gone = deletedByName.get(name.toLowerCase())
       if (gone) {
-        const last = gone.effectiveTo?.trim() || '未知'
-        throw new ScheduleSaveError([
-          {
-            type: 'anchor_overlap',
-            message: `主播“${name}”已删除，最后工作日为${last}，不能安排到${params.date}。`,
-          },
-        ])
+        const last = gone.effectiveTo?.trim() || ''
+        // 软删主播：最后工作日当天仍允许回写/保留历史排班；次日起禁止
+        if (!isBusinessDateKey(last) || params.date > last) {
+          throw new ScheduleSaveError([
+            {
+              type: 'anchor_overlap',
+              message: `主播“${name}”已删除，最后工作日为${last || '未知'}，不能安排到${params.date}。`,
+            },
+          ])
+        }
+        continue
       }
     }
     if (anchor) {
@@ -962,29 +967,11 @@ export async function copyDailySchedules(params: {
 /** 业绩页补的占位请假班次（取消休假时应删除，勿改成正常班） */
 const PERFORMANCE_LEAVE_PLACEHOLDER_NOTE = '业绩页标记休假'
 
-type LeaveScheduleDraft = {
-  anchorId?: string | null
-  anchorName: string
-  shopName: string
-  liveRoomName: string
-  startTime: string
-  endTime: string
-  enabled?: boolean
-  note?: string
-  isTemporaryAnchor?: boolean
-  temporaryAnchorKey?: string | null
-  anchorColorSnapshot?: string | null
-  isOnLeave?: boolean
-}
-
-function isPerformanceLeavePlaceholder(s: LeaveScheduleDraft): boolean {
-  return String(s.note ?? '').includes(PERFORMANCE_LEAVE_PLACEHOLDER_NOTE)
-}
-
 /**
- * 主播业绩「昨日」休假打勾：将该主播当日全部排班行设为请假/取消请假。
- * 基于当日完整生效排班（含模板/生成班），避免只读 manual 列表整日重写冲掉其他人班次。
- * 无排班行且标记请假时，补一条占位请假班次；取消时删除占位行。
+ * 主播业绩「昨日」休假打勾：仅改目标主播当日排班，禁止整日重写（否则会把已删/离职主播一并 save 触发误报）。
+ * - 有 DB 行：只更新 isOnLeave；取消时删掉业绩页占位请假班
+ * - 无 DB 行且生效表有该主播：只物化该主播行并标请假
+ * - 全无：补一条占位请假班
  */
 export async function setAnchorLeaveForDate(params: {
   date: string
@@ -1007,101 +994,166 @@ export async function setAnchorLeaveForDate(params: {
     throw new ScheduleSaveError([{ type: 'anchor_overlap', message: '请提供合法 date（YYYY-MM-DD）' }])
   }
   const wantLeave = Boolean(params.isOnLeave)
-  const listed = await listDailySchedulesForDate(date)
-  // 始终用完整生效表，避免 hasManualDay 时只带 manual 行导致整日覆盖丢班
-  const schedules: LeaveScheduleDraft[] = listed.effectiveTable.rows
-    .filter((r) => r.enabled)
-    .map((r) => ({
-      anchorId: r.anchorId ?? null,
-      anchorName: r.anchorName,
-      shopName: r.shopName,
-      liveRoomName: r.liveRoomName,
-      startTime: r.startTime,
-      endTime: r.endTime,
-      enabled: true,
-      note: r.note ?? undefined,
-      isTemporaryAnchor: Boolean(r.isTemporaryAnchor),
-      temporaryAnchorKey: r.temporaryAnchorKey ?? null,
-      anchorColorSnapshot: r.anchorColorSnapshot ?? null,
-      isOnLeave: Boolean(r.isOnLeave),
-    }))
-
-  const anchorId = String(params.anchorId ?? '').trim()
+  const anchorIdHint = String(params.anchorId ?? '').trim()
   const anchorNameHint = String(params.anchorName ?? '').trim()
-  const match = (s: LeaveScheduleDraft) => {
-    if (anchorId && String(s.anchorId ?? '').trim() === anchorId) return true
-    if (anchorNameHint && s.anchorName.trim() === anchorNameHint) return true
+  if (!anchorIdHint && !anchorNameHint) {
+    throw new ScheduleSaveError([{ type: 'anchor_overlap', message: '请提供主播姓名或 ID' }])
+  }
+
+  await assertHistoricalScheduleChangeAllowed({
+    date,
+    forceHistoricalScheduleChange: params.forceHistoricalScheduleChange ?? true,
+    changeReason:
+      params.changeReason?.trim() ||
+      (wantLeave
+        ? `主播业绩标记休假：${anchorNameHint || anchorIdHint}`
+        : `主播业绩取消休假：${anchorNameHint || anchorIdHint}`),
+    createdBy: params.createdBy,
+  })
+
+  const listed = await listDailySchedulesForDate(date)
+  const matchEffective = (r: { anchorId?: string | null; anchorName: string }) => {
+    if (anchorIdHint && String(r.anchorId ?? '').trim() === anchorIdHint) return true
+    if (anchorNameHint && r.anchorName.trim() === anchorNameHint) return true
     return false
   }
 
-  let matchedName = anchorNameHint
-  let matchedAny = false
-  for (const s of schedules) {
-    if (!match(s)) continue
-    matchedAny = true
-    matchedName = s.anchorName.trim() || matchedName
-    s.isOnLeave = wantLeave
+  let matchedName =
+    listed.effectiveTable.rows.find(matchEffective)?.anchorName.trim() || anchorNameHint
+  if (!matchedName && anchorIdHint) {
+    const { getAnchorConfigSync } = await import('./anchor.service')
+    matchedName =
+      getAnchorConfigSync().anchors.find((a) => a.id === anchorIdHint)?.name?.trim() || ''
   }
-
   if (!matchedName) {
     throw new ScheduleSaveError([{ type: 'anchor_overlap', message: '请提供主播姓名或 ID' }])
   }
 
-  if (wantLeave && !matchedAny) {
-    const { getAnchorConfigSync } = await import('./anchor.service')
-    const { findAnchorByName } = await import('./anchor-rules.service')
-    const cfg = getAnchorConfigSync()
-    const found =
-      (anchorId ? cfg.anchors.find((a) => a.id === anchorId) : null) ??
-      findAnchorByName(cfg, matchedName)
-    const shopName =
-      listed.effectiveTable.rows.find((r) => r.anchorName.trim() === matchedName)?.shopName?.trim() ||
-      '拾玉居和田玉'
-    schedules.push({
-      anchorId: found?.id ?? (anchorId || null),
-      anchorName: found?.name ?? matchedName,
-      shopName,
-      liveRoomName: shopName,
-      startTime: '09:00',
-      endTime: '18:00',
-      enabled: true,
-      note: PERFORMANCE_LEAVE_PLACEHOLDER_NOTE,
-      isTemporaryAnchor: false,
-      temporaryAnchorKey: null,
-      anchorColorSnapshot: found?.color ?? null,
-      isOnLeave: true,
-    })
-    matchedName = found?.name ?? matchedName
+  const dbWhere = {
+    scheduleDate: date,
+    OR: [
+      ...(anchorIdHint ? [{ anchorId: anchorIdHint }] : []),
+      { anchorName: matchedName },
+    ],
   }
+  const dbRows = await prisma.anchorDailySchedule.findMany({ where: dbWhere })
 
-  if (!wantLeave && !matchedAny) {
+  if (!wantLeave) {
+    const placeholderIds = dbRows
+      .filter((r) => String(r.note ?? '').includes(PERFORMANCE_LEAVE_PLACEHOLDER_NOTE))
+      .map((r) => r.id)
+    if (placeholderIds.length > 0) {
+      await prisma.anchorDailySchedule.deleteMany({ where: { id: { in: placeholderIds } } })
+    }
+    const keepIds = dbRows.filter((r) => !placeholderIds.includes(r.id)).map((r) => r.id)
+    if (keepIds.length > 0) {
+      await prisma.anchorDailySchedule.updateMany({
+        where: { id: { in: keepIds } },
+        data: { isOnLeave: false },
+      })
+    }
+    await invalidateBusinessBoardCacheForDate(date)
+    const result = await listDailySchedulesForDate(date)
     return {
-      date,
-      schedules: listed.schedules,
-      warnings: listed.warnings,
+      ...result,
       confirmPreviewLines: [],
       isOnLeave: false,
       anchorName: matchedName,
     }
   }
 
-  // 取消休假：删掉业绩页补的占位班，避免变成 09:00-18:00 正常班
-  const toSave = !wantLeave
-    ? schedules.filter((s) => !(match(s) && isPerformanceLeavePlaceholder(s)))
-    : schedules
+  // —— 标记休假 ——
+  if (dbRows.length > 0) {
+    await prisma.anchorDailySchedule.updateMany({
+      where: { id: { in: dbRows.map((r) => r.id) } },
+      data: { isOnLeave: true },
+    })
+    await invalidateBusinessBoardCacheForDate(date)
+    const result = await listDailySchedulesForDate(date)
+    return {
+      ...result,
+      confirmPreviewLines: [],
+      isOnLeave: true,
+      anchorName: matchedName,
+    }
+  }
 
-  const saved = await saveDailySchedules({
-    date,
-    schedules: toSave,
-    createdBy: params.createdBy,
-    forceHistoricalScheduleChange: params.forceHistoricalScheduleChange ?? true,
-    changeReason:
-      params.changeReason?.trim() ||
-      (wantLeave ? `主播业绩标记休假：${matchedName}` : `主播业绩取消休假：${matchedName}`),
+  const fromEffective = listed.effectiveTable.rows.filter(
+    (r) => r.enabled && matchEffective(r),
+  )
+  if (fromEffective.length > 0) {
+    for (const r of fromEffective) {
+      const { startAt, endAt } = buildScheduleBounds(date, r.startTime, r.endTime)
+      await prisma.anchorDailySchedule.create({
+        data: {
+          scheduleDate: date,
+          anchorId: r.anchorId ?? null,
+          anchorName: r.anchorName.trim(),
+          shopName: r.shopName.trim(),
+          liveRoomName: r.liveRoomName.trim(),
+          startAt,
+          endAt,
+          source: 'manual',
+          enabled: true,
+          locked: false,
+          confirmed: false,
+          note: r.note?.trim() || null,
+          createdBy: params.createdBy ?? null,
+          isTemporaryAnchor: Boolean(r.isTemporaryAnchor),
+          temporaryAnchorKey: r.temporaryAnchorKey ?? null,
+          anchorColorSnapshot: r.anchorColorSnapshot ?? null,
+          isOnLeave: true,
+        },
+      })
+    }
+    await invalidateBusinessBoardCacheForDate(date)
+    const result = await listDailySchedulesForDate(date)
+    return {
+      ...result,
+      confirmPreviewLines: [],
+      isOnLeave: true,
+      anchorName: matchedName,
+    }
+  }
+
+  const { getAnchorConfigSync } = await import('./anchor.service')
+  const { findAnchorByName } = await import('./anchor-rules.service')
+  const cfg = getAnchorConfigSync()
+  const found =
+    (anchorIdHint ? cfg.anchors.find((a) => a.id === anchorIdHint) : null) ??
+    findAnchorByName(cfg, matchedName)
+  const shopName =
+    listed.effectiveTable.rows.find((r) => r.anchorName.trim() === matchedName)?.shopName?.trim() ||
+    '拾玉居和田玉'
+  const { startAt, endAt } = buildScheduleBounds(date, '09:00', '18:00')
+  await prisma.anchorDailySchedule.create({
+    data: {
+      scheduleDate: date,
+      anchorId: found?.id ?? (anchorIdHint || null),
+      anchorName: found?.name ?? matchedName,
+      shopName,
+      liveRoomName: shopName,
+      startAt,
+      endAt,
+      source: 'manual',
+      enabled: true,
+      locked: false,
+      confirmed: false,
+      note: PERFORMANCE_LEAVE_PLACEHOLDER_NOTE,
+      createdBy: params.createdBy ?? null,
+      isTemporaryAnchor: false,
+      temporaryAnchorKey: null,
+      anchorColorSnapshot: found?.color ?? null,
+      isOnLeave: true,
+    },
   })
+  matchedName = found?.name ?? matchedName
+  await invalidateBusinessBoardCacheForDate(date)
+  const result = await listDailySchedulesForDate(date)
   return {
-    ...saved,
-    isOnLeave: wantLeave,
+    ...result,
+    confirmPreviewLines: [],
+    isOnLeave: true,
     anchorName: matchedName,
   }
 }

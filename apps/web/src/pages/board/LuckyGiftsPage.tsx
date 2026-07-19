@@ -141,6 +141,8 @@ interface SfRouteStatsPayload {
     anchorId?: string | null
     giftName: string
     trackingNo: string | null
+    markedShippedAt?: string | null
+    sfRouteEventAt?: string | null
     sfRouteStatus: string
     sfRouteLabel: string | null
     sfRouteQueriedAt: string | null
@@ -1097,6 +1099,12 @@ export const LuckyGiftsPage: React.FC = () => {
                     店铺 {it.shopName || it.liveAccountName || '—'}
                     <span className="mx-1.5 text-slate-300">·</span>
                     主播 {formatAnchorDisplayName(it.anchorName)}
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    发货 {formatDateTime(it.markedShippedAt)}
+                    <span className="mx-1.5 text-slate-300">·</span>
+                    {it.sfRouteStatus === 'returned' ? '退回' : '拒收'}{' '}
+                    {formatDateTime(it.sfRouteEventAt)}
                   </div>
                   <div className="mt-0.5 text-xs text-slate-500">
                     中奖人 {it.winnerNickname || '—'}

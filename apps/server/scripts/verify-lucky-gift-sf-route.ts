@@ -17,6 +17,7 @@ const rejected = classifySfRouteNodes([
   { acceptTime: '2026-07-02 12:00:00', acceptAddress: null, remark: '客户拒收，快件退回', opCode: '70' },
 ])
 assert(rejected.outcome === 'rejected', `expected rejected got ${rejected.outcome}`)
+assert(rejected.eventAt === '2026-07-02 12:00:00', `rejected eventAt ${rejected.eventAt}`)
 
 const returned = classifySfRouteNodes([
   { acceptTime: '2026-07-01 10:00:00', acceptAddress: null, remark: '顺丰已收件', opCode: '50' },
@@ -28,12 +29,14 @@ const returned = classifySfRouteNodes([
   },
 ])
 assert(returned.outcome === 'returned', `expected returned got ${returned.outcome}`)
+assert(returned.eventAt === '2026-07-03 09:00:00', `returned eventAt ${returned.eventAt}`)
 
 const signed = classifySfRouteNodes([
   { acceptTime: '2026-07-01 10:00:00', acceptAddress: null, remark: '顺丰已收件', opCode: '50' },
   { acceptTime: '2026-07-02 18:00:00', acceptAddress: null, remark: '已签收,感谢使用顺丰', opCode: '80' },
 ])
 assert(signed.outcome === 'signed', `expected signed got ${signed.outcome}`)
+assert(signed.eventAt === '2026-07-02 18:00:00', `signed eventAt ${signed.eventAt}`)
 
 const page = path.join(
   process.cwd(),
@@ -41,7 +44,8 @@ const page = path.join(
 )
 const pageSrc = fs.readFileSync(page, 'utf8')
 assert(pageSrc.includes('未签收 / 退回运费'), 'page missing route panel title')
-assert(pageSrc.includes('查询顺丰轨迹'), 'page missing refresh button')
+assert(pageSrc.includes('发货'), 'page missing ship time label')
+assert(pageSrc.includes('拒收'), 'page missing reject time label')
 assert(!pageSrc.includes('亏损'), 'page must not use 亏损')
 assert(!pageSrc.includes('顺丰费用'), 'page must not use banned 顺丰费用 label')
 

@@ -35,6 +35,8 @@ export type SfWaybillRouteResult = {
   ok: boolean
   outcome: SfRouteOutcome
   label: string | null
+  /** 关键轨迹节点时间（拒收/退回/签收），如 2025-10-03 07:55:56 */
+  eventAt: string | null
   nodes: SfRouteNode[]
   error: string | null
   apiCode: string | null
@@ -198,32 +200,45 @@ function phoneLast4(raw: string | null | undefined): string | null {
 export function classifySfRouteNodes(nodes: SfRouteNode[]): {
   outcome: Exclude<SfRouteOutcome, 'failed'>
   label: string | null
+  eventAt: string | null
 } {
-  if (nodes.length === 0) return { outcome: 'unknown', label: null }
+  if (nodes.length === 0) return { outcome: 'unknown', label: null, eventAt: null }
   const sorted = [...nodes].sort((a, b) => {
     const ta = a.acceptTime ? Date.parse(a.acceptTime.replace(/-/g, '/')) : 0
     const tb = b.acceptTime ? Date.parse(b.acceptTime.replace(/-/g, '/')) : 0
     return ta - tb
   })
-  const blob = sorted.map((n) => `${n.opCode} ${n.remark}`).join('\n')
   const last = sorted[sorted.length - 1]
-  const label = last?.remark?.trim() || null
+  const pick = (n: SfRouteNode | undefined) => ({
+    label: n?.remark?.trim() || last?.remark?.trim() || null,
+    eventAt: n?.acceptTime?.trim() || last?.acceptTime?.trim() || null,
+  })
 
-  if (/拒收|客户拒签|收方拒|拒签|收件人拒/.test(blob)) {
-    return { outcome: 'rejected', label }
+  const rejectedNode = [...sorted]
+    .reverse()
+    .find((n) => /拒收|客户拒签|收方拒|拒签|收件人拒/.test(`${n.opCode} ${n.remark}`))
+  if (rejectedNode) {
+    return { outcome: 'rejected', ...pick(rejectedNode) }
   }
-  if (
-    sorted.some((n) => n.opCode === '648') ||
-    /快件已退回|退回寄件|退回\/转寄|退件入库|退回中/.test(blob)
-  ) {
-    return { outcome: 'returned', label }
+
+  const returnedNode = [...sorted]
+    .reverse()
+    .find(
+      (n) =>
+        n.opCode === '648' ||
+        /快件已退回|退回寄件|退回\/转寄|退件入库|退回中/.test(`${n.opCode} ${n.remark}`),
+    )
+  if (returnedNode) {
+    return { outcome: 'returned', ...pick(returnedNode) }
   }
-  if (
-    sorted.some((n) => n.opCode === '80' || /已签收|签收人/.test(n.remark))
-  ) {
-    return { outcome: 'signed', label }
+
+  const signedNode = [...sorted]
+    .reverse()
+    .find((n) => n.opCode === '80' || /已签收|签收人/.test(n.remark))
+  if (signedNode) {
+    return { outcome: 'signed', ...pick(signedNode) }
   }
-  return { outcome: 'in_transit', label }
+  return { outcome: 'in_transit', ...pick(last) }
 }
 
 function parseRouteResult(
@@ -238,6 +253,7 @@ function parseRouteResult(
       ok: false,
       outcome: 'failed',
       label: null,
+      eventAt: null,
       nodes: [],
       error: String(outer.apiErrorMsg || `丰桥外层错误 ${outerCode}`),
       apiCode: outerCode,
@@ -252,6 +268,7 @@ function parseRouteResult(
       ok: false,
       outcome: 'failed',
       label: null,
+      eventAt: null,
       nodes: [],
       error,
       apiCode: code || null,
@@ -274,6 +291,7 @@ function parseRouteResult(
     ok: true,
     outcome: classified.outcome,
     label: classified.label,
+    eventAt: classified.eventAt,
     nodes,
     error: null,
     apiCode: 'S0000',
@@ -295,6 +313,7 @@ export async function querySfWaybillRoute(
       ok: false,
       outcome: 'failed',
       label: null,
+      eventAt: null,
       nodes: [],
       error: '非顺丰运单号',
       apiCode: null,
@@ -346,6 +365,7 @@ async function querySfWaybillRouteOnce(
       ok: false,
       outcome: 'failed',
       label: null,
+      eventAt: null,
       nodes: [],
       error: posted.error,
       apiCode: null,

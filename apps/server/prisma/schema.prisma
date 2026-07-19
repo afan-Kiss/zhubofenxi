@@ -1348,6 +1348,8 @@ model LuckyGiftShipment {
   /// 顺丰轨迹结果：unknown|querying|in_transit|signed|rejected|returned|failed
   sfRouteStatus        String    @default("unknown")
   sfRouteLabel         String?
+  /// 关键轨迹节点时间（拒收/退回/签收等）
+  sfRouteEventAt       DateTime?
   sfRouteQueriedAt     DateTime?
   sfRouteError         String?
   sfRouteTrackingNo    String?

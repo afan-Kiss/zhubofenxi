@@ -15,6 +15,14 @@ const ABNORMAL_TTL_MS = 24 * 3_600_000
 const IN_TRANSIT_TTL_MS = 6 * 3_600_000
 const FAILED_BACKOFF_MS = 30 * 60_000
 
+function parseSfRouteEventAt(raw: string | null | undefined): Date | null {
+  const s = String(raw || '').trim()
+  if (!s) return null
+  const ms = Date.parse(s.includes('T') ? s : s.replace(/-/g, '/'))
+  if (!Number.isFinite(ms)) return null
+  return new Date(ms)
+}
+
 export function shouldQuerySfRoute(input: {
   trackingNo: string | null | undefined
   shipmentStatus: string
@@ -84,6 +92,7 @@ export async function queryAndCacheSfRouteForShipment(
         sfRouteError: message,
         sfRouteTrackingNo: tracking,
         sfRouteLabel: null,
+        sfRouteEventAt: null,
       },
     })
     return {
@@ -104,6 +113,7 @@ export async function queryAndCacheSfRouteForShipment(
         sfRouteError: result.error,
         sfRouteTrackingNo: tracking,
         sfRouteLabel: null,
+        sfRouteEventAt: null,
       },
     })
     return {
@@ -116,14 +126,19 @@ export async function queryAndCacheSfRouteForShipment(
 
   // 若 API 返回空轨迹但 ok，用 classify 再确认
   const classified =
-    result.nodes.length > 0 ? classifySfRouteNodes(result.nodes) : { outcome: result.outcome, label: result.label }
+    result.nodes.length > 0
+      ? classifySfRouteNodes(result.nodes)
+      : { outcome: result.outcome, label: result.label, eventAt: result.eventAt }
   const status = (classified.outcome === 'failed' ? 'unknown' : classified.outcome) as SfRouteStatus
+  const eventAtRaw = classified.eventAt || result.eventAt
+  const eventAtDate = parseSfRouteEventAt(eventAtRaw)
 
   await prisma.luckyGiftShipment.update({
     where: { id: shipmentId },
     data: {
       sfRouteStatus: status,
       sfRouteLabel: classified.label,
+      sfRouteEventAt: eventAtDate,
       sfRouteQueriedAt: now,
       sfRouteError: null,
       sfRouteTrackingNo: tracking,
@@ -366,6 +381,8 @@ export async function getLuckyGiftSfRouteStats(accountIds?: string[] | null) {
         anchorId: att?.anchorId ?? null,
         giftName: s.winner.draw?.giftName ?? '',
         trackingNo: s.trackingNo,
+        markedShippedAt: s.markedShippedAt?.toISOString() ?? null,
+        sfRouteEventAt: s.sfRouteEventAt?.toISOString() ?? null,
         sfRouteStatus: s.sfRouteStatus,
         sfRouteLabel: s.sfRouteLabel,
         sfRouteQueriedAt: s.sfRouteQueriedAt?.toISOString() ?? null,

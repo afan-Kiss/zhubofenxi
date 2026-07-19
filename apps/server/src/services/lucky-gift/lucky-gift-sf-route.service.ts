@@ -5,6 +5,7 @@ import {
   querySfWaybillRoute,
   type SfRouteOutcome,
 } from '../sf-waybill-fee.service'
+import { resolveLuckyGiftAnchorsBatch } from './lucky-gift-anchor-attribution.service'
 import { isSfTrackingNo, queryAndCacheSfFeeForShipment } from './lucky-gift-sf-fee.service'
 
 export type SfRouteStatus = SfRouteOutcome | 'querying'
@@ -261,13 +262,24 @@ export async function getLuckyGiftSfRouteStats(accountIds?: string[] | null) {
           liveAccountName: true,
           liveAccountId: true,
           luckyDrawId: true,
-          draw: { select: { giftName: true } },
+          winTime: true,
+          draw: { select: { giftName: true, roomId: true } },
         },
       },
     },
     orderBy: { sfRouteQueriedAt: 'desc' },
     take: 200,
   })
+
+  const abnormalAnchorMap = await resolveLuckyGiftAnchorsBatch(
+    abnormal.map((s) => ({
+      id: s.winner.id,
+      liveAccountId: s.winner.liveAccountId,
+      liveAccountName: s.winner.liveAccountName,
+      winTime: s.winner.winTime,
+      draw: s.winner.draw ? { roomId: s.winner.draw.roomId } : null,
+    })),
+  )
 
   let sfTracking = 0
   let rejected = 0
@@ -342,19 +354,25 @@ export async function getLuckyGiftSfRouteStats(accountIds?: string[] | null) {
     /** 全部顺丰已发中已出账月结运费（含正常签收；路由未开通时也可看） */
     billedShippedFeeYuan: Math.round(billedShippedFeeCent) / 100,
     billedShippedFeeCount,
-    items: abnormal.map((s) => ({
-      shipmentId: s.id,
-      winnerId: s.winner.id,
-      winnerNickname: s.winner.winnerNickname,
-      liveAccountName: s.winner.liveAccountName,
-      giftName: s.winner.draw?.giftName ?? '',
-      trackingNo: s.trackingNo,
-      sfRouteStatus: s.sfRouteStatus,
-      sfRouteLabel: s.sfRouteLabel,
-      sfRouteQueriedAt: s.sfRouteQueriedAt?.toISOString() ?? null,
-      sfMonthlyFeeYuan: centToYuan(s.sfMonthlyFeeCent),
-      sfFeeStatus: s.sfFeeStatus,
-    })),
+    items: abnormal.map((s) => {
+      const att = abnormalAnchorMap.get(s.winner.id)
+      return {
+        shipmentId: s.id,
+        winnerId: s.winner.id,
+        winnerNickname: s.winner.winnerNickname,
+        liveAccountName: s.winner.liveAccountName,
+        shopName: s.winner.liveAccountName,
+        anchorName: att?.anchorName ?? null,
+        anchorId: att?.anchorId ?? null,
+        giftName: s.winner.draw?.giftName ?? '',
+        trackingNo: s.trackingNo,
+        sfRouteStatus: s.sfRouteStatus,
+        sfRouteLabel: s.sfRouteLabel,
+        sfRouteQueriedAt: s.sfRouteQueriedAt?.toISOString() ?? null,
+        sfMonthlyFeeYuan: centToYuan(s.sfMonthlyFeeCent),
+        sfFeeStatus: s.sfFeeStatus,
+      }
+    }),
   }
 }
 

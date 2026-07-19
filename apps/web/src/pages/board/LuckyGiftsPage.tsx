@@ -136,6 +136,9 @@ interface SfRouteStatsPayload {
     winnerId: string
     winnerNickname: string
     liveAccountName: string
+    shopName?: string
+    anchorName?: string | null
+    anchorId?: string | null
     giftName: string
     trackingNo: string | null
     sfRouteStatus: string
@@ -1090,8 +1093,13 @@ export const LuckyGiftsPage: React.FC = () => {
                       {sfRouteStatusLabel(it.sfRouteStatus)}
                     </span>
                   </div>
+                  <div className="mt-0.5 text-xs text-slate-600">
+                    店铺 {it.shopName || it.liveAccountName || '—'}
+                    <span className="mx-1.5 text-slate-300">·</span>
+                    主播 {formatAnchorDisplayName(it.anchorName)}
+                  </div>
                   <div className="mt-0.5 text-xs text-slate-500">
-                    {it.liveAccountName} · {it.winnerNickname || '—'}
+                    中奖人 {it.winnerNickname || '—'}
                     {it.trackingNo ? ` · ${it.trackingNo}` : ''}
                   </div>
                   {it.sfRouteLabel ? (

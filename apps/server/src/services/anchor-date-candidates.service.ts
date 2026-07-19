@@ -7,6 +7,15 @@ import {
   isOffboardDateMissing,
 } from '../utils/anchor-effective-date.util'
 import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
+import { findAnchorForAttributionByName } from './anchor.service'
+
+/** 正式主播幽灵名：不在当日生效区间则不进候选（临时主播不受影响） */
+function isFormalNameAllowedOnDate(name: string, dateKey: string): boolean {
+  const found = findAnchorForAttributionByName(name)
+  if (!found) return true
+  if (isOffboardDateMissing(found)) return false
+  return isAnchorEffectiveOnDate(found, dateKey)
+}
 
 export interface DateAnchorCandidate {
   key: string
@@ -145,11 +154,13 @@ export async function resolveAnchorCandidatesForDate(
         source: 'daily_schedule',
       })
     } else if (row.anchorName.trim()) {
+      const name = row.anchorName.trim()
+      if (!isFormalNameAllowedOnDate(name, dateKey)) continue
       pushCandidate(map, {
-        key: `name:${row.anchorName.trim().toLowerCase()}`,
+        key: `name:${name.toLowerCase()}`,
         anchorId: null,
         temporaryAnchorKey: null,
-        anchorName: row.anchorName.trim(),
+        anchorName: name,
         color: null,
         isTemporaryAnchor: false,
         historical: true,
@@ -166,6 +177,7 @@ export async function resolveAnchorCandidatesForDate(
       (c) => c.isTemporaryAnchor && c.anchorName === name,
     )
     if (alreadyTemp) continue
+    if (!isFormalNameAllowedOnDate(name, dateKey)) continue
     const formalHit = formal.find((f) => f.name === name)
     if (formalHit) {
       pushCandidate(map, {
@@ -195,6 +207,7 @@ export async function resolveAnchorCandidatesForDate(
   for (const name of extras?.orderAnchorNames ?? []) {
     const n = name.trim()
     if (!n || n === '未归属') continue
+    if (!isFormalNameAllowedOnDate(n, dateKey)) continue
     const formalHit = formal.find((f) => f.name === n)
     if (formalHit) {
       pushCandidate(map, {
@@ -229,6 +242,7 @@ export async function resolveAnchorCandidatesForDate(
   for (const name of extras?.liveSessionAnchorNames ?? []) {
     const n = name.trim()
     if (!n || n === '未归属') continue
+    if (!isFormalNameAllowedOnDate(n, dateKey)) continue
     const formalHit = formal.find((f) => f.name === n)
     if (formalHit) {
       pushCandidate(map, {

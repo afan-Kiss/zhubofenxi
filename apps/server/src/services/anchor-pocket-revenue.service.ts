@@ -5,7 +5,14 @@ import {
   ANCHOR_SESSION_DISPLAY_FROM_0613,
   isReportDateOnOrAfterShopSessionCutoff,
   isReportDateOnOrAfterXiaoBaiCutoff,
+  shouldPadEmptyAnchorSlot,
 } from './anchor-performance-attribution.service'
+import {
+  findAnchorForAttributionByName,
+  getAnchorConfigSync,
+} from './anchor.service'
+import { findAnchorByName } from './anchor-rules.service'
+import { doesAnchorEffectiveIntervalOverlapRange } from '../utils/anchor-effective-date.util'
 import { remapViewsWithScheduleOverlay } from './anchor-schedule-attribution.service'
 import { listUnconfirmedScheduleDatesInRange } from './anchor-schedule-confirm.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
@@ -248,11 +255,20 @@ function emptyRow(anchorName: string): AnchorPocketAnchorRow {
   }
 }
 
-function resolveFixedAnchorNames(endDate: string): string[] {
+/** 固定场次空行：仅补查询区间仍有效的正式主播，禁止离职后幽灵空卡 */
+function resolveFixedAnchorNames(startDate: string, endDate: string): string[] {
   if (!isReportDateOnOrAfterShopSessionCutoff(endDate)) return []
+  const config = getAnchorConfigSync()
   const names = Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613).filter((n) => n !== '小白')
   if (isReportDateOnOrAfterXiaoBaiCutoff(endDate)) names.push('小白')
-  return names
+  return names.filter((anchorName) => {
+    const found =
+      findAnchorByName(config, anchorName) ?? findAnchorForAttributionByName(anchorName)
+    if (!found) return false
+    if (!doesAnchorEffectiveIntervalOverlapRange(found, startDate, endDate)) return false
+    // 单日空卡：区间末日仍须可补；跨月则重叠即可
+    return startDate === endDate ? shouldPadEmptyAnchorSlot(found, endDate) : true
+  })
 }
 
 export async function buildAnchorPocketSummary(params: {
@@ -329,12 +345,21 @@ export async function buildAnchorPocketSummary(params: {
   }
 
   const rows = [...aggMap.values()].map(aggToRow)
-  const byName = new Map(rows.map((r) => [r.anchorName, r]))
-  const fixedNames = resolveFixedAnchorNames(scoped.endDate)
+  // 已有业绩行：区间无交集的离职主播不展示（历史区间仍保留）
+  const visibleRows = rows.filter((r) => {
+    const found = findAnchorForAttributionByName(r.anchorName)
+    if (!found) return true
+    return doesAnchorEffectiveIntervalOverlapRange(found, scoped.startDate, scoped.endDate)
+  })
+  const byName = new Map(visibleRows.map((r) => [r.anchorName, r]))
+  const fixedNames = resolveFixedAnchorNames(scoped.startDate, scoped.endDate)
   const mergedAnchors: AnchorPocketAnchorRow[] =
     fixedNames.length > 0
-      ? fixedNames.map((name) => byName.get(name) ?? emptyRow(name))
-      : rows.sort((a, b) => a.anchorName.localeCompare(b.anchorName, 'zh-CN'))
+      ? [
+          ...fixedNames.map((name) => byName.get(name) ?? emptyRow(name)),
+          ...visibleRows.filter((r) => !fixedNames.includes(r.anchorName)),
+        ]
+      : visibleRows.sort((a, b) => a.anchorName.localeCompare(b.anchorName, 'zh-CN'))
 
   const lateRows = await enrichPocketRowsWithLateStatus(mergedAnchors, {
     startDate: scoped.startDate,

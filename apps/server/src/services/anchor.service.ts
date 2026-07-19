@@ -6,6 +6,7 @@ import { logWarn } from '../utils/server-log'
 import {
   isAnchorEffectiveOnDate,
   isOffboardDateMissing,
+  shanghaiTodayDateKey,
 } from '../utils/anchor-effective-date.util'
 
 let configCache: AnchorConfig | null = null
@@ -444,15 +445,23 @@ export async function listAnchorsForAdmin(includeDeleted = false) {
 export async function listAnchorFilterOptions() {
   await refreshAnchorConfigCache()
   const cfg = getAnchorConfigSync()
+  const today = shanghaiTodayDateKey()
+  // 筛选器：只列今日仍在岗主播（软删本就不在 cfg；历史业绩不靠筛选项复活）
+  const visible = cfg.anchors.filter((a) => {
+    if (!a.name.trim()) return false
+    if (isOfflineOnlyAnchor(a)) return true
+    if (isOffboardDateMissing(a)) return false
+    return isAnchorEffectiveOnDate(a, today)
+  })
   return {
-    anchors: cfg.anchors.map((a) => ({
+    anchors: visible.map((a) => ({
       id: a.id,
       name: a.name,
       color: a.color,
       systemKey: a.systemKey ?? null,
       attributionMode: a.attributionMode ?? 'schedule',
     })),
-    filterNames: ['全部', ...cfg.anchors.map((a) => a.name), '其他'],
+    filterNames: ['全部', ...visible.map((a) => a.name), '其他'],
   }
 }
 

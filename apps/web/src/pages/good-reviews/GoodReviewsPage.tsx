@@ -6,6 +6,7 @@ import {
   DEFAULT_GOOD_REVIEW_LIST_FILTERS,
   describeGoodReviewFilters,
   formatGoodReviewSyncMessage,
+  formatGoodReviewBuyerLabel,
   formatLocalDateTime,
   formatMoneyFromCent,
   GOOD_REVIEWS_DEFAULT_DAYS,
@@ -108,6 +109,9 @@ function ReviewCard({
           <div className="truncate text-sm font-medium text-slate-900">
             {review.itemName ?? '未命名商品'}
           </div>
+          <div className="mt-0.5 truncate text-[12px] text-slate-700">
+            买家：{formatGoodReviewBuyerLabel(review)}
+          </div>
           <div className="mt-0.5 flex flex-wrap gap-2 text-[11px] text-slate-500">
             {shopName ? <span>{shopName}</span> : null}
             {price ? <span>{price}</span> : null}
@@ -115,11 +119,6 @@ function ReviewCard({
             {review.serviceScore != null ? <span>服务 {review.serviceScore} 分</span> : null}
             {review.logisticsScore != null ? <span>物流 {review.logisticsScore} 分</span> : null}
           </div>
-          {review.reviewText ? (
-            <p className="mt-2 text-sm leading-relaxed text-slate-700">{review.reviewText}</p>
-          ) : (
-            <p className="mt-2 text-sm text-slate-400">买家未填写文字评价</p>
-          )}
           {review.reviewImages.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-2">
               {review.reviewImages.slice(0, 4).map((url) => (

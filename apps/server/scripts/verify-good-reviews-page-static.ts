@@ -77,6 +77,19 @@ function main(): void {
   } else {
     fail('统计卡片未区分累计与最近 3 天')
   }
+  if (page.includes('formatGoodReviewBuyerLabel') && page.includes('买家：')) {
+    ok('好评卡片展示买家昵称')
+  } else {
+    fail('好评卡片未展示买家昵称')
+  }
+  if (
+    !page.includes('review.reviewText') &&
+    !page.includes('买家未填写文字评价')
+  ) {
+    ok('好评卡片不再展示评价正文')
+  } else {
+    fail('好评卡片仍展示评价正文')
+  }
 
   const image = read('web/src/components/good-reviews/GoodReviewImage.tsx')
   if (image.includes('try') && image.includes('sessionStorage')) ok('GoodReviewImage try/catch sessionStorage')
@@ -87,6 +100,17 @@ function main(): void {
   const drawer = read('web/src/components/good-reviews/GoodReviewDetailDrawer.tsx')
   if (drawer.includes('buildGoodReviewImageProxyUrl')) ok('DetailDrawer 图片用 buildGoodReviewImageProxyUrl')
   else fail('DetailDrawer 未用 buildGoodReviewImageProxyUrl')
+  if (drawer.includes('formatGoodReviewBuyerLabel') && !drawer.includes('review.reviewText')) {
+    ok('DetailDrawer 展示买家昵称且不展示评价正文')
+  } else {
+    fail('DetailDrawer 仍展示评价正文或缺少买家昵称')
+  }
+
+  if (lib.includes('buyerNickname') && lib.includes('formatGoodReviewBuyerLabel')) {
+    ok('前端类型含 buyerNickname')
+  } else {
+    fail('前端类型缺少 buyerNickname')
+  }
 
   const orderRow = read('web/src/components/good-reviews/GoodReviewOrderRow.tsx')
   if (orderRow.includes('if (!trimmed)')) ok('OrderRow 空 orderId 不展示千帆按钮')

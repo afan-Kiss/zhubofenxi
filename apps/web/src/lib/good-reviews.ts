@@ -35,12 +35,20 @@ export interface GoodReviewItemView {
   reviewImages: string[]
   reviewTags: string[]
   materialTags: string[]
+  /** 买家昵称（由订单缓存补齐；匿名评价前端展示「匿名买家」） */
+  buyerNickname: string | null
   isAnonymous: boolean
   likeCount: number
   replyCount: number
   reviewTime: string | null
   reviewTimeText: string | null
   syncedAt: string
+}
+
+export function formatGoodReviewBuyerLabel(review: Pick<GoodReviewItemView, 'buyerNickname' | 'isAnonymous'>): string {
+  if (review.isAnonymous) return '匿名买家'
+  const nick = review.buyerNickname?.trim()
+  return nick || '未获取昵称'
 }
 
 export interface GoodReviewPagePayload {

@@ -1,6 +1,7 @@
 import React from 'react'
 import { BoardDrawerShell } from '../board/BoardDrawerShell'
 import {
+  formatGoodReviewBuyerLabel,
   formatLocalDateTime,
   formatMoneyFromCent,
   resolveGoodReviewThumb,
@@ -67,10 +68,8 @@ export const GoodReviewDetailDrawer: React.FC<Props> = ({
               </div>
             ) : null}
             <div className="flex gap-2">
-              <dt className="w-16 shrink-0 text-slate-500">评价</dt>
-              <dd className="min-w-0 leading-relaxed">
-                {review.reviewText?.trim() || '买家未填写文字，但给了好评'}
-              </dd>
+              <dt className="w-16 shrink-0 text-slate-500">买家</dt>
+              <dd className="min-w-0">{formatGoodReviewBuyerLabel(review)}</dd>
             </div>
             <div className="flex gap-2">
               <dt className="w-16 shrink-0 text-slate-500">晒图</dt>

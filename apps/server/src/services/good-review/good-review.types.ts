@@ -127,6 +127,8 @@ export interface GoodReviewItemView {
   reviewImages: string[]
   reviewTags: string[]
   materialTags: string[]
+  /** 买家昵称：好评接口无此字段，按订单号从订单缓存补齐 */
+  buyerNickname: string | null
   isAnonymous: boolean
   likeCount: number
   replyCount: number

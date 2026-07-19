@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client'
 import { prisma } from '../../lib/prisma'
 import { GOOD_REVIEW_SHOPS } from '../../config/good-review-shops.constants'
+import { pickBuyerNicknameFromRaw } from '../buyer-identity.service'
 import { getGoodReviewLastSyncedAt } from './good-review-store.service'
 import {
   isPlausibleReviewImageUrl,
@@ -63,32 +64,120 @@ function rowToShopView(row: {
   }
 }
 
-function rowToReviewView(row: {
-  id: string
-  shopKey: string
-  reviewId: string | null
-  orderId: string | null
-  itemId: string | null
-  skuId: string | null
-  itemName: string | null
-  itemImage: string | null
-  itemPriceCent: number | null
-  itemQuantity: number | null
-  productScore: number | null
-  serviceScore: number | null
-  logisticsScore: number | null
-  reviewText: string | null
-  reviewImagesJson: string
-  reviewTagsJson: string
-  materialTagsJson?: string
-  rawJson: string | null
-  isAnonymous: boolean
-  likeCount: number
-  replyCount: number
-  reviewTime: Date | null
-  reviewTimeText: string | null
-  syncedAt: Date
-}): GoodReviewItemView {
+function pickBuyerNicknameFromReviewRawJson(rawJson: string | null | undefined): string | null {
+  if (!rawJson?.trim()) return null
+  try {
+    const raw = JSON.parse(rawJson) as Record<string, unknown>
+    const reviewData =
+      raw.review_data && typeof raw.review_data === 'object'
+        ? (raw.review_data as Record<string, unknown>)
+        : raw.reviewData && typeof raw.reviewData === 'object'
+          ? (raw.reviewData as Record<string, unknown>)
+          : null
+    const userInfo =
+      (reviewData?.user_info as Record<string, unknown> | undefined) ??
+      (reviewData?.userInfo as Record<string, unknown> | undefined) ??
+      (raw.user_info as Record<string, unknown> | undefined) ??
+      (raw.userInfo as Record<string, unknown> | undefined)
+    if (userInfo && typeof userInfo === 'object') {
+      const nick = pickBuyerNicknameFromRaw(userInfo)
+      if (nick) return nick
+    }
+    const nick = pickBuyerNicknameFromRaw(raw)
+    return nick || null
+  } catch {
+    return null
+  }
+}
+
+function asOrderRawRecord(rawJson: unknown): Record<string, unknown> | undefined {
+  if (!rawJson) return undefined
+  if (typeof rawJson === 'string') {
+    try {
+      const parsed = JSON.parse(rawJson) as unknown
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : undefined
+    } catch {
+      return undefined
+    }
+  }
+  if (typeof rawJson === 'object' && !Array.isArray(rawJson)) {
+    return rawJson as Record<string, unknown>
+  }
+  return undefined
+}
+
+/** 好评接口无买家昵称：按订单号从订单缓存补齐 */
+export async function resolveBuyerNicknamesByOrderIds(
+  orderIds: Array<string | null | undefined>,
+): Promise<Map<string, string>> {
+  const ids = Array.from(
+    new Set(orderIds.map((x) => String(x || '').trim()).filter(Boolean)),
+  )
+  const out = new Map<string, string>()
+  if (ids.length === 0) return out
+
+  const rows = await prisma.xhsRawOrder.findMany({
+    where: {
+      OR: [
+        { packageId: { in: ids } },
+        { orderId: { in: ids } },
+        { displayOrderNo: { in: ids } },
+      ],
+    },
+    select: {
+      packageId: true,
+      orderId: true,
+      displayOrderNo: true,
+      rawJson: true,
+    },
+  })
+
+  for (const row of rows) {
+    const nick = pickBuyerNicknameFromRaw(asOrderRawRecord(row.rawJson))
+    if (!nick) continue
+    for (const key of [row.packageId, row.orderId, row.displayOrderNo]) {
+      const k = String(key || '').trim()
+      if (k && !out.has(k)) out.set(k, nick)
+    }
+  }
+  return out
+}
+
+function rowToReviewView(
+  row: {
+    id: string
+    shopKey: string
+    reviewId: string | null
+    orderId: string | null
+    itemId: string | null
+    skuId: string | null
+    itemName: string | null
+    itemImage: string | null
+    itemPriceCent: number | null
+    itemQuantity: number | null
+    productScore: number | null
+    serviceScore: number | null
+    logisticsScore: number | null
+    reviewText: string | null
+    reviewImagesJson: string
+    reviewTagsJson: string
+    materialTagsJson?: string
+    rawJson: string | null
+    isAnonymous: boolean
+    likeCount: number
+    replyCount: number
+    reviewTime: Date | null
+    reviewTimeText: string | null
+    syncedAt: Date
+  },
+  buyerNicknameByOrderId?: Map<string, string>,
+): GoodReviewItemView {
+  const orderId = row.orderId?.trim() || null
+  const fromOrder = orderId ? buyerNicknameByOrderId?.get(orderId) : undefined
+  const buyerNickname =
+    fromOrder?.trim() || pickBuyerNicknameFromReviewRawJson(row.rawJson) || null
   return {
     id: row.id,
     shopKey: row.shopKey,
@@ -109,6 +198,7 @@ function rowToReviewView(row: {
     reviewImages: resolveReviewImages(row.reviewImagesJson, row.rawJson),
     reviewTags: parseJsonArray(row.reviewTagsJson),
     materialTags: parseJsonArray(row.materialTagsJson),
+    buyerNickname,
     isAnonymous: row.isAnonymous,
     likeCount: row.likeCount,
     replyCount: row.replyCount,
@@ -119,6 +209,11 @@ function rowToReviewView(row: {
 }
 
 export { rowToReviewView }
+
+export async function rowToReviewViewWithBuyerNick(row: Parameters<typeof rowToReviewView>[0]) {
+  const nickMap = await resolveBuyerNicknamesByOrderIds([row.orderId])
+  return rowToReviewView(row, nickMap)
+}
 
 export function encodeGoodReviewCursor(payload: GoodReviewCursorPayload): string {
   return Buffer.from(JSON.stringify(payload)).toString('base64url')
@@ -350,10 +445,14 @@ export async function queryGoodReviews(params?: {
     }
   })
 
+  const buyerNicknameByOrderId = await resolveBuyerNicknamesByOrderIds(
+    pageRows.map((row) => row.orderId),
+  )
+
   return {
     lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
     shops,
-    reviews: pageRows.map(rowToReviewView),
+    reviews: pageRows.map((row) => rowToReviewView(row, buyerNicknameByOrderId)),
     totalReviewCount,
     returnedReviewCount: pageRows.length,
     filteredReviewCount,

@@ -1,6 +1,6 @@
 import { prisma } from '../../lib/prisma'
 import { GOOD_REVIEW_MATERIAL_TAG_OPTIONS } from './good-review-material.constants'
-import { rowToReviewView } from './good-review-query.service'
+import { rowToReviewViewWithBuyerNick } from './good-review-query.service'
 import type { GoodReviewItemView } from './good-review.types'
 
 const ALLOWED_TAGS = new Set<string>(GOOD_REVIEW_MATERIAL_TAG_OPTIONS)
@@ -28,5 +28,5 @@ export async function updateGoodReviewMaterialTags(params: {
     where: { id: params.id },
     data: { materialTagsJson: JSON.stringify(normalized) },
   })
-  return rowToReviewView(updated)
+  return rowToReviewViewWithBuyerNick(updated)
 }

@@ -5,9 +5,9 @@ import {
   type BossDashboardShopKey,
 } from '../../config/boss-dashboard.constants'
 import { prisma } from '../../lib/prisma'
-import { formatDateKeyShanghai, shanghaiMonthKey } from '../../utils/business-timezone'
+import { addDaysShanghai, formatDateKeyShanghai, shanghaiMonthKey } from '../../utils/business-timezone'
 import {
-  parseBossFeeDetailInfo,
+  readStoredBossFeeDetailJson,
   sumFeeDetailExceptStatement,
   type BossFeeDetailMap,
 } from './boss-dashboard-bill-normalize.service'
@@ -31,6 +31,13 @@ export type BossCurrentMonthBillView = {
   settleOrderCount: number | null
   dataThroughDate: string | null
   isPartialMonth: boolean
+}
+
+export type BossYesterdaySettlementView = {
+  settlementNetCent: number | null
+  billDate: string | null
+  settleOrderCount: number | null
+  commissionCent: number | null
 }
 
 export type BossMonthlySettlementTrendPoint = {
@@ -106,7 +113,7 @@ export async function loadCurrentMonthBillView(shopKey: string): Promise<BossCur
     }
   }
 
-  const feeDetails = monthBills.map((b) => parseBossFeeDetailInfo(JSON.parse(b.feeDetailJson ?? '{}')))
+  const feeDetails = monthBills.map((b) => readStoredBossFeeDetailJson(b.feeDetailJson))
   const merged = mergeFeeDetails(feeDetails)
   const settlementNetCent = monthBills.reduce((acc, b) => acc + (b.totalChangeCent ?? 0), 0)
   const commissionCent = monthBills.reduce((acc, b) => acc + (b.totalCommissionCent ?? 0), 0)
@@ -122,6 +129,35 @@ export async function loadCurrentMonthBillView(shopKey: string): Promise<BossCur
     settleOrderCount: settleOrderCount || null,
     dataThroughDate: monthBills[0]?.billDate ?? null,
     isPartialMonth: true,
+  }
+}
+
+/** 昨日日账单结算净额（按 billDate 归属上海时区昨日） */
+export async function loadYesterdaySettlementView(shopKey: string): Promise<BossYesterdaySettlementView> {
+  const yesterday = addDaysShanghai(formatDateKeyShanghai(), -1)
+  const dayBills = await prisma.bossSettlementPeriodBill.findMany({
+    where: {
+      shopKey,
+      periodType: 'DAY',
+      billDate: { startsWith: yesterday },
+    },
+    orderBy: { fetchedAt: 'desc' },
+  })
+
+  if (dayBills.length === 0) {
+    return {
+      settlementNetCent: null,
+      billDate: yesterday,
+      settleOrderCount: null,
+      commissionCent: null,
+    }
+  }
+
+  return {
+    settlementNetCent: dayBills.reduce((acc, b) => acc + (b.totalChangeCent ?? 0), 0),
+    billDate: yesterday,
+    settleOrderCount: dayBills.reduce((acc, b) => acc + (b.settleOrderCount ?? 0), 0) || null,
+    commissionCent: dayBills.reduce((acc, b) => acc + (b.totalCommissionCent ?? 0), 0) || null,
   }
 }
 

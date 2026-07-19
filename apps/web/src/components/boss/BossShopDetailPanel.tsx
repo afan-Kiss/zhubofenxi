@@ -72,6 +72,16 @@ export const BossShopDetailPanel: React.FC<Props> = ({ shop }) => {
               <span className="text-slate-500">本月结算净额</span>
               <span className="font-semibold">{centToDisplayYuan(shop.currentMonthBill.settlementNetCent)}</span>
             </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">昨日结算净额</span>
+              <span className="font-semibold">
+                {centToDisplayYuan(shop.yesterdaySettlement?.settlementNetCent)}
+              </span>
+            </div>
+            <div className="flex justify-between gap-2">
+              <span className="text-slate-500">昨日入账</span>
+              <span className="font-semibold">{centToDisplayYuan(shop.fund?.yesterdayIncomeCent)}</span>
+            </div>
           </div>
         </div>
 

@@ -23,6 +23,8 @@ import {
   parseBossSellerPreIncome,
   parseBossSettleBillListPage,
   parseBossStoreInfo,
+  parseBossFeeDetailInfo,
+  readStoredBossFeeDetailJson,
 } from '../src/services/boss-dashboard/boss-dashboard-bill-normalize.service'
 import { rankBossShops, verifyMonthlyTrendTotals } from '../src/services/boss-dashboard/boss-dashboard-bill-query.service'
 import { summarizeBossRun } from '../src/services/boss-dashboard/boss-dashboard-sync-status.util'
@@ -389,17 +391,6 @@ async function main() {
   else fail('分数下降应生成 negative 公告')
   if (down) await prisma.bossAnnouncement.delete({ where: { id: down.id } })
 
-  const {
-    parseBossSellerPreIncome,
-    parseBossPendingSettleOrderRow,
-    buildThirtyDayWindows,
-    checkPendingReconciliation,
-    parseBossFeeDetailInfo,
-  } = await import('../src/services/boss-dashboard/boss-dashboard-bill-normalize.service')
-  const { rankBossShops, verifyMonthlyTrendTotals } = await import(
-    '../src/services/boss-dashboard/boss-dashboard-bill-query.service'
-  )
-
   const preIncome = parseBossSellerPreIncome({
     data: { allAmount: '22618.67', sellerAccountAmount: '22618.67', alipayAmount: '0.00', wechatAmount: '0.00' },
   })
@@ -467,6 +458,23 @@ async function main() {
   })
   if (feeDetail.STATEMENT_IN === 215713) ok('feeDetailInfo 对象格式解析正确')
   else fail(`feeDetailInfo 解析失败：${feeDetail.STATEMENT_IN}`)
+
+  const storedFeeRoundTrip = parseBossFeeDetailInfo(
+    JSON.parse(JSON.stringify({ STATEMENT_IN: 215713, STATEMENT_REFUND: -489189 })),
+  )
+  if (storedFeeRoundTrip.STATEMENT_IN === 215713 && storedFeeRoundTrip.STATEMENT_REFUND === -489189) {
+    ok('落库 feeDetailJson（分）回读不再 ×100')
+  } else {
+    fail(
+      `feeDetailJson 回读放大错误：in=${storedFeeRoundTrip.STATEMENT_IN} refund=${storedFeeRoundTrip.STATEMENT_REFUND}`,
+    )
+  }
+
+  const fromJson = readStoredBossFeeDetailJson(
+    JSON.stringify({ STATEMENT_IN: 215713, STATEMENT_REFUND: -489189 }),
+  )
+  if (fromJson.STATEMENT_IN === 215713) ok('readStoredBossFeeDetailJson 按分读取')
+  else fail(`readStoredBossFeeDetailJson 错误：${fromJson.STATEMENT_IN}`)
 
   const ranked = rankBossShops([
     { shopKey: 'xiangyu', shopName: '祥钰珠宝', fund: { availableAmountCent: 1000 } },

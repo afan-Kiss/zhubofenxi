@@ -88,6 +88,10 @@ export const BossManagementSummary: React.FC<Props> = ({ data }) => {
       <div className="flex flex-wrap gap-2 rounded-xl border border-slate-100 bg-white/80 px-3 py-2 text-xs text-slate-600">
         <span>今日实际到账 {centToDisplayYuan(data.totals.todayIncomeCent)}</span>
         <span className="text-slate-300">|</span>
+        <span>昨日入账 {centToDisplayYuan(data.totals.yesterdayIncomeCent)}</span>
+        <span className="text-slate-300">|</span>
+        <span>昨日结算净额 {centToDisplayYuan(data.totals.yesterdaySettlementNetCent)}</span>
+        <span className="text-slate-300">|</span>
         <span>售后冻结 {centToDisplayYuan(data.totals.afterSaleFrozenAmountCent)}</span>
         <span className="text-slate-300">|</span>
         <span>本月平台佣金 {centToDisplayYuan(data.totals.currentMonthCommissionCent)}</span>

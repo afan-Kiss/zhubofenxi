@@ -264,9 +264,30 @@ export function parseBossFeeDetailInfo(raw: unknown): BossFeeDetailMap {
       result[code] = null
       continue
     }
+    // DB 回读：feeDetailJson 已是「分」整数；勿再走 yuanStringToCent（否则整数会被 heuristic_yuan ×100）
+    if (typeof v === 'number' && Number.isFinite(v)) {
+      result[code] = Math.round(v)
+      continue
+    }
+    const asText = String(v).trim()
+    if (/^-?\d+$/.test(asText) && !asText.includes('.')) {
+      const n = Number(asText)
+      result[code] = Number.isFinite(n) ? Math.round(n) : null
+      continue
+    }
     result[code] = yuanStringToCent(v, code)
   }
   return result
+}
+
+/** 读取已落库的 feeDetailJson（分）；兼容历史错误二次放大后的超大值时不再二次换算 */
+export function readStoredBossFeeDetailJson(rawJson: string | null | undefined): BossFeeDetailMap {
+  if (!rawJson) return {}
+  try {
+    return parseBossFeeDetailInfo(JSON.parse(rawJson))
+  } catch {
+    return {}
+  }
 }
 
 export function sumFeeDetailExceptStatement(feeDetail: BossFeeDetailMap): number {

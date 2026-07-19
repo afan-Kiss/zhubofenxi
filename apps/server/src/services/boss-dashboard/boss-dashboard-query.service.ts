@@ -15,6 +15,7 @@ import {
   loadCurrentMonthBillView,
   loadMonthlySettlementTrend,
   loadPendingSettlementView,
+  loadYesterdaySettlementView,
   rankBossShops,
   verifyMonthlyTrendTotals,
 } from './boss-dashboard-bill-query.service'
@@ -124,6 +125,7 @@ export async function buildBossDashboardPayload(userId?: string) {
       const scoreTrend = await loadBossScoreTrendSeries(shop)
       const pendingSettlement = await loadPendingSettlementView(shop.shopKey)
       const currentMonthBill = await loadCurrentMonthBillView(shop.shopKey)
+      const yesterdaySettlement = await loadYesterdaySettlementView(shop.shopKey)
       const billReconciliationStatus = await loadBillReconciliationStatus(shop.shopKey)
       return {
         shopKey: shop.shopKey,
@@ -134,6 +136,7 @@ export async function buildBossDashboardPayload(userId?: string) {
         monthlySettlementTrend,
         pendingSettlement,
         currentMonthBill,
+        yesterdaySettlement,
         billReconciliationStatus,
         scoreTrend,
         advice: buildBossShopAdvice({
@@ -213,6 +216,10 @@ export async function buildBossDashboardPayload(userId?: string) {
   const pendingSettlementOrderCount = sumNullable(rankedShops.map((s) => s.pendingSettlement.orderCount))
   const currentMonthSettlementNetCent = sumNullable(rankedShops.map((s) => s.currentMonthBill.settlementNetCent))
   const currentMonthCommissionCent = sumNullable(rankedShops.map((s) => s.currentMonthBill.commissionCent))
+  const yesterdayIncomeCent = sumNullable(rankedShops.map((s) => s.fund?.yesterdayIncomeCent))
+  const yesterdaySettlementNetCent = sumNullable(
+    rankedShops.map((s) => s.yesterdaySettlement.settlementNetCent),
+  )
 
   return {
     generatedAt: new Date().toISOString(),
@@ -220,6 +227,8 @@ export async function buildBossDashboardPayload(userId?: string) {
       '可提现：平台当前可提现余额',
       '待结算：平台预计待结算订单金额，可能因退款、取消或延迟结算变化',
       '实际到账：真正进入店铺余额的结算入账',
+      '昨日入账：平台资金账户「昨日入账」字段合计',
+      '昨日结算净额：昨日日账单 totalChangeAmount 合计',
       '结算净额：结算账单周期净变动',
       '累计已提现：只统计提现成功',
       '平台佣金：账单参考值，不会再次从结算净额重复扣除',
@@ -230,6 +239,8 @@ export async function buildBossDashboardPayload(userId?: string) {
       withdrawnAmountCent: sumNullable(rankedShops.map((s) => s.fund?.withdrawnAmountCent)),
       afterSaleFrozenAmountCent: sumNullable(rankedShops.map((s) => s.fund?.afterSaleFrozenAmountCent)),
       todayIncomeCent: sumNullable(rankedShops.map((s) => s.fund?.todayIncomeCent)),
+      yesterdayIncomeCent,
+      yesterdaySettlementNetCent,
       pendingSettlementAmountCent,
       pendingSettlementOrderCount,
       currentMonthSettlementNetCent,

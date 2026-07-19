@@ -61,6 +61,13 @@ export interface BossCurrentMonthBillView {
   isPartialMonth: boolean
 }
 
+export interface BossYesterdaySettlementView {
+  settlementNetCent: number | null
+  billDate: string | null
+  settleOrderCount: number | null
+  commissionCent: number | null
+}
+
 export interface BossMonthlySettlementTrendPoint {
   month: string
   amountCent: number | null
@@ -117,6 +124,8 @@ export interface BossDashboardPayload {
     withdrawnAmountCent: number
     afterSaleFrozenAmountCent: number
     todayIncomeCent: number
+    yesterdayIncomeCent: number
+    yesterdaySettlementNetCent: number
     pendingSettlementAmountCent: number
     pendingSettlementOrderCount: number
     currentMonthSettlementNetCent: number
@@ -137,6 +146,7 @@ export interface BossDashboardPayload {
     monthlySettlementTrend: BossMonthlySettlementTrendPoint[]
     pendingSettlement: BossPendingSettlementView
     currentMonthBill: BossCurrentMonthBillView
+    yesterdaySettlement: BossYesterdaySettlementView
     billReconciliationStatus: string
     scoreTrend: {
       quality: Array<{ date: string; score: number | null }>

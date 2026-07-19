@@ -7,6 +7,7 @@ import { aggregateAnchorLiveSessionTraffic } from './anchor-live-sessions.servic
 import { formatLiveDurationMinutes } from './anchor-live-sessions.service'
 import {
   collapseDailyReportDisplaySessions,
+  parseBaseLiveId,
   type DailyReportDisplaySessionGroup,
 } from './daily-report-session-display.util'
 import { formatClockShanghai, parseLiveSessionTimeMs } from '../utils/business-timezone'
@@ -138,12 +139,79 @@ function resolveGroupShopName(
   return fallbackShopName.trim()
 }
 
+/**
+ * 图片卡片展示用：用小红书原始开播/下播替换排班裁剪时段。
+ * 金额分摊仍按裁剪后时长，避免跨班误摊。
+ */
+export function resolveImageSessionDisplayBounds(
+  group: DailyReportDisplaySessionGroup,
+  originalsByBaseLiveId?: Map<string, AnchorLiveSessionBrief>,
+): { startTime: string; endTime: string; durationMinutes: number } {
+  if (!originalsByBaseLiveId || originalsByBaseLiveId.size === 0) {
+    return {
+      startTime: group.startTime,
+      endTime: group.endTime,
+      durationMinutes: group.durationMinutes,
+    }
+  }
+
+  const seen = new Set<string>()
+  const originals: AnchorLiveSessionBrief[] = []
+  for (const liveId of group.liveIds) {
+    const baseId = parseBaseLiveId(liveId)
+    if (!baseId || seen.has(baseId)) continue
+    const original = originalsByBaseLiveId.get(baseId)
+    if (!original) continue
+    seen.add(baseId)
+    originals.push(original)
+  }
+  if (originals.length === 0) {
+    return {
+      startTime: group.startTime,
+      endTime: group.endTime,
+      durationMinutes: group.durationMinutes,
+    }
+  }
+
+  let startTime = originals[0]!.startTime
+  let endTime = originals[0]!.endTime
+  let durationMinutes = 0
+  for (const original of originals) {
+    if (original.startTime.localeCompare(startTime) < 0) startTime = original.startTime
+    if (
+      original.endTime &&
+      original.endTime !== '—' &&
+      (endTime === '—' || original.endTime.localeCompare(endTime) > 0)
+    ) {
+      endTime = original.endTime
+    }
+    durationMinutes += Math.max(0, original.durationMinutes)
+  }
+  return { startTime, endTime, durationMinutes }
+}
+
+function indexOriginalSessionsByBaseLiveId(
+  originals: AnchorLiveSessionBrief[] | undefined,
+): Map<string, AnchorLiveSessionBrief> | undefined {
+  if (!originals || originals.length === 0) return undefined
+  const map = new Map<string, AnchorLiveSessionBrief>()
+  for (const session of originals) {
+    const baseId = parseBaseLiveId(session.liveId)
+    if (!baseId || map.has(baseId)) continue
+    map.set(baseId, session)
+  }
+  return map
+}
+
 /** 将某主播的展示班次展开为日报图片场次（发货/单数按时长分摊；GMV/退款优先用场次原始值） */
 export function buildDailyReportImageSessionsForAnchor(params: {
   anchorName: string
   shopName: string
   color?: string | null
+  /** 排班裁剪后的归属场次：用于断播合并与金额分摊 */
   sessions: AnchorLiveSessionBrief[]
+  /** 平台原始开播场次：用于卡片直播时段 / 时长文案 */
+  originalSessions?: AnchorLiveSessionBrief[]
   shippedAmountYuan: number
   soldOrderCount: number
   gmvYuan: number
@@ -156,6 +224,7 @@ export function buildDailyReportImageSessionsForAnchor(params: {
 
   const groups = collapseDailyReportDisplaySessions(params.sessions)
   if (groups.length === 0) return []
+  const originalsByBaseLiveId = indexOriginalSessionsByBaseLiveId(params.originalSessions)
 
   const shippedParts = allocateByDuration(params.shippedAmountYuan, groups)
   const gmvFallbackParts = allocateByDuration(params.gmvYuan, groups)
@@ -178,8 +247,9 @@ export function buildDailyReportImageSessionsForAnchor(params: {
       const coverClickRate = traffic.coverClickRate
       const liveGmv = sumSessionMoney(group.sessions, 'sellerRealIncomeAmtYuan')
       const liveRefund = sumSessionMoney(group.sessions, 'refundAmtYuan')
-      const startTime = group.startTime
-      const endTime = group.endTime
+      const display = resolveImageSessionDisplayBounds(group, originalsByBaseLiveId)
+      const startTime = display.startTime
+      const endTime = display.endTime
       return {
         id: `${anchorName}::${shopName}::${startTime}::${endTime}::${idx}`,
         shopName,
@@ -187,8 +257,8 @@ export function buildDailyReportImageSessionsForAnchor(params: {
         startTime,
         endTime,
         liveTimeRange: formatLiveTimeRange(startTime, endTime),
-        liveDurationText: formatLiveDurationMinutes(group.durationMinutes),
-        liveDurationMinutes: group.durationMinutes,
+        liveDurationText: formatLiveDurationMinutes(display.durationMinutes),
+        liveDurationMinutes: display.durationMinutes,
         shipmentAmountYuan: shippedParts[idx] ?? 0,
         gmvYuan: liveGmv ?? gmvFallbackParts[idx] ?? 0,
         orderCount: orderParts[idx] ?? 0,

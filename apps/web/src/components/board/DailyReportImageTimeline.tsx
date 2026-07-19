@@ -61,6 +61,9 @@ function TimelineBarBlock({
         </div>
         <div className="truncate text-[10px] tabular-nums text-slate-600">
           {bar.session.liveTimeRange}
+          {bar.session.liveDurationText && bar.session.liveDurationText !== '—'
+            ? ` · ${bar.session.liveDurationText}`
+            : ''}
         </div>
       </div>
     </div>

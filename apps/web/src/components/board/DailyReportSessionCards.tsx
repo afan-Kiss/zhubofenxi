@@ -89,6 +89,9 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
           <div className="mt-0.5 text-[11px] tabular-nums text-slate-600">
             直播时段：{session.liveTimeRange}
           </div>
+          <div className="mt-0.5 text-[11px] tabular-nums text-slate-600">
+            直播时长：{session.liveDurationText || '—'}
+          </div>
         </div>
       </div>
 

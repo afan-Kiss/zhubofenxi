@@ -22,6 +22,7 @@ import {
 } from './anchor-live-sessions.service'
 import {
   getAssignedSessionsForAnchor,
+  mapOriginalSessionsWithAssignedRange,
   resolveDailyReportLiveSessionAssignments,
   sumUniqueDailyReportLiveDurationMinutes,
   type DailyReportLiveSessionAssignment,
@@ -835,11 +836,16 @@ export async function buildDailyReport(params: {
   for (const row of anchorRows) {
     const sessions = sessionsByAnchorName.get(row.anchorName) ?? []
     if (sessions.length === 0) continue
+    const originalSessions = mapOriginalSessionsWithAssignedRange(
+      liveAssignment,
+      row.anchorName,
+    )
     imageSessions.push(
       ...buildDailyReportImageSessionsForAnchor({
         anchorName: row.anchorName,
         shopName: row.shopName,
         color: row.color,
+        originalSessions,
         sessions,
         shippedAmountYuan: row.shippedAmountYuan,
         soldOrderCount: row.soldOrderCount,

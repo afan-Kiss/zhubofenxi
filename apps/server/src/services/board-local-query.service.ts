@@ -606,7 +606,9 @@ export async function executeBoardLocalQuery(params: {
               aggregatedLeaderboard,
               endDate,
             )
-          : ensureAnchorPerformanceLeaderboardSlots(aggregatedLeaderboard, endDate)
+          : ensureAnchorPerformanceLeaderboardSlots(aggregatedLeaderboard, endDate, {
+              startDate,
+            })
       ) as unknown as Array<Record<string, unknown>>
 
       const anchorLeaderboardWithLate = await enrichAnchorLeaderboardWithLateStatus(

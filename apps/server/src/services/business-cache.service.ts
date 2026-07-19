@@ -410,6 +410,7 @@ export async function buildAndSetBusinessBoardCache(params: {
         : ensureAnchorPerformanceLeaderboardSlots(
             anchorLeaderboard as import('./board-metrics.service').BoardAnchorMetrics[],
             range.endDate,
+            { startDate: range.startDate },
           )
     ) as unknown as Array<Record<string, unknown>>
     const anchorLeaderboardWithLate = await enrichAnchorLeaderboardWithLateStatus(

@@ -1,10 +1,21 @@
 import { prisma } from '../lib/prisma'
-import type { AnchorConfig } from '../types/analysis'
+import type { Anchor, AnchorConfig } from '../types/analysis'
 import { createDefaultAnchorConfig } from './default-anchor-config'
 import { isLegacyAnchorCreatedAt } from './anchor-rules.service'
 import { logWarn } from '../utils/server-log'
+import {
+  isAnchorEffectiveOnDate,
+  isOffboardDateMissing,
+} from '../utils/anchor-effective-date.util'
 
 let configCache: AnchorConfig | null = null
+
+/** 含软删主播：历史日自动归属仍须按姓名解析到 id / 生效区间 */
+export type AttributionAnchorLookup = Anchor & {
+  deletedAt?: string | null
+}
+
+let attributionLifecycleByName: Map<string, AttributionAnchorLookup> | null = null
 
 export const YIFAN_SYSTEM_KEY = 'YIFAN_MANUAL'
 export const YIFAN_DEFAULT_DISPLAY_NAME = '逸凡'
@@ -292,30 +303,81 @@ export async function refreshAnchorConfigCache(): Promise<AnchorConfig> {
       }))
     }),
   }
+
+  // 软删主播单独进生命周期表：在职日内仍可自动归属，离职次日起禁止
+  const softDeleted = await prisma.anchor.findMany({
+    where: { deletedAt: { not: null } },
+    select: {
+      id: true,
+      name: true,
+      color: true,
+      enabled: true,
+      systemKey: true,
+      attributionMode: true,
+      effectiveFrom: true,
+      effectiveTo: true,
+      deletedAt: true,
+    },
+  })
+  const lifecycle = new Map<string, AttributionAnchorLookup>()
+  for (const a of configCache.anchors) {
+    lifecycle.set(a.name.trim().toLowerCase(), { ...a, deletedAt: null })
+  }
+  for (const a of softDeleted) {
+    const key = a.name.trim().toLowerCase()
+    if (!key || lifecycle.has(key)) continue
+    lifecycle.set(key, {
+      id: a.id,
+      name: a.name,
+      color: a.color ?? '#94a3b8',
+      enabled: a.enabled,
+      systemKey: a.systemKey,
+      attributionMode: a.attributionMode === 'manual' ? 'manual' : 'schedule',
+      effectiveFrom: a.effectiveFrom ?? null,
+      effectiveTo: a.effectiveTo ?? null,
+      deletedAt: a.deletedAt?.toISOString() ?? null,
+    })
+  }
+  attributionLifecycleByName = lifecycle
+
   return configCache
 }
 
 export function invalidateAnchorConfigCache(): void {
   configCache = null
+  attributionLifecycleByName = null
 }
 
 /** 仅供验收/单元测试注入配置缓存 */
 export function setAnchorConfigCacheForTests(config: AnchorConfig | null): void {
   configCache = config
+  if (!config) {
+    attributionLifecycleByName = null
+    return
+  }
+  const lifecycle = new Map<string, AttributionAnchorLookup>()
+  for (const a of config.anchors) {
+    lifecycle.set(a.name.trim().toLowerCase(), { ...a, deletedAt: null })
+  }
+  attributionLifecycleByName = lifecycle
+}
+
+/** 仅供验收：追加软删主播到生命周期表（不进前台配置） */
+export function setAttributionLifecycleExtrasForTests(
+  extras: AttributionAnchorLookup[],
+): void {
+  if (!attributionLifecycleByName) {
+    attributionLifecycleByName = new Map()
+  }
+  for (const a of extras) {
+    const key = a.name.trim().toLowerCase()
+    if (!key || attributionLifecycleByName.has(key)) continue
+    attributionLifecycleByName.set(key, a)
+  }
 }
 
 export function getAnchorConfigSync(): AnchorConfig {
   return configCache ?? createDefaultAnchorConfig()
-}
-
-/** 自动归属路径：manual 模式主播不可被场次/排班/时段命中；配置中不存在（含已软删）的名字不可自动归属 */
-export function isAutoAttributableAnchorName(anchorName: string): boolean {
-  const name = anchorName.trim()
-  if (!name || name === '未归属') return false
-  const found = findCachedAnchorByName(name)
-  // 离职/删除后不在配置缓存中：禁止再以「幽灵名」吃订单（否则会落到 extra-小红 等）
-  if (!found) return false
-  return !isManualAttributionMode(found.attributionMode)
 }
 
 function findCachedAnchorByName(name: string) {
@@ -323,6 +385,52 @@ function findCachedAnchorByName(name: string) {
   return getAnchorConfigSync().anchors.find(
     (a) => a.name.trim().toLowerCase() === n,
   )
+}
+
+/** 归属解析：先活跃配置，再软删生命周期（同名优先活跃） */
+export function findAnchorForAttributionByName(
+  name: string,
+): AttributionAnchorLookup | null {
+  const trimmed = name.trim()
+  if (!trimmed) return null
+  const live = findCachedAnchorByName(trimmed)
+  if (live) return { ...live, deletedAt: null }
+  const key = trimmed.toLowerCase()
+  return attributionLifecycleByName?.get(key) ?? null
+}
+
+/**
+ * 指定业务日是否允许自动归属到该主播名。
+ * - 软删但 dateKey ∈ [effectiveFrom, effectiveTo] → 允许（保住历史）
+ * - dateKey > effectiveTo / 缺离职日 / manual / 线下专属 → 禁止（防幽灵）
+ */
+export function isAnchorAutoAttributableOnDate(
+  anchorName: string,
+  dateKey: string,
+): boolean {
+  const name = anchorName.trim()
+  if (!name || name === '未归属') return false
+  const found = findAnchorForAttributionByName(name)
+  if (!found) return false
+  if (isOfflineOnlyAnchor(found)) return false
+  if (isManualAttributionMode(found.attributionMode)) return false
+  if (isOffboardDateMissing(found)) return false
+  return isAnchorEffectiveOnDate(found, dateKey)
+}
+
+/**
+ * 无业务日时的兼容检查：仅看活跃配置（不含软删）。
+ * 正式归属请用 isAnchorAutoAttributableOnDate。
+ */
+export function isAutoAttributableAnchorName(anchorName: string): boolean {
+  const name = anchorName.trim()
+  if (!name || name === '未归属') return false
+  const found = findCachedAnchorByName(name)
+  if (!found) return false
+  if (isOfflineOnlyAnchor(found)) return false
+  if (isManualAttributionMode(found.attributionMode)) return false
+  if (isOffboardDateMissing(found)) return false
+  return true
 }
 
 export async function listAnchorsForAdmin(includeDeleted = false) {

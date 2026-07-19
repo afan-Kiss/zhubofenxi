@@ -8,7 +8,7 @@ import {
 import { AFTER_SALES_METRICS_VERSION } from './workbench-cache-validity.service'
 
 /** 与 canonical-order-attribution.service 保持同步 */
-export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v4-manual-schedule-2026-07-14'
+export const CANONICAL_ATTRIBUTION_VERSION = 'canonical-v5-offboard-date-2026-07-19'
 
 export const BUSINESS_CACHE_FINGERPRINT = [
   CANONICAL_ATTRIBUTION_VERSION,

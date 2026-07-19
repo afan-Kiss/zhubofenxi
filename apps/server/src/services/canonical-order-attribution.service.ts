@@ -15,7 +15,11 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { ANCHOR_SCHEDULE_ATTRIBUTION_START_DATE } from '../config/anchor-schedule.constants'
 import { findAnchorByName, matchTimeRule } from './anchor-rules.service'
-import { getAnchorConfigSync, isAutoAttributableAnchorName } from './anchor.service'
+import {
+  findAnchorForAttributionByName,
+  getAnchorConfigSync,
+  isAnchorAutoAttributableOnDate,
+} from './anchor.service'
 import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import {
   resolveManualAnchorOverrideForView,
@@ -200,9 +204,11 @@ function pickBestMatchedSchedule(
 
 function resolveAnchorId(anchorName: string): string {
   if (!anchorName || anchorName === '未归属') return ''
-  const config = getAnchorConfigSync()
-  const found = findAnchorByName(config, anchorName)
-  return found?.id ?? `extra-${anchorName}`
+  const found =
+    findAnchorByName(getAnchorConfigSync(), anchorName) ??
+    findAnchorForAttributionByName(anchorName)
+  // 正式主播禁止回落 extra-*；未知名才用占位（临时主播走 temporaryAnchorKey）
+  return found?.id ?? ''
 }
 
 /** 临时主播用 temporaryAnchorKey；正式主播优先排班行 anchorId */
@@ -453,7 +459,7 @@ async function resolveByLiveSession(
 
   if (!hits.length) return { hit: null, conflict: null, hasShopSessions: true }
 
-  const autoHits = hits.filter((h) => isAutoAttributableAnchorName(h.anchorName))
+  const autoHits = hits.filter((h) => isAnchorAutoAttributableOnDate(h.anchorName, dateKey))
   if (!autoHits.length) return { hit: null, conflict: null, hasShopSessions: true }
 
   const anchors = new Set(autoHits.map((h) => h.anchorName))
@@ -543,7 +549,9 @@ async function resolveByEffectiveSchedule(
     return createMs >= row.startAt.getTime() && createMs < row.endAt.getTime()
   })
   if (!matched.length) return { hit: null, conflict: null }
-  const autoMatched = matched.filter((m) => isAutoAttributableAnchorName(m.anchorName))
+  const autoMatched = matched.filter(
+    (m) => m.isTemporaryAnchor || isAnchorAutoAttributableOnDate(m.anchorName, dateKey),
+  )
   if (!autoMatched.length) return { hit: null, conflict: null }
   const anchors = new Set(autoMatched.map((m) => m.anchorName))
   if (anchors.size > 1) {
@@ -738,10 +746,13 @@ export async function resolveCanonicalOrderAttribution(
   }
 
   // 7–8) 小白固定午场 + 其他店铺场次规则（6.13 起；小白另有入职日起限制）
+  const orderDateKey = scheduleDateFromPayMs(create.ms)
   if (onOrAfterShopSessionRules) {
     if (isXiaoBaiOrderAttribution(view, create.ms)) {
-      const xb = findAnchorByName(getAnchorConfigSync(), '小白')
-      if (xb && isAutoAttributableAnchorName(xb.name)) {
+      const xb =
+        findAnchorByName(getAnchorConfigSync(), '小白') ??
+        findAnchorForAttributionByName('小白')
+      if (xb && isAnchorAutoAttributableOnDate(xb.name, orderDateKey)) {
         return {
           canonicalAnchorId: xb.id,
           canonicalAnchorName: xb.name,
@@ -759,7 +770,7 @@ export async function resolveCanonicalOrderAttribution(
       }
     }
     const shopHit = resolveShopSessionAnchorFromLiveAccount(live.name, new Date(create.ms))
-    if (shopHit && isAutoAttributableAnchorName(shopHit.anchorName)) {
+    if (shopHit && isAnchorAutoAttributableOnDate(shopHit.anchorName, orderDateKey)) {
       return {
         canonicalAnchorId: shopHit.anchorId,
         canonicalAnchorName: shopHit.anchorName,
@@ -805,9 +816,11 @@ function resolveLegacyKeepableViewAnchor(
   const name = (view.anchorName ?? '').trim()
   if (!name || name === '未归属') return null
   if (isShopOrInvalidAnchorLabel(name)) return null
-  if (!isAutoAttributableAnchorName(name)) return null
-  const found = findAnchorByName(getAnchorConfigSync(), name)
-  if (!found?.enabled) return null
+  const dateKey = scheduleDateFromPayMs(createMs)
+  if (!isAnchorAutoAttributableOnDate(name, dateKey)) return null
+  const found =
+    findAnchorByName(getAnchorConfigSync(), name) ?? findAnchorForAttributionByName(name)
+  if (!found) return null
   return {
     canonicalAnchorId: found.id,
     canonicalAnchorName: found.name,
@@ -831,7 +844,8 @@ function resolveLegacyTimeRuleAnchor(
 ): CanonicalOrderAttribution | null {
   const hit = matchTimeRule(new Date(createMs), getAnchorConfigSync())
   if (!hit) return null
-  if (!isAutoAttributableAnchorName(hit.anchor.name)) return null
+  const dateKey = scheduleDateFromPayMs(createMs)
+  if (!isAnchorAutoAttributableOnDate(hit.anchor.name, dateKey)) return null
   return {
     canonicalAnchorId: hit.anchor.id,
     canonicalAnchorName: hit.anchor.name,

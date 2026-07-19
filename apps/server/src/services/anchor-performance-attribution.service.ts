@@ -1,6 +1,12 @@
 import type { AnchorConfig, AnalyzedOrderView } from '../types/analysis'
 import { findAnchorByName } from './anchor-rules.service'
-import { getAnchorConfigSync, isOfflineOnlyAnchor, YIFAN_SYSTEM_KEY } from './anchor.service'
+import {
+  findAnchorForAttributionByName,
+  getAnchorConfigSync,
+  isManualAttributionMode,
+  isOfflineOnlyAnchor,
+  YIFAN_SYSTEM_KEY,
+} from './anchor.service'
 import { applyManualAnchorOverrideToView } from './order-anchor-manual-override.service'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import { getTimeMinutes } from '../utils/time'
@@ -17,6 +23,7 @@ import {
   type BoardAnchorMetrics,
 } from './board-metrics.service'
 import {
+  doesAnchorEffectiveIntervalOverlapRange,
   isAnchorEffectiveOnDate,
   isOffboardDateMissing,
 } from '../utils/anchor-effective-date.util'
@@ -401,17 +408,42 @@ export function resolveShopSessionAnchorFromLiveAccount(
   at: Date,
   config: AnchorConfig = getAnchorConfigSync(),
 ): { anchorId: string; anchorName: string } | null {
+  void config
   const shopKey = normalizeShopSessionKey(liveAccountName)
   const period = resolveLiveSessionPeriod(at)
   const dateKey = formatDateKeyShanghai(at)
   const anchorName = resolveShopSessionAnchorName(shopKey, period, dateKey)
   if (!anchorName) return null
-  const found = findAnchorByName(config, anchorName)
-  // 已软删/不在配置中：禁止回落 extra-小红 等幽灵名
+  // 活跃配置 + 软删生命周期：离职当天仍可命中，次日起禁止；禁止回落 extra-*
+  const found = findAnchorForAttributionByName(anchorName)
   if (!found) return null
+  if (isOfflineOnlyAnchor(found)) return null
+  if (isManualAttributionMode(found.attributionMode)) return null
+  if (isOffboardDateMissing(found)) return null
   if (!isAnchorEffectiveOnDate(found, dateKey)) return null
-  if (found.enabled === false) return null
   return { anchorId: found.id, anchorName: found.name }
+}
+
+/** 业绩榜行：查询区间与主播生效区间无交集时隐藏（防离职后幽灵空卡/错归属行） */
+export function shouldKeepLeaderboardAnchorRow(
+  row: { anchorName: string; anchorId?: string | null },
+  startDate: string,
+  endDate: string,
+): boolean {
+  const name = (row.anchorName ?? '').trim()
+  if (!name || name === '未归属') return true
+  const id = (row.anchorId ?? '').trim()
+  if (id.startsWith('temp:') || name.startsWith('temp:')) return true
+  const found = findAnchorForAttributionByName(name)
+  if (!found) {
+    // 固定场次名单里的幽灵名（已软删且未进生命周期）不保留
+    if (Object.prototype.hasOwnProperty.call(ANCHOR_SESSION_DISPLAY_FROM_0613, name)) {
+      return false
+    }
+    return true
+  }
+  if (isOffboardDateMissing(found)) return false
+  return doesAnchorEffectiveIntervalOverlapRange(found, startDate, endDate)
 }
 
 /**
@@ -519,8 +551,13 @@ export function createEmptyAnchorLeaderboardRow(
 export function ensureAnchorPerformanceLeaderboardSlots(
   rows: BoardAnchorMetrics[],
   endDate: string,
+  opts?: { startDate?: string },
 ): BoardAnchorMetrics[] {
-  if (!isReportDateOnOrAfterShopSessionCutoff(endDate)) return rows
+  const startDate = (opts?.startDate ?? endDate).trim() || endDate
+  const scopedRows = rows.filter((r) =>
+    shouldKeepLeaderboardAnchorRow(r, startDate, endDate),
+  )
+  if (!isReportDateOnOrAfterShopSessionCutoff(endDate)) return scopedRows
 
   const config = getAnchorConfigSync()
   const fixedNames = Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613).filter(
@@ -532,7 +569,8 @@ export function ensureAnchorPerformanceLeaderboardSlots(
 
   // 按业务日过滤：已删除 / 离职次日 / 停用缺离职日 → 不再补空卡
   const effectiveFixedNames = fixedNames.filter((anchorName) => {
-    const found = findAnchorByName(config, anchorName)
+    const found =
+      findAnchorByName(config, anchorName) ?? findAnchorForAttributionByName(anchorName)
     return shouldPadEmptyAnchorSlot(found, endDate)
   })
 
@@ -566,20 +604,23 @@ export function ensureAnchorPerformanceLeaderboardSlots(
     if (!slotNames.includes(name)) slotNames.push(name)
   }
 
-  const byName = new Map(rows.map((r) => [r.anchorName, r]))
-  const merged: BoardAnchorMetrics[] = [...rows]
+  const byName = new Map(scopedRows.map((r) => [r.anchorName, r]))
+  const merged: BoardAnchorMetrics[] = [...scopedRows]
 
   for (const anchorName of slotNames) {
     if (byName.has(anchorName)) continue
-    const found = findAnchorByName(config, anchorName)
+    const found =
+      findAnchorByName(config, anchorName) ?? findAnchorForAttributionByName(anchorName)
     if (found && isOfflineOnlyAnchor(found)) continue
     if (!shouldPadEmptyAnchorSlot(found, endDate)) continue
+    // 禁止对已不在配置/生命周期中的名字生成 extra-* 幽灵空卡
+    if (!found) continue
     merged.push(
       createEmptyAnchorLeaderboardRow(
-        found?.id ?? `extra-${anchorName}`,
-        anchorName,
-        found?.color ?? '#94a3b8',
-        { systemKey: found?.systemKey ?? null, attributionMode: found?.attributionMode ?? null },
+        found.id,
+        found.name,
+        found.color ?? '#94a3b8',
+        { systemKey: found.systemKey ?? null, attributionMode: found.attributionMode ?? null },
       ),
     )
   }
@@ -644,12 +685,13 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
       if (!r.enabled || !r.isOnLeave) continue
       const name = r.anchorName.trim()
       if (!name || byName.has(name) || workingNames.has(name)) continue
-      const found = findAnchorByName(cfg, name)
-      // 离职/删除主播不补休假空卡
+      const found = findAnchorByName(cfg, name) ?? findAnchorForAttributionByName(name)
+      // 离职/删除主播不补休假空卡；禁止 extra-* 幽灵 id
       if (!shouldPadEmptyAnchorSlot(found, dateKey)) continue
+      if (!found && !r.anchorId?.trim()) continue
       const empty = {
         ...createEmptyAnchorLeaderboardRow(
-          found?.id ?? r.anchorId ?? `extra-${name}`,
+          found?.id ?? r.anchorId!,
           name,
           found?.color ?? r.anchorColorSnapshot ?? '#94a3b8',
           {

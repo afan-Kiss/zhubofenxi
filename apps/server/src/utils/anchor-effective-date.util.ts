@@ -32,6 +32,23 @@ export function isAnchorEffectiveOnDate(
   return true
 }
 
+/**
+ * 主播生效区间是否与查询区间有交集（闭区间）。
+ * 用于区间业绩榜：离职后仍可展示「在职日内」的历史行，但查询完全落在离职后则隐藏。
+ */
+export function doesAnchorEffectiveIntervalOverlapRange(
+  anchor: AnchorEffectiveInterval | null | undefined,
+  startDate: string,
+  endDate: string,
+): boolean {
+  if (!anchor || !isBusinessDateKey(startDate) || !isBusinessDateKey(endDate)) return false
+  const from = anchor.effectiveFrom?.trim() || null
+  const to = anchor.effectiveTo?.trim() || null
+  if (from && isBusinessDateKey(from) && from > endDate) return false
+  if (to && isBusinessDateKey(to) && to < startDate) return false
+  return true
+}
+
 /** 已停用且缺少离职日期：未来排班禁止，需人工补录 */
 export function isOffboardDateMissing(anchor: {
   enabled?: boolean

@@ -76,13 +76,24 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [data, setData] = useState<DrillData | null>(null)
-  const pageSize = 20
+  const pageSize = 18
+  const [expandedOrderNos, setExpandedOrderNos] = useState<Set<string>>(() => new Set())
+
+  const toggleExpand = (orderNo: string) => {
+    setExpandedOrderNos((prev) => {
+      const next = new Set(prev)
+      if (next.has(orderNo)) next.delete(orderNo)
+      else next.add(orderNo)
+      return next
+    })
+  }
 
   useEffect(() => {
     if (!open) return
     setPage(1)
     setData(null)
     setError(null)
+    setExpandedOrderNos(new Set())
   }, [open, anchorName, anchorId, startDate, endDate, preset])
 
   useEffect(() => {
@@ -125,6 +136,7 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
       onClose={onClose}
       title={`${formatAnchorDisplayName(anchorName)} · 品退明细`}
       subtitle={`${startDate} ~ ${endDate}`}
+      scrollResetKey={page}
       footer={
         data ? (
           <Pagination
@@ -137,7 +149,15 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
       }
     >
       {loading && !data ? (
-        <p className="py-12 text-center text-sm text-slate-400">加载中…</p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              className="h-[200px] animate-pulse rounded-xl bg-rose-50/80"
+              style={{ animationDelay: `${i * 60}ms` }}
+            />
+          ))}
+        </div>
       ) : error ? (
         <p className="py-12 text-center text-sm text-red-600">{error}</p>
       ) : data ? (
@@ -159,7 +179,7 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
           {data.rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-slate-400">暂无品退订单</p>
           ) : (
-            <ul className="space-y-3">
+            <ul className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
               {data.rows.map((row) => {
                 const officialReason =
                   row.officialQualityReasonText || row.qualityReasonText || '—'
@@ -168,73 +188,109 @@ export const AnchorQualityRefundDrawer: React.FC<Props> = ({
                   row.afterSaleFinalReasonText?.trim() || row.afterSaleReasonText?.trim() || ''
                 const missingFinalReason = Boolean(afterSaleNo && !finalReason)
                 const refundYuan = row.afterSaleRefundAmountYuan ?? 0
+                const expanded = expandedOrderNos.has(row.orderNo)
                 return (
                   <li
                     key={row.orderNo}
-                    className="rounded-xl border border-rose-100 bg-white p-3 text-xs text-slate-700"
+                    className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-rose-100 bg-white p-3 text-[11px] text-slate-700"
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <p className="font-medium text-slate-900">{row.orderNo}</p>
+                    <div className="flex min-w-0 items-start justify-between gap-2 border-b border-rose-50 pb-2">
+                      <p
+                        className="min-w-0 truncate font-mono text-[12px] font-semibold text-slate-900"
+                        title={row.orderNo}
+                      >
+                        {row.orderNo}
+                      </p>
                       {row.qianfanDetailAvailable !== false ? (
                         <QianfanOrderDetailButton orderNo={row.orderNo} compact />
                       ) : null}
                     </div>
-                    <p className="mt-1">买家：{row.buyerNickname || '—'}</p>
-                    <p className="mt-1">订单下单时间：{row.orderTime || '—'}</p>
-                    <p className="mt-1">来源直播号：{row.liveAccountName || '—'}</p>
-                    <p className="mt-1">包裹号：{row.packageId || '—'}</p>
-                    <p className="mt-1 font-medium text-slate-800">
-                      品退归属主播：{formatAnchorDisplayName(row.qualityAttributionAnchorName || anchorName)}
-                    </p>
-                    <p className="mt-1">
-                      订单归属来源：{row.orderAttributionSource || '—'}
-                      {row.attributionExplain ? `｜${row.attributionExplain}` : ''}
-                    </p>
-                    <p className="mt-1">
-                      订单归属主播：{row.paymentAnchorName?.trim() || '—'}
-                    </p>
-                    <p className="mt-2 font-medium text-rose-800">
-                      品退来源：官方品退
-                    </p>
-                    <p className="mt-1">官方品退原因：{officialReason}</p>
-                    <p className="mt-1">官方品退匹配方式：{row.qualitySourceLabel || '—'}</p>
-                    {afterSaleNo ? (
-                      <>
-                        <p className="mt-1">
-                          售后单号：{afterSaleNo}
-                          <button
-                            type="button"
-                            className="ml-2 text-rose-600 hover:underline"
-                            onClick={() => copyText(afterSaleNo)}
-                          >
-                            复制
-                          </button>
-                        </p>
-                        <p className="mt-1">售后状态：{row.afterSaleStatus || '—'}</p>
-                        <p className="mt-1">
-                          最终售后理由：
-                          {missingFinalReason
-                            ? '系统暂未同步到最终售后理由'
-                            : finalReason || '—'}
-                        </p>
-                        <p className="mt-1">
-                          退款金额：
-                          {refundYuan > 0 ? formatMoney(refundYuan) : '—'}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="mt-1 text-slate-500">售后单：暂无售后单信息</p>
-                    )}
-                    {row.extraHint ? (
-                      <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-amber-800">
-                        {row.extraHint}
+                    <div className="mt-2 flex flex-1 flex-col gap-0.5">
+                      <p>
+                        <span className="text-slate-500">买家：</span>
+                        {row.buyerNickname || '—'}
                       </p>
-                    ) : null}
-                    {row.qualityUnassignedReason ? (
-                      <p className="mt-1 text-amber-700">
-                        归属异常原因：{row.qualityUnassignedReason}
+                      <p>
+                        <span className="text-slate-500">下单：</span>
+                        {row.orderTime || '—'}
                       </p>
-                    ) : null}
+                      <p className="truncate" title={row.liveAccountName || ''}>
+                        <span className="text-slate-500">来源直播号：</span>
+                        {row.liveAccountName || '—'}
+                      </p>
+                      <p className="truncate">
+                        <span className="text-slate-500">订单归属主播：</span>
+                        {row.paymentAnchorName?.trim() || '—'}
+                      </p>
+                      <p className="line-clamp-2 break-words">
+                        <span className="text-slate-500">官方品退原因：</span>
+                        {officialReason}
+                      </p>
+                      <p>
+                        <span className="text-slate-500">售后状态：</span>
+                        {row.afterSaleStatus || '—'}
+                      </p>
+                      <p>
+                        <span className="text-slate-500">退款金额：</span>
+                        {refundYuan > 0 ? formatMoney(refundYuan) : '—'}
+                      </p>
+                    </div>
+                    <div className="mt-2 border-t border-rose-50 pt-2">
+                      <button
+                        type="button"
+                        className="text-[11px] font-medium text-rose-700"
+                        onClick={() => toggleExpand(row.orderNo)}
+                      >
+                        {expanded ? '收起详情' : '展开详情'}
+                      </button>
+                      {expanded ? (
+                        <div className="mt-1.5 space-y-1">
+                          <p>包裹号：{row.packageId || '—'}</p>
+                          <p>匹配方式：{row.qualitySourceLabel || '—'}</p>
+                          <p>
+                            品退归属主播：
+                            {formatAnchorDisplayName(row.qualityAttributionAnchorName || anchorName)}
+                          </p>
+                          <p>
+                            归属解释：
+                            {row.orderAttributionSource || '—'}
+                            {row.attributionExplain ? `｜${row.attributionExplain}` : ''}
+                          </p>
+                          {afterSaleNo ? (
+                            <>
+                              <p>
+                                售后单号：{afterSaleNo}
+                                <button
+                                  type="button"
+                                  className="ml-2 text-rose-600 hover:underline"
+                                  onClick={() => copyText(afterSaleNo)}
+                                >
+                                  复制
+                                </button>
+                              </p>
+                              <p>
+                                最终售后理由：
+                                {missingFinalReason
+                                  ? '系统暂未同步到最终售后理由'
+                                  : finalReason || '—'}
+                              </p>
+                            </>
+                          ) : (
+                            <p className="text-slate-500">售后单：暂无售后单信息</p>
+                          )}
+                          {row.extraHint ? (
+                            <p className="rounded-lg bg-amber-50 px-2 py-1.5 text-amber-800">
+                              {row.extraHint}
+                            </p>
+                          ) : null}
+                          {row.qualityUnassignedReason ? (
+                            <p className="text-amber-700">
+                              归属异常原因：{row.qualityUnassignedReason}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
                   </li>
                 )
               })}

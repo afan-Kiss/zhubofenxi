@@ -100,7 +100,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
   const [data, setData] = useState<MetricDetailData | null>(null)
   const [tab, setTab] = useState('')
   const [page, setPage] = useState(1)
-  const pageSize = 20
+  const pageSize = 18
   const [reloadNonce, setReloadNonce] = useState(0)
   const [liveBlacklist, setLiveBlacklist] = useState<string[]>(blacklistedBuyerIds)
 
@@ -241,6 +241,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
       onClose={onClose}
       title={data?.title ?? (isOfflineGmvMetric ? '线下 GMV｜逸凡' : '指标明细')}
       subtitle={drawerSubtitle}
+      scrollResetKey={page}
       footer={
         data ? (
           <Pagination

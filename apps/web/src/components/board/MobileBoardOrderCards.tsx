@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
+import { formatAnchorDisplayName, isUnassignedAnchorName } from '../../lib/anchor-display-name'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import {
   boardRowDisplayOrderNo,
@@ -30,38 +30,18 @@ interface Props {
 
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-3 py-1">
+    <div className="flex items-start justify-between gap-2 py-0.5">
       <span className="shrink-0 text-[11px] text-slate-500">{label}</span>
-      <span className="min-w-0 text-right text-[11px] text-slate-800">{children}</span>
+      <span className="min-w-0 text-right text-[11px] leading-snug text-slate-800">{children}</span>
     </div>
   )
 }
 
-function QualityReturnBadge({ isQuality }: { isQuality: boolean }) {
-  return isQuality ? (
-    <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-700">
-      品退
-    </span>
-  ) : (
-    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
-      非品退
-    </span>
-  )
-}
-
-function ExpandableReason({ text }: { text: string }) {
-  const [open, setOpen] = useState(false)
-  if (!text || text === '—') return <span className="text-slate-400">—</span>
-  const long = text.length > 28
+function Tag({ children, className }: { children: React.ReactNode; className: string }) {
   return (
-    <button
-      type="button"
-      className="max-w-[58%] text-left text-[11px] text-slate-800"
-      onClick={() => long && setOpen((v) => !v)}
-    >
-      <span className={open ? '' : 'line-clamp-2'}>{text}</span>
-      {long && !open ? <span className="ml-1 text-[10px] text-rose-500">展开</span> : null}
-    </button>
+    <span className={`inline-flex max-w-full truncate rounded-full px-1.5 py-0.5 text-[10px] font-medium ${className}`}>
+      {children}
+    </span>
   )
 }
 
@@ -74,13 +54,23 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
   rows,
   emptyText = '暂无明细',
   blacklistedBuyerIds = [],
-  className = 'block md:hidden',
+  className = '',
   amountMode = 'default',
   offlineMode = false,
   manualAnchorAssign,
 }) => {
   const { formatMoney } = useAmountDisplay()
   const blacklistSet = new Set(blacklistedBuyerIds)
+  const [expandedOrderNos, setExpandedOrderNos] = useState<Set<string>>(() => new Set())
+
+  const toggleExpand = (key: string) => {
+    setExpandedOrderNos((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   if (rows.length === 0) {
     return (
@@ -93,10 +83,12 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
   }
 
   return (
-    <div className={`space-y-3 ${className}`}>
+    <div className={`grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 ${className}`}>
       {rows.map((r, idx) => {
         const orderNo = boardRowDisplayOrderNo(r)
         const dealKey = displayCell(r.offlineDealKey ?? orderNo)
+        const expandKey = offlineMode ? `${dealKey}-${idx}` : orderNo
+        const expanded = expandedOrderNos.has(expandKey)
         const buyerKey = displayCell(r.buyerKey)
         const nick = displayCell(r.buyerNickname)
         const rowBlocked =
@@ -106,52 +98,55 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
         const pay = Number(r.merchantReceivableAmount ?? r.paymentBaseAmount ?? r.statPaidAmount ?? 0)
         const refund = Number(r.refundAmount ?? r.productRefundAmount ?? 0)
         const net = Math.round((pay - refund) * 100) / 100
+        const anchorName = formatAnchorDisplayName(r.anchorName)
+        const unassigned = isUnassignedAnchorName(String(r.anchorName ?? ''))
+        const manual = r.attributionSource === 'manual_override'
 
         if (offlineMode) {
           return (
             <article
-              key={`${dealKey}-${idx}`}
-              className="rounded-2xl border border-rose-100/80 bg-white p-3.5 shadow-sm shadow-rose-100/40"
+              key={expandKey}
+              className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-rose-100/80 bg-white p-3 shadow-sm shadow-rose-100/30"
             >
-              <div className="border-b border-rose-50 pb-2.5">
-                <p className="break-all font-mono text-[12px] font-semibold leading-snug text-slate-900">
+              <div className="min-w-0 border-b border-rose-50 pb-2">
+                <p className="truncate font-mono text-[12px] font-semibold text-slate-900" title={dealKey}>
                   {dealKey}
                 </p>
-                <p className="mt-1 text-[11px] text-slate-500">
-                  {displayCell(r.payTime ?? r.orderTime)}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-1">
-                  <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] text-indigo-700">
-                    线下成交
-                  </span>
-                  <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700">
-                    {formatAnchorDisplayName(r.anchorName)}
-                  </span>
-                  <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">
-                    线下手动归属
-                  </span>
-                  <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
-                    已确认
-                  </span>
+                <p className="mt-0.5 text-[11px] text-slate-500">{displayCell(r.payTime ?? r.orderTime)}</p>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  <Tag className="bg-indigo-50 text-indigo-700">线下成交</Tag>
+                  <Tag className="bg-violet-50 text-violet-700">{anchorName}</Tag>
                 </div>
               </div>
-              <div className="mt-2.5 space-y-0.5">
-                <FieldRow label="归属主播">{formatAnchorDisplayName(r.anchorName)}</FieldRow>
-                <FieldRow label="客户/订单标识">
+              <div className="mt-2 flex flex-1 flex-col gap-0.5">
+                <FieldRow label="客户">
                   <BuyerDisplay nickname={nick === '—' ? '未知' : nick} />
                 </FieldRow>
                 <FieldRow label="支付金额">
-                  <span className="font-medium">{formatMoney(pay)}</span>
+                  <span className="text-sm font-semibold tabular-nums">{formatMoney(pay)}</span>
                 </FieldRow>
                 <FieldRow label="退款金额">
                   <span className="font-semibold text-rose-600">{formatMoney(refund)}</span>
                 </FieldRow>
                 <FieldRow label="净金额">{formatMoney(net)}</FieldRow>
                 <FieldRow label="状态">{displayCell(r.orderStatus)}</FieldRow>
-                {r.attributedBy ? (
-                  <FieldRow label="操作人">{String(r.attributedBy)}</FieldRow>
-                ) : null}
               </div>
+              {r.attributedBy ? (
+                <div className="mt-2 border-t border-rose-50 pt-2">
+                  <button
+                    type="button"
+                    className="text-[11px] font-medium text-rose-700"
+                    onClick={() => toggleExpand(expandKey)}
+                  >
+                    {expanded ? '收起详情' : '展开详情'}
+                  </button>
+                  {expanded ? (
+                    <div className="mt-1">
+                      <FieldRow label="操作人">{String(r.attributedBy)}</FieldRow>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </article>
           )
         }
@@ -159,24 +154,27 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
         return (
           <article
             key={`${orderNo}-${idx}`}
-            className={`rounded-2xl border p-3.5 shadow-sm ${
+            className={`flex h-full min-w-0 flex-col overflow-hidden rounded-xl border p-3 shadow-sm ${
               rowBlocked
                 ? 'border-red-200 bg-red-50/30 shadow-red-100/30'
-                : 'border-rose-100/80 bg-white shadow-rose-100/40'
+                : 'border-rose-100/80 bg-white shadow-rose-100/30'
             }`}
           >
-            <div className="flex items-start justify-between gap-2 border-b border-rose-50 pb-2.5">
+            <div className="flex min-w-0 items-start justify-between gap-2 border-b border-rose-50 pb-2">
               <div className="min-w-0 flex-1">
-                <p className="break-all font-mono text-[12px] font-semibold leading-snug text-slate-900">
+                <p
+                  className="truncate font-mono text-[12px] font-semibold text-slate-900"
+                  title={displayCell(orderNo)}
+                >
                   {displayCell(orderNo)}
                 </p>
-                <p className="mt-1 text-[11px] text-slate-500">{displayCell(r.orderTime)}</p>
+                <p className="mt-0.5 text-[11px] text-slate-500">{displayCell(r.orderTime)}</p>
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <button
                   type="button"
                   onClick={() => copyOrderNo(orderNo)}
-                  className="rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-[10px] font-medium text-rose-700"
+                  className="rounded-full border border-rose-100 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700"
                 >
                   复制
                 </button>
@@ -184,27 +182,31 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
               </div>
             </div>
 
-            <div className="mt-2 flex flex-wrap gap-2 text-[10px]">
-              <span className="rounded-full bg-rose-50 px-2 py-0.5 text-rose-700">
-                来源直播号 {displayCell(r.liveAccountName)}
-              </span>
-              <span className="rounded-full bg-slate-50 px-2 py-0.5 text-slate-600">
-                主播 {formatAnchorDisplayName(r.anchorName)}
-              </span>
-              <span className="rounded-full bg-slate-50 px-2 py-0.5 text-slate-600">
-                {displayCell(r.orderStatus)}
-              </span>
+            <div className="mt-1.5 flex flex-wrap gap-1">
+              {!r.includedInGmv ? (
+                <Tag className="bg-slate-100 text-slate-600">状态未成交</Tag>
+              ) : (
+                <Tag className="bg-emerald-50 text-emerald-700">正常订单</Tag>
+              )}
+              {Boolean(r.afterSaleStatus && displayCell(r.afterSaleStatus) !== '—') ? (
+                <Tag className="bg-amber-50 text-amber-800">售后</Tag>
+              ) : null}
+              {r.isQualityReturn ? <Tag className="bg-rose-100 text-rose-700">品退</Tag> : null}
+              {unassigned ? <Tag className="bg-amber-100 text-amber-900">未归属</Tag> : null}
+              {manual ? <Tag className="bg-violet-50 text-violet-700">手动指定</Tag> : null}
             </div>
 
-            <div className="mt-2.5 space-y-0.5">
-              <FieldRow label="买家昵称">
+            <div className="mt-2 flex flex-1 flex-col gap-0.5">
+              <FieldRow label="买家">
                 <BuyerDisplay nickname={nick === '—' ? '未知' : nick} />
               </FieldRow>
-              <FieldRow label="商品名称">
-                <span className="line-clamp-2 text-right">{displayCell(r.productName)}</span>
+              <FieldRow label="商品">
+                <span className="line-clamp-2 break-words text-right" title={displayCell(r.productName)}>
+                  {displayCell(r.productName)}
+                </span>
               </FieldRow>
-              <FieldRow label={amountMode === 'signed' ? '已签收金额' : '商家应收/支付金额'}>
-                <span className="font-medium">
+              <FieldRow label={amountMode === 'signed' ? '已签收金额' : '支付金额'}>
+                <span className="text-sm font-semibold tabular-nums text-slate-900">
                   {formatMoney(
                     Number(
                       amountMode === 'signed'
@@ -214,34 +216,46 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
                   )}
                 </span>
               </FieldRow>
-              {amountMode === 'signed' ? (
-                <FieldRow label="支付金额">
-                  <span className="text-[11px] text-slate-500">
-                    {formatMoney(Number(r.merchantReceivableAmount ?? 0))}
-                  </span>
-                </FieldRow>
-              ) : null}
               <FieldRow label="退款金额">
-                <span className="text-[12px] font-semibold text-rose-600">
+                <span className="font-semibold text-rose-600">
                   {formatMoney(Number(r.refundAmount ?? r.productRefundAmount ?? 0))}
                 </span>
               </FieldRow>
+              <FieldRow label="订单状态">{displayCell(r.orderStatus)}</FieldRow>
               <FieldRow label="售后状态">{displayCell(r.afterSaleStatus)}</FieldRow>
-              <FieldRow label="售后原因">
-                <ExpandableReason text={reason} />
+              <FieldRow label="来源直播号">
+                <span className="truncate" title={displayCell(r.liveAccountName)}>
+                  {displayCell(r.liveAccountName)}
+                </span>
               </FieldRow>
-              <FieldRow label="销售状态">{r.includedInGmv ? '本期支付有效' : '状态未成交'}</FieldRow>
-              <FieldRow label="状态说明">{displayCell(r.gmvExcludeReason)}</FieldRow>
-              <FieldRow label="品退标记">
-                <QualityReturnBadge isQuality={Boolean(r.isQualityReturn)} />
+              <FieldRow label="归属主播">
+                <span className="truncate" title={anchorName}>
+                  {anchorName}
+                </span>
               </FieldRow>
-              {(r.paymentAnchorName != null ||
-                r.qualityAttributionAnchorName != null ||
-                r.attributionSource != null ||
-                r.attributionExplain != null) && (
-                <>
-                  <FieldRow label="订单归属主播">
-                    {formatAnchorDisplayName(r.paymentAnchorName || r.anchorName)}
+            </div>
+
+            <div className="mt-2 border-t border-rose-50 pt-2">
+              <button
+                type="button"
+                className="text-[11px] font-medium text-rose-700"
+                onClick={() => toggleExpand(expandKey)}
+              >
+                {expanded ? '收起详情' : '展开详情'}
+              </button>
+              {expanded ? (
+                <div className="mt-1.5 space-y-0.5">
+                  {amountMode === 'signed' ? (
+                    <FieldRow label="支付金额">
+                      {formatMoney(Number(r.merchantReceivableAmount ?? 0))}
+                    </FieldRow>
+                  ) : null}
+                  <FieldRow label="售后原因">
+                    <span className="break-words text-right">{reason || '—'}</span>
+                  </FieldRow>
+                  <FieldRow label="状态说明">{displayCell(r.gmvExcludeReason)}</FieldRow>
+                  <FieldRow label="销售状态">
+                    {r.includedInGmv ? '本期支付有效' : '状态未成交'}
                   </FieldRow>
                   {r.isQualityReturn ? (
                     <FieldRow label="品退归属主播">
@@ -249,21 +263,15 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
                     </FieldRow>
                   ) : null}
                   <FieldRow label="归属来源">
-                    <span
-                      className="line-clamp-2 text-right"
-                      title={formatAttributionBasis(
-                        r.attributionSource,
-                        r.attributionExplain,
-                        120,
-                      )}
-                    >
+                    <span className="break-words text-right">
                       {formatAttributionBasis(r.attributionSource, r.attributionExplain)}
                     </span>
                   </FieldRow>
-                </>
-              )}
+                </div>
+              ) : null}
               {manualAnchorAssign ? (
-                <FieldRow label="指定主播">
+                <div className="mt-2 min-w-0">
+                  <p className="mb-1 text-[11px] text-slate-500">指定主播</p>
                   <OrderAnchorAssignControl
                     orderNo={orderNo}
                     defaultAnchorName={r.anchorName}
@@ -274,7 +282,7 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
                     onClearManualOverride={manualAnchorAssign.onClearManualOverride}
                     compact
                   />
-                </FieldRow>
+                </div>
               ) : null}
             </div>
           </article>

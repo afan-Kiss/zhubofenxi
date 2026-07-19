@@ -136,7 +136,7 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer, scope 
   const [data, setData] = useState<BuyerDrillData | null>(null)
   /** 顶部历史累计：仅打开 Drawer 时更新，不随 Tab 切换变化 */
   const [buyerSummary, setBuyerSummary] = useState<BuyerOrderSummaryCent | null>(null)
-  const pageSize = 20
+  const pageSize = 18
 
   const load = useCallback(async () => {
     if (!open || !buyer?.buyerKey) return
@@ -294,6 +294,8 @@ export const BuyerOrderDrawer: React.FC<Props> = ({ open, onClose, buyer, scope 
       onClose={onClose}
       testId="buyer-order-drawer"
       title={displayName}
+      scrollResetKey={page}
+      zIndexClass="z-[110]"
       headerExtra={
         <div
           key={data?.buyerKey ?? buyer.buyerKey}

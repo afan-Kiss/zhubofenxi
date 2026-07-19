@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { formatAnchorDisplayName } from '../../lib/anchor-display-name'
 import { resolveAnchorColor } from '../../lib/anchor-theme'
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
   Legend,
-  Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -390,7 +390,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     return (
       <div
         data-anchor-trend-compare="empty"
-        className={`flex ${isReport ? 'min-h-[120px]' : 'min-h-[140px] md:min-h-[160px]'} flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-4 ${className}`}
+        className={`flex ${isReport ? 'min-h-[120px]' : 'min-h-[180px] md:min-h-[220px]'} flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-6 ${className}`}
       >
         <p className="text-[13px] text-slate-500">暂无可对比走势</p>
         {!isReport ? (
@@ -414,7 +414,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     : '按日期对比每日支付金额，不是已签收金额'
 
   const xAxisKey = compact ? 'tickLabel' : 'label'
-  const chartHeightClass = isReport ? 'h-[188px]' : compact ? 'h-[160px]' : 'h-[160px] md:h-[180px]'
+  const chartHeightClass = isReport ? 'h-[188px]' : compact ? 'h-[248px]' : 'h-[220px] md:h-[260px]'
   const chartMargin = isReport
     ? { top: 4, right: 20, left: -10, bottom: 6 }
     : {
@@ -490,9 +490,11 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
 
       <div className={`w-full ${chartHeightClass}${isReport ? ' overflow-visible' : ''}`}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart
+          <BarChart
             data={chartDataWithTicks}
             margin={chartMargin}
+            barCategoryGap={compact ? '18%' : '22%'}
+            barGap={2}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#f8fafc" vertical={false} />
             <XAxis
@@ -544,20 +546,17 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
               }}
             />
             {series.map((s) => (
-              <Line
+              <Bar
                 key={s.dataKey}
-                type="monotone"
                 dataKey={s.dataKey}
                 name={s.dataKey}
-                stroke={s.color}
-                strokeWidth={isReport ? 2.5 : 2}
-                dot={false}
-                connectNulls={isReport}
-                activeDot={isReport ? false : { r: 3.5, fill: s.color, stroke: '#fff', strokeWidth: 1 }}
+                fill={s.color}
+                radius={[3, 3, 0, 0]}
+                maxBarSize={isReport ? 18 : compact ? 14 : 22}
                 isAnimationActive={!isReport}
               />
             ))}
-          </LineChart>
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </div>

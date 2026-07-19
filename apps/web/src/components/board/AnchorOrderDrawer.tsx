@@ -116,7 +116,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
   const [liveSessionsOpen, setLiveSessionsOpen] = useState(false)
   const [orderTab, setOrderTab] = useState<'signed' | 'all'>('all')
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const pageSize = 20
+  const pageSize = 18
 
   const bumpReload = useCallback(() => setReloadNonce((n) => n + 1), [])
 
@@ -315,6 +315,7 @@ export const AnchorOrderDrawer: React.FC<Props> = ({
       title={formatAnchorDisplayName(anchorName)}
       testId="anchor-order-drawer"
       subtitle={`${startDate} ~ ${endDate} · 主播订单明细`}
+      scrollResetKey={page}
       headerExtra={
         stats ? (
           <div

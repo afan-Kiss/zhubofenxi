@@ -1,7 +1,7 @@
-import React, { useId, useMemo } from 'react'
+import React, { useMemo } from 'react'
 import {
-  Area,
-  AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
   ResponsiveContainer,
   Tooltip,
@@ -150,7 +150,6 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   color,
   className = '',
 }) => {
-  const gradientId = useId().replace(/:/g, '')
   const strokeColor = color?.trim() || '#f43f5e'
   const resolved = trend ?? null
   const isReport = variant === 'report'
@@ -263,16 +262,7 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
       </div>
       <div className={`${chartHeight} w-full${isReport ? ' overflow-visible' : ''}`}>
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart
-            data={chartData}
-            margin={chartMargin}
-          >
-            <defs>
-              <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={strokeColor} stopOpacity={isReport ? 0.12 : 0.14} />
-                <stop offset="100%" stopColor={strokeColor} stopOpacity={0.04} />
-              </linearGradient>
-            </defs>
+          <BarChart data={chartData} margin={chartMargin} barCategoryGap="28%">
             <CartesianGrid strokeDasharray="3 3" stroke={gridStroke} vertical={false} />
             <XAxis
               dataKey="label"
@@ -297,19 +287,14 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
                 )}
               />
             ) : null}
-            <Area
-              type="monotone"
+            <Bar
               dataKey="chartValue"
-              stroke={strokeColor}
-              strokeWidth={isReport ? 1.25 : 1.5}
-              fill={`url(#${gradientId})`}
-              dot={false}
-              activeDot={
-                isReport ? false : { r: 3.5, fill: strokeColor, stroke: '#fff', strokeWidth: 1 }
-              }
+              fill={strokeColor}
+              radius={[3, 3, 0, 0]}
+              maxBarSize={isReport ? 16 : 18}
               isAnimationActive={!isReport}
             />
-          </AreaChart>
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </div>

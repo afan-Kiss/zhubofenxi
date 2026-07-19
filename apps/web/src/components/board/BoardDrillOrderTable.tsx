@@ -121,12 +121,12 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
     return (
       <div
         data-testid="drawer-order-skeleton"
-        className="animate-in fade-in space-y-2 py-4 duration-300"
+        className="animate-in fade-in grid grid-cols-1 gap-3 py-4 duration-300 md:grid-cols-2 xl:grid-cols-3"
       >
-        {[1, 2, 3, 4, 5].map((i) => (
+        {Array.from({ length: 6 }).map((_, i) => (
           <div
             key={i}
-            className="h-10 animate-pulse rounded-xl bg-rose-50/80"
+            className="h-[200px] animate-pulse rounded-xl bg-rose-50/80"
             style={{ animationDelay: `${i * 60}ms` }}
           />
         ))}
@@ -173,7 +173,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
 
   function renderOfflineTable() {
     return (
-      <div className="max-h-[min(70dvh,680px)] overflow-auto rounded-2xl border border-rose-100/60 bg-white">
+      <div className="overflow-x-auto rounded-2xl border border-rose-100/60 bg-white">
         <table className="w-full min-w-[960px] text-left text-[11px]">
           <thead className="sticky top-0 z-10 bg-rose-50/95 text-slate-500 shadow-[0_1px_0_rgba(244,63,94,0.08)]">
             <tr>
@@ -263,7 +263,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
 
   function renderBuyerTable() {
     return (
-      <div className="max-h-[min(70dvh,680px)] overflow-auto rounded-2xl border border-rose-100/60 bg-white">
+      <div className="overflow-x-auto rounded-2xl border border-rose-100/60 bg-white">
         <table className="w-full min-w-[720px] text-left text-[11px]">
           <thead className="sticky top-0 z-10 bg-rose-50/95 text-slate-500 shadow-[0_1px_0_rgba(244,63,94,0.08)]">
             <tr>
@@ -291,7 +291,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
 
   function renderBoardTable() {
     return (
-      <div className="max-h-[min(70dvh,680px)] overflow-auto rounded-2xl border border-rose-100/60 bg-white">
+      <div className="overflow-x-auto rounded-2xl border border-rose-100/60 bg-white">
         <table className="w-full min-w-[1280px] text-left text-[11px]">
           <thead className="sticky top-0 z-10 bg-rose-50/95 text-slate-500 shadow-[0_1px_0_rgba(244,63,94,0.08)]">
             <tr>

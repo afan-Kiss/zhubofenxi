@@ -113,7 +113,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
       </p>
 
       {showCompareTrend && canCompareTrend ? (
-        <div className="mb-4 max-w-3xl">
+        <div className="mb-4">
           <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
             {includeZeroPerformance
               ? '单日展示全部固定主播，无成交显示平线；可手动隐藏不想看的主播。'

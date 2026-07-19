@@ -40,6 +40,8 @@ export interface DailyReportImageSession {
   color: string | null
   /** 排班请假：卡片展示「休假」水印 */
   isOnLeave?: boolean
+  /** 逸凡线下成交：无直播场次，卡片展示线下业绩 */
+  isOfflineDeal?: boolean
 }
 
 function clockFromIso(iso: string): string {
@@ -271,4 +273,39 @@ export function buildDailyReportImageSessionsForAnchor(params: {
       }
     })
     .filter((row): row is DailyReportImageSession => row != null)
+}
+
+/** 逸凡线下成交：写入日报长图卡片（无直播时段，突出 GMV / 笔数） */
+export function buildDailyReportOfflineImageSession(params: {
+  anchorName: string
+  color?: string | null
+  gmvYuan: number
+  dealCount: number
+  reportDate: string
+}): DailyReportImageSession | null {
+  const anchorName = params.anchorName.trim()
+  const gmvYuan = Number.isFinite(params.gmvYuan) ? Math.round(params.gmvYuan * 100) / 100 : 0
+  const dealCount = Math.max(0, Math.floor(params.dealCount || 0))
+  if (!anchorName || (gmvYuan <= 0 && dealCount <= 0)) return null
+  const dateKey = params.reportDate.trim() || 'offline'
+  return {
+    id: `offline::${anchorName}::${dateKey}`,
+    shopName: '线下成交',
+    anchorName,
+    startTime: dateKey,
+    endTime: dateKey,
+    liveTimeRange: '线下成交',
+    liveDurationText: '—',
+    liveDurationMinutes: 0,
+    shipmentAmountYuan: 0,
+    gmvYuan,
+    orderCount: dealCount,
+    refundAmountYuan: null,
+    coverClickRate: null,
+    stay60sUserCount: null,
+    avgStayDurationSeconds: null,
+    status: 'missing',
+    color: params.color ?? null,
+    isOfflineDeal: true,
+  }
 }

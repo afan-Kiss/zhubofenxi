@@ -32,6 +32,8 @@ export interface DailyReportImageSession {
   color: string | null
   /** 排班请假：卡片展示「休假」水印 */
   isOnLeave?: boolean
+  /** 逸凡线下成交：无直播场次，卡片展示线下业绩 */
+  isOfflineDeal?: boolean
 }
 
 export interface DailyReportTimelineBar {

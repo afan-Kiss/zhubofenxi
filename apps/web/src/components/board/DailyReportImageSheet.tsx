@@ -118,6 +118,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(
     const dateLine = weekday ? `${data.startDate} ${weekday}` : data.startDate || data.dateLabel
     const showOffline =
       (data.summary.offlineGmvYuan ?? 0) > 0 || (data.summary.offlineDealCount ?? 0) > 0
+    const liveSessionCount = sessions.filter((s) => !s.isOfflineDeal && !s.isOnLeave).length
 
     return (
       <div
@@ -152,7 +153,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(
             ) : null}
             <span>
               直播场次{' '}
-              <strong className="tabular-nums text-slate-900">{sessions.length}</strong>
+              <strong className="tabular-nums text-slate-900">{liveSessionCount}</strong>
             </span>
           </div>
           {data.summary.liveSessionAttributionNote || data.summary.unassignedShippedNote ? (

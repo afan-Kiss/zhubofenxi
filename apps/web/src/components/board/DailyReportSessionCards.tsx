@@ -52,21 +52,21 @@ function MetricCell({
 
 function CoverClickRateValue({
   session,
-  onLeave,
+  hideStatus,
 }: {
   session: DailyReportImageSession
-  onLeave?: boolean
+  hideStatus?: boolean
 }) {
   if (session.coverClickRate == null) {
-    // 请假卡：不展示「数据缺失」，避免与休假水印抢语义
-    return <span className={STATUS_TEXT_CLASS.missing}>{onLeave ? '—' : '数据缺失'}</span>
+    // 请假/线下卡：不展示「数据缺失」
+    return <span className={STATUS_TEXT_CLASS.missing}>{hideStatus ? '—' : '数据缺失'}</span>
   }
   const statusLabel = dailyReportImageStatusLabel(session.status)
   const statusClass = STATUS_TEXT_CLASS[session.status]
   return (
     <span>
       <span className="text-slate-900">{formatRatePercent(session.coverClickRate)}</span>
-      {onLeave ? null : (
+      {hideStatus ? null : (
         <span className={`ml-1 text-[11px] font-semibold ${statusClass}`}>{statusLabel}</span>
       )}
     </span>
@@ -75,8 +75,10 @@ function CoverClickRateValue({
 
 function SessionCard({ session }: { session: DailyReportImageSession }) {
   const onLeave = Boolean(session.isOnLeave)
+  const isOffline = Boolean(session.isOfflineDeal)
+  const softMissing = onLeave || isOffline
   const missingOrDash = (value: string) =>
-    onLeave && value === '数据缺失' ? '—' : value
+    softMissing && value === '数据缺失' ? '—' : value
   return (
     <div className="relative flex min-h-[168px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       {onLeave ? <LeaveWatermark offsetY="22%" /> : null}
@@ -87,9 +89,9 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
             主播：{formatAnchorDisplayName(session.anchorName)}
           </div>
           <div className="mt-0.5 text-[11px] tabular-nums text-slate-600">
-            直播时段：{session.liveTimeRange}
+            {isOffline ? `成交类型：${session.liveTimeRange}` : `直播时段：${session.liveTimeRange}`}
           </div>
-          {!onLeave && session.liveDurationText && session.liveDurationText !== '—' ? (
+          {!softMissing && session.liveDurationText && session.liveDurationText !== '—' ? (
             <div className="mt-0.5 text-[11px] tabular-nums text-slate-600">
               直播时长：{session.liveDurationText}
             </div>
@@ -99,13 +101,20 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
 
       <div className="relative z-[1] flex flex-1 flex-col gap-3 px-3 py-3">
         <div className="grid grid-cols-4 gap-2">
-          <MetricCell label="GMV" value={formatMoney(session.gmvYuan)} />
+          <MetricCell
+            label={isOffline ? '线下 GMV' : 'GMV'}
+            emphasize={isOffline}
+            value={formatMoney(session.gmvYuan)}
+          />
           <MetricCell
             label="发货金额"
-            emphasize
-            value={formatMoney(session.shipmentAmountYuan)}
+            emphasize={!isOffline}
+            value={isOffline ? '—' : formatMoney(session.shipmentAmountYuan)}
           />
-          <MetricCell label="订单数" value={formatOrderCount(session.orderCount)} />
+          <MetricCell
+            label={isOffline ? '成交笔数' : '订单数'}
+            value={formatOrderCount(session.orderCount)}
+          />
           <MetricCell
             label="退款金额"
             value={
@@ -116,8 +125,8 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
         <div className="grid grid-cols-4 gap-2 border-t border-slate-100 pt-3">
           <MetricCell
             label="封面点击率"
-            emphasize
-            value={<CoverClickRateValue session={session} onLeave={onLeave} />}
+            emphasize={!isOffline}
+            value={<CoverClickRateValue session={session} hideStatus={softMissing} />}
           />
           <MetricCell
             label="60s停留人数"
@@ -130,12 +139,15 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
               Number.isFinite(session.avgStayDurationSeconds) &&
               session.avgStayDurationSeconds > 0
                 ? formatStayDurationSeconds(session.avgStayDurationSeconds)
-                : onLeave
+                : softMissing
                   ? '—'
                   : '数据缺失'
             }
           />
-          <MetricCell label="直播时长" value={session.liveDurationText || '—'} />
+          <MetricCell
+            label="直播时长"
+            value={isOffline ? '—' : session.liveDurationText || '—'}
+          />
         </div>
       </div>
     </div>
@@ -160,7 +172,9 @@ export function DailyReportSessionCardGrid({
     <div>
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold text-slate-800">场次数据卡片</h3>
-        <span className="text-[11px] text-slate-400">共 {sessions.length} 场 · 两列布局</span>
+        <span className="text-[11px] text-slate-400">
+          共 {sessions.length} 张卡片 · 两列布局
+        </span>
       </div>
       <div className="grid grid-cols-2 gap-3">
         {sessions.map((session) => (

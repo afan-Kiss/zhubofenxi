@@ -70,6 +70,7 @@ import {
 import { normalizeShopLabel, normalizeShopName } from '../utils/shop-name-normalize.util'
 import {
   buildDailyReportImageSessionsForAnchor,
+  buildDailyReportOfflineImageSession,
   type DailyReportImageSession,
 } from './daily-report-image-session'
 
@@ -79,6 +80,7 @@ export type {
 } from './daily-report-image-session'
 export {
   buildDailyReportImageSessionsForAnchor,
+  buildDailyReportOfflineImageSession,
   resolveDailyReportImageSessionStatus,
 } from './daily-report-image-session'
 
@@ -901,7 +903,28 @@ export async function buildDailyReport(params: {
     })
   }
 
+  // 逸凡线下成交：有出单时追加独立卡片（此前被 imageSessions 直播场次逻辑漏掉）
+  if (showOfflineOnReport) {
+    const yifanRow = anchorRows.find(
+      (row) =>
+        isOfflineOnlyAnchor({ systemKey: row.systemKey }) || row.shopName === '线下成交',
+    )
+    const offlineCard = buildDailyReportOfflineImageSession({
+      anchorName: yifanRow?.anchorName || findYifanManualSystemAnchor(config)?.name || '逸凡',
+      color: yifanRow?.color ?? null,
+      gmvYuan: roundMoneyYuan(gmvSplit.offlineGmv),
+      dealCount: gmvSplit.offlineDealCount,
+      reportDate: params.startDate,
+    })
+    if (offlineCard && !imageSessions.some((s) => s.isOfflineDeal)) {
+      imageSessions.push(offlineCard)
+    }
+  }
+
   imageSessions.sort((a, b) => {
+    if (Boolean(a.isOfflineDeal) !== Boolean(b.isOfflineDeal)) {
+      return a.isOfflineDeal ? 1 : -1
+    }
     const shopCmp = a.shopName.localeCompare(b.shopName, 'zh-CN')
     if (shopCmp !== 0) return shopCmp
     return a.startTime.localeCompare(b.startTime)

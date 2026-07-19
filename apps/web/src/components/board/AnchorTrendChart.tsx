@@ -198,7 +198,7 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
     return buildTrendSummary(trendForSummary, formatMoney, formatCount)
   }, [resolved, formatMoney, formatCount, useRelativeIntraday])
 
-  const emptyMinH = isReport ? 'min-h-[100px]' : 'min-h-[72px] sm:min-h-[88px]'
+  const emptyMinH = isReport ? 'min-h-[100px]' : 'min-h-[96px] sm:min-h-[110px]'
 
   if (!hasTrendData(resolved, variant, includeZeroPerformance)) {
     return (
@@ -221,14 +221,14 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   const subtitle = useRelativeIntraday
     ? '按开播后分钟统计，不是有效成交走势'
     : resolveTrendSubtitle(resolved!)
-  const chartHeight = isReport ? 'h-[140px]' : 'h-[72px] sm:h-[88px]'
+  const chartHeight = isReport ? 'h-[140px]' : 'h-[96px] sm:h-[110px]'
   const titleClass = isReport ? 'text-[11px]' : 'text-[11px] sm:text-[12px]'
   const tagClass = isReport ? 'text-[9px] px-1.5 py-0' : 'text-[9px] px-1.5 py-0 sm:text-[10px] sm:px-2 sm:py-0.5'
   const tickSize = isReport ? 9 : 9
   const gridStroke = isReport ? '#f1f5f9' : '#f8fafc'
   const chartMargin = isReport
     ? { top: 4, right: 18, left: -10, bottom: 6 }
-    : { top: 2, right: 2, left: -22, bottom: 0 }
+    : { top: 2, right: 2, left: -20, bottom: 0 }
 
   return (
     <div

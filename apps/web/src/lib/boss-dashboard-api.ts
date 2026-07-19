@@ -124,8 +124,8 @@ export interface BossDashboardPayload {
     withdrawnAmountCent: number
     afterSaleFrozenAmountCent: number
     todayIncomeCent: number
-    yesterdayIncomeCent: number
-    yesterdaySettlementNetCent: number
+    yesterdayIncomeCent: number | null
+    yesterdaySettlementNetCent: number | null
     pendingSettlementAmountCent: number
     pendingSettlementOrderCount: number
     currentMonthSettlementNetCent: number

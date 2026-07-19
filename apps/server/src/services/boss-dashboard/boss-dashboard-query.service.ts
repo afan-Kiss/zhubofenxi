@@ -111,6 +111,12 @@ function sumNullable(values: Array<number | null | undefined>): number {
   return values.reduce<number>((acc, v) => acc + (v ?? 0), 0)
 }
 
+/** 全部缺失时返回 null，避免合计显示成 ¥0.00 误导「无数据」 */
+function sumNullableOrNull(values: Array<number | null | undefined>): number | null {
+  if (!values.some((v) => v != null)) return null
+  return sumNullable(values)
+}
+
 export async function buildBossDashboardPayload(userId?: string) {
   const monthKeys = buildRecentMonthKeys()
   const settlementMonthKeys = buildRecentBillMonthKeys()
@@ -216,8 +222,8 @@ export async function buildBossDashboardPayload(userId?: string) {
   const pendingSettlementOrderCount = sumNullable(rankedShops.map((s) => s.pendingSettlement.orderCount))
   const currentMonthSettlementNetCent = sumNullable(rankedShops.map((s) => s.currentMonthBill.settlementNetCent))
   const currentMonthCommissionCent = sumNullable(rankedShops.map((s) => s.currentMonthBill.commissionCent))
-  const yesterdayIncomeCent = sumNullable(rankedShops.map((s) => s.fund?.yesterdayIncomeCent))
-  const yesterdaySettlementNetCent = sumNullable(
+  const yesterdayIncomeCent = sumNullableOrNull(rankedShops.map((s) => s.fund?.yesterdayIncomeCent))
+  const yesterdaySettlementNetCent = sumNullableOrNull(
     rankedShops.map((s) => s.yesterdaySettlement.settlementNetCent),
   )
 

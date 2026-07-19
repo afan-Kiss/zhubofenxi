@@ -194,7 +194,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               <div className="min-w-0 flex-1">
                 <p className="text-[10px] text-slate-500 sm:text-[11px]">主播</p>
                 <p
-                  className={`flex flex-wrap items-center gap-1 text-sm font-semibold leading-snug sm:gap-1.5 sm:text-base ${
+                  className={`flex min-w-0 flex-wrap items-center gap-1 text-sm font-semibold leading-snug sm:gap-1.5 sm:text-base ${
                     isUnassigned ? 'text-amber-900' : 'text-slate-900'
                   }`}
                 >
@@ -205,11 +205,15 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                       aria-hidden
                     />
                   ) : null}
-                  {name}
+                  <span className="min-w-0 truncate">{name}</span>
                   {(() => {
                     const shop = anchorRowShopName(a)
                     if (!shop || isUnassigned) return null
-                    return <span className="font-normal text-slate-500"> · {shop}</span>
+                    return (
+                      <span className="max-w-[6.5rem] truncate font-normal text-slate-500 sm:max-w-[9rem]">
+                        · {shop}
+                      </span>
+                    )
                   })()}
                   {!onLeave && isOffboarded && !showLivePeriod ? (
                     <button
@@ -249,7 +253,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               {allowLeaveToggle && !isUnassigned && onLeaveToggle ? (
                 <button
                   type="button"
-                  className={`relative z-20 flex shrink-0 items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] transition sm:gap-1.5 sm:rounded-lg sm:px-2 sm:py-1.5 sm:text-[12px] ${
+                  className={`relative z-20 inline-flex min-h-9 min-w-9 shrink-0 items-center justify-center gap-1 rounded-md border px-1.5 py-1 text-[10px] transition sm:min-h-0 sm:min-w-0 sm:gap-1.5 sm:rounded-lg sm:px-2 sm:py-1.5 sm:text-[12px] ${
                     onLeave
                       ? 'border-rose-300 bg-rose-50 font-semibold text-rose-700'
                       : 'border-rose-100 bg-white text-slate-700'

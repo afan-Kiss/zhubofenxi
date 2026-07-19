@@ -264,13 +264,13 @@ export function parseBossFeeDetailInfo(raw: unknown): BossFeeDetailMap {
       result[code] = null
       continue
     }
-    // DB 回读：feeDetailJson 已是「分」整数；勿再走 yuanStringToCent（否则整数会被 heuristic_yuan ×100）
+    // DB 回读：整数（含整数 string）按「分」；带小数的数字/字符串按「元」转分
     if (typeof v === 'number' && Number.isFinite(v)) {
-      result[code] = Math.round(v)
+      result[code] = Number.isInteger(v) ? Math.round(v) : Math.round(v * 100)
       continue
     }
     const asText = String(v).trim()
-    if (/^-?\d+$/.test(asText) && !asText.includes('.')) {
+    if (/^-?\d+$/.test(asText)) {
       const n = Number(asText)
       result[code] = Number.isFinite(n) ? Math.round(n) : null
       continue

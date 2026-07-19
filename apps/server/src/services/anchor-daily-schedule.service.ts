@@ -959,6 +959,123 @@ export async function copyDailySchedules(params: {
   return result
 }
 
+/**
+ * 主播业绩「昨日」休假打勾：将该主播当日全部排班行设为请假/取消请假。
+ * 无排班行且标记请假时，补一条占位请假班次。
+ */
+export async function setAnchorLeaveForDate(params: {
+  date: string
+  anchorName?: string | null
+  anchorId?: string | null
+  isOnLeave: boolean
+  createdBy?: string
+  forceHistoricalScheduleChange?: boolean
+  changeReason?: string
+}): Promise<{
+  date: string
+  schedules: DailyScheduleDto[]
+  warnings: string[]
+  confirmPreviewLines: string[]
+  isOnLeave: boolean
+  anchorName: string
+}> {
+  const date = String(params.date ?? '').trim()
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new ScheduleSaveError([{ type: 'anchor_overlap', message: '请提供合法 date（YYYY-MM-DD）' }])
+  }
+  const wantLeave = Boolean(params.isOnLeave)
+  const listed = await listDailySchedulesForDate(date)
+  const schedules = listed.schedules.map((s) => ({
+    anchorId: s.anchorId,
+    anchorName: s.anchorName,
+    shopName: s.shopName,
+    liveRoomName: s.liveRoomName,
+    startTime: s.startTime,
+    endTime: s.endTime,
+    enabled: s.enabled,
+    note: s.note ?? undefined,
+    isTemporaryAnchor: s.isTemporaryAnchor,
+    temporaryAnchorKey: s.temporaryAnchorKey,
+    anchorColorSnapshot: s.anchorColorSnapshot,
+    isOnLeave: Boolean(s.isOnLeave),
+  }))
+
+  const anchorId = String(params.anchorId ?? '').trim()
+  const anchorNameHint = String(params.anchorName ?? '').trim()
+  const match = (s: (typeof schedules)[number]) => {
+    if (anchorId && s.anchorId && s.anchorId === anchorId) return true
+    if (anchorNameHint && s.anchorName.trim() === anchorNameHint) return true
+    return false
+  }
+
+  let matchedName = anchorNameHint
+  let matchedAny = false
+  for (const s of schedules) {
+    if (!match(s)) continue
+    matchedAny = true
+    matchedName = s.anchorName.trim() || matchedName
+    s.isOnLeave = wantLeave
+  }
+
+  if (!matchedName) {
+    throw new ScheduleSaveError([{ type: 'anchor_overlap', message: '请提供主播姓名或 ID' }])
+  }
+
+  if (wantLeave && !matchedAny) {
+    const { getAnchorConfigSync } = await import('./anchor.service')
+    const { findAnchorByName } = await import('./anchor-rules.service')
+    const cfg = getAnchorConfigSync()
+    const found =
+      (anchorId ? cfg.anchors.find((a) => a.id === anchorId) : null) ??
+      findAnchorByName(cfg, matchedName)
+    const shopName =
+      listed.effectiveTable.rows.find((r) => r.anchorName.trim() === matchedName)?.shopName?.trim() ||
+      '拾玉居和田玉'
+    schedules.push({
+      anchorId: found?.id ?? (anchorId || null),
+      anchorName: found?.name ?? matchedName,
+      shopName,
+      liveRoomName: shopName,
+      startTime: '09:00',
+      endTime: '18:00',
+      enabled: true,
+      note: '业绩页标记休假',
+      isTemporaryAnchor: false,
+      temporaryAnchorKey: null,
+      anchorColorSnapshot: found?.color ?? null,
+      isOnLeave: true,
+    })
+    matchedName = found?.name ?? matchedName
+  }
+
+  if (!wantLeave && !matchedAny) {
+    // 本来就没有该主播排班，无需保存
+    return {
+      date,
+      schedules: listed.schedules,
+      warnings: listed.warnings,
+      confirmPreviewLines: [],
+      isOnLeave: false,
+      anchorName: matchedName,
+    }
+  }
+
+  const saved = await saveDailySchedules({
+    date,
+    schedules,
+    createdBy: params.createdBy,
+    forceHistoricalScheduleChange: params.forceHistoricalScheduleChange ?? true,
+    changeReason:
+      params.changeReason?.trim() ||
+      (wantLeave ? `主播业绩标记休假：${matchedName}` : `主播业绩取消休假：${matchedName}`),
+  })
+  return {
+    ...saved,
+    isOnLeave: wantLeave,
+    anchorName: matchedName,
+  }
+}
+
 export async function validateDailySchedulesBody(params: {
   date: string
   schedules: Array<{

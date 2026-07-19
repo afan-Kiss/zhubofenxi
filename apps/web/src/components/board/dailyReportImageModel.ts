@@ -22,9 +22,17 @@ export interface DailyReportImageSession {
   liveDurationText: string
   liveDurationMinutes: number
   shipmentAmountYuan: number
+  /** 真实发货单数 */
+  shipmentOrderCount?: number
   gmvYuan: number
+  /** @deprecated 优先读 totalOrderCount */
   orderCount: number
+  /** 总订单数 = 发货 + 退货 */
+  totalOrderCount?: number
+  returnOrderCount?: number
+  returnAmountYuan?: number
   refundAmountYuan: number | null
+  refundOrderCount?: number
   coverClickRate: number | null
   stay60sUserCount: number | null
   avgStayDurationSeconds: number | null
@@ -51,7 +59,7 @@ export interface DailyReportTimelineShopRow {
 const STATUS_LABEL: Record<DailyReportImageSessionStatus, string> = {
   qualified: '合格',
   warning: '待关注',
-  unqualified: '不合格',
+  unqualified: '需提升',
   missing: '数据缺失',
 }
 

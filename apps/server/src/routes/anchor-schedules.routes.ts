@@ -6,6 +6,7 @@ import {
   generateDefaultSchedulesForDate,
   listDailySchedulesForDate,
   saveDailySchedules,
+  setAnchorLeaveForDate,
   validateDailySchedulesBody,
   buildScheduleMutationResult,
   ScheduleSaveError,
@@ -160,6 +161,49 @@ anchorSchedulesRouter.post('/', async (req, res, next) => {
       return
     }
     sendFail(res, err instanceof Error ? err.message : '保存排班失败', 400)
+  }
+})
+
+anchorSchedulesRouter.post('/leave', async (req, res, next) => {
+  try {
+    const body = req.body ?? {}
+    const date = String(body.date ?? '').trim()
+    if (!date) {
+      sendFail(res, '请提供 date', 400)
+      return
+    }
+    if (typeof body.isOnLeave !== 'boolean') {
+      sendFail(res, '请提供 isOnLeave（boolean）', 400)
+      return
+    }
+    const data = await setAnchorLeaveForDate({
+      date,
+      anchorName: body.anchorName ? String(body.anchorName) : null,
+      anchorId: body.anchorId ? String(body.anchorId) : null,
+      isOnLeave: body.isOnLeave,
+      createdBy: req.user?.username,
+      forceHistoricalScheduleChange: Boolean(body.forceHistoricalScheduleChange ?? true),
+      changeReason: body.changeReason ? String(body.changeReason) : undefined,
+    })
+    sendOk(res, {
+      ok: true,
+      ...data,
+      ...buildScheduleMutationResult(date, {
+        confirmPreviewLines: data.confirmPreviewLines,
+        hardValidationWarnings: data.warnings,
+      }),
+    })
+  } catch (err) {
+    if (err instanceof ScheduleSaveError) {
+      res.status(400).json({
+        ok: false,
+        success: false,
+        message: err.message,
+        conflicts: err.conflicts,
+      })
+      return
+    }
+    sendFail(res, err instanceof Error ? err.message : '标记休假失败', 400)
   }
 })
 

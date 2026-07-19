@@ -41,6 +41,10 @@ interface Props {
   showLivePeriod?: boolean
   /** 单日：无成交也展示平线走势 */
   includeZeroPerformance?: boolean
+  /** 昨日：允许勾选休假（写回排班） */
+  allowLeaveToggle?: boolean
+  leaveToggleBusyKey?: string | null
+  onLeaveToggle?: (row: AnchorLeaderboardRow, isOnLeave: boolean) => void
 }
 
 function MetricCell({
@@ -102,6 +106,9 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
   showIndividualTrend = true,
   showLivePeriod = false,
   includeZeroPerformance = false,
+  allowLeaveToggle = false,
+  leaveToggleBusyKey = null,
+  onLeaveToggle,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [expandedTrendKeys, setExpandedTrendKeys] = useState<Record<string, boolean>>({})
@@ -215,6 +222,22 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   <p className="mt-0.5 text-[11px] text-slate-400">{liveLines.secondary}</p>
                 ) : null}
               </div>
+              {allowLeaveToggle && !isUnassigned && onLeaveToggle ? (
+                <label
+                  className="relative z-20 flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-100 bg-white/90 px-2 py-1.5 text-[12px] text-slate-700"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 accent-rose-600"
+                    checked={onLeave}
+                    disabled={leaveToggleBusyKey === rowKey}
+                    onChange={(e) => onLeaveToggle(a, e.target.checked)}
+                  />
+                  <span className={onLeave ? 'font-semibold text-rose-600' : ''}>休假</span>
+                </label>
+              ) : null}
             </div>
 
             <div className="relative z-[1] mt-3 grid grid-cols-2 gap-2">

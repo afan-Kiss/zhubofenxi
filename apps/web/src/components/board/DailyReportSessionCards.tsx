@@ -50,6 +50,12 @@ function MetricCell({
   )
 }
 
+function formatCountAndMoney(count: number | null | undefined, amountYuan: number | null | undefined) {
+  const countText = formatOrderCount(count ?? 0)
+  const moneyText = formatMoney(amountYuan ?? 0)
+  return `${countText} / ${moneyText}`
+}
+
 function CoverClickRateValue({
   session,
   hideStatus,
@@ -79,6 +85,13 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
   const softMissing = onLeave || isOffline
   const missingOrDash = (value: string) =>
     softMissing && value === '数据缺失' ? '—' : value
+  const shipmentOrderCount = session.shipmentOrderCount ?? (isOffline ? 0 : session.orderCount)
+  const returnOrderCount = session.returnOrderCount ?? 0
+  const returnAmountYuan = session.returnAmountYuan ?? 0
+  const totalOrderCount =
+    session.totalOrderCount ??
+    (isOffline ? session.orderCount : shipmentOrderCount + returnOrderCount)
+  const refundOrderCount = session.refundOrderCount ?? 0
   return (
     <div className="relative flex min-h-[168px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       {onLeave ? <LeaveWatermark offsetY="22%" /> : null}
@@ -107,19 +120,23 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
             value={formatMoney(session.gmvYuan)}
           />
           <MetricCell
-            label="发货金额"
+            label="发货"
             emphasize={!isOffline}
-            value={isOffline ? '—' : formatMoney(session.shipmentAmountYuan)}
-          />
-          <MetricCell
-            label={isOffline ? '成交笔数' : '订单数'}
-            value={formatOrderCount(session.orderCount)}
-          />
-          <MetricCell
-            label="退款金额"
             value={
-              session.refundAmountYuan != null ? formatMoney(session.refundAmountYuan) : '—'
+              isOffline
+                ? '—'
+                : formatCountAndMoney(shipmentOrderCount, session.shipmentAmountYuan)
             }
+          />
+          <MetricCell
+            label="退货"
+            value={
+              isOffline ? '—' : formatCountAndMoney(returnOrderCount, returnAmountYuan)
+            }
+          />
+          <MetricCell
+            label={isOffline ? '成交笔数' : '总订单数'}
+            value={formatOrderCount(totalOrderCount)}
           />
         </div>
         <div className="grid grid-cols-4 gap-2 border-t border-slate-100 pt-3">
@@ -127,6 +144,17 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
             label="封面点击率"
             emphasize={!isOffline}
             value={<CoverClickRateValue session={session} hideStatus={softMissing} />}
+          />
+          <MetricCell
+            label="退款"
+            value={
+              isOffline
+                ? '—'
+                : formatCountAndMoney(
+                    refundOrderCount,
+                    session.refundAmountYuan != null ? session.refundAmountYuan : 0,
+                  )
+            }
           />
           <MetricCell
             label="60s停留人数"
@@ -143,10 +171,6 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
                   ? '—'
                   : '数据缺失'
             }
-          />
-          <MetricCell
-            label="直播时长"
-            value={isOffline ? '—' : session.liveDurationText || '—'}
           />
         </div>
       </div>

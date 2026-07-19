@@ -4,6 +4,7 @@ import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-
 import { pickProductName } from './order-row-mapper.service'
 import { isLowPriceBrushOrderView } from './low-price-brush-order.service'
 import { isActualAfterSaleOrder } from './operations-after-sale-order.util'
+import { aggregateRefundAmountCentByOrderNo } from './order-refund-metrics.service'
 
 const CLOSED_OR_CANCELLED_KEYWORDS = ['已关闭', '交易关闭', '已取消', '交易取消']
 
@@ -128,6 +129,38 @@ export function countDailyReportOrders(views: AnalyzedOrderView[]): {
     }
   }
   return { soldOrderCount, invalidOrderCount }
+}
+
+/** 退货（关闭/取消/售后无效单）：单数 + 支付金额合计 */
+export function sumDailyReportReturnFromViews(views: AnalyzedOrderView[]): {
+  returnOrderCount: number
+  returnAmountYuan: number
+} {
+  const deduped = dedupeViewsByMetricOrderNo(views)
+  let returnOrderCount = 0
+  let returnAmountCent = 0
+  for (const v of deduped) {
+    if (!resolveMetricOrderNo(v) && v.paymentBaseCent <= 0) continue
+    if (!isDailyReportInvalidOrder(v)) continue
+    returnOrderCount += 1
+    returnAmountCent += Math.max(0, v.paymentBaseCent ?? 0)
+  }
+  return {
+    returnOrderCount,
+    returnAmountYuan: roundMoneyYuan(centToYuan(returnAmountCent)),
+  }
+}
+
+/** 退款：成功退款单数 + 退款金额（与看板退款聚合同源） */
+export function sumDailyReportRefundFromViews(views: AnalyzedOrderView[]): {
+  refundOrderCount: number
+  refundAmountYuan: number
+} {
+  const { totalCent, byOrderNo } = aggregateRefundAmountCentByOrderNo(views)
+  return {
+    refundOrderCount: byOrderNo.size,
+    refundAmountYuan: roundMoneyYuan(centToYuan(totalCent)),
+  }
 }
 
 export function safeRatioPercent(part: number, total: number): number | null {

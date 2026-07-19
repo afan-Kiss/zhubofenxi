@@ -274,6 +274,7 @@ export const AnchorPerformanceTab: React.FC = () => {
 
   const [anchorFilter, setAnchorFilter] = useState('全部')
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [leaveToggleBusyKey, setLeaveToggleBusyKey] = useState<string | null>(null)
   const [anchorDrawer, setAnchorDrawer] = useState<{
     anchorName: string
     anchorId?: string
@@ -443,6 +444,39 @@ export const AnchorPerformanceTab: React.FC = () => {
   const showMetrics = hasPerformanceData && boardDataVisible
 
   const isRealtimePreset = preset === 'today' || preset === 'yesterday'
+  const allowYesterdayLeaveToggle = preset === 'yesterday' && Boolean(startDate)
+
+  const handleLeaveToggle = useCallback(
+    async (row: { anchorName?: string; anchorId?: string }, isOnLeave: boolean) => {
+      if (!startDate) return
+      const name = String(row.anchorName ?? '').trim()
+      const id = String(row.anchorId ?? '').trim()
+      const busyKey = id || name
+      if (!busyKey || name === '未归属') return
+      setLeaveToggleBusyKey(busyKey)
+      try {
+        await apiRequest('/anchor-schedules/leave', {
+          method: 'POST',
+          body: JSON.stringify({
+            date: startDate,
+            anchorName: name || undefined,
+            anchorId: id || undefined,
+            isOnLeave,
+            forceHistoricalScheduleChange: true,
+            changeReason: isOnLeave
+              ? `主播业绩标记休假：${name}`
+              : `主播业绩取消休假：${name}`,
+          }),
+        })
+        await reload()
+      } catch (err) {
+        window.alert(err instanceof Error ? err.message : '标记休假失败')
+      } finally {
+        setLeaveToggleBusyKey(null)
+      }
+    },
+    [reload, startDate],
+  )
   const isSyncingNow =
     isRealtimePreset &&
     (isBusinessSyncActive(syncMeta?.businessSync?.status) || Boolean(activeSyncJob))
@@ -963,6 +997,9 @@ export const AnchorPerformanceTab: React.FC = () => {
                 includeZeroPerformance={showLivePeriod}
                 startDate={startDate}
                 endDate={endDate}
+                allowLeaveToggle={allowYesterdayLeaveToggle}
+                leaveToggleBusyKey={leaveToggleBusyKey}
+                onLeaveToggle={allowYesterdayLeaveToggle ? handleLeaveToggle : undefined}
                 emptyText="当前范围暂无已同步数据"
                 onRowClick={(a) => {
                   const name = String(a.anchorName)

@@ -30,9 +30,23 @@ export interface DailyReportImageSession {
   liveDurationText: string
   liveDurationMinutes: number
   shipmentAmountYuan: number
+  /** 真实发货单数 */
+  shipmentOrderCount: number
   gmvYuan: number
+  /**
+   * 兼容字段：总订单数（发货 + 退货）
+   * @deprecated 优先读 totalOrderCount
+   */
   orderCount: number
+  /** 总订单数 = 发货单 + 退货单 */
+  totalOrderCount: number
+  /** 退货（关闭/取消/售后）单数 */
+  returnOrderCount: number
+  /** 退货单支付金额合计 */
+  returnAmountYuan: number
   refundAmountYuan: number | null
+  /** 退款成功单数 */
+  refundOrderCount: number
   coverClickRate: number | null
   stay60sUserCount: number | null
   avgStayDurationSeconds: number | null
@@ -42,6 +56,16 @@ export interface DailyReportImageSession {
   isOnLeave?: boolean
   /** 逸凡线下成交：无直播场次，卡片展示线下业绩 */
   isOfflineDeal?: boolean
+}
+
+function emptyOrderMetrics() {
+  return {
+    shipmentOrderCount: 0,
+    totalOrderCount: 0,
+    returnOrderCount: 0,
+    returnAmountYuan: 0,
+    refundOrderCount: 0,
+  }
 }
 
 function clockFromIso(iso: string): string {
@@ -215,9 +239,14 @@ export function buildDailyReportImageSessionsForAnchor(params: {
   /** 平台原始开播场次：用于卡片直播时段 / 时长文案 */
   originalSessions?: AnchorLiveSessionBrief[]
   shippedAmountYuan: number
+  /** 真实发货单数 */
   soldOrderCount: number
   gmvYuan: number
+  returnOrderCount?: number
+  returnAmountYuan?: number
+  totalOrderCount?: number
   refundAmountYuan?: number | null
+  refundOrderCount?: number
 }): DailyReportImageSession[] {
   const fallbackShopName = params.shopName.trim()
   const anchorName = params.anchorName.trim()
@@ -228,9 +257,25 @@ export function buildDailyReportImageSessionsForAnchor(params: {
   if (groups.length === 0) return []
   const originalsByBaseLiveId = indexOriginalSessionsByBaseLiveId(params.originalSessions)
 
+  const shipmentOrderCount = Math.max(0, Math.floor(params.soldOrderCount || 0))
+  const returnOrderCount = Math.max(0, Math.floor(params.returnOrderCount || 0))
+  const returnAmountYuan =
+    params.returnAmountYuan != null && Number.isFinite(params.returnAmountYuan)
+      ? Math.round(params.returnAmountYuan * 100) / 100
+      : 0
+  const totalOrderCount =
+    params.totalOrderCount != null && Number.isFinite(params.totalOrderCount)
+      ? Math.max(0, Math.floor(params.totalOrderCount))
+      : shipmentOrderCount + returnOrderCount
+  const refundOrderCount = Math.max(0, Math.floor(params.refundOrderCount || 0))
+
   const shippedParts = allocateByDuration(params.shippedAmountYuan, groups)
   const gmvFallbackParts = allocateByDuration(params.gmvYuan, groups)
-  const orderParts = allocateCountByDuration(params.soldOrderCount, groups)
+  const shipmentCountParts = allocateCountByDuration(shipmentOrderCount, groups)
+  const returnCountParts = allocateCountByDuration(returnOrderCount, groups)
+  const returnAmountParts = allocateByDuration(returnAmountYuan, groups)
+  const totalOrderParts = allocateCountByDuration(totalOrderCount, groups)
+  const refundCountParts = allocateCountByDuration(refundOrderCount, groups)
   const refundFallbackTotal =
     params.refundAmountYuan != null && Number.isFinite(params.refundAmountYuan)
       ? params.refundAmountYuan
@@ -252,6 +297,8 @@ export function buildDailyReportImageSessionsForAnchor(params: {
       const display = resolveImageSessionDisplayBounds(group, originalsByBaseLiveId)
       const startTime = display.startTime
       const endTime = display.endTime
+      const shipmentOrders = shipmentCountParts[idx] ?? 0
+      const totalOrders = totalOrderParts[idx] ?? 0
       return {
         id: `${anchorName}::${shopName}::${startTime}::${endTime}::${idx}`,
         shopName,
@@ -262,9 +309,14 @@ export function buildDailyReportImageSessionsForAnchor(params: {
         liveDurationText: formatLiveDurationMinutes(display.durationMinutes),
         liveDurationMinutes: display.durationMinutes,
         shipmentAmountYuan: shippedParts[idx] ?? 0,
+        shipmentOrderCount: shipmentOrders,
         gmvYuan: liveGmv ?? gmvFallbackParts[idx] ?? 0,
-        orderCount: orderParts[idx] ?? 0,
+        orderCount: totalOrders,
+        totalOrderCount: totalOrders,
+        returnOrderCount: returnCountParts[idx] ?? 0,
+        returnAmountYuan: returnAmountParts[idx] ?? 0,
         refundAmountYuan: liveRefund ?? refundFallbackParts[idx] ?? null,
+        refundOrderCount: refundCountParts[idx] ?? 0,
         coverClickRate,
         stay60sUserCount: traffic.stay60sUserCount,
         avgStayDurationSeconds: traffic.avgViewDurationSeconds,
@@ -299,7 +351,6 @@ export function buildDailyReportOfflineImageSession(params: {
     liveDurationMinutes: 0,
     shipmentAmountYuan: 0,
     gmvYuan,
-    orderCount: dealCount,
     refundAmountYuan: null,
     coverClickRate: null,
     stay60sUserCount: null,
@@ -307,5 +358,39 @@ export function buildDailyReportOfflineImageSession(params: {
     status: 'missing',
     color: params.color ?? null,
     isOfflineDeal: true,
+    ...emptyOrderMetrics(),
+    totalOrderCount: dealCount,
+    orderCount: dealCount,
+  }
+}
+
+export function buildEmptyLeaveImageSession(params: {
+  id: string
+  shopName: string
+  anchorName: string
+  startTime: string
+  endTime: string
+  color: string | null
+}): DailyReportImageSession {
+  return {
+    id: params.id,
+    shopName: params.shopName,
+    anchorName: params.anchorName,
+    startTime: params.startTime,
+    endTime: params.endTime,
+    liveTimeRange: `${params.startTime}-${params.endTime}`,
+    liveDurationText: '—',
+    liveDurationMinutes: 0,
+    shipmentAmountYuan: 0,
+    gmvYuan: 0,
+    orderCount: 0,
+    refundAmountYuan: null,
+    coverClickRate: null,
+    stay60sUserCount: null,
+    avgStayDurationSeconds: null,
+    status: 'missing',
+    color: params.color,
+    isOnLeave: true,
+    ...emptyOrderMetrics(),
   }
 }

@@ -41,6 +41,9 @@ interface Props {
   includeZeroPerformance?: boolean
   startDate?: string
   endDate?: string
+  allowLeaveToggle?: boolean
+  leaveToggleBusyKey?: string | null
+  onLeaveToggle?: (row: AnchorLeaderboardRow, isOnLeave: boolean) => void
 }
 
 export const AnchorLeaderboardPanel: React.FC<Props> = ({
@@ -56,6 +59,9 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   includeZeroPerformance = false,
   startDate: _startDate = '',
   endDate: _endDate = '',
+  allowLeaveToggle = false,
+  leaveToggleBusyKey = null,
+  onLeaveToggle,
 }) => {
   const { formatMoney, formatCount, formatRate } = useAmountDisplay()
   const [viewMode, setViewMode] = useState<ListViewMode>('cards')
@@ -74,7 +80,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
   const cardClass = showCardsOnDesktop ? 'block' : 'block md:hidden'
   const tableWrapClass = showTableOnDesktop ? 'hidden md:block' : 'hidden'
 
-  const colCount = showExtraColumns ? 11 : 7
+  const colCount = (showExtraColumns ? 11 : 7) + (allowLeaveToggle ? 1 : 0)
 
   return (
     <div>
@@ -132,6 +138,9 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
         showIndividualTrend
         showLivePeriod={showLivePeriod}
         includeZeroPerformance={includeZeroPerformance}
+        allowLeaveToggle={allowLeaveToggle}
+        leaveToggleBusyKey={leaveToggleBusyKey}
+        onLeaveToggle={onLeaveToggle}
         className={cardClass}
       />
 
@@ -140,6 +149,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
           <thead className="bg-rose-50/40 text-slate-500">
             <tr>
               <th className="py-2.5 pl-4 pr-2">主播</th>
+              {allowLeaveToggle ? <th className="py-2 pr-2 text-center">休假</th> : null}
               <th className="py-2 pr-2 text-right">GMV</th>
               <th className="py-2 pr-2 text-right">已签收金额</th>
               <th className="py-2 pr-2 text-right">支付单数</th>
@@ -176,6 +186,8 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                 const liveLines = showLivePeriod ? anchorRowLivePeriodLines(a) : { primary: null, secondary: null }
                 const livePeriodMultiline = liveLines.primary?.includes('\n') ?? false
                 const isUnassigned = isUnassignedAnchorName(String(a.anchorName ?? ''))
+                const rowKey = String(a.anchorId ?? a.anchorName ?? idx)
+                const onLeave = Boolean((a as { isOnLeave?: boolean }).isOnLeave)
                 const theme = resolveAnchorTheme({
                   id: typeof a.anchorId === 'string' ? a.anchorId : null,
                   name: typeof a.anchorName === 'string' ? a.anchorName : null,
@@ -183,7 +195,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                 })
                 return (
                   <tr
-                    key={String(a.anchorId ?? a.anchorName ?? idx)}
+                    key={rowKey}
                     data-testid={anchorCardTestId(String(a.anchorName))}
                     style={{ ['--i' as string]: String(Math.min(idx, 12)) }}
                     className={`board-list-row-enter border-t transition ${
@@ -247,6 +259,24 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                         ) : null}
                       </div>
                     </td>
+                    {allowLeaveToggle ? (
+                      <td className="py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                        {!isUnassigned && onLeaveToggle ? (
+                          <label className="inline-flex items-center gap-1 text-[12px] text-slate-600">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4 accent-rose-600"
+                              checked={onLeave}
+                              disabled={leaveToggleBusyKey === rowKey}
+                              onChange={(e) => onLeaveToggle(a, e.target.checked)}
+                            />
+                            <span className={onLeave ? 'font-semibold text-rose-600' : ''}>休假</span>
+                          </label>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    ) : null}
                     <td className="py-2 text-right tabular-nums">{formatMoney(anchorRowGmv(a))}</td>
                     <td className="py-2 text-right tabular-nums">
                       {formatMoney(anchorRowActualSignedAmount(a))}

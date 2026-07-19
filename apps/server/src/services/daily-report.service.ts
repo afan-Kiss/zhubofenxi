@@ -45,6 +45,8 @@ import {
   roundYuan,
   safeDivide,
   safeRatioPercent,
+  sumDailyReportRefundFromViews,
+  sumDailyReportReturnFromViews,
   sumDailyReportShippedFromViews,
   type DailyReportShippedOrderLine,
 } from './daily-report-order.util'
@@ -71,6 +73,7 @@ import { normalizeShopLabel, normalizeShopName } from '../utils/shop-name-normal
 import {
   buildDailyReportImageSessionsForAnchor,
   buildDailyReportOfflineImageSession,
+  buildEmptyLeaveImageSession,
   type DailyReportImageSession,
 } from './daily-report-image-session'
 
@@ -538,6 +541,16 @@ export async function buildDailyReport(params: {
   const usedScheduleRowIds = new Set<string>()
   /** 组装 imageSessions 用：主播 → 归属场次快照 */
   const sessionsByAnchorName = new Map<string, AnchorLiveSessionBrief[]>()
+  const imageOrderMetricsByAnchor = new Map<
+    string,
+    {
+      returnOrderCount: number
+      returnAmountYuan: number
+      totalOrderCount: number
+      refundOrderCount: number
+      refundAmountYuan: number
+    }
+  >()
   for (const anchor of reportAnchors) {
     if (isOfflineOnlyAnchor({ systemKey: anchor.systemKey })) continue
     const performanceViewsRaw = await getAnchorPerformanceViews(
@@ -554,6 +567,15 @@ export async function buildDailyReport(params: {
     const anchorAllViews = filterViewsByAnchorSpec(remappedAll, anchor.anchorId, anchor.anchorName)
     const { soldOrderCount } = shipped
     const { invalidOrderCount: invalidFromPerformance } = countDailyReportOrders(performanceViews)
+    const returnStats = sumDailyReportReturnFromViews(performanceViews)
+    const refundStats = sumDailyReportRefundFromViews(performanceViews)
+    imageOrderMetricsByAnchor.set(anchor.anchorName, {
+      returnOrderCount: returnStats.returnOrderCount,
+      returnAmountYuan: returnStats.returnAmountYuan,
+      totalOrderCount: soldOrderCount + invalidFromPerformance,
+      refundOrderCount: refundStats.refundOrderCount,
+      refundAmountYuan: refundStats.refundAmountYuan,
+    })
     const fixedDisplay = useShopSessionRules
       ? ANCHOR_SESSION_DISPLAY_FROM_0613[anchor.anchorName]
       : undefined
@@ -842,6 +864,7 @@ export async function buildDailyReport(params: {
       liveAssignment,
       row.anchorName,
     )
+    const metrics = imageOrderMetricsByAnchor.get(row.anchorName)
     imageSessions.push(
       ...buildDailyReportImageSessionsForAnchor({
         anchorName: row.anchorName,
@@ -852,13 +875,31 @@ export async function buildDailyReport(params: {
         shippedAmountYuan: row.shippedAmountYuan,
         soldOrderCount: row.soldOrderCount,
         gmvYuan: Number(row.gmvYuan ?? 0),
-        refundAmountYuan: null,
+        returnOrderCount: metrics?.returnOrderCount ?? row.invalidOrderCount ?? 0,
+        returnAmountYuan: metrics?.returnAmountYuan ?? 0,
+        totalOrderCount:
+          metrics?.totalOrderCount ?? row.soldOrderCount + (row.invalidOrderCount ?? 0),
+        refundAmountYuan: metrics?.refundAmountYuan ?? 0,
+        refundOrderCount: metrics?.refundOrderCount ?? 0,
       }),
     )
   }
 
   // 请假排班：在日报图片补/标记主播卡片（无直播场次也展示休假水印）
   const leaveRows = scheduleTable.rows.filter((r) => r.enabled && r.isOnLeave)
+  const leaveOnlyAnchorNames = new Set<string>()
+  {
+    const workingNames = new Set(
+      scheduleTable.rows
+        .filter((r) => r.enabled && !r.isOnLeave)
+        .map((r) => r.anchorName.trim())
+        .filter(Boolean),
+    )
+    for (const leave of leaveRows) {
+      const name = leave.anchorName.trim()
+      if (name && !workingNames.has(name)) leaveOnlyAnchorNames.add(name)
+    }
+  }
   for (const leave of leaveRows) {
     const anchorName = leave.anchorName.trim()
     const shopName = leave.shopName.trim() || leave.liveRoomName.trim()
@@ -881,26 +922,22 @@ export async function buildDailyReport(params: {
       leave.anchorColorSnapshot ||
       anchorRows.find((a) => a.anchorName === anchorName)?.color ||
       null
-    imageSessions.push({
-      id: `leave::${anchorName}::${shopName}::${startTime}::${endTime}`,
-      shopName,
-      anchorName,
-      startTime,
-      endTime,
-      liveTimeRange: `${startTime}-${endTime}`,
-      liveDurationText: '—',
-      liveDurationMinutes: 0,
-      shipmentAmountYuan: 0,
-      gmvYuan: 0,
-      orderCount: 0,
-      refundAmountYuan: null,
-      coverClickRate: null,
-      stay60sUserCount: null,
-      avgStayDurationSeconds: null,
-      status: 'missing',
-      color,
-      isOnLeave: true,
-    })
+    imageSessions.push(
+      buildEmptyLeaveImageSession({
+        id: `leave::${anchorName}::${shopName}::${startTime}::${endTime}`,
+        shopName,
+        anchorName,
+        startTime,
+        endTime,
+        color,
+      }),
+    )
+  }
+  // 整日休假：该主播所有场次卡都打休假水印（不要求时段与请假行精确对齐）
+  for (const session of imageSessions) {
+    if (leaveOnlyAnchorNames.has(session.anchorName)) {
+      session.isOnLeave = true
+    }
   }
 
   // 逸凡线下成交：有出单时追加独立卡片（此前被 imageSessions 直播场次逻辑漏掉）

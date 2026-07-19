@@ -80,7 +80,7 @@ export function resolveCoverClickRateQuality(
   return {
     status: ok ? 'pass' : 'fail',
     pctText,
-    label: ok ? '合格' : '不合格',
+    label: ok ? '合格' : '需提升',
   }
 }
 

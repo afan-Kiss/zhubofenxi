@@ -579,7 +579,7 @@ export function ensureAnchorPerformanceLeaderboardSlots(
   })
 }
 
-/** 异步：在 ensure 基础上再补当日临时试播空卡 */
+/** 异步：在 ensure 基础上再补当日临时试播空卡、请假占位空卡 */
 export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
   rows: BoardAnchorMetrics[],
   dateKey: string,
@@ -587,17 +587,57 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
   const base = ensureAnchorPerformanceLeaderboardSlots(rows, dateKey)
   const { resolveAnchorCandidatesForDate } = await import('./anchor-date-candidates.service')
   const candidates = await resolveAnchorCandidatesForDate(dateKey)
-  const byName = new Map(base.map((r) => [r.anchorName, r]))
+  const byName = new Map(base.map((r) => [r.anchorName, r] as const))
   const merged = [...base]
   for (const c of candidates) {
     if (!c.isTemporaryAnchor || !c.temporaryAnchorKey) continue
     if (byName.has(c.anchorName)) continue
-    merged.push(
-      createEmptyAnchorLeaderboardRow(c.temporaryAnchorKey, c.anchorName, c.color ?? '#94a3b8', {
+    const empty = createEmptyAnchorLeaderboardRow(
+      c.temporaryAnchorKey,
+      c.anchorName,
+      c.color ?? '#94a3b8',
+      {
         systemKey: null,
         attributionMode: 'schedule',
-      }),
+      },
     )
+    merged.push(empty)
+    byName.set(c.anchorName, empty)
   }
+
+  // 请假排班：即使无成交也补卡片，供前端打「休假」水印
+  try {
+    const { getEffectiveScheduleTableForDate } = await import('./anchor-daily-schedule.service')
+    const table = await getEffectiveScheduleTableForDate(dateKey)
+    for (const r of table.rows) {
+      if (!r.enabled || !r.isOnLeave) continue
+      const name = r.anchorName.trim()
+      if (!name || byName.has(name)) continue
+      const found = findAnchorByName(getAnchorConfigSync(), name)
+      const empty = {
+        ...createEmptyAnchorLeaderboardRow(
+          found?.id ?? r.anchorId ?? `extra-${name}`,
+          name,
+          found?.color ?? r.anchorColorSnapshot ?? '#94a3b8',
+          {
+            systemKey: found?.systemKey ?? null,
+            attributionMode: found?.attributionMode ?? 'schedule',
+          },
+        ),
+        shopName: r.shopName,
+        sessionLabel: `${r.startTime}-${r.endTime}`,
+        isOnLeave: true,
+      } as BoardAnchorMetrics & {
+        shopName?: string
+        sessionLabel?: string
+        isOnLeave?: boolean
+      }
+      merged.push(empty)
+      byName.set(name, empty)
+    }
+  } catch {
+    /* ignore schedule load failures for slot padding */
+  }
+
   return merged
 }

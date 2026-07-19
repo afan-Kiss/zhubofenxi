@@ -911,6 +911,8 @@ model AnchorDailySchedule {
   temporaryAnchorKey  String?
   /** 业绩卡片/时间轴/日报颜色快照 */
   anchorColorSnapshot String?
+  /** 请假：展示「休假」水印，且不参与订单归属 */
+  isOnLeave           Boolean   @default(false)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

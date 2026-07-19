@@ -573,8 +573,12 @@ export async function buildDailyReport(params: {
 
     // 固定场次空行：仅在职有效日保留；已删除/离职后的新日期不展示空卡
     // 临时试播：有排班或直播场次也保留空行
+    // 请假排班：保留空行以便日报图片打休假水印
     const cfgAnchor = config.anchors.find(
       (a) => a.id === anchor.anchorId || a.name === anchor.anchorName,
+    )
+    const hasLeaveSlot = scheduleTable.rows.some(
+      (r) => r.enabled && r.isOnLeave && r.anchorName === anchor.anchorName,
     )
     const keepEmptySlot =
       Boolean(
@@ -598,7 +602,8 @@ export async function buildDailyReport(params: {
                   (r as { temporaryAnchorKey?: string | null }).temporaryAnchorKey ===
                     anchor.temporaryAnchorKey),
             )),
-      )
+      ) ||
+      hasLeaveSlot
     if (!hasData && !keepEmptySlot) continue
 
     const shopNameHint =
@@ -846,6 +851,51 @@ export async function buildDailyReport(params: {
       }),
     )
   }
+
+  // 请假排班：在日报图片补/标记主播卡片（无直播场次也展示休假水印）
+  const leaveRows = scheduleTable.rows.filter((r) => r.enabled && r.isOnLeave)
+  for (const leave of leaveRows) {
+    const anchorName = leave.anchorName.trim()
+    const shopName = leave.shopName.trim() || leave.liveRoomName.trim()
+    if (!anchorName || !shopName) continue
+    const startTime = leave.startTime
+    const endTime = leave.endTime
+    const existing = imageSessions.find(
+      (s) =>
+        s.anchorName === anchorName &&
+        s.shopName === shopName &&
+        (s.liveTimeRange.includes(startTime) || s.startTime.includes(startTime)),
+    )
+    if (existing) {
+      existing.isOnLeave = true
+      continue
+    }
+    const color =
+      leave.anchorColorSnapshot ||
+      anchorRows.find((a) => a.anchorName === anchorName)?.color ||
+      null
+    imageSessions.push({
+      id: `leave::${anchorName}::${shopName}::${startTime}::${endTime}`,
+      shopName,
+      anchorName,
+      startTime,
+      endTime,
+      liveTimeRange: `${startTime}-${endTime}`,
+      liveDurationText: '—',
+      liveDurationMinutes: 0,
+      shipmentAmountYuan: 0,
+      gmvYuan: 0,
+      orderCount: 0,
+      refundAmountYuan: null,
+      coverClickRate: null,
+      stay60sUserCount: null,
+      avgStayDurationSeconds: null,
+      status: 'missing',
+      color,
+      isOnLeave: true,
+    })
+  }
+
   imageSessions.sort((a, b) => {
     const shopCmp = a.shopName.localeCompare(b.shopName, 'zh-CN')
     if (shopCmp !== 0) return shopCmp

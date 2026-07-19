@@ -213,6 +213,17 @@ export async function enrichAnchorLeaderboardWithLivePeriod(
     )
   }
 
+  const leaveByAnchor = new Map<string, { shopName: string; sessionLabel: string }>()
+  for (const r of scheduleTable.rows) {
+    if (!r.enabled || !r.isOnLeave) continue
+    const name = r.anchorName.trim()
+    if (!name || leaveByAnchor.has(name)) continue
+    leaveByAnchor.set(name, {
+      shopName: r.shopName.trim() || r.liveRoomName.trim(),
+      sessionLabel: `${r.startTime}-${r.endTime}`,
+    })
+  }
+
   return rows.map((row, index) => {
     const livePeriod = livePeriodByIndex.get(index)
     const item = prefetched[index]
@@ -220,8 +231,10 @@ export async function enrichAnchorLeaderboardWithLivePeriod(
     const actualSessions = item?.actualSessions ?? sessions
     const livePeriodText = buildPerSessionLivePeriodText(sessions)
     const liveTimeRange = buildActualLivePeriodText(actualSessions)
+    const anchorName = String(row.anchorName ?? '').trim()
+    const leaveInfo = leaveByAnchor.get(anchorName)
     const livePeriodHint = resolveAnchorLiveMatchHint({
-      anchorName: String(row.anchorName ?? ''),
+      anchorName,
       scheduleRows: scheduleTable.rows,
       assignment: liveAssignment,
     })
@@ -232,9 +245,21 @@ export async function enrichAnchorLeaderboardWithLivePeriod(
       livePeriodHint:
         livePeriodText && livePeriodText !== '—' ? null : livePeriodHint,
       scheduleTimeRange: livePeriod?.scheduledPeriodText ?? null,
+      isOnLeave: Boolean(leaveInfo),
     }
 
-    if (!livePeriod) return { ...row, ...base }
+    if (!livePeriod) {
+      return {
+        ...row,
+        ...base,
+        ...(leaveInfo
+          ? {
+              shopName: String(row.shopName ?? '').trim() || leaveInfo.shopName,
+              sessionLabel: String(row.sessionLabel ?? '').trim() || leaveInfo.sessionLabel,
+            }
+          : {}),
+      }
+    }
 
     return {
       ...row,

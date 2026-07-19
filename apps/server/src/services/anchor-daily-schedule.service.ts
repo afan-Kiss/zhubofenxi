@@ -84,6 +84,8 @@ export interface EffectiveScheduleRow {
   isTemporaryAnchor?: boolean
   temporaryAnchorKey?: string | null
   anchorColorSnapshot?: string | null
+  /** 请假：展示休假水印，且不参与订单归属 */
+  isOnLeave?: boolean
 }
 
 export interface EffectiveScheduleTable {
@@ -136,6 +138,7 @@ export interface DailyScheduleDto {
   isTemporaryAnchor?: boolean
   temporaryAnchorKey?: string | null
   anchorColorSnapshot?: string | null
+  isOnLeave?: boolean
 }
 
 function rowToDto(row: {
@@ -156,6 +159,7 @@ function rowToDto(row: {
   isTemporaryAnchor?: boolean
   temporaryAnchorKey?: string | null
   anchorColorSnapshot?: string | null
+  isOnLeave?: boolean
 }): DailyScheduleDto {
   const startTime = row.startAt.toLocaleTimeString('zh-CN', {
     timeZone: 'Asia/Shanghai',
@@ -200,6 +204,7 @@ function rowToDto(row: {
     isTemporaryAnchor: Boolean(row.isTemporaryAnchor),
     temporaryAnchorKey: row.temporaryAnchorKey ?? null,
     anchorColorSnapshot: row.anchorColorSnapshot ?? null,
+    isOnLeave: Boolean(row.isOnLeave),
   }
 }
 
@@ -233,6 +238,7 @@ function dbRowToEffective(
     isTemporaryAnchor?: boolean
     temporaryAnchorKey?: string | null
     anchorColorSnapshot?: string | null
+    isOnLeave?: boolean
   },
   source: EffectiveScheduleSource,
   dateConfirmed: boolean,
@@ -254,6 +260,7 @@ function dbRowToEffective(
     isTemporaryAnchor: Boolean(row.isTemporaryAnchor),
     temporaryAnchorKey: row.temporaryAnchorKey ?? null,
     anchorColorSnapshot: row.anchorColorSnapshot ?? null,
+    isOnLeave: Boolean(row.isOnLeave),
   }
 }
 
@@ -347,6 +354,7 @@ function effectiveRowToDto(row: EffectiveScheduleRow, dateKey: string): DailySch
     isTemporaryAnchor: Boolean(row.isTemporaryAnchor),
     temporaryAnchorKey: row.temporaryAnchorKey ?? null,
     anchorColorSnapshot: row.anchorColorSnapshot ?? null,
+    isOnLeave: Boolean(row.isOnLeave),
   }
 }
 
@@ -573,6 +581,7 @@ export async function saveDailySchedules(params: {
     isTemporaryAnchor?: boolean
     temporaryAnchorKey?: string | null
     anchorColorSnapshot?: string | null
+    isOnLeave?: boolean
   }>
   createdBy?: string
   confirm?: boolean
@@ -723,6 +732,7 @@ export async function saveDailySchedules(params: {
           isTemporaryAnchor: true,
           temporaryAnchorKey: key,
           anchorColorSnapshot: s.anchorColorSnapshot?.trim() || null,
+          isOnLeave: Boolean(s.isOnLeave),
         },
       })
       continue
@@ -753,6 +763,7 @@ export async function saveDailySchedules(params: {
         isTemporaryAnchor: false,
         temporaryAnchorKey: null,
         anchorColorSnapshot: null,
+        isOnLeave: Boolean(s.isOnLeave),
       },
     })
   }
@@ -871,6 +882,7 @@ export async function copyDailySchedules(params: {
         isTemporaryAnchor: false,
         temporaryAnchorKey: null,
         anchorColorSnapshot: null,
+        isOnLeave: Boolean(row.isOnLeave),
       },
     })
   }

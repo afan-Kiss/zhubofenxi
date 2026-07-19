@@ -30,6 +30,8 @@ export interface DailyReportImageSession {
   avgStayDurationSeconds: number | null
   status: DailyReportImageSessionStatus
   color: string | null
+  /** 排班请假：卡片展示「休假」水印 */
+  isOnLeave?: boolean
 }
 
 export interface DailyReportTimelineBar {

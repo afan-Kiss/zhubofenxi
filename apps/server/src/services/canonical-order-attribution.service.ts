@@ -309,7 +309,8 @@ async function loadEffectiveSchedules(dateKey: string): Promise<EffectiveSchedul
   if (!pending) {
     pending = getEffectiveScheduleTableForDate(dateKey).then((table) =>
       table.rows
-        .filter((r) => r.enabled)
+        // 请假排班占位展示，但不参与订单归属
+        .filter((r) => r.enabled && !r.isOnLeave)
         .map((r) => ({
           id: r.rowId,
           anchorName: r.anchorName,

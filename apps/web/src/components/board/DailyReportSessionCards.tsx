@@ -12,6 +12,7 @@ import {
   type DailyReportImageSession,
   type DailyReportImageSessionStatus,
 } from './dailyReportImageModel'
+import { LeaveWatermark } from './LeaveWatermark'
 
 const STATUS_TEXT_CLASS: Record<DailyReportImageSessionStatus, string> = {
   qualified: 'text-emerald-700',
@@ -64,21 +65,23 @@ function CoverClickRateValue({ session }: { session: DailyReportImageSession }) 
 }
 
 function SessionCard({ session }: { session: DailyReportImageSession }) {
+  const onLeave = Boolean(session.isOnLeave)
   return (
-    <div className="flex min-h-[168px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-100 bg-slate-50/70 px-3 py-2.5">
+    <div className="relative flex min-h-[168px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      {onLeave ? <LeaveWatermark /> : null}
+      <div className="relative z-10 border-b border-slate-100 bg-slate-50/90 px-3 py-2.5">
         <div className="min-w-0">
-          <div className="truncate text-[13px] font-semibold text-slate-800">{session.shopName}</div>
-          <div className="mt-0.5 truncate text-[12px] text-slate-600">
+          <div className="truncate text-[13px] font-semibold text-slate-900">{session.shopName}</div>
+          <div className="mt-0.5 truncate text-[12px] font-medium text-slate-800">
             主播：{formatAnchorDisplayName(session.anchorName)}
           </div>
-          <div className="mt-0.5 text-[11px] tabular-nums text-slate-500">
+          <div className="mt-0.5 text-[11px] tabular-nums text-slate-600">
             直播时段：{session.liveTimeRange}
           </div>
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3 px-3 py-3">
+      <div className="relative z-[1] flex flex-1 flex-col gap-3 px-3 py-3">
         <div className="grid grid-cols-4 gap-2">
           <MetricCell label="GMV" value={formatMoney(session.gmvYuan)} />
           <MetricCell

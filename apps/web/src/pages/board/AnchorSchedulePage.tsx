@@ -32,6 +32,8 @@ interface ScheduleRow {
   isTemporaryAnchor?: boolean
   temporaryAnchorKey?: string | null
   anchorColorSnapshot?: string | null
+  /** 请假：业绩卡片/日报图片打「休假」水印 */
+  isOnLeave?: boolean
 }
 
 interface ScheduleAnchorOption {
@@ -217,6 +219,7 @@ export const AnchorSchedulePage: React.FC = () => {
         isTemporaryAnchor: s.isTemporaryAnchor,
         temporaryAnchorKey: s.temporaryAnchorKey ?? null,
         anchorColorSnapshot: s.anchorColorSnapshot ?? null,
+        isOnLeave: Boolean(s.isOnLeave),
       })),
     )
     setWarnings(data.warnings ?? [])
@@ -380,6 +383,7 @@ export const AnchorSchedulePage: React.FC = () => {
             isTemporaryAnchor: Boolean(r.isTemporaryAnchor),
             temporaryAnchorKey: r.temporaryAnchorKey ?? null,
             anchorColorSnapshot: r.anchorColorSnapshot ?? null,
+            isOnLeave: Boolean(r.isOnLeave),
           })),
           confirm,
         }),
@@ -759,6 +763,7 @@ export const AnchorSchedulePage: React.FC = () => {
               <th className="px-3 py-2">店铺/直播间</th>
               <th className="px-3 py-2">时段</th>
               <th className="px-3 py-2">来源</th>
+              <th className="px-3 py-2">请假</th>
               <th className="px-3 py-2">备注</th>
               <th className="px-3 py-2">操作</th>
             </tr>
@@ -873,6 +878,19 @@ export const AnchorSchedulePage: React.FC = () => {
                     />
                   </td>
                   <td className="px-3 py-2 text-slate-500">{sourceLabel(row.source)}</td>
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(row.isOnLeave)}
+                        onChange={(e) => updateRow(index, { isOnLeave: e.target.checked })}
+                        className="rounded border-slate-300 text-rose-600 focus:ring-rose-200"
+                      />
+                      <span className={row.isOnLeave ? 'font-semibold text-rose-600' : ''}>
+                        休假
+                      </span>
+                    </label>
+                  </td>
                   <td className="px-3 py-2" title={tip || undefined} onClick={(e) => e.stopPropagation()}>
                     <input
                       value={row.note ?? ''}
@@ -897,7 +915,7 @@ export const AnchorSchedulePage: React.FC = () => {
             })}
             {!loading && rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-3 py-8 text-center text-slate-500">
+                <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
                   当天暂无排班，可点「更多 → 生成默认排班」或「新增」
                 </td>
               </tr>

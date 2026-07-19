@@ -39,6 +39,7 @@ export interface ScheduleTimelineRow {
   note?: string | null
   /** 主播配置色；优先于 id/name hash */
   color?: string | null
+  isOnLeave?: boolean
 }
 
 export interface ScheduleTimelineEditorProps {
@@ -605,6 +606,9 @@ export const ScheduleTimelineEditor: React.FC<ScheduleTimelineEditorProps> = ({
                       >
                         <div className="truncate text-[11px] font-semibold leading-tight">
                           {row.anchorName || '未选主播'}
+                          {row.isOnLeave ? (
+                            <span className="ml-1 font-bold text-red-600">休假</span>
+                          ) : null}
                         </div>
                         {!narrow ? (
                           <div className="truncate text-[10px] leading-tight opacity-80">

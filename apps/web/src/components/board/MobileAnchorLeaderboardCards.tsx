@@ -24,6 +24,7 @@ import {
 import { anchorCardTestId } from '../../lib/anchor-test-id'
 import { resolveAnchorColor, resolveAnchorTheme } from '../../lib/anchor-theme'
 import { AnchorTrendChart } from './AnchorTrendChart'
+import { LeaveWatermark } from './LeaveWatermark'
 
 interface Props {
   rows: AnchorLeaderboardRow[]
@@ -141,6 +142,8 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
           color: typeof a.color === 'string' ? a.color : null,
         })
 
+        const onLeave = Boolean((a as { isOnLeave?: boolean }).isOnLeave)
+
         return (
           <article
             key={rowKey}
@@ -155,7 +158,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   }
                 : undefined
             }
-            className={`board-list-row-enter rounded-2xl border p-4 shadow-sm ${
+            className={`board-list-row-enter relative overflow-hidden rounded-2xl border p-4 shadow-sm ${
               isUnassigned
                 ? 'border-amber-200 bg-amber-50/60 shadow-amber-100/40'
                 : 'border-rose-100 bg-white shadow-rose-100/40'
@@ -170,7 +173,8 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                   }),
             }}
           >
-            <div className="flex items-start justify-between gap-2">
+            {onLeave ? <LeaveWatermark /> : null}
+            <div className="relative z-10 flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] text-slate-500">主播</p>
                 <p
@@ -213,7 +217,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
               </div>
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="relative z-[1] mt-3 grid grid-cols-2 gap-2">
               <MetricCell label="GMV" value={formatMoney(anchorRowGmv(a))} />
               <MetricCell label="已签收金额" value={formatMoney(anchorRowActualSignedAmount(a))} />
               <MetricCell label="支付单数" value={formatCount(anchorRowPaidCount(a))} />
@@ -231,7 +235,7 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
             </div>
 
             {showExtraMetrics ? (
-              <div className="mt-2 grid grid-cols-2 gap-2">
+              <div className="relative z-[1] mt-2 grid grid-cols-2 gap-2">
                 <MetricCell label="退款金额" value={formatMoney(anchorRowRefundAmount(a))} danger />
                 <MetricCell
                   label="退货退款单数"

@@ -25,6 +25,7 @@ export interface DbScheduleRowLike {
   isTemporaryAnchor?: boolean
   temporaryAnchorKey?: string | null
   anchorColorSnapshot?: string | null
+  isOnLeave?: boolean
 }
 
 export interface BuildEffectiveScheduleRowsResult {
@@ -72,6 +73,7 @@ function dbRowToEffective(
     isTemporaryAnchor: Boolean(row.isTemporaryAnchor),
     temporaryAnchorKey: row.temporaryAnchorKey ?? null,
     anchorColorSnapshot: row.anchorColorSnapshot ?? null,
+    isOnLeave: Boolean(row.isOnLeave),
   }
 }
 

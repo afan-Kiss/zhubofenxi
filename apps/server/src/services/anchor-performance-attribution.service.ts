@@ -52,7 +52,13 @@ export const ANCHOR_SESSION_DISPLAY_FROM_0613: Record<
   飞云: { sessionLabel: '晚场·拾玉居和田玉', shopName: '拾玉居和田玉' },
   小艺: { sessionLabel: '晚场·和田雅玉', shopName: '和田雅玉' },
   小白: { sessionLabel: '午场·XY祥钰珠宝 14:30-18:00', shopName: 'XY祥钰珠宝' },
+  /** 2026-07-17 起接手和田雅玉（接替小红/小艺） */
+  橙橙: { sessionLabel: '和田雅玉', shopName: '和田雅玉' },
+  小小: { sessionLabel: '晚场·XY祥钰珠宝', shopName: 'XY祥钰珠宝' },
 }
+
+/** 和田雅玉新主播上场日：此前仍按小红/小艺固定场次 */
+const HETIAN_CHENGCHENG_START_DATE = '2026-07-17'
 
 const SHOP_SESSION_ANCHOR_MAP: Record<
   LiveSessionPeriod,
@@ -341,8 +347,12 @@ export function normalizeShopSessionKey(liveAccountName: string): ShopSessionKey
 export function resolveShopSessionAnchorName(
   shopKey: ShopSessionKey | null,
   period: LiveSessionPeriod | null,
+  dateKey?: string | null,
 ): string | null {
   if (!shopKey || !period) return null
+  if (shopKey === 'hetian' && dateKey && dateKey >= HETIAN_CHENGCHENG_START_DATE) {
+    return '橙橙'
+  }
   return SHOP_SESSION_ANCHOR_MAP[period][shopKey] ?? null
 }
 
@@ -393,12 +403,12 @@ export function resolveShopSessionAnchorFromLiveAccount(
 ): { anchorId: string; anchorName: string } | null {
   const shopKey = normalizeShopSessionKey(liveAccountName)
   const period = resolveLiveSessionPeriod(at)
-  const anchorName = resolveShopSessionAnchorName(shopKey, period)
+  const dateKey = formatDateKeyShanghai(at)
+  const anchorName = resolveShopSessionAnchorName(shopKey, period, dateKey)
   if (!anchorName) return null
   const found = findAnchorByName(config, anchorName)
   // 已软删/不在配置中：禁止回落 extra-小红 等幽灵名
   if (!found) return null
-  const dateKey = formatDateKeyShanghai(at)
   if (!isAnchorEffectiveOnDate(found, dateKey)) return null
   if (found.enabled === false) return null
   return { anchorId: found.id, anchorName: found.name }
@@ -539,8 +549,20 @@ export function ensureAnchorPerformanceLeaderboardSlots(
     )
     .map((a) => a.name.trim())
 
+  // 排班制正式主播（如橙橙/小小）：不在旧固定名单里也要补空卡，否则无成交日整卡消失
+  const scheduleFormalNames = config.anchors
+    .filter(
+      (a) =>
+        a.name.trim() &&
+        !isOfflineOnlyAnchor(a) &&
+        (a.attributionMode ?? 'schedule') === 'schedule' &&
+        !a.systemKey &&
+        shouldPadEmptyAnchorSlot(a, endDate),
+    )
+    .map((a) => a.name.trim())
+
   const slotNames = [...effectiveFixedNames]
-  for (const name of manualOnlyNames) {
+  for (const name of [...manualOnlyNames, ...scheduleFormalNames]) {
     if (!slotNames.includes(name)) slotNames.push(name)
   }
 

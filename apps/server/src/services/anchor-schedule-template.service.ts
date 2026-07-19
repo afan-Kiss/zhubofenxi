@@ -80,6 +80,17 @@ export const NEW_SCHEDULE_TEMPLATE_SEEDS_20260701: ScheduleTemplateSeed[] = [
     note: '午场·和田雅玉',
   },
   {
+    anchorName: '橙橙',
+    shopName: '和田雅玉',
+    liveRoomName: '和田雅玉',
+    startTime: '09:30',
+    endTime: '18:30',
+    effectiveFrom: '2026-07-17',
+    effectiveTo: null,
+    sortOrder: 45,
+    note: '和田雅玉·橙橙',
+  },
+  {
     anchorName: '飞云',
     shopName: '拾玉居和田玉',
     liveRoomName: '拾玉居和田玉',

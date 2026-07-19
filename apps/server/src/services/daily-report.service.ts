@@ -580,18 +580,15 @@ export async function buildDailyReport(params: {
     const hasLeaveSlot = scheduleTable.rows.some(
       (r) => r.enabled && r.isOnLeave && r.anchorName === anchor.anchorName,
     )
+    const padCfg =
+      cfgAnchor ?? {
+        enabled: true,
+        effectiveFrom: anchor.effectiveFrom,
+        effectiveTo: anchor.effectiveTo,
+      }
+    // 在职正式主播（含橙橙等非旧固定名单）无成交也保留空行；不再强制要求 ANCHOR_SESSION_DISPLAY
     const keepEmptySlot =
-      Boolean(
-        fixedDisplay &&
-          shouldPadEmptyAnchorSlot(
-            cfgAnchor ?? {
-              enabled: true,
-              effectiveFrom: anchor.effectiveFrom,
-              effectiveTo: anchor.effectiveTo,
-            },
-            params.startDate,
-          ),
-      ) ||
+      shouldPadEmptyAnchorSlot(padCfg, params.startDate) ||
       Boolean(
         anchor.isTemporaryAnchor &&
           (sessions.length > 0 ||

@@ -50,25 +50,36 @@ function MetricCell({
   )
 }
 
-function CoverClickRateValue({ session }: { session: DailyReportImageSession }) {
+function CoverClickRateValue({
+  session,
+  onLeave,
+}: {
+  session: DailyReportImageSession
+  onLeave?: boolean
+}) {
   if (session.coverClickRate == null) {
-    return <span className={STATUS_TEXT_CLASS.missing}>数据缺失</span>
+    // 请假卡：不展示「数据缺失」，避免与休假水印抢语义
+    return <span className={STATUS_TEXT_CLASS.missing}>{onLeave ? '—' : '数据缺失'}</span>
   }
   const statusLabel = dailyReportImageStatusLabel(session.status)
   const statusClass = STATUS_TEXT_CLASS[session.status]
   return (
     <span>
       <span className="text-slate-900">{formatRatePercent(session.coverClickRate)}</span>
-      <span className={`ml-1 text-[11px] font-semibold ${statusClass}`}>{statusLabel}</span>
+      {onLeave ? null : (
+        <span className={`ml-1 text-[11px] font-semibold ${statusClass}`}>{statusLabel}</span>
+      )}
     </span>
   )
 }
 
 function SessionCard({ session }: { session: DailyReportImageSession }) {
   const onLeave = Boolean(session.isOnLeave)
+  const missingOrDash = (value: string) =>
+    onLeave && value === '数据缺失' ? '—' : value
   return (
     <div className="relative flex min-h-[168px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-      {onLeave ? <LeaveWatermark /> : null}
+      {onLeave ? <LeaveWatermark offsetY="22%" /> : null}
       <div className="relative z-10 border-b border-slate-100 bg-slate-50/90 px-3 py-2.5">
         <div className="min-w-0">
           <div className="truncate text-[13px] font-semibold text-slate-900">{session.shopName}</div>
@@ -101,11 +112,11 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
           <MetricCell
             label="封面点击率"
             emphasize
-            value={<CoverClickRateValue session={session} />}
+            value={<CoverClickRateValue session={session} onLeave={onLeave} />}
           />
           <MetricCell
             label="60s停留人数"
-            value={formatPeopleCountOrMissing(session.stay60sUserCount)}
+            value={missingOrDash(formatPeopleCountOrMissing(session.stay60sUserCount))}
           />
           <MetricCell
             label="人均停留"
@@ -114,7 +125,9 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
               Number.isFinite(session.avgStayDurationSeconds) &&
               session.avgStayDurationSeconds > 0
                 ? formatStayDurationSeconds(session.avgStayDurationSeconds)
-                : '数据缺失'
+                : onLeave
+                  ? '—'
+                  : '数据缺失'
             }
           />
           <MetricCell label="直播时长" value={session.liveDurationText || '—'} />

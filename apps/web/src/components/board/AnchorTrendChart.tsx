@@ -198,16 +198,16 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
     return buildTrendSummary(trendForSummary, formatMoney, formatCount)
   }, [resolved, formatMoney, formatCount, useRelativeIntraday])
 
-  const emptyMinH = isReport ? 'min-h-[100px]' : 'min-h-[120px] md:min-h-[150px]'
+  const emptyMinH = isReport ? 'min-h-[100px]' : 'min-h-[72px] sm:min-h-[88px]'
 
   if (!hasTrendData(resolved, variant, includeZeroPerformance)) {
     return (
       <div
         data-anchor-trend-chart="empty"
-        className={`flex ${emptyMinH} flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-4 ${className}`}
+        className={`flex ${emptyMinH} flex-col items-center justify-center rounded-xl border border-dashed border-rose-100 bg-white/70 px-2 py-3 ${className}`}
       >
-        <p className={`${isReport ? 'text-[12px]' : 'text-[13px]'} text-slate-500`}>暂无走势数据</p>
-        <p className="mt-1 text-[11px] text-slate-400">
+        <p className={`${isReport ? 'text-[12px]' : 'text-[11px] sm:text-[12px]'} text-slate-500`}>暂无走势数据</p>
+        <p className="mt-1 text-[10px] text-slate-400 sm:text-[11px]">
           {showZeroPerformanceTrend
             ? '请先设置排班或同步直播场次'
             : '有订单后会按开播时间生成走势'}
@@ -221,19 +221,19 @@ export const AnchorTrendChart: React.FC<AnchorTrendChartProps> = ({
   const subtitle = useRelativeIntraday
     ? '按开播后分钟统计，不是有效成交走势'
     : resolveTrendSubtitle(resolved!)
-  const chartHeight = isReport ? 'h-[140px]' : 'h-[120px] md:h-[150px]'
-  const titleClass = isReport ? 'text-[11px]' : 'text-[12px]'
-  const tagClass = isReport ? 'text-[9px] px-1.5 py-0' : 'text-[10px] px-2 py-0.5'
-  const tickSize = isReport ? 9 : 10
+  const chartHeight = isReport ? 'h-[140px]' : 'h-[72px] sm:h-[88px]'
+  const titleClass = isReport ? 'text-[11px]' : 'text-[11px] sm:text-[12px]'
+  const tagClass = isReport ? 'text-[9px] px-1.5 py-0' : 'text-[9px] px-1.5 py-0 sm:text-[10px] sm:px-2 sm:py-0.5'
+  const tickSize = isReport ? 9 : 9
   const gridStroke = isReport ? '#f1f5f9' : '#f8fafc'
   const chartMargin = isReport
     ? { top: 4, right: 18, left: -10, bottom: 6 }
-    : { top: 4, right: 4, left: -18, bottom: 0 }
+    : { top: 2, right: 2, left: -22, bottom: 0 }
 
   return (
     <div
       data-anchor-trend-chart="ready"
-      className={`rounded-2xl border border-rose-100 bg-white/80 p-3 shadow-sm shadow-rose-50/40 ${className}`}
+      className={`rounded-xl border border-rose-100 bg-white/80 p-2 shadow-sm shadow-rose-50/40 sm:rounded-2xl sm:p-3 ${className}`}
     >
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="min-w-0">

@@ -390,7 +390,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     return (
       <div
         data-anchor-trend-compare="empty"
-        className={`flex ${isReport ? 'min-h-[120px]' : 'min-h-[180px] md:min-h-[220px]'} flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-6 ${className}`}
+        className={`flex ${isReport ? 'min-h-[120px]' : 'min-h-[140px] md:min-h-[160px]'} flex-col items-center justify-center rounded-2xl border border-dashed border-rose-100 bg-white/70 px-3 py-4 ${className}`}
       >
         <p className="text-[13px] text-slate-500">暂无可对比走势</p>
         {!isReport ? (
@@ -414,7 +414,7 @@ export const AnchorTrendCompareChart: React.FC<AnchorTrendCompareChartProps> = (
     : '按日期对比每日支付金额，不是已签收金额'
 
   const xAxisKey = compact ? 'tickLabel' : 'label'
-  const chartHeightClass = isReport ? 'h-[188px]' : compact ? 'h-[248px]' : 'h-[220px] md:h-[260px]'
+  const chartHeightClass = isReport ? 'h-[188px]' : compact ? 'h-[160px]' : 'h-[160px] md:h-[180px]'
   const chartMargin = isReport
     ? { top: 4, right: 20, left: -10, bottom: 6 }
     : {

@@ -124,9 +124,13 @@ interface SfRouteStatsPayload {
   inTransitCount: number
   unknownCount: number
   failedCount: number
+  commonRouteError?: string | null
+  permissionBlocked?: boolean
   abnormalFeeYuan: number
   abnormalFeeKnownCount: number
   abnormalFeeMissingCount: number
+  billedShippedFeeYuan?: number
+  billedShippedFeeCount?: number
   items: Array<{
     shipmentId: string
     winnerId: string
@@ -512,7 +516,7 @@ export const LuckyGiftsPage: React.FC = () => {
         qs.set('page', '1')
         qs.set('pageSize', '100')
 
-        const [sum, list, routes] = await Promise.all([
+        const [sumRes, listRes, routesRes] = await Promise.allSettled([
           // summary 始终四店汇总（店铺 pill / 主播卡）；列表才按 shopKey 过滤
           apiRequest<SummaryPayload>('/api/board/lucky-gifts/summary'),
           apiRequest<{ items: LuckyGiftItem[]; total: number; canViewPii: boolean }>(
@@ -520,10 +524,14 @@ export const LuckyGiftsPage: React.FC = () => {
           ),
           apiRequest<SfRouteStatsPayload>('/api/board/lucky-gifts/sf-route-stats'),
         ])
+        if (sumRes.status === 'rejected') throw sumRes.reason
+        if (listRes.status === 'rejected') throw listRes.reason
+        const sum = sumRes.value
+        const list = listRes.value
         setSummary(sum)
         setItems(list.items)
         setTotal(list.total)
-        setRouteStats(routes)
+        if (routesRes.status === 'fulfilled') setRouteStats(routesRes.value)
         setSelected(new Set())
         writeLuckyGiftSummaryCache(sum)
         writeLuckyGiftListCache(listCacheKey, { items: list.items, total: list.total })
@@ -971,22 +979,52 @@ export const LuckyGiftsPage: React.FC = () => {
           <div>
             <h2 className="text-sm font-medium text-slate-800">未签收 / 退回运费</h2>
             <p className="mt-1 text-xs leading-relaxed text-slate-500">
-              对接顺丰轨迹识别拒收、退回；金额为已出账月结运费合计（不含礼品成本，未出账单暂不计）
+              拒收、退回需顺丰「路由查询」权限；金额仅统计已出账月结运费（不含礼品成本）
             </p>
           </div>
           {isSuperAdmin ? (
             <button
               type="button"
-              onClick={() => void handleRefreshSfRoutes(false)}
+              onClick={() => void handleRefreshSfRoutes(true)}
               disabled={routeRefreshing}
               className={ACTION_BTN}
             >
               {routeRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              查询顺丰轨迹
+              重新查询轨迹
             </button>
           ) : null}
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+
+        {(routeStats?.permissionBlocked || (routeStats?.failedCount ?? 0) > 0) && (
+          <div
+            className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs leading-relaxed text-amber-950"
+            data-testid="lucky-gift-sf-route-blocked"
+          >
+            {routeStats?.permissionBlocked ? (
+              <>
+                <p className="font-medium">还查不到拒收/退回：顺丰账号未开通「路由查询」</p>
+                <p className="mt-1">
+                  当前错误：{routeStats.commonRouteError || '无对应服务权限'}（已失败{' '}
+                  {routeStats.failedCount} 单）。请到丰桥开放平台（open.sf-express.com）为顾客编码关联并上线
+                  「路由查询 EXP_RECE_SEARCH_ROUTES」，再点重新查询。
+                </p>
+              </>
+            ) : (
+              <p>
+                有 {routeStats?.failedCount} 个单号轨迹查询失败
+                {routeStats?.commonRouteError ? `（${routeStats.commonRouteError}）` : ''}，暂无法汇总拒收运费。
+              </p>
+            )}
+            {(routeStats?.billedShippedFeeCount ?? 0) > 0 ? (
+              <p className="mt-1.5 text-amber-900/80">
+                参考：全部顺丰已发中，已出账月结运费 {formatYuan(routeStats?.billedShippedFeeYuan ?? 0)}（
+                {routeStats?.billedShippedFeeCount} 单，含正常签收，不是拒收专用）
+              </p>
+            ) : null}
+          </div>
+        )}
+
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           <div className="rounded-xl border border-white bg-white px-3 py-2.5 shadow-sm">
             <div className="text-[11px] text-slate-500">拒收</div>
             <div className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900">
@@ -1000,15 +1038,23 @@ export const LuckyGiftsPage: React.FC = () => {
             </div>
           </div>
           <div className="rounded-xl border border-white bg-white px-3 py-2.5 shadow-sm">
-            <div className="text-[11px] text-slate-500">已出账运费</div>
+            <div className="text-[11px] text-slate-500">拒收/退回运费</div>
             <div className="mt-0.5 text-xl font-semibold tabular-nums text-rose-700">
-              {formatYuan(routeStats?.abnormalFeeYuan ?? 0)}
+              {(routeStats?.abnormalCount ?? 0) > 0
+                ? formatYuan(routeStats?.abnormalFeeYuan ?? 0)
+                : '—'}
             </div>
           </div>
           <div className="rounded-xl border border-white bg-white px-3 py-2.5 shadow-sm">
             <div className="text-[11px] text-slate-500">运费未出账</div>
             <div className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900">
               {routeStats?.abnormalFeeMissingCount ?? 0}
+            </div>
+          </div>
+          <div className="rounded-xl border border-white bg-white px-3 py-2.5 shadow-sm">
+            <div className="text-[11px] text-slate-500">轨迹查询失败</div>
+            <div className="mt-0.5 text-xl font-semibold tabular-nums text-amber-700">
+              {routeStats?.failedCount ?? 0}
             </div>
           </div>
         </div>

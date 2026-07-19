@@ -242,6 +242,9 @@ export async function getLuckyGiftSfRouteStats(accountIds?: string[] | null) {
     select: {
       trackingNo: true,
       sfRouteStatus: true,
+      sfRouteError: true,
+      sfMonthlyFeeCent: true,
+      sfFeeStatus: true,
     },
   })
 
@@ -276,6 +279,9 @@ export async function getLuckyGiftSfRouteStats(accountIds?: string[] | null) {
   let feeCentTotal = 0
   let feeKnown = 0
   let feeMissing = 0
+  let billedShippedFeeCent = 0
+  let billedShippedFeeCount = 0
+  const errorCounts = new Map<string, number>()
 
   for (const s of shipped) {
     if (!isSfTrackingNo(s.trackingNo)) continue
@@ -285,8 +291,16 @@ export async function getLuckyGiftSfRouteStats(accountIds?: string[] | null) {
     else if (st === 'returned') returned += 1
     else if (st === 'signed') signed += 1
     else if (st === 'in_transit') inTransit += 1
-    else if (st === 'failed') failed += 1
-    else unknown += 1
+    else if (st === 'failed') {
+      failed += 1
+      const err = String(s.sfRouteError || '').trim() || '查询失败'
+      errorCounts.set(err, (errorCounts.get(err) || 0) + 1)
+    } else unknown += 1
+
+    if (s.sfMonthlyFeeCent != null && s.sfFeeStatus === 'available') {
+      billedShippedFeeCent += s.sfMonthlyFeeCent
+      billedShippedFeeCount += 1
+    }
   }
 
   for (const s of abnormal) {
@@ -298,6 +312,18 @@ export async function getLuckyGiftSfRouteStats(accountIds?: string[] | null) {
     }
   }
 
+  let commonRouteError: string | null = null
+  let commonRouteErrorCount = 0
+  for (const [err, n] of errorCounts) {
+    if (n > commonRouteErrorCount) {
+      commonRouteError = err
+      commonRouteErrorCount = n
+    }
+  }
+  const permissionBlocked =
+    failed > 0 &&
+    Boolean(commonRouteError && /无对应服务权限|A1004|未开通|没有权限/.test(commonRouteError))
+
   return {
     sfTrackingCount: sfTracking,
     rejectedCount: rejected,
@@ -307,10 +333,15 @@ export async function getLuckyGiftSfRouteStats(accountIds?: string[] | null) {
     inTransitCount: inTransit,
     unknownCount: unknown,
     failedCount: failed,
+    commonRouteError,
+    permissionBlocked,
     /** 拒收+退回中，已出账月结运费合计（元） */
     abnormalFeeYuan: Math.round(feeCentTotal) / 100,
     abnormalFeeKnownCount: feeKnown,
     abnormalFeeMissingCount: feeMissing,
+    /** 全部顺丰已发中已出账月结运费（含正常签收；路由未开通时也可看） */
+    billedShippedFeeYuan: Math.round(billedShippedFeeCent) / 100,
+    billedShippedFeeCount,
     items: abnormal.map((s) => ({
       shipmentId: s.id,
       winnerId: s.winner.id,

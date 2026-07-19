@@ -959,9 +959,32 @@ export async function copyDailySchedules(params: {
   return result
 }
 
+/** 业绩页补的占位请假班次（取消休假时应删除，勿改成正常班） */
+const PERFORMANCE_LEAVE_PLACEHOLDER_NOTE = '业绩页标记休假'
+
+type LeaveScheduleDraft = {
+  anchorId?: string | null
+  anchorName: string
+  shopName: string
+  liveRoomName: string
+  startTime: string
+  endTime: string
+  enabled?: boolean
+  note?: string
+  isTemporaryAnchor?: boolean
+  temporaryAnchorKey?: string | null
+  anchorColorSnapshot?: string | null
+  isOnLeave?: boolean
+}
+
+function isPerformanceLeavePlaceholder(s: LeaveScheduleDraft): boolean {
+  return String(s.note ?? '').includes(PERFORMANCE_LEAVE_PLACEHOLDER_NOTE)
+}
+
 /**
  * 主播业绩「昨日」休假打勾：将该主播当日全部排班行设为请假/取消请假。
- * 无排班行且标记请假时，补一条占位请假班次。
+ * 基于当日完整生效排班（含模板/生成班），避免只读 manual 列表整日重写冲掉其他人班次。
+ * 无排班行且标记请假时，补一条占位请假班次；取消时删除占位行。
  */
 export async function setAnchorLeaveForDate(params: {
   date: string
@@ -985,25 +1008,28 @@ export async function setAnchorLeaveForDate(params: {
   }
   const wantLeave = Boolean(params.isOnLeave)
   const listed = await listDailySchedulesForDate(date)
-  const schedules = listed.schedules.map((s) => ({
-    anchorId: s.anchorId,
-    anchorName: s.anchorName,
-    shopName: s.shopName,
-    liveRoomName: s.liveRoomName,
-    startTime: s.startTime,
-    endTime: s.endTime,
-    enabled: s.enabled,
-    note: s.note ?? undefined,
-    isTemporaryAnchor: s.isTemporaryAnchor,
-    temporaryAnchorKey: s.temporaryAnchorKey,
-    anchorColorSnapshot: s.anchorColorSnapshot,
-    isOnLeave: Boolean(s.isOnLeave),
-  }))
+  // 始终用完整生效表，避免 hasManualDay 时只带 manual 行导致整日覆盖丢班
+  const schedules: LeaveScheduleDraft[] = listed.effectiveTable.rows
+    .filter((r) => r.enabled)
+    .map((r) => ({
+      anchorId: r.anchorId ?? null,
+      anchorName: r.anchorName,
+      shopName: r.shopName,
+      liveRoomName: r.liveRoomName,
+      startTime: r.startTime,
+      endTime: r.endTime,
+      enabled: true,
+      note: r.note ?? undefined,
+      isTemporaryAnchor: Boolean(r.isTemporaryAnchor),
+      temporaryAnchorKey: r.temporaryAnchorKey ?? null,
+      anchorColorSnapshot: r.anchorColorSnapshot ?? null,
+      isOnLeave: Boolean(r.isOnLeave),
+    }))
 
   const anchorId = String(params.anchorId ?? '').trim()
   const anchorNameHint = String(params.anchorName ?? '').trim()
-  const match = (s: (typeof schedules)[number]) => {
-    if (anchorId && s.anchorId && s.anchorId === anchorId) return true
+  const match = (s: LeaveScheduleDraft) => {
+    if (anchorId && String(s.anchorId ?? '').trim() === anchorId) return true
     if (anchorNameHint && s.anchorName.trim() === anchorNameHint) return true
     return false
   }
@@ -1039,7 +1065,7 @@ export async function setAnchorLeaveForDate(params: {
       startTime: '09:00',
       endTime: '18:00',
       enabled: true,
-      note: '业绩页标记休假',
+      note: PERFORMANCE_LEAVE_PLACEHOLDER_NOTE,
       isTemporaryAnchor: false,
       temporaryAnchorKey: null,
       anchorColorSnapshot: found?.color ?? null,
@@ -1049,7 +1075,6 @@ export async function setAnchorLeaveForDate(params: {
   }
 
   if (!wantLeave && !matchedAny) {
-    // 本来就没有该主播排班，无需保存
     return {
       date,
       schedules: listed.schedules,
@@ -1060,9 +1085,14 @@ export async function setAnchorLeaveForDate(params: {
     }
   }
 
+  // 取消休假：删掉业绩页补的占位班，避免变成 09:00-18:00 正常班
+  const toSave = !wantLeave
+    ? schedules.filter((s) => !(match(s) && isPerformanceLeavePlaceholder(s)))
+    : schedules
+
   const saved = await saveDailySchedules({
     date,
-    schedules,
+    schedules: toSave,
     createdBy: params.createdBy,
     forceHistoricalScheduleChange: params.forceHistoricalScheduleChange ?? true,
     changeReason:

@@ -263,10 +263,6 @@ export function buildDailyReportImageSessionsForAnchor(params: {
     params.returnAmountYuan != null && Number.isFinite(params.returnAmountYuan)
       ? Math.round(params.returnAmountYuan * 100) / 100
       : 0
-  const totalOrderCount =
-    params.totalOrderCount != null && Number.isFinite(params.totalOrderCount)
-      ? Math.max(0, Math.floor(params.totalOrderCount))
-      : shipmentOrderCount + returnOrderCount
   const refundOrderCount = Math.max(0, Math.floor(params.refundOrderCount || 0))
 
   const shippedParts = allocateByDuration(params.shippedAmountYuan, groups)
@@ -274,7 +270,11 @@ export function buildDailyReportImageSessionsForAnchor(params: {
   const shipmentCountParts = allocateCountByDuration(shipmentOrderCount, groups)
   const returnCountParts = allocateCountByDuration(returnOrderCount, groups)
   const returnAmountParts = allocateByDuration(returnAmountYuan, groups)
-  const totalOrderParts = allocateCountByDuration(totalOrderCount, groups)
+  // 总订单 = 发货 + 退货（分摊后按卡相加，避免三路分摊漂移）
+  // params.totalOrderCount 仅作入参兼容，多卡场景不用独立分摊以免与发货+退货不一致
+  const totalOrderParts = shipmentCountParts.map(
+    (ship, idx) => ship + (returnCountParts[idx] ?? 0),
+  )
   const refundCountParts = allocateCountByDuration(refundOrderCount, groups)
   const refundFallbackTotal =
     params.refundAmountYuan != null && Number.isFinite(params.refundAmountYuan)

@@ -38,6 +38,7 @@ import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
+import { enrichAnchorLeaderboardWithOffboardStatus } from './anchor-offboard-enrichment.service'
 import { loadOfflineDealViewsForRange, splitGmvByDealSource } from './offline-deal.service'
 
 export type BoardLiveQueryPreset =
@@ -294,11 +295,15 @@ export async function executeBoardLiveQuery(
       anchorLeaderboardRaw as unknown as Array<Record<string, unknown>>,
       { startDate, endDate, preset: params.preset },
     )
+    const anchorLeaderboardWithOffboard = enrichAnchorLeaderboardWithOffboardStatus(
+      anchorLeaderboardWithLate,
+      { startDate, endDate },
+    )
     const performanceViewsForTrend = params.anchorId || params.anchorName
       ? scopedPerformanceViews
       : performanceViews
     const anchorLeaderboard = await enrichAnchorLeaderboardWithTrend(
-      anchorLeaderboardWithLate,
+      anchorLeaderboardWithOffboard,
       performanceViewsForTrend,
       { preset: params.preset, startDate, endDate },
     )

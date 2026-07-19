@@ -31,6 +31,7 @@ import {
 } from './anchor-performance-attribution.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
+import { enrichAnchorLeaderboardWithOffboardStatus } from './anchor-offboard-enrichment.service'
 import { readBoardPresetSnapshot, buildSnapshotBoardCacheStub } from './board-preset-snapshot.service'
 import {
   resolveAfterSalesCompleteness,
@@ -619,9 +620,13 @@ export async function executeBoardLocalQuery(params: {
           preset: params.preset,
         },
       )
+      const anchorLeaderboardWithOffboard = enrichAnchorLeaderboardWithOffboardStatus(
+        anchorLeaderboardWithLate,
+        { startDate, endDate },
+      )
 
       anchorLeaderboard = await enrichAnchorLeaderboardWithTrend(
-        anchorLeaderboardWithLate,
+        anchorLeaderboardWithOffboard,
         performanceViews,
         { preset: params.preset, startDate, endDate },
       )

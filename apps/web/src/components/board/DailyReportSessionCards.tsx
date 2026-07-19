@@ -25,35 +25,53 @@ function MetricCell({
   label,
   value,
   emphasize,
+  compact,
 }: {
   label: string
   value: React.ReactNode
   emphasize?: boolean
+  /** 复合指标（单数+金额）允许换行，避免 truncate 截断 */
+  compact?: boolean
 }) {
+  const valueClass = emphasize
+    ? `mt-0.5 text-[13px] font-bold tabular-nums leading-tight text-slate-900 ${
+        compact ? 'whitespace-normal break-words pb-0.5' : 'truncate'
+      }`
+    : `mt-0.5 text-[12px] font-semibold tabular-nums leading-tight text-slate-900 ${
+        compact ? 'whitespace-normal break-words' : 'truncate'
+      }`
   if (emphasize) {
     return (
-      <div className="min-w-0 rounded-lg border border-sky-100 bg-sky-50/80 px-1.5 py-1">
+      <div className="min-w-0 rounded-lg border border-sky-100 bg-sky-50/80 px-1.5 py-1.5">
         <div className="text-[10px] font-medium leading-4 text-sky-700/80">{label}</div>
-        <div className="mt-0.5 truncate text-[15px] font-bold tabular-nums leading-5 text-slate-900">
-          {value}
-        </div>
+        <div className={valueClass}>{value}</div>
       </div>
     )
   }
   return (
     <div className="min-w-0">
       <div className="text-[10px] leading-4 text-slate-400">{label}</div>
-      <div className="mt-0.5 truncate text-[13px] font-semibold tabular-nums leading-5 text-slate-900">
-        {value}
-      </div>
+      <div className={valueClass}>{value}</div>
     </div>
   )
 }
 
-function formatCountAndMoney(count: number | null | undefined, amountYuan: number | null | undefined) {
-  const countText = formatOrderCount(count ?? 0)
-  const moneyText = formatMoney(amountYuan ?? 0)
-  return `${countText} / ${moneyText}`
+/** 单数与金额分行展示，避免窄格截断 */
+function CountMoneyValue({
+  count,
+  amountYuan,
+}: {
+  count: number | null | undefined
+  amountYuan: number | null | undefined
+}) {
+  return (
+    <span className="flex flex-col gap-0.5 leading-tight">
+      <span className="leading-none">{formatOrderCount(count ?? 0)}</span>
+      <span className="text-[11px] font-semibold leading-none text-slate-800">
+        {formatMoney(amountYuan ?? 0)}
+      </span>
+    </span>
+  )
 }
 
 function CoverClickRateValue({
@@ -70,10 +88,10 @@ function CoverClickRateValue({
   const statusLabel = dailyReportImageStatusLabel(session.status)
   const statusClass = STATUS_TEXT_CLASS[session.status]
   return (
-    <span>
+    <span className="inline-flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
       <span className="text-slate-900">{formatRatePercent(session.coverClickRate)}</span>
       {hideStatus ? null : (
-        <span className={`ml-1 text-[11px] font-semibold ${statusClass}`}>{statusLabel}</span>
+        <span className={`text-[11px] font-semibold ${statusClass}`}>{statusLabel}</span>
       )}
     </span>
   )
@@ -116,44 +134,60 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
         <div className="grid grid-cols-4 gap-2">
           <MetricCell
             label={isOffline ? '线下 GMV' : 'GMV'}
-            emphasize={isOffline}
-            value={formatMoney(session.gmvYuan)}
+            emphasize={isOffline || !onLeave}
+            compact={isOffline}
+            value={onLeave ? '—' : formatMoney(session.gmvYuan)}
           />
           <MetricCell
             label="发货"
-            emphasize={!isOffline}
+            emphasize={!isOffline && !onLeave}
+            compact
             value={
-              isOffline
-                ? '—'
-                : formatCountAndMoney(shipmentOrderCount, session.shipmentAmountYuan)
+              softMissing ? (
+                '—'
+              ) : (
+                <CountMoneyValue
+                  count={shipmentOrderCount}
+                  amountYuan={session.shipmentAmountYuan}
+                />
+              )
             }
           />
           <MetricCell
             label="退货"
+            compact
             value={
-              isOffline ? '—' : formatCountAndMoney(returnOrderCount, returnAmountYuan)
+              softMissing ? (
+                '—'
+              ) : (
+                <CountMoneyValue count={returnOrderCount} amountYuan={returnAmountYuan} />
+              )
             }
           />
           <MetricCell
             label={isOffline ? '成交笔数' : '总订单数'}
-            value={formatOrderCount(totalOrderCount)}
+            value={softMissing ? '—' : formatOrderCount(totalOrderCount)}
           />
         </div>
         <div className="grid grid-cols-4 gap-2 border-t border-slate-100 pt-3">
           <MetricCell
             label="封面点击率"
-            emphasize={!isOffline}
+            emphasize={!isOffline && !onLeave}
+            compact
             value={<CoverClickRateValue session={session} hideStatus={softMissing} />}
           />
           <MetricCell
             label="退款"
+            compact
             value={
-              isOffline
-                ? '—'
-                : formatCountAndMoney(
-                    refundOrderCount,
-                    session.refundAmountYuan != null ? session.refundAmountYuan : 0,
-                  )
+              softMissing ? (
+                '—'
+              ) : (
+                <CountMoneyValue
+                  count={refundOrderCount}
+                  amountYuan={session.refundAmountYuan != null ? session.refundAmountYuan : 0}
+                />
+              )
             }
           />
           <MetricCell

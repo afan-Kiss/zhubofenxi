@@ -19,6 +19,7 @@ import {
 } from './anchor-performance-attribution.service'
 import { enrichAnchorLeaderboardWithLateStatus } from './anchor-late-enrichment.service'
 import { enrichAnchorLeaderboardWithTrend } from './anchor-card-trend.service'
+import { enrichAnchorLeaderboardWithOffboardStatus } from './anchor-offboard-enrichment.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 import { splitGmvByDealSource } from './offline-deal.service'
 import {
@@ -421,13 +422,17 @@ export async function buildAndSetBusinessBoardCache(params: {
         preset: params.preset,
       },
     )
+    const anchorLeaderboardWithOffboard = enrichAnchorLeaderboardWithOffboardStatus(
+      anchorLeaderboardWithLate,
+      { startDate: range.startDate, endDate: range.endDate },
+    )
     const { loadRangeLiveSessionIndex } = await import('./range-live-session-index.service')
     const sessionIndex = await loadRangeLiveSessionIndex({
       startDate: range.startDate,
       endDate: range.endDate,
     })
     const enrichedAnchorLeaderboard = await enrichAnchorLeaderboardWithTrend(
-      anchorLeaderboardWithLate,
+      anchorLeaderboardWithOffboard,
       performanceViews,
       { preset: params.preset, startDate: range.startDate, endDate: range.endDate },
       sessionIndex,

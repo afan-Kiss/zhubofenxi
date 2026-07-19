@@ -188,6 +188,9 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                 const isUnassigned = isUnassignedAnchorName(String(a.anchorName ?? ''))
                 const rowKey = String(a.anchorId ?? a.anchorName ?? idx)
                 const onLeave = Boolean((a as { isOnLeave?: boolean }).isOnLeave)
+                const isOffboarded = Boolean((a as { isOffboarded?: boolean }).isOffboarded)
+                const leaveBusyKey =
+                  String(a.anchorId ?? '').trim() || String(a.anchorName ?? '').trim()
                 const theme = resolveAnchorTheme({
                   id: typeof a.anchorId === 'string' ? a.anchorId : null,
                   name: typeof a.anchorName === 'string' ? a.anchorName : null,
@@ -208,7 +211,7 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                     <td className="py-2.5 pl-4">
                       <div className="flex flex-col gap-1">
                         <span
-                          className={`inline-flex items-center gap-2 font-medium ${
+                          className={`inline-flex flex-wrap items-center gap-2 font-medium ${
                             isUnassigned ? 'text-amber-900' : 'text-slate-800'
                           }`}
                         >
@@ -227,10 +230,23 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                               <span className="font-normal text-slate-500"> · {shop}</span>
                             )
                           })()}
-                          {Boolean((a as { isOnLeave?: boolean }).isOnLeave) ? (
+                          {onLeave ? (
                             <span className="rounded px-1.5 py-0.5 text-[11px] font-bold text-red-600">
                               休假
                             </span>
+                          ) : null}
+                          {!onLeave && isOffboarded && !showLivePeriod ? (
+                            <button
+                              type="button"
+                              className="rounded px-1.5 py-0.5 text-[11px] font-bold text-red-600 underline-offset-2 hover:underline"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                onRowClick?.(a)
+                              }}
+                            >
+                              已离职
+                            </button>
                           ) : null}
                         </span>
                         {isUnassigned ? (
@@ -260,18 +276,40 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                       </div>
                     </td>
                     {allowLeaveToggle ? (
-                      <td className="py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                      <td
+                        className="py-2 text-center"
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onMouseDown={(e) => e.stopPropagation()}
+                      >
                         {!isUnassigned && onLeaveToggle ? (
-                          <label className="inline-flex items-center gap-1 text-[12px] text-slate-600">
-                            <input
-                              type="checkbox"
-                              className="h-4 w-4 accent-rose-600"
-                              checked={onLeave}
-                              disabled={leaveToggleBusyKey === rowKey}
-                              onChange={(e) => onLeaveToggle(a, e.target.checked)}
-                            />
-                            <span className={onLeave ? 'font-semibold text-rose-600' : ''}>休假</span>
-                          </label>
+                          <button
+                            type="button"
+                            className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[12px] ${
+                              onLeave
+                                ? 'border-rose-300 bg-rose-50 font-semibold text-rose-700'
+                                : 'border-slate-200 bg-white text-slate-600'
+                            }`}
+                            disabled={leaveToggleBusyKey === leaveBusyKey}
+                            aria-pressed={onLeave}
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              onLeaveToggle(a, !onLeave)
+                            }}
+                          >
+                            <span
+                              className={`inline-flex h-3.5 w-3.5 items-center justify-center rounded border text-[9px] ${
+                                onLeave
+                                  ? 'border-rose-600 bg-rose-600 text-white'
+                                  : 'border-slate-300 bg-white'
+                              }`}
+                              aria-hidden
+                            >
+                              {onLeave ? '✓' : ''}
+                            </span>
+                            休假
+                          </button>
                         ) : (
                           '—'
                         )}

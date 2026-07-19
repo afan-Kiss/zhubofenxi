@@ -900,22 +900,36 @@ export async function buildDailyReport(params: {
       if (name && !workingNames.has(name)) leaveOnlyAnchorNames.add(name)
     }
   }
+  const clockOf = (isoOrClock: string): string => {
+    const text = String(isoOrClock ?? '').trim()
+    const hm = /^(\d{1,2}):(\d{2})/.exec(text)
+    if (hm) return `${String(Number(hm[1])).padStart(2, '0')}:${hm[2]}`
+    const isoHm = /[ T](\d{2}):(\d{2})/.exec(text)
+    if (isoHm) return `${isoHm[1]}:${isoHm[2]}`
+    return text.slice(0, 5)
+  }
   for (const leave of leaveRows) {
     const anchorName = leave.anchorName.trim()
     const shopName = leave.shopName.trim() || leave.liveRoomName.trim()
     if (!anchorName || !shopName) continue
     const startTime = leave.startTime
     const endTime = leave.endTime
-    // 精确对齐排班时段，避免 includes 误标其它场次
+    const leaveStartClock = clockOf(startTime)
+    const leaveEndClock = clockOf(endTime)
+    // 用时分对齐：场次卡可能是 ISO，排班是 HH:mm
     const existing = imageSessions.find(
       (s) =>
         s.anchorName === anchorName &&
         s.shopName === shopName &&
-        s.startTime === startTime &&
-        s.endTime === endTime,
+        clockOf(s.startTime) === leaveStartClock &&
+        clockOf(s.endTime) === leaveEndClock,
     )
     if (existing) {
       existing.isOnLeave = true
+      continue
+    }
+    // 整日休假且已有真实场次：不额外插空卡（下面会给该主播所有场次打水印）
+    if (leaveOnlyAnchorNames.has(anchorName) && imageSessions.some((s) => s.anchorName === anchorName)) {
       continue
     }
     const color =

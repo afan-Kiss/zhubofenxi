@@ -150,16 +150,22 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
         })
 
         const onLeave = Boolean((a as { isOnLeave?: boolean }).isOnLeave)
+        const isOffboarded = Boolean((a as { isOffboarded?: boolean }).isOffboarded)
+        const rawAnchorName = String(a.anchorName ?? '').trim()
+        const leaveBusyKey = String(a.anchorId ?? '').trim() || rawAnchorName
+        const stopCardActivation = (e: React.SyntheticEvent) => {
+          e.stopPropagation()
+        }
 
         return (
           <article
             key={rowKey}
             data-testid={anchorCardTestId(name)}
-            role={onSelect ? 'button' : undefined}
-            tabIndex={onSelect ? 0 : undefined}
+            role={onSelect && !allowLeaveToggle ? 'button' : undefined}
+            tabIndex={onSelect && !allowLeaveToggle ? 0 : undefined}
             onClick={onSelect ? () => onSelect(a) : undefined}
             onKeyDown={
-              onSelect
+              onSelect && !allowLeaveToggle
                 ? (e) => {
                     if (e.key === 'Enter') onSelect(a)
                   }
@@ -181,11 +187,14 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
             }}
           >
             {onLeave ? <LeaveWatermark /> : null}
+            {!onLeave && isOffboarded && !showLivePeriod ? (
+              <LeaveWatermark label="已离职" />
+            ) : null}
             <div className="relative z-10 flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] text-slate-500">主播</p>
                 <p
-                  className={`flex items-center gap-2 text-lg font-semibold ${
+                  className={`flex flex-wrap items-center gap-2 text-lg font-semibold ${
                     isUnassigned ? 'text-amber-900' : 'text-slate-900'
                   }`}
                 >
@@ -202,6 +211,21 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                     if (!shop || isUnassigned) return null
                     return <span className="font-normal text-slate-500"> · {shop}</span>
                   })()}
+                  {!onLeave && isOffboarded && !showLivePeriod ? (
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-0.5 text-[11px] font-bold text-red-600 underline-offset-2 hover:underline"
+                      onPointerDown={stopCardActivation}
+                      onMouseDown={stopCardActivation}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        onSelect?.(a)
+                      }}
+                    >
+                      已离职
+                    </button>
+                  ) : null}
                 </p>
                 {isUnassigned ? (
                   <p className="mt-1 text-[11px] leading-snug text-amber-800/90">{UNASSIGNED_ANCHOR_HINT}</p>
@@ -223,20 +247,35 @@ export const MobileAnchorLeaderboardCards: React.FC<Props> = ({
                 ) : null}
               </div>
               {allowLeaveToggle && !isUnassigned && onLeaveToggle ? (
-                <label
-                  className="relative z-20 flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-100 bg-white/90 px-2 py-1.5 text-[12px] text-slate-700"
-                  onClick={(e) => e.stopPropagation()}
-                  onKeyDown={(e) => e.stopPropagation()}
+                <button
+                  type="button"
+                  className={`relative z-20 flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1.5 text-[12px] ${
+                    onLeave
+                      ? 'border-rose-300 bg-rose-50 font-semibold text-rose-700'
+                      : 'border-rose-100 bg-white text-slate-700'
+                  }`}
+                  disabled={leaveToggleBusyKey === leaveBusyKey}
+                  aria-pressed={onLeave}
+                  onPointerDown={stopCardActivation}
+                  onMouseDown={stopCardActivation}
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onLeaveToggle(a, !onLeave)
+                  }}
                 >
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 accent-rose-600"
-                    checked={onLeave}
-                    disabled={leaveToggleBusyKey === rowKey}
-                    onChange={(e) => onLeaveToggle(a, e.target.checked)}
-                  />
-                  <span className={onLeave ? 'font-semibold text-rose-600' : ''}>休假</span>
-                </label>
+                  <span
+                    className={`inline-flex h-4 w-4 items-center justify-center rounded border ${
+                      onLeave
+                        ? 'border-rose-600 bg-rose-600 text-[10px] text-white'
+                        : 'border-slate-300 bg-white'
+                    }`}
+                    aria-hidden
+                  >
+                    {onLeave ? '✓' : ''}
+                  </span>
+                  休假
+                </button>
               ) : null}
             </div>
 

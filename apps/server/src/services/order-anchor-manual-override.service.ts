@@ -1,7 +1,13 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 import { prisma } from '../lib/prisma'
 import { findAnchorByName } from './anchor-rules.service'
-import { getAnchorConfigSync, refreshAnchorConfigCache } from './anchor.service'
+import {
+  findAnchorForAttributionByName,
+  getAnchorConfigSync,
+  isOfflineOnlyAnchor,
+  refreshAnchorConfigCache,
+  type AttributionAnchorLookup,
+} from './anchor.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
 import {
   invalidateAndRebuildBusinessBoardCache,
@@ -10,6 +16,11 @@ import {
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
 import { ANCHOR_SESSION_DISPLAY_FROM_0613 } from './anchor-performance-attribution.service'
 import { logInfo, logWarn } from '../utils/server-log'
+import {
+  isAnchorEffectiveOnDate,
+  isOffboardDateMissing,
+  shanghaiTodayDateKey,
+} from '../utils/anchor-effective-date.util'
 
 export interface ManualAnchorOverrideEntry {
   anchorId: string
@@ -64,8 +75,24 @@ export async function loadManualAnchorOverrideMap(
   return out
 }
 
+/** 读取历史手动指定时解析 id（允许已离职）；禁止回落 extra-* */
 function resolveAnchorIdByName(anchorName: string): string {
-  return resolveManualAssignAnchorIdentity(anchorName).anchorId
+  const name = anchorName.trim()
+  if (!name || name === '未归属') return ''
+  const found =
+    findAnchorByName(getAnchorConfigSync(), name) ?? findAnchorForAttributionByName(name)
+  return found?.id ?? ''
+}
+
+/** 今日可手动指派：在职区间内、非线下专属、非「停用却无离职日」 */
+export function isManualAssignableAnchorToday(
+  anchor: AttributionAnchorLookup | null | undefined,
+  today = shanghaiTodayDateKey(),
+): boolean {
+  if (!anchor?.name?.trim()) return false
+  if (isOfflineOnlyAnchor(anchor)) return false
+  if (isOffboardDateMissing(anchor)) return false
+  return isAnchorEffectiveOnDate(anchor, today)
 }
 
 export function resolveManualAssignAnchorIdentity(anchorName: string): {
@@ -74,20 +101,19 @@ export function resolveManualAssignAnchorIdentity(anchorName: string): {
 } {
   const name = anchorName.trim()
   if (!name || name === '未归属') throw new Error('请选择有效主播')
-  const config = getAnchorConfigSync()
-  const found = findAnchorByName(config, name)
-  if (found) return { anchorId: found.id, anchorName: found.name }
-  if (Object.prototype.hasOwnProperty.call(ANCHOR_SESSION_DISPLAY_FROM_0613, name)) {
-    return { anchorId: `extra-${name}`, anchorName: name }
+  const found =
+    findAnchorByName(getAnchorConfigSync(), name) ?? findAnchorForAttributionByName(name)
+  if (!found) throw new Error(`主播「${name}」不存在`)
+  if (!isManualAssignableAnchorToday(found)) {
+    throw new Error(`主播「${found.name}」已不在岗，不能再指派订单`)
   }
-  throw new Error(`主播「${name}」不存在`)
+  return { anchorId: found.id, anchorName: found.name }
 }
 
-/** 抽屉手动指定：固定场次主播 + 后台启用主播（含仅手动归属） */
-export async function listOrderAnchorAssignOptions(): Promise<
-  Array<{ id: string; name: string; attributionMode?: string; systemKey?: string | null }>
-> {
-  await refreshAnchorConfigCache()
+/** 纯函数：供验收；生产路径经 listOrderAnchorAssignOptions 刷新缓存后调用 */
+export function buildOrderAnchorAssignOptions(
+  today = shanghaiTodayDateKey(),
+): Array<{ id: string; name: string; attributionMode?: string; systemKey?: string | null }> {
   const config = getAnchorConfigSync()
   const fixedNames = Object.keys(ANCHOR_SESSION_DISPLAY_FROM_0613)
   const byName = new Map<
@@ -95,23 +121,23 @@ export async function listOrderAnchorAssignOptions(): Promise<
     { id: string; name: string; attributionMode?: string; systemKey?: string | null }
   >()
 
-  for (const name of fixedNames) {
-    const found = findAnchorByName(config, name)
-    byName.set(name, {
-      id: found?.id ?? `extra-${name}`,
-      name,
-      attributionMode: found?.attributionMode ?? 'schedule',
-      systemKey: found?.systemKey ?? null,
-    })
-  }
-  for (const anchor of config.anchors) {
-    if (!anchor.enabled || !anchor.name.trim()) continue
+  const offer = (anchor: AttributionAnchorLookup) => {
+    if (!isManualAssignableAnchorToday(anchor, today)) return
     byName.set(anchor.name, {
       id: anchor.id,
       name: anchor.name,
       attributionMode: anchor.attributionMode ?? 'schedule',
       systemKey: anchor.systemKey ?? null,
     })
+  }
+
+  for (const name of fixedNames) {
+    const found =
+      findAnchorByName(config, name) ?? findAnchorForAttributionByName(name)
+    if (found) offer(found)
+  }
+  for (const anchor of config.anchors) {
+    offer({ ...anchor, deletedAt: null })
   }
 
   const result: Array<{
@@ -127,17 +153,20 @@ export async function listOrderAnchorAssignOptions(): Promise<
     seen.add(name)
     result.push(hit)
   }
-  for (const anchor of config.anchors) {
-    if (!anchor.enabled || seen.has(anchor.name)) continue
-    seen.add(anchor.name)
-    result.push({
-      id: anchor.id,
-      name: anchor.name,
-      attributionMode: anchor.attributionMode ?? 'schedule',
-      systemKey: anchor.systemKey ?? null,
-    })
+  for (const hit of byName.values()) {
+    if (seen.has(hit.name)) continue
+    seen.add(hit.name)
+    result.push(hit)
   }
   return result
+}
+
+/** 抽屉手动指定：今日仍在岗的场次主播 + 配置主播（禁止 extra-* / 已离职幽灵名） */
+export async function listOrderAnchorAssignOptions(): Promise<
+  Array<{ id: string; name: string; attributionMode?: string; systemKey?: string | null }>
+> {
+  await refreshAnchorConfigCache()
+  return buildOrderAnchorAssignOptions()
 }
 
 export function resolveManualAnchorOverrideForView(

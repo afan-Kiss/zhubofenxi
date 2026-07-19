@@ -1,8 +1,8 @@
 /**
- * 历史场次展示优先顺序（仅排序，不伪造不存在主播）。
- * 新增业务主播以 /api 主数据为准，勿再扩本表。
+ * 指派下拉排序参考（仅排序，不伪造不存在主播）。
+ * 已离职名不要再写进本表；新增主播以 /api 主数据为准。
  */
-export const FIXED_SESSION_ANCHOR_NAMES = ['子杰', '小红', '飞云', '小艺', '小白'] as const
+export const FIXED_SESSION_ANCHOR_NAMES = ['子杰', '橙橙', '飞云', '小白', '小小'] as const
 
 export type AnchorAssignOption = { id: string; name: string }
 

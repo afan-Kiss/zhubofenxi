@@ -1345,6 +1345,12 @@ model LuckyGiftShipment {
   sfFeeQueriedAt       DateTime?
   sfFeeError           String?
   sfFeeTrackingNo      String?
+  /// 顺丰轨迹结果：unknown|querying|in_transit|signed|rejected|returned|failed
+  sfRouteStatus        String    @default("unknown")
+  sfRouteLabel         String?
+  sfRouteQueriedAt     DateTime?
+  sfRouteError         String?
+  sfRouteTrackingNo    String?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
@@ -1354,6 +1360,7 @@ model LuckyGiftShipment {
   @@index([shipmentStatus])
   @@index([shippingStatusSource])
   @@index([markedShippedAt])
+  @@index([sfRouteStatus])
 }
 
 /// 福袋发货操作日志

@@ -20,6 +20,7 @@ import {
   isSfTrackingNo,
   mapSfFeeForApi,
 } from './lucky-gift-sf-fee.service'
+import { mapSfRouteForApi } from './lucky-gift-sf-route.service'
 
 export type LuckyGiftListStatusFilter =
   | 'todo'
@@ -553,6 +554,15 @@ export async function listLuckyGifts(params: {
           trackingNo: shipment.trackingNo ?? w.officialTrackingNo,
         })
       : null
+    const sfRoute = shipment
+      ? mapSfRouteForApi({
+          sfRouteStatus: shipment.sfRouteStatus,
+          sfRouteLabel: shipment.sfRouteLabel,
+          sfRouteQueriedAt: shipment.sfRouteQueriedAt,
+          sfRouteError: shipment.sfRouteError,
+          trackingNo: shipment.trackingNo ?? w.officialTrackingNo,
+        })
+      : null
 
     const row = {
       id: w.id,
@@ -592,7 +602,11 @@ export async function listLuckyGifts(params: {
       sfFeeStatus: sfFee?.sfFeeStatus ?? 'unknown',
       sfFeeQueriedAt: sfFee?.sfFeeQueriedAt ?? null,
       sfFeeError: sfFee?.sfFeeError ?? null,
-      isSfTracking: sfFee?.isSfTracking ?? false,
+      isSfTracking: sfFee?.isSfTracking ?? sfRoute?.isSfTracking ?? false,
+      sfRouteStatus: sfRoute?.sfRouteStatus ?? 'unknown',
+      sfRouteLabel: sfRoute?.sfRouteLabel ?? null,
+      sfRouteQueriedAt: sfRoute?.sfRouteQueriedAt ?? null,
+      sfRouteError: sfRoute?.sfRouteError ?? null,
     }
     return showPii ? row : maskLuckyGiftPii(row)
   })

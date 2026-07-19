@@ -147,6 +147,95 @@ luckyGiftsRouter.post(
   },
 )
 
+luckyGiftsRouter.get('/sf-route-stats', async (req, res, next) => {
+  try {
+    const accountId = String(req.query.accountId ?? '').trim() || undefined
+    let accountIds: string[] | null = null
+    if (accountId && accountId !== 'all') {
+      const shopKey = resolveGoodReviewShopKey(accountId)
+      if (shopKey) {
+        const { resolveOfficialShopAccountForStatus } = await import(
+          '../services/official-shop-account.service'
+        )
+        const acc = await resolveOfficialShopAccountForStatus(shopKey)
+        accountIds = acc?.id ? [acc.id] : ['__none__']
+      } else {
+        accountIds = [accountId]
+      }
+    }
+    const { getLuckyGiftSfRouteStats } = await import(
+      '../services/lucky-gift/lucky-gift-sf-route.service'
+    )
+    sendOk(res, await getLuckyGiftSfRouteStats(accountIds))
+  } catch (err) {
+    next(err)
+  }
+})
+
+luckyGiftsRouter.post('/sf-routes/refresh', requireSuperAdmin, async (req, res, next) => {
+  try {
+    const maxQueries = req.body?.maxQueries != null ? Number(req.body.maxQueries) : 40
+    const force = Boolean(req.body?.force)
+    const accountId = String(req.body?.accountId ?? req.query.accountId ?? '').trim() || undefined
+    let accountIds: string[] | null = null
+    if (accountId && accountId !== 'all') {
+      const shopKey = resolveGoodReviewShopKey(accountId)
+      if (shopKey) {
+        const { resolveOfficialShopAccountForStatus } = await import(
+          '../services/official-shop-account.service'
+        )
+        const acc = await resolveOfficialShopAccountForStatus(shopKey)
+        accountIds = acc?.id ? [acc.id] : ['__none__']
+      } else {
+        accountIds = [accountId]
+      }
+    }
+    const { refreshLuckyGiftSfRoutes, getLuckyGiftSfRouteStats } = await import(
+      '../services/lucky-gift/lucky-gift-sf-route.service'
+    )
+    const refresh = await refreshLuckyGiftSfRoutes({ maxQueries, force, accountIds })
+    const stats = await getLuckyGiftSfRouteStats(accountIds)
+    sendOk(res, { refresh, stats })
+  } catch (err) {
+    next(err)
+  }
+})
+
+luckyGiftsRouter.post(
+  '/winners/:id/sf-route/refresh',
+  requireRole('super_admin'),
+  async (req, res, next) => {
+    try {
+      const id = String(req.params.id || '').trim()
+      const winner = await prisma.xhsLuckyWinner.findUnique({
+        where: { id },
+        include: { shipment: true },
+      })
+      if (!winner?.shipment) {
+        sendFail(res, '记录不存在或未发货', 404)
+        return
+      }
+      const tracking = winner.shipment.trackingNo ?? winner.officialTrackingNo
+      if (!tracking) {
+        sendFail(res, '暂无运单号', 400)
+        return
+      }
+      const { queryAndCacheSfRouteForShipment } = await import(
+        '../services/lucky-gift/lucky-gift-sf-route.service'
+      )
+      const data = await queryAndCacheSfRouteForShipment(
+        winner.shipment.id,
+        tracking,
+        winner.recipientPhone,
+        true,
+      )
+      sendOk(res, data)
+    } catch (err) {
+      next(err)
+    }
+  },
+)
+
 luckyGiftsRouter.post(
   '/qianfan-ticket',
   requireRole('super_admin', 'boss', 'staff'),

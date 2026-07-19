@@ -21,12 +21,31 @@ export type SfWaybillFeeResult = {
   notBilled: boolean
 }
 
+export type SfRouteNode = {
+  acceptTime: string | null
+  acceptAddress: string | null
+  remark: string
+  opCode: string
+}
+
+export type SfRouteOutcome = 'unknown' | 'in_transit' | 'signed' | 'rejected' | 'returned' | 'failed'
+
+export type SfWaybillRouteResult = {
+  waybill: string
+  ok: boolean
+  outcome: SfRouteOutcome
+  label: string | null
+  nodes: SfRouteNode[]
+  error: string | null
+  apiCode: string | null
+}
+
 function sfMsgDigest(msgData: string, timestamp: number, checkWord: string): string {
   const raw = `${msgData}${timestamp}${checkWord}`
   return crypto.createHash('md5').update(raw, 'utf8').digest('base64')
 }
 
-function buildMsgData(waybill: string, cfg: SfWaybillConfig): string {
+function buildFeeMsgData(waybill: string, cfg: SfWaybillConfig): string {
   const payload: Record<string, string> = {
     trackingType: '2',
     trackingNum: waybill.trim().toUpperCase(),
@@ -43,7 +62,11 @@ function resolveCheckWord(cfg: SfWaybillConfig): string {
   return String(cfg.checkWord || '').trim()
 }
 
-function parseFeeResult(waybill: string, outer: Record<string, unknown>, inner: Record<string, unknown>): SfWaybillFeeResult {
+function parseFeeResult(
+  waybill: string,
+  outer: Record<string, unknown>,
+  inner: Record<string, unknown>,
+): SfWaybillFeeResult {
   const outerCode = String(outer.apiResultCode || '').trim()
   if (outerCode && outerCode !== 'A1000') {
     return {
@@ -99,28 +122,22 @@ export function loadSfWaybillConfigFromEnv(): SfWaybillConfig | null {
   }
 }
 
-export async function querySfWaybillFee(
-  waybill: string,
+async function postSfService(
+  serviceCode: string,
+  msgData: string,
   cfg: SfWaybillConfig,
   signal?: AbortSignal,
-): Promise<SfWaybillFeeResult> {
-  const no = String(waybill || '').trim().toUpperCase()
-  if (!/^SF\d{10,}$/.test(no)) {
-    return { waybill: no, ok: false, totalFeeYuan: null, error: '非顺丰运单号', apiCode: null, notBilled: false }
-  }
+): Promise<{ outer: Record<string, unknown>; inner: Record<string, unknown> } | { error: string }> {
   const partnerID = String(cfg.partnerID || '').trim()
   const checkWord = resolveCheckWord(cfg)
-  if (!partnerID || !checkWord) {
-    return { waybill: no, ok: false, totalFeeYuan: null, error: '顺丰配置缺失', apiCode: null, notBilled: false }
-  }
+  if (!partnerID || !checkWord) return { error: '顺丰配置缺失' }
 
-  const msgData = buildMsgData(no, cfg)
   const timestamp = Date.now()
   const msgDigest = sfMsgDigest(msgData, timestamp, checkWord)
   const body = new URLSearchParams({
     partnerID,
     requestID: crypto.randomUUID().replace(/-/g, ''),
-    serviceCode: 'EXP_RECE_QUERY_SFWAYBILL',
+    serviceCode,
     timestamp: String(timestamp),
     msgDigest,
     msgData,
@@ -139,7 +156,7 @@ export async function querySfWaybillFee(
     try {
       outer = JSON.parse(text) as Record<string, unknown>
     } catch {
-      return { waybill: no, ok: false, totalFeeYuan: null, error: '响应非 JSON', apiCode: null, notBilled: false }
+      return { error: '响应非 JSON' }
     }
     let inner: Record<string, unknown> = outer
     if (typeof outer.apiResultData === 'string') {
@@ -149,15 +166,157 @@ export async function querySfWaybillFee(
         inner = { success: false, errorMsg: 'apiResultData 解析失败' }
       }
     }
-    return parseFeeResult(no, outer, inner)
+    return { outer, inner }
   } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err) }
+  }
+}
+
+export async function querySfWaybillFee(
+  waybill: string,
+  cfg: SfWaybillConfig,
+  signal?: AbortSignal,
+): Promise<SfWaybillFeeResult> {
+  const no = String(waybill || '').trim().toUpperCase()
+  if (!/^SF\d{10,}$/.test(no)) {
+    return { waybill: no, ok: false, totalFeeYuan: null, error: '非顺丰运单号', apiCode: null, notBilled: false }
+  }
+  const msgData = buildFeeMsgData(no, cfg)
+  const posted = await postSfService('EXP_RECE_QUERY_SFWAYBILL', msgData, cfg, signal)
+  if ('error' in posted) {
+    return { waybill: no, ok: false, totalFeeYuan: null, error: posted.error, apiCode: null, notBilled: false }
+  }
+  return parseFeeResult(no, posted.outer, posted.inner)
+}
+
+function phoneLast4(raw: string | null | undefined): string | null {
+  const digits = String(raw || '').replace(/\D/g, '')
+  if (digits.length < 4) return null
+  return digits.slice(-4)
+}
+
+export function classifySfRouteNodes(nodes: SfRouteNode[]): {
+  outcome: Exclude<SfRouteOutcome, 'failed'>
+  label: string | null
+} {
+  if (nodes.length === 0) return { outcome: 'unknown', label: null }
+  const sorted = [...nodes].sort((a, b) => {
+    const ta = a.acceptTime ? Date.parse(a.acceptTime.replace(/-/g, '/')) : 0
+    const tb = b.acceptTime ? Date.parse(b.acceptTime.replace(/-/g, '/')) : 0
+    return ta - tb
+  })
+  const blob = sorted.map((n) => `${n.opCode} ${n.remark}`).join('\n')
+  const last = sorted[sorted.length - 1]
+  const label = last?.remark?.trim() || null
+
+  if (/拒收|客户拒签|收方拒|拒签|收件人拒/.test(blob)) {
+    return { outcome: 'rejected', label }
+  }
+  if (
+    sorted.some((n) => n.opCode === '648') ||
+    /快件已退回|退回寄件|退回\/转寄|退件入库|退回中/.test(blob)
+  ) {
+    return { outcome: 'returned', label }
+  }
+  if (sorted.some((n) => n.opCode === '80' || /已签收|签收人/.test(n.remark))) {
+    return { outcome: 'signed', label }
+  }
+  return { outcome: 'in_transit', label }
+}
+
+function parseRouteResult(
+  waybill: string,
+  outer: Record<string, unknown>,
+  inner: Record<string, unknown>,
+): SfWaybillRouteResult {
+  const outerCode = String(outer.apiResultCode || '').trim()
+  if (outerCode && outerCode !== 'A1000') {
+    return {
+      waybill,
+      ok: false,
+      outcome: 'failed',
+      label: null,
+      nodes: [],
+      error: String(outer.apiErrorMsg || `丰桥外层错误 ${outerCode}`),
+      apiCode: outerCode,
+    }
+  }
+  const success = inner.success === true || inner.success === 'true'
+  if (!success) {
+    const code = String(inner.errorCode || outerCode || '').trim()
+    const error = String(inner.errorMsg || outer.apiErrorMsg || '路由查询失败')
+    return {
+      waybill,
+      ok: false,
+      outcome: 'failed',
+      label: null,
+      nodes: [],
+      error,
+      apiCode: code || null,
+    }
+  }
+
+  const data = (inner.msgData ?? inner) as Record<string, unknown>
+  const routeResp = Array.isArray(data.routeResps) ? data.routeResps : []
+  const first = (routeResp[0] ?? {}) as Record<string, unknown>
+  const rawNodes = Array.isArray(first.routes) ? first.routes : []
+  const nodes: SfRouteNode[] = rawNodes.map((n: Record<string, unknown>) => ({
+    acceptTime: n.acceptTime != null ? String(n.acceptTime) : null,
+    acceptAddress: n.acceptAddress != null ? String(n.acceptAddress) : null,
+    remark: String(n.remark ?? n.remarkZh ?? ''),
+    opCode: String(n.opCode ?? ''),
+  }))
+  const classified = classifySfRouteNodes(nodes)
+  return {
+    waybill: String(first.mailNo || waybill),
+    ok: true,
+    outcome: classified.outcome,
+    label: classified.label,
+    nodes,
+    error: null,
+    apiCode: 'S0000',
+  }
+}
+
+/** 路由查询：优先用收件手机后四位，否则回落 SF_PHONE_LAST4 */
+export async function querySfWaybillRoute(
+  waybill: string,
+  cfg: SfWaybillConfig,
+  options?: { phone?: string | null; signal?: AbortSignal },
+): Promise<SfWaybillRouteResult> {
+  const no = String(waybill || '').trim().toUpperCase()
+  if (!/^SF\d{10,}$/.test(no)) {
     return {
       waybill: no,
       ok: false,
-      totalFeeYuan: null,
-      error: err instanceof Error ? err.message : String(err),
+      outcome: 'failed',
+      label: null,
+      nodes: [],
+      error: '非顺丰运单号',
       apiCode: null,
-      notBilled: false,
     }
   }
+  const checkPhone =
+    phoneLast4(options?.phone) || phoneLast4(cfg.phoneLast4) || String(cfg.phoneLast4 || '').trim() || ''
+  const payload: Record<string, unknown> = {
+    language: '0',
+    trackingType: '1',
+    trackingNumber: [no],
+    methodType: '1',
+  }
+  if (checkPhone) payload.checkPhoneNo = checkPhone
+  const msgData = JSON.stringify(payload)
+  const posted = await postSfService('EXP_RECE_SEARCH_ROUTES', msgData, cfg, options?.signal)
+  if ('error' in posted) {
+    return {
+      waybill: no,
+      ok: false,
+      outcome: 'failed',
+      label: null,
+      nodes: [],
+      error: posted.error,
+      apiCode: null,
+    }
+  }
+  return parseRouteResult(no, posted.outer, posted.inner)
 }

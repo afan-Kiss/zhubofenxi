@@ -108,6 +108,37 @@ interface LuckyGiftItem {
   anchorName: string | null
   anchorId: string | null
   anchorAttributionSource: string
+  sfRouteStatus?: string
+  sfRouteLabel?: string | null
+  sfMonthlyFeeYuan?: number | null
+  sfFeeStatus?: string
+}
+
+interface SfRouteStatsPayload {
+  sfTrackingCount: number
+  rejectedCount: number
+  returnedCount: number
+  abnormalCount: number
+  signedCount: number
+  inTransitCount: number
+  unknownCount: number
+  failedCount: number
+  abnormalFeeYuan: number
+  abnormalFeeKnownCount: number
+  abnormalFeeMissingCount: number
+  items: Array<{
+    shipmentId: string
+    winnerId: string
+    winnerNickname: string
+    liveAccountName: string
+    giftName: string
+    trackingNo: string | null
+    sfRouteStatus: string
+    sfRouteLabel: string | null
+    sfRouteQueriedAt: string | null
+    sfMonthlyFeeYuan: number | null
+    sfFeeStatus: string
+  }>
 }
 
 const SHOP_ORDER = ['shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu'] as const
@@ -185,6 +216,29 @@ function trackingLine(item: LuckyGiftItem): string | null {
   return `${company} ${item.trackingNo}`
 }
 
+function formatYuan(n: number): string {
+  return `¥${n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function sfRouteStatusLabel(status: string | null | undefined): string | null {
+  switch (status) {
+    case 'rejected':
+      return '拒收'
+    case 'returned':
+      return '退回'
+    case 'signed':
+      return '已签收'
+    case 'in_transit':
+      return '运送中'
+    case 'failed':
+      return '轨迹查询失败'
+    case 'querying':
+      return '查询中'
+    default:
+      return null
+  }
+}
+
 function LuckyGiftRow(props: {
   item: LuckyGiftItem
   checked: boolean
@@ -233,6 +287,13 @@ function LuckyGiftRow(props: {
               {item.freightLabel ? (
                 <span className="rounded-md border border-slate-200 px-2 py-0.5 text-xs text-slate-500">
                   {item.freightLabel}
+                </span>
+              ) : null}
+              {sfRouteStatusLabel(item.sfRouteStatus) &&
+              (item.sfRouteStatus === 'rejected' || item.sfRouteStatus === 'returned') ? (
+                <span className="rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-xs text-rose-700">
+                  {sfRouteStatusLabel(item.sfRouteStatus)}
+                  {item.sfMonthlyFeeYuan != null ? ` · ${formatYuan(item.sfMonthlyFeeYuan)}` : ''}
                 </span>
               ) : null}
             </div>
@@ -404,6 +465,9 @@ export const LuckyGiftsPage: React.FC = () => {
   const [courier, setCourier] = useState('')
   const [trackingNo, setTrackingNo] = useState('')
   const [note, setNote] = useState('')
+  const [routeStats, setRouteStats] = useState<SfRouteStatsPayload | null>(null)
+  const [routeRefreshing, setRouteRefreshing] = useState(false)
+  const [showAbnormalList, setShowAbnormalList] = useState(false)
 
   const listCacheKey = useMemo(() => {
     const trackingKw = looksLikeLuckyGiftTrackingKeyword(keyword)
@@ -442,16 +506,18 @@ export const LuckyGiftsPage: React.FC = () => {
         qs.set('page', '1')
         qs.set('pageSize', '100')
 
-        const [sum, list] = await Promise.all([
+        const [sum, list, routes] = await Promise.all([
           // summary 始终四店汇总（店铺 pill / 主播卡）；列表才按 shopKey 过滤
           apiRequest<SummaryPayload>('/api/board/lucky-gifts/summary'),
           apiRequest<{ items: LuckyGiftItem[]; total: number; canViewPii: boolean }>(
             `/api/board/lucky-gifts?${qs.toString()}`,
           ),
+          apiRequest<SfRouteStatsPayload>('/api/board/lucky-gifts/sf-route-stats'),
         ])
         setSummary(sum)
         setItems(list.items)
         setTotal(list.total)
+        setRouteStats(routes)
         setSelected(new Set())
         writeLuckyGiftSummaryCache(sum)
         writeLuckyGiftListCache(listCacheKey, { items: list.items, total: list.total })
@@ -582,6 +648,31 @@ export const LuckyGiftsPage: React.FC = () => {
       setError(err instanceof Error ? err.message : '单店同步失败')
     } finally {
       setSyncing(false)
+    }
+  }
+
+  async function handleRefreshSfRoutes(force = false) {
+    if (!isSuperAdmin) return
+    setRouteRefreshing(true)
+    setMessage(null)
+    setError(null)
+    try {
+      const data = await apiRequest<{
+        refresh: { scanned: number; queried: number; rejected: number; returned: number }
+        stats: SfRouteStatsPayload
+      }>('/api/board/lucky-gifts/sf-routes/refresh', {
+        method: 'POST',
+        body: JSON.stringify({ maxQueries: 50, force }),
+      })
+      setRouteStats(data.stats)
+      setMessage(
+        `已查 ${data.refresh.queried} 个顺丰单号：拒收 ${data.stats.rejectedCount}，退回 ${data.stats.returnedCount}，已出账运费 ${formatYuan(data.stats.abnormalFeeYuan)}`,
+      )
+      await load({ background: true })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '查询顺丰轨迹失败')
+    } finally {
+      setRouteRefreshing(false)
     }
   }
 
@@ -830,6 +921,105 @@ export const LuckyGiftsPage: React.FC = () => {
           </div>
         </section>
       )}
+
+      {/* 3c. 顺丰未签收/退回运费 */}
+      <section
+        className="space-y-3 rounded-2xl border border-rose-100 bg-rose-50/40 p-4 shadow-sm"
+        data-testid="lucky-gift-sf-route-panel"
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-sm font-medium text-slate-800">未签收 / 退回运费</h2>
+            <p className="mt-1 text-xs leading-relaxed text-slate-500">
+              对接顺丰轨迹识别拒收、退回；金额为已出账月结运费合计（不含礼品成本，未出账单暂不计）
+            </p>
+          </div>
+          {isSuperAdmin ? (
+            <button
+              type="button"
+              onClick={() => void handleRefreshSfRoutes(false)}
+              disabled={routeRefreshing}
+              className={ACTION_BTN}
+            >
+              {routeRefreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              查询顺丰轨迹
+            </button>
+          ) : null}
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="rounded-xl border border-white bg-white px-3 py-2.5 shadow-sm">
+            <div className="text-[11px] text-slate-500">拒收</div>
+            <div className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900">
+              {routeStats?.rejectedCount ?? 0}
+            </div>
+          </div>
+          <div className="rounded-xl border border-white bg-white px-3 py-2.5 shadow-sm">
+            <div className="text-[11px] text-slate-500">退回</div>
+            <div className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900">
+              {routeStats?.returnedCount ?? 0}
+            </div>
+          </div>
+          <div className="rounded-xl border border-white bg-white px-3 py-2.5 shadow-sm">
+            <div className="text-[11px] text-slate-500">已出账运费</div>
+            <div className="mt-0.5 text-xl font-semibold tabular-nums text-rose-700">
+              {formatYuan(routeStats?.abnormalFeeYuan ?? 0)}
+            </div>
+          </div>
+          <div className="rounded-xl border border-white bg-white px-3 py-2.5 shadow-sm">
+            <div className="text-[11px] text-slate-500">运费未出账</div>
+            <div className="mt-0.5 text-xl font-semibold tabular-nums text-slate-900">
+              {routeStats?.abnormalFeeMissingCount ?? 0}
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+          <span>顺丰单号 {routeStats?.sfTrackingCount ?? 0}</span>
+          <span>·</span>
+          <span>已签收 {routeStats?.signedCount ?? 0}</span>
+          <span>·</span>
+          <span>运送中 {routeStats?.inTransitCount ?? 0}</span>
+          <span>·</span>
+          <span>未查过 {routeStats?.unknownCount ?? 0}</span>
+          {(routeStats?.abnormalCount ?? 0) > 0 ? (
+            <button
+              type="button"
+              onClick={() => setShowAbnormalList((v) => !v)}
+              className="text-rose-700 hover:underline"
+            >
+              {showAbnormalList ? '收起明细' : `查看 ${routeStats?.abnormalCount} 条明细`}
+            </button>
+          ) : null}
+        </div>
+        {showAbnormalList && (routeStats?.items?.length ?? 0) > 0 ? (
+          <div className="max-h-72 space-y-2 overflow-y-auto rounded-xl border border-rose-100 bg-white p-3">
+            {routeStats!.items.map((it) => (
+              <div
+                key={it.shipmentId}
+                className="flex flex-wrap items-baseline justify-between gap-2 border-b border-slate-50 pb-2 text-sm last:border-0 last:pb-0"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium text-slate-800">
+                    {it.giftName || '直播福袋'}
+                    <span className="ml-2 text-xs font-normal text-rose-700">
+                      {sfRouteStatusLabel(it.sfRouteStatus)}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 text-xs text-slate-500">
+                    {it.liveAccountName} · {it.winnerNickname || '—'}
+                    {it.trackingNo ? ` · ${it.trackingNo}` : ''}
+                  </div>
+                  {it.sfRouteLabel ? (
+                    <div className="mt-0.5 text-[11px] text-slate-400 line-clamp-1">{it.sfRouteLabel}</div>
+                  ) : null}
+                </div>
+                <div className="shrink-0 tabular-nums text-slate-800">
+                  {it.sfMonthlyFeeYuan != null ? formatYuan(it.sfMonthlyFeeYuan) : '运费未出账'}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </section>
 
       {/* 4. 筛选 / 操作区 */}
       <section className="space-y-3 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">

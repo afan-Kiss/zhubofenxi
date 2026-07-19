@@ -81,6 +81,11 @@ install_deps_build() {
   require_cmd node
   require_cmd npm
   log "Node $(node -v) / npm $(npm -v)"
+  # 国内服务器访问 registry.npmjs.org 易超时，优先使用 npmmirror
+  if [[ -z "${npm_config_registry:-}" ]]; then
+    export npm_config_registry="${NPM_REGISTRY:-https://registry.npmmirror.com}"
+    log "npm registry -> $npm_config_registry"
+  fi
   log "npm ci --include=dev"
   npm ci --include=dev
   log "prisma generate"

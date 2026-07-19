@@ -78,11 +78,10 @@ export function resolveAnchorCardTrendMode(
 }
 
 function rowAnchorKey(row: Record<string, unknown>): string {
-  const name = String(row.anchorName ?? '').trim() || '未归属'
-  if (name === '未归属') return '未归属'
-  const id = String(row.anchorId ?? '').trim()
-  if (id && id !== name && !id.startsWith('extra-')) return `id:${id}`
-  return `name:${name}`
+  return anchorGroupKey({
+    anchorId: String(row.anchorId ?? ''),
+    anchorName: String(row.anchorName ?? ''),
+  } as import('../types/analysis').AnalyzedOrderView)
 }
 
 function parseOrderPaymentMs(orderTimeText: string): number | null {

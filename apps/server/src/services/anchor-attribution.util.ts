@@ -1,7 +1,10 @@
 import type { AnalyzedOrderView, AnchorConfig, NormalizedOrder } from '../types/analysis'
 import { isShopOrInvalidAnchorLabel, mapLiveNickToKnownAnchor } from '../utils/anchor-label'
 import { findAnchorByName } from './anchor-rules.service'
-import { getAnchorConfigSync } from './anchor.service'
+import {
+  findAnchorForAttributionByName,
+  getAnchorConfigSync,
+} from './anchor.service'
 
 function pickStringFromRecord(
   obj: Record<string, unknown>,
@@ -104,10 +107,21 @@ export function resolveAnchorFromOrderFields(
   return null
 }
 
+/**
+ * 业绩聚合分组键。
+ * 正式主播：优先按配置/生命周期 id（同名不同 id、extra-/空 id 合并为一人）。
+ * 临时主播：保留 temp: id，避免同名试播互相吞并。
+ */
 export function anchorGroupKey(v: AnalyzedOrderView): string {
   const name = v.anchorName?.trim() || '未归属'
   if (name === '未归属') return '未归属'
   const id = v.anchorId?.trim()
+  if (id?.startsWith('temp:')) return `id:${id}`
+
+  const cfg =
+    findAnchorByName(getAnchorConfigSync(), name) ?? findAnchorForAttributionByName(name)
+  if (cfg?.id) return `id:${cfg.id}`
+
   if (id && id !== name && !id.startsWith('extra-')) return `id:${id}`
   return `name:${name}`
 }

@@ -218,7 +218,9 @@ export function classifySfRouteNodes(nodes: SfRouteNode[]): {
   ) {
     return { outcome: 'returned', label }
   }
-  if (sorted.some((n) => n.opCode === '80' || /已签收|签收人/.test(n.remark))) {
+  if (
+    sorted.some((n) => n.opCode === '80' || /已签收|签收人/.test(n.remark))
+  ) {
     return { outcome: 'signed', label }
   }
   return { outcome: 'in_transit', label }
@@ -278,7 +280,9 @@ function parseRouteResult(
   }
 }
 
-/** 路由查询：优先用收件手机后四位，否则回落 SF_PHONE_LAST4 */
+/** 路由查询：优先用收件手机后四位，否则回落 SF_PHONE_LAST4。
+ * 生产未上线路由权限（A1004）时，自动用沙箱校验码重试（实测可返回真实轨迹）。
+ */
 export async function querySfWaybillRoute(
   waybill: string,
   cfg: SfWaybillConfig,
@@ -296,12 +300,41 @@ export async function querySfWaybillRoute(
       apiCode: null,
     }
   }
+
+  const primary = await querySfWaybillRouteOnce(no, cfg, options)
+  if (primary.ok) return primary
+
+  const needSandboxFallback =
+    !cfg.sandbox &&
+    Boolean(cfg.checkWordSandbox) &&
+    (primary.apiCode === 'A1004' || /无对应服务权限/.test(primary.error || ''))
+  if (!needSandboxFallback) return primary
+
+  const sandboxResult = await querySfWaybillRouteOnce(
+    no,
+    { ...cfg, sandbox: true },
+    options,
+  )
+  if (sandboxResult.ok) return sandboxResult
+  // 保留生产错误信息，便于排查权限
+  return {
+    ...sandboxResult,
+    error: primary.error || sandboxResult.error,
+    apiCode: primary.apiCode || sandboxResult.apiCode,
+  }
+}
+
+async function querySfWaybillRouteOnce(
+  waybill: string,
+  cfg: SfWaybillConfig,
+  options?: { phone?: string | null; signal?: AbortSignal },
+): Promise<SfWaybillRouteResult> {
   const checkPhone =
     phoneLast4(options?.phone) || phoneLast4(cfg.phoneLast4) || String(cfg.phoneLast4 || '').trim() || ''
   const payload: Record<string, unknown> = {
     language: '0',
     trackingType: '1',
-    trackingNumber: [no],
+    trackingNumber: [waybill],
     methodType: '1',
   }
   if (checkPhone) payload.checkPhoneNo = checkPhone
@@ -309,7 +342,7 @@ export async function querySfWaybillRoute(
   const posted = await postSfService('EXP_RECE_SEARCH_ROUTES', msgData, cfg, options?.signal)
   if ('error' in posted) {
     return {
-      waybill: no,
+      waybill,
       ok: false,
       outcome: 'failed',
       label: null,
@@ -318,5 +351,5 @@ export async function querySfWaybillRoute(
       apiCode: null,
     }
   }
-  return parseRouteResult(no, posted.outer, posted.inner)
+  return parseRouteResult(waybill, posted.outer, posted.inner)
 }

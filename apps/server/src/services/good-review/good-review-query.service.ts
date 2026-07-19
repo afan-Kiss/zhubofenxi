@@ -176,8 +176,10 @@ function rowToReviewView(
 ): GoodReviewItemView {
   const orderId = row.orderId?.trim() || null
   const fromOrder = orderId ? buyerNicknameByOrderId?.get(orderId) : undefined
-  const buyerNickname =
-    fromOrder?.trim() || pickBuyerNicknameFromReviewRawJson(row.rawJson) || null
+  // 匿名评价不回传真实昵称
+  const buyerNickname = row.isAnonymous
+    ? null
+    : fromOrder?.trim() || pickBuyerNicknameFromReviewRawJson(row.rawJson) || null
   return {
     id: row.id,
     shopKey: row.shopKey,

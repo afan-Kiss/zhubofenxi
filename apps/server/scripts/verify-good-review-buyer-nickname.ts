@@ -3,6 +3,8 @@
  * npx tsx apps/server/scripts/verify-good-review-buyer-nickname.ts
  */
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
 import { pickBuyerNicknameFromRaw } from '../src/services/buyer-identity.service'
 
 function formatGoodReviewBuyerLabel(review: {
@@ -35,6 +37,16 @@ async function main() {
   })
   assert.equal(nick, 'Sweet🦄')
   console.log('  ✓ 订单 raw 可解析买家昵称')
+
+  const querySrc = fs.readFileSync(
+    path.resolve(__dirname, '../src/services/good-review/good-review-query.service.ts'),
+    'utf8',
+  )
+  assert.ok(
+    querySrc.includes('row.isAnonymous') && querySrc.includes('? null'),
+    '匿名评价应清空 buyerNickname',
+  )
+  console.log('  ✓ 匿名评价不回传真实昵称')
 
   console.log('\nALL PASS')
 }

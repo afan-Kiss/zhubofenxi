@@ -6,6 +6,7 @@ import { openQianfanLuckyGift } from '../../lib/lucky-gift-qianfan'
 import { useAuth } from '../../providers/AuthProvider'
 import {
   buildLuckyGiftListCacheKey,
+  looksLikeLuckyGiftTrackingKeyword,
   readLuckyGiftListCache,
   readLuckyGiftSummaryCache,
   writeLuckyGiftListCache,
@@ -391,18 +392,18 @@ export const LuckyGiftsPage: React.FC = () => {
   const [trackingNo, setTrackingNo] = useState('')
   const [note, setNote] = useState('')
 
-  const listCacheKey = useMemo(
-    () =>
-      buildLuckyGiftListCacheKey({
-        shopKey,
-        status,
-        dateRange,
-        startDate,
-        endDate,
-        keyword,
-      }),
-    [shopKey, status, dateRange, startDate, endDate, keyword],
-  )
+  const listCacheKey = useMemo(() => {
+    const trackingKw = looksLikeLuckyGiftTrackingKeyword(keyword)
+    return buildLuckyGiftListCacheKey({
+      shopKey,
+      // 查单号实际走 status=all，缓存 key 必须与请求一致
+      status: trackingKw ? 'all' : status,
+      dateRange,
+      startDate,
+      endDate,
+      keyword,
+    })
+  }, [shopKey, status, dateRange, startDate, endDate, keyword])
 
   const load = useCallback(
     async (opts?: { background?: boolean }) => {
@@ -417,10 +418,7 @@ export const LuckyGiftsPage: React.FC = () => {
         if (shopKey !== 'all') qs.set('accountId', shopKey)
         // 默认「待发货」会挡住已发货单号；查单号时跨状态
         const kw = keyword.trim()
-        const trackingKw =
-          kw.length >= 8 &&
-          (/^(sf|yt|zt|jd|sto|yd|ems)?\d{8,}$/i.test(kw.replace(/\s+/g, '')) ||
-            /^[A-Za-z]{0,4}\d{10,}$/.test(kw.replace(/\s+/g, '')))
+        const trackingKw = looksLikeLuckyGiftTrackingKeyword(kw)
         qs.set('status', trackingKw ? 'all' : status)
         qs.set('dateRange', dateRange)
         if (dateRange === 'custom') {

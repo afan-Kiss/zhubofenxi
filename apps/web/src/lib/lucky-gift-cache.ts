@@ -53,6 +53,14 @@ export function buildLuckyGiftListCacheKey(input: {
   ].join('|')
 }
 
+/** 与后端 listLuckyGifts 一致：查单号时跨状态；手机号不当单号 */
+export function looksLikeLuckyGiftTrackingKeyword(raw: string): boolean {
+  const k = raw.replace(/\s+/g, '')
+  if (k.length < 8) return false
+  if (/^1\d{10}$/.test(k)) return false
+  return /^(sf|yt|zt|jd|sto|yd|ems)?\d{8,}$/i.test(k) || /^[A-Za-z]{0,4}\d{10,}$/.test(k)
+}
+
 export function readLuckyGiftSummaryCache<T>(): T | null {
   const store = readStore()
   return (store?.summary as T | null) ?? null

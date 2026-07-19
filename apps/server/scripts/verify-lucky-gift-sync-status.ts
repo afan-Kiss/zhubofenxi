@@ -8,6 +8,7 @@ import { classifyLuckyGiftListPage } from '../src/services/lucky-gift/lucky-gift
 function looksLikeTrackingKeyword(raw: string): boolean {
   const k = raw.replace(/\s+/g, '')
   if (k.length < 8) return false
+  if (/^1\d{10}$/.test(k)) return false
   return /^(sf|yt|zt|jd|sto|yd|ems)?\d{8,}$/i.test(k) || /^[A-Za-z]{0,4}\d{10,}$/.test(k)
 }
 
@@ -54,8 +55,9 @@ async function main() {
   assert.equal(looksLikeTrackingKeyword('SF1464539449246'), true)
   assert.equal(looksLikeTrackingKeyword('sf1464539048407'), true)
   assert.equal(looksLikeTrackingKeyword('1464539449246'), true)
+  assert.equal(looksLikeTrackingKeyword('13800138000'), false)
   assert.equal(looksLikeTrackingKeyword('小猪'), false)
-  console.log('  ✓ 物流号关键词识别')
+  console.log('  ✓ 物流号关键词识别（排除手机号）')
 
   console.log('\nALL PASS')
 }

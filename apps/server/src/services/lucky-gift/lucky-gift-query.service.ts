@@ -235,9 +235,11 @@ export async function getLuckyGiftSummary(params?: { accountId?: string }) {
 }
 
 /** 快递单号形态：查单号时默认「待发货」筛会挡住已发货结果 */
-function looksLikeTrackingKeyword(raw: string): boolean {
+export function looksLikeTrackingKeyword(raw: string): boolean {
   const k = raw.replace(/\s+/g, '')
   if (k.length < 8) return false
+  // 11 位手机号勿当作单号，否则会误开跨状态搜索
+  if (/^1\d{10}$/.test(k)) return false
   return /^(sf|yt|zt|jd|sto|yd|ems)?\d{8,}$/i.test(k) || /^[A-Za-z]{0,4}\d{10,}$/.test(k)
 }
 
@@ -306,8 +308,9 @@ export async function listLuckyGifts(params: {
 
   const sfCandidates = rows
     .filter((w) => {
-      const status = w.shipment?.shipmentStatus || 'no_address'
-      const tracking = w.shipment?.trackingNo ?? w.officialTrackingNo
+      if (!w.shipment?.id) return false
+      const status = w.shipment.shipmentStatus || 'no_address'
+      const tracking = w.shipment.trackingNo ?? w.officialTrackingNo
       if (status === 'shipped') return true
       return status === 'pending' && isSfTrackingNo(tracking)
     })

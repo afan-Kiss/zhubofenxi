@@ -52,6 +52,8 @@ luckyGiftsRouter.get('/', async (req, res, next) => {
       startDate: String(req.query.startDate ?? '').trim() || undefined,
       endDate: String(req.query.endDate ?? '').trim() || undefined,
       keyword: String(req.query.keyword ?? '').trim() || undefined,
+      anchorId: String(req.query.anchorId ?? '').trim() || undefined,
+      anchorName: String(req.query.anchorName ?? '').trim() || undefined,
       page: req.query.page != null ? Number(req.query.page) : 1,
       pageSize: req.query.pageSize != null ? Number(req.query.pageSize) : 50,
       role: req.user?.role,

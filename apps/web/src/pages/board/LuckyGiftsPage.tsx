@@ -18,6 +18,7 @@ import {
   buildLuckyGiftShipCopyText,
   copyTextToClipboard,
 } from '../../lib/lucky-gift-copy'
+import { BoardDrawerShell } from '../../components/board/BoardDrawerShell'
 
 type StatusFilter = 'pending' | 'no_address' | 'incomplete_address' | 'shipped' | 'all'
 type DateRange = 'today' | '7d' | '30d' | 'custom' | 'all'
@@ -468,6 +469,11 @@ export const LuckyGiftsPage: React.FC = () => {
   const [routeStats, setRouteStats] = useState<SfRouteStatsPayload | null>(null)
   const [routeRefreshing, setRouteRefreshing] = useState(false)
   const [showAbnormalList, setShowAbnormalList] = useState(false)
+  const [drillAnchor, setDrillAnchor] = useState<AnchorStat | null>(null)
+  const [drillItems, setDrillItems] = useState<LuckyGiftItem[]>([])
+  const [drillTotal, setDrillTotal] = useState(0)
+  const [drillLoading, setDrillLoading] = useState(false)
+  const [drillError, setDrillError] = useState<string | null>(null)
 
   const listCacheKey = useMemo(() => {
     const trackingKw = looksLikeLuckyGiftTrackingKeyword(keyword)
@@ -676,6 +682,32 @@ export const LuckyGiftsPage: React.FC = () => {
     }
   }
 
+  async function openAnchorDrill(anchor: AnchorStat) {
+    setDrillAnchor(anchor)
+    setDrillLoading(true)
+    setDrillError(null)
+    setDrillItems([])
+    setDrillTotal(0)
+    try {
+      const qs = new URLSearchParams()
+      qs.set('status', 'all')
+      qs.set('dateRange', 'all')
+      qs.set('page', '1')
+      qs.set('pageSize', '100')
+      if (anchor.anchorId) qs.set('anchorId', anchor.anchorId)
+      if (anchor.anchorName) qs.set('anchorName', anchor.anchorName)
+      const list = await apiRequest<{ items: LuckyGiftItem[]; total: number }>(
+        `/api/board/lucky-gifts?${qs.toString()}`,
+      )
+      setDrillItems(list.items)
+      setDrillTotal(list.total)
+    } catch (err) {
+      setDrillError(err instanceof Error ? err.message : '加载主播福袋明细失败')
+    } finally {
+      setDrillLoading(false)
+    }
+  }
+
   async function handleOpenQianfan(id: string) {
     if (!canMutate || openingQianfanId) return
     setOpeningQianfanId(id)
@@ -876,7 +908,7 @@ export const LuckyGiftsPage: React.FC = () => {
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 className="text-sm font-medium text-slate-800">主播福袋</h2>
             <p className="text-xs text-slate-400">
-              按直播排班归属统计；「福袋场次」= 该主播发出的福袋活动场数（不是中奖人数）
+              按直播排班归属；点击卡片查看该主播中奖明细（福袋场次 ≠ 中奖人数）
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
@@ -888,11 +920,19 @@ export const LuckyGiftsPage: React.FC = () => {
                 anchorName: a.anchorName,
               })
               const missingAddr = a.noAddress + a.incompleteAddress
+              const active =
+                drillAnchor?.anchorId === a.anchorId ||
+                (!!drillAnchor && drillAnchor.anchorName === a.anchorName)
               return (
-                <div
+                <button
                   key={a.anchorId || a.anchorName}
-                  className="rounded-2xl border bg-white px-3 py-3 shadow-sm"
+                  type="button"
+                  onClick={() => void openAnchorDrill(a)}
+                  className={`rounded-2xl border bg-white px-3 py-3 text-left shadow-sm transition hover:brightness-[0.98] focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
+                    active ? 'ring-2 ring-slate-800' : ''
+                  }`}
                   style={{ borderColor: theme.border, backgroundColor: theme.softBackground }}
+                  data-testid="lucky-gift-anchor-card"
                 >
                   <div className="flex items-center gap-2">
                     <span
@@ -915,7 +955,7 @@ export const LuckyGiftsPage: React.FC = () => {
                       {missingAddr > 0 ? <div>缺地址 {missingAddr}</div> : null}
                     </div>
                   </div>
-                </div>
+                </button>
               )
             })}
           </div>
@@ -1263,6 +1303,56 @@ export const LuckyGiftsPage: React.FC = () => {
           </div>
         </div>
       )}
+
+      <BoardDrawerShell
+        open={Boolean(drillAnchor)}
+        onClose={() => {
+          setDrillAnchor(null)
+          setDrillItems([])
+          setDrillError(null)
+        }}
+        title={
+          drillAnchor
+            ? `${formatAnchorDisplayName(drillAnchor.anchorName)} · 福袋明细`
+            : '主播福袋明细'
+        }
+        subtitle={
+          drillAnchor
+            ? `福袋场次 ${drillAnchor.drawCount}｜中奖 ${drillTotal || drillAnchor.winnerCount}｜待发 ${drillAnchor.pending}`
+            : undefined
+        }
+        testId="lucky-gift-anchor-drill"
+      >
+        {drillLoading ? (
+          <div className="flex items-center gap-2 px-1 py-8 text-sm text-slate-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            加载中…
+          </div>
+        ) : drillError ? (
+          <div className="rounded-xl border border-amber-100 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+            {drillError}
+          </div>
+        ) : drillItems.length === 0 ? (
+          <div className="py-10 text-center text-sm text-slate-500">该主播暂无中奖明细</div>
+        ) : (
+          <div className="space-y-3">
+            {drillItems.map((item) => (
+              <LuckyGiftRow
+                key={item.id}
+                item={item}
+                checked={false}
+                onToggle={() => undefined}
+                canMutate={false}
+                isSuperAdmin={false}
+                onCopy={() => void handleCopyOne(item)}
+                onOpenQianfan={() => undefined}
+                openingQianfan={false}
+                onUndo={() => undefined}
+              />
+            ))}
+          </div>
+        )}
+      </BoardDrawerShell>
     </div>
   )
 }

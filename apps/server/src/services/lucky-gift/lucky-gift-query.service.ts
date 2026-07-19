@@ -403,6 +403,26 @@ export function looksLikeTrackingKeyword(raw: string): boolean {
   return /^(sf|yt|zt|jd|sto|yd|ems)?\d{8,}$/i.test(k) || /^[A-Za-z]{0,4}\d{10,}$/.test(k)
 }
 
+function matchLuckyGiftAnchorFilter(
+  att: { anchorId: string | null; anchorName: string | null } | undefined,
+  anchorId?: string,
+  anchorName?: string,
+): boolean {
+  const id = String(anchorId || '').trim()
+  const name = String(anchorName || '').trim()
+  if (!id && !name) return true
+  if (!att) return false
+  if (id && att.anchorId && att.anchorId === id) return true
+  if (name && att.anchorName?.trim() === name) return true
+  // extra-* id 时用名称兜底
+  if (id.startsWith('extra-') && name && att.anchorName?.trim() === name) return true
+  if (id.startsWith('extra-') && !name) {
+    const fromId = id.slice('extra-'.length)
+    return Boolean(fromId && att.anchorName?.trim() === fromId)
+  }
+  return false
+}
+
 export async function listLuckyGifts(params: {
   accountId?: string
   status?: LuckyGiftListStatusFilter
@@ -410,6 +430,9 @@ export async function listLuckyGifts(params: {
   startDate?: string
   endDate?: string
   keyword?: string
+  /** 主播下钻：按归属过滤（需先解析归属，内存分页） */
+  anchorId?: string
+  anchorName?: string
   page?: number
   pageSize?: number
   role?: string | null
@@ -420,6 +443,9 @@ export async function listLuckyGifts(params: {
   const dateFilter = resolveDateRange(params.dateRange, params.startDate, params.endDate)
   const keyword = String(params.keyword || '').trim()
   const trackingSearch = keyword.length > 0 && looksLikeTrackingKeyword(keyword)
+  const anchorId = String(params.anchorId || '').trim() || undefined
+  const anchorName = String(params.anchorName || '').trim() || undefined
+  const anchorFilter = Boolean(anchorId || anchorName)
   // 查物流号时跨状态；普通关键词仍尊重状态筛选
   const shipFilter = trackingSearch ? undefined : statusWhere(params.status)
 
@@ -452,19 +478,27 @@ export async function listLuckyGifts(params: {
     ]
   }
 
-  const [total, rows] = await Promise.all([
-    prisma.xhsLuckyWinner.count({ where }),
-    prisma.xhsLuckyWinner.findMany({
-      where,
-      include: { shipment: true, draw: true },
-      orderBy: [{ liveAccountName: 'asc' }, { winTime: 'desc' }, { recipientName: 'asc' }],
-      skip: (page - 1) * pageSize,
-      take: pageSize,
-    }),
-  ])
+  // 主播归属在应用层解析，下钻时先取全量再过滤分页
+  const fetched = await prisma.xhsLuckyWinner.findMany({
+    where,
+    include: { shipment: true, draw: true },
+    orderBy: [{ liveAccountName: 'asc' }, { winTime: 'desc' }, { recipientName: 'asc' }],
+    skip: anchorFilter ? 0 : (page - 1) * pageSize,
+    take: anchorFilter ? 3000 : pageSize,
+  })
+  const totalBeforeAnchor = anchorFilter
+    ? fetched.length
+    : await prisma.xhsLuckyWinner.count({ where })
 
   const showPii = canViewLuckyGiftPii(params.role)
-  const anchorMap = await resolveLuckyGiftAnchorsBatch(rows)
+  const anchorMap = await resolveLuckyGiftAnchorsBatch(fetched)
+  const filtered = anchorFilter
+    ? fetched.filter((w) => matchLuckyGiftAnchorFilter(anchorMap.get(w.id), anchorId, anchorName))
+    : fetched
+  const total = anchorFilter ? filtered.length : totalBeforeAnchor
+  const rows = anchorFilter
+    ? filtered.slice((page - 1) * pageSize, page * pageSize)
+    : filtered
 
   const sfCandidates = rows
     .filter((w) => {

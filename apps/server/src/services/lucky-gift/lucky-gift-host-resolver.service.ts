@@ -86,13 +86,22 @@ export async function resolveLuckyGiftHostIdForAccount(
   return { hostId, source: 'cookie' }
 }
 
+/** 历史福袋回看窗口：过久场次平台常无数据/报错，扫全量会误报「场次异常」 */
+const LUCKY_GIFT_ROOM_LOOKBACK_MS = 45 * 24 * 60 * 60 * 1000
+const LUCKY_GIFT_ROOM_SCAN_LIMIT = 60
+
 /** 历史福袋按场次 room_id 查询；平台实测 liveId 可作为 room_id */
 export async function listLuckyGiftRoomIdsForAccount(liveAccountId: string): Promise<string[]> {
+  const since = new Date(Date.now() - LUCKY_GIFT_ROOM_LOOKBACK_MS)
   const sessions = await prisma.xhsRawLiveSession.findMany({
-    where: { liveAccountId, liveId: { not: null } },
+    where: {
+      liveAccountId,
+      liveId: { not: null },
+      startTime: { gte: since },
+    },
     orderBy: { startTime: 'desc' },
     select: { liveId: true, rawJson: true },
-    take: 200,
+    take: LUCKY_GIFT_ROOM_SCAN_LIMIT,
   })
   const out: string[] = []
   const seen = new Set<string>()

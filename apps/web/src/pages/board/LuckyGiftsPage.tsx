@@ -415,13 +415,19 @@ export const LuckyGiftsPage: React.FC = () => {
       try {
         const qs = new URLSearchParams()
         if (shopKey !== 'all') qs.set('accountId', shopKey)
-        qs.set('status', status)
+        // 默认「待发货」会挡住已发货单号；查单号时跨状态
+        const kw = keyword.trim()
+        const trackingKw =
+          kw.length >= 8 &&
+          (/^(sf|yt|zt|jd|sto|yd|ems)?\d{8,}$/i.test(kw.replace(/\s+/g, '')) ||
+            /^[A-Za-z]{0,4}\d{10,}$/.test(kw.replace(/\s+/g, '')))
+        qs.set('status', trackingKw ? 'all' : status)
         qs.set('dateRange', dateRange)
         if (dateRange === 'custom') {
           if (startDate) qs.set('startDate', startDate)
           if (endDate) qs.set('endDate', endDate)
         }
-        if (keyword.trim()) qs.set('keyword', keyword.trim())
+        if (kw) qs.set('keyword', kw)
         qs.set('page', '1')
         qs.set('pageSize', '100')
 
@@ -767,7 +773,7 @@ export const LuckyGiftsPage: React.FC = () => {
           <input
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder="搜索昵称、收件人、手机、地址、快递单号或福袋名"
+            placeholder="搜索昵称、收件人、手机、地址、快递单号或福袋名（输单号可跨待发/已发）"
             className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 px-3 text-sm"
           />
           <div className="flex flex-wrap gap-2">

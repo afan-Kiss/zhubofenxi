@@ -233,13 +233,14 @@ function deriveOverallSyncStatus(input: {
   roomsScanned: number
 }): { status: LuckyGiftSyncShopStatus; error?: string } {
   if (input.fetchedCount > 0) {
-    const failedRooms = input.roomStats.filter(
-      (r) => r.status !== 'success_with_data' && r.status !== 'confirmed_empty',
+    // 仅真实接口失败算异常；confirmed_empty / ambiguous_empty 多为该场次无福袋，不算失败
+    const hardFailedRooms = input.roomStats.filter((r) =>
+      ['auth_failed', 'parse_failed', 'request_failed', 'parameter_failed'].includes(r.status),
     )
-    if (failedRooms.length > 0) {
+    if (hardFailedRooms.length > 0) {
       return {
         status: 'partial_success',
-        error: `${failedRooms.length} 个场次请求异常，已拉到 ${input.fetchedCount} 个福袋`,
+        error: `${hardFailedRooms.length} 个场次接口异常，已拉到 ${input.fetchedCount} 个福袋`,
       }
     }
     return { status: 'success_with_data' }

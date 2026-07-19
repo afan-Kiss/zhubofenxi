@@ -234,6 +234,13 @@ export async function getLuckyGiftSummary(params?: { accountId?: string }) {
   }
 }
 
+/** 快递单号形态：查单号时默认「待发货」筛会挡住已发货结果 */
+function looksLikeTrackingKeyword(raw: string): boolean {
+  const k = raw.replace(/\s+/g, '')
+  if (k.length < 8) return false
+  return /^(sf|yt|zt|jd|sto|yd|ems)?\d{8,}$/i.test(k) || /^[A-Za-z]{0,4}\d{10,}$/.test(k)
+}
+
 export async function listLuckyGifts(params: {
   accountId?: string
   status?: LuckyGiftListStatusFilter
@@ -248,15 +255,26 @@ export async function listLuckyGifts(params: {
   const page = Math.max(1, params.page ?? 1)
   const pageSize = Math.min(100, Math.max(1, params.pageSize ?? 50))
   const accountIds = await resolveAccountIdFilter(params.accountId)
-  const shipFilter = statusWhere(params.status)
   const dateFilter = resolveDateRange(params.dateRange, params.startDate, params.endDate)
   const keyword = String(params.keyword || '').trim()
+  const trackingSearch = keyword.length > 0 && looksLikeTrackingKeyword(keyword)
+  // 查物流号时跨状态；普通关键词仍尊重状态筛选
+  const shipFilter = trackingSearch ? undefined : statusWhere(params.status)
 
   const where: Record<string, unknown> = {}
   if (accountIds) where.liveAccountId = { in: accountIds }
   if (dateFilter) where.winTime = dateFilter
   if (shipFilter) where.shipment = shipFilter
   if (keyword) {
+    const trackingVariants = trackingSearch
+      ? Array.from(
+          new Set([keyword, keyword.toUpperCase(), keyword.toLowerCase(), keyword.replace(/\s+/g, '')]),
+        )
+      : [keyword]
+    const trackingOr = trackingVariants.flatMap((k) => [
+      { officialTrackingNo: { contains: k } },
+      { shipment: { trackingNo: { contains: k } } },
+    ])
     where.OR = [
       { winnerNickname: { contains: keyword } },
       { recipientName: { contains: keyword } },
@@ -266,10 +284,9 @@ export async function listLuckyGifts(params: {
       { draw: { giftName: { contains: keyword } } },
       { draw: { roomId: { contains: keyword } } },
       { redId: { contains: keyword } },
-      { officialTrackingNo: { contains: keyword } },
       { officialCourier: { contains: keyword } },
-      { shipment: { trackingNo: { contains: keyword } } },
       { shipment: { courierCompany: { contains: keyword } } },
+      ...trackingOr,
     ]
   }
 

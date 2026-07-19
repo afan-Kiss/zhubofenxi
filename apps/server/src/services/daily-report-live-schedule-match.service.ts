@@ -64,7 +64,12 @@ export interface LiveSessionScheduleOverlapMatch {
   matchReason: string
 }
 
-/** 单场直播与全部 enabled 排班行的重叠明细（调试用） */
+/** 可参与直播场次归属的排班：启用且非请假（请假仅占位/水印，不抢场次） */
+function isAttributableScheduleRow(row: EffectiveScheduleRow): boolean {
+  return row.enabled && !row.isOnLeave
+}
+
+/** 单场直播与全部可归属排班行的重叠明细（调试用） */
 export function listSessionScheduleMatchCandidates(
   session: AnchorLiveSessionBrief,
   scheduleRows: EffectiveScheduleRow[],
@@ -76,7 +81,7 @@ export function listSessionScheduleMatchCandidates(
 
   const candidates: LiveSessionScheduleMatchCandidate[] = []
   for (const row of scheduleRows) {
-    if (!row.enabled) continue
+    if (!isAttributableScheduleRow(row)) continue
     const overlap = computeGraceAwareScheduleOverlapMinutes(startMs, endMs, row, scheduleRows)
     const shopMatch = orderLiveRoomMatchesSchedule(liveName, row.shopName, row.liveRoomName)
     candidates.push({
@@ -244,7 +249,7 @@ export function matchLiveSessionToBestScheduleRow(
   } | null = null
 
   for (const row of scheduleRows) {
-    if (!row.enabled) continue
+    if (!isAttributableScheduleRow(row)) continue
     const overlap = computeGraceAwareScheduleOverlapMinutes(startMs, endMs, row, scheduleRows)
     if (overlap <= 0) continue
 
@@ -306,7 +311,7 @@ export function matchLiveSessionToScheduleSegments(
 
   const rawSegments: LiveSessionScheduleSegment[] = []
   for (const row of scheduleRows) {
-    if (!row.enabled) continue
+    if (!isAttributableScheduleRow(row)) continue
     const overlap = computeGraceAwareScheduleOverlapMinutes(startMs, endMs, row, scheduleRows)
     if (overlap <= 0) continue
 

@@ -860,11 +860,13 @@ export async function buildDailyReport(params: {
     if (!anchorName || !shopName) continue
     const startTime = leave.startTime
     const endTime = leave.endTime
+    // 精确对齐排班时段，避免 includes 误标其它场次
     const existing = imageSessions.find(
       (s) =>
         s.anchorName === anchorName &&
         s.shopName === shopName &&
-        (s.liveTimeRange.includes(startTime) || s.startTime.includes(startTime)),
+        s.startTime === startTime &&
+        s.endTime === endTime,
     )
     if (existing) {
       existing.isOnLeave = true

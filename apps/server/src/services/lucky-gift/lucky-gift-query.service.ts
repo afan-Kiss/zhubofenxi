@@ -266,6 +266,10 @@ export async function listLuckyGifts(params: {
       { draw: { giftName: { contains: keyword } } },
       { draw: { roomId: { contains: keyword } } },
       { redId: { contains: keyword } },
+      { officialTrackingNo: { contains: keyword } },
+      { officialCourier: { contains: keyword } },
+      { shipment: { trackingNo: { contains: keyword } } },
+      { shipment: { courierCompany: { contains: keyword } } },
     ]
   }
 

@@ -7,7 +7,10 @@ import { resolveOfficialShopAccountForStatus } from '../official-shop-account.se
 import { requestXhsJsonWithSyncAudit, buildXhsRequestHash } from '../sync-request-audit.service'
 import { enqueueXhsRequest } from '../xhs-api-sync/xhs-rate-limiter.service'
 import { parseJsonPreserveLargeIds } from './lucky-gift-json.util'
-import { normalizeLuckyWinnerBoys } from './lucky-gift-normalize.service'
+import {
+  extractLuckyGiftLogistics,
+  normalizeLuckyWinnerBoys,
+} from './lucky-gift-normalize.service'
 import {
   listLuckyGiftRoomIdsForAccount,
   resolveLuckyGiftHostIdForAccount,
@@ -434,6 +437,59 @@ export async function fetchAllLuckyGiftDraws(params: {
   }
 }
 
+/** 按中奖人拉取平台物流（快递单号）；失败返回 null，不阻断主同步 */
+export async function fetchLuckyGiftWinnerLogistics(params: {
+  shop: GoodReviewShopDefinition
+  luckyDrawId: string
+  winnerUserId: string
+  accountId: string
+  accountName: string
+  cookie: string
+  hostId: string
+  trigger?: string
+}): Promise<{
+  officialCourier: string | null
+  officialTrackingNo: string | null
+  officialShipped: boolean
+} | null> {
+  const userId = String(params.winnerUserId || '').trim()
+  if (!userId) return null
+  // 平台参数命名不统一：依次尝试 user_id / lucky_boy_id
+  const queryVariants: Array<Record<string, string>> = [
+    { lucky_draw_id: params.luckyDrawId, user_id: userId },
+    { lucky_draw_id: params.luckyDrawId, lucky_boy_id: userId },
+  ]
+  let lastErr: unknown = null
+  for (const q of queryVariants) {
+    const qs = new URLSearchParams(q)
+    const url = `${LUCKY_GIFT_API.winnerLogistics}?${qs.toString()}`
+    try {
+      const { json } = await requestLuckyGiftJson<unknown>({
+        shop: params.shop,
+        accountId: params.accountId,
+        accountName: params.accountName,
+        cookie: params.cookie,
+        hostId: params.hostId,
+        method: 'GET',
+        url,
+        apiLabel: 'target_lucky_boy_with_address/get',
+        trigger: params.trigger,
+      })
+      const logistics = extractLuckyGiftLogistics(json)
+      if (logistics.officialTrackingNo || logistics.officialCourier) return logistics
+    } catch (err) {
+      lastErr = err
+    }
+  }
+  if (lastErr) {
+    console.warn(
+      `[lucky-gift] logistics fail draw=${params.luckyDrawId} user=${userId}:`,
+      lastErr instanceof Error ? lastErr.message : lastErr,
+    )
+  }
+  return null
+}
+
 export async function fetchLuckyGiftWinners(params: {
   shop: GoodReviewShopDefinition
   luckyDrawId: string
@@ -462,6 +518,31 @@ export async function fetchLuckyGiftWinners(params: {
     trigger: params.trigger,
   })
   const { draw, winners } = normalizeLuckyWinnerBoys(json, params.luckyDrawId, rawText)
+
+  // 列表详情常无 logistics：对已填地址且缺单号的中奖人补拉物流接口
+  for (let i = 0; i < winners.length; i++) {
+    const w = winners[i]!
+    if (w.officialShipped || w.officialTrackingNo) continue
+    if (!w.hasAddress || !w.winnerUserId) continue
+    const logistics = await fetchLuckyGiftWinnerLogistics({
+      shop: params.shop,
+      luckyDrawId: params.luckyDrawId,
+      winnerUserId: w.winnerUserId,
+      accountId: ctx.accountId,
+      accountName: ctx.accountName,
+      cookie: ctx.cookie,
+      hostId,
+      trigger: params.trigger,
+    })
+    if (!logistics) continue
+    winners[i] = {
+      ...w,
+      officialCourier: logistics.officialCourier ?? w.officialCourier,
+      officialTrackingNo: logistics.officialTrackingNo ?? w.officialTrackingNo,
+      officialShipped: logistics.officialShipped || w.officialShipped,
+    }
+  }
+
   return {
     accountId: ctx.accountId,
     accountName: ctx.accountName,

@@ -215,6 +215,11 @@ export const AnchorLeaderboardPanel: React.FC<Props> = ({
                               <span className="font-normal text-slate-500"> · {shop}</span>
                             )
                           })()}
+                          {Boolean((a as { isOnLeave?: boolean }).isOnLeave) ? (
+                            <span className="rounded px-1.5 py-0.5 text-[11px] font-bold text-red-600">
+                              休假
+                            </span>
+                          ) : null}
                         </span>
                         {isUnassigned ? (
                           <>

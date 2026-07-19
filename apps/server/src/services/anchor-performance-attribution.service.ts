@@ -605,14 +605,20 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
     byName.set(c.anchorName, empty)
   }
 
-  // 请假排班：即使无成交也补卡片，供前端打「休假」水印
+  // 请假排班：无「非请假」班次且尚无卡片时补空卡，供前端打「休假」水印
   try {
     const { getEffectiveScheduleTableForDate } = await import('./anchor-daily-schedule.service')
     const table = await getEffectiveScheduleTableForDate(dateKey)
+    const workingNames = new Set(
+      table.rows
+        .filter((r) => r.enabled && !r.isOnLeave)
+        .map((r) => r.anchorName.trim())
+        .filter(Boolean),
+    )
     for (const r of table.rows) {
       if (!r.enabled || !r.isOnLeave) continue
       const name = r.anchorName.trim()
-      if (!name || byName.has(name)) continue
+      if (!name || byName.has(name) || workingNames.has(name)) continue
       const found = findAnchorByName(getAnchorConfigSync(), name)
       const empty = {
         ...createEmptyAnchorLeaderboardRow(

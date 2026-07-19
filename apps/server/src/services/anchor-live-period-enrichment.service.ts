@@ -213,11 +213,18 @@ export async function enrichAnchorLeaderboardWithLivePeriod(
     )
   }
 
+  // 仅当该主播当天没有「非请假」生效排班时，整卡打休假水印（避免请假+正常班混排误盖业绩卡）
+  const workingAnchorNames = new Set<string>()
+  for (const r of scheduleTable.rows) {
+    if (!r.enabled || r.isOnLeave) continue
+    const name = r.anchorName.trim()
+    if (name) workingAnchorNames.add(name)
+  }
   const leaveByAnchor = new Map<string, { shopName: string; sessionLabel: string }>()
   for (const r of scheduleTable.rows) {
     if (!r.enabled || !r.isOnLeave) continue
     const name = r.anchorName.trim()
-    if (!name || leaveByAnchor.has(name)) continue
+    if (!name || workingAnchorNames.has(name) || leaveByAnchor.has(name)) continue
     leaveByAnchor.set(name, {
       shopName: r.shopName.trim() || r.liveRoomName.trim(),
       sessionLabel: `${r.startTime}-${r.endTime}`,

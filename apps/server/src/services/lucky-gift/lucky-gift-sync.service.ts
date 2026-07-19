@@ -214,9 +214,10 @@ async function upsertWinnerAndShipment(params: {
         : JSON.stringify(w.addressMissing),
       firstAddressSeenAt,
       winTime: params.winTime ?? undefined,
-      officialCourier: w.officialCourier,
-      officialTrackingNo: w.officialTrackingNo,
-      officialShipped: w.officialShipped,
+      // 平台偶发不回 logistics 时保留库内已有官方单号，避免同步抹掉
+      officialCourier: w.officialCourier ?? existing?.officialCourier ?? null,
+      officialTrackingNo: w.officialTrackingNo ?? existing?.officialTrackingNo ?? null,
+      officialShipped: Boolean(w.officialShipped || existing?.officialShipped),
       rawJson: JSON.stringify(w.raw),
     },
   })
@@ -225,12 +226,18 @@ async function upsertWinnerAndShipment(params: {
   const localMarkedShipped =
     existing?.shipment?.shipmentStatus === 'shipped' &&
     existing.shipment.shippingStatusSource === 'local'
+  const mergedOfficialShipped = Boolean(
+    w.officialShipped ||
+      (existing?.officialShipped && (w.officialTrackingNo || existing.officialTrackingNo)),
+  )
+  const mergedOfficialTracking = w.officialTrackingNo ?? existing?.officialTrackingNo ?? null
+  const mergedOfficialCourier = w.officialCourier ?? existing?.officialCourier ?? null
 
   let nextStatus = deriveLuckyGiftShipmentStatus({
     hasAddress: preserveAddress ? Boolean(existing?.hasAddress) : w.hasAddress,
     addressComplete: preserveAddress ? Boolean(existing?.addressComplete) : w.addressComplete,
     markedShipped: localMarkedShipped,
-    officialShipped: w.officialShipped,
+    officialShipped: mergedOfficialShipped,
   })
   let shippingStatusSource = existing?.shipment?.shippingStatusSource ?? 'local'
   let courierCompany = existing?.shipment?.courierCompany ?? null
@@ -238,17 +245,16 @@ async function upsertWinnerAndShipment(params: {
   let markedShippedAt = existing?.shipment?.markedShippedAt ?? null
   let markedShippedBy = existing?.shipment?.markedShippedBy ?? null
 
-  if (w.officialShipped) {
-    if (prevStatus === 'shipped' && shippingStatusSource === 'local' && !w.officialShipped) {
-      nextStatus = 'shipped'
-    } else {
-      nextStatus = 'shipped'
+  if (mergedOfficialShipped) {
+    nextStatus = 'shipped'
+    shippingStatusSource = shippingStatusSource === 'local' && localMarkedShipped ? 'local' : 'official'
+    if (mergedOfficialTracking) {
       shippingStatusSource = 'official'
-      courierCompany = w.officialCourier ?? courierCompany
-      trackingNo = w.officialTrackingNo ?? trackingNo
-      markedShippedAt = markedShippedAt ?? params.now
-      markedShippedBy = markedShippedBy ?? 'official'
+      courierCompany = mergedOfficialCourier ?? courierCompany
+      trackingNo = mergedOfficialTracking
     }
+    markedShippedAt = markedShippedAt ?? params.now
+    markedShippedBy = markedShippedBy ?? 'official'
   }
 
   const shipment = await prisma.luckyGiftShipment.upsert({

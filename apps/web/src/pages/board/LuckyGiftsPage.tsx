@@ -767,7 +767,7 @@ export const LuckyGiftsPage: React.FC = () => {
           <input
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
-            placeholder="搜索昵称、收件人、手机、地址或福袋名"
+            placeholder="搜索昵称、收件人、手机、地址、快递单号或福袋名"
             className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 px-3 text-sm"
           />
           <div className="flex flex-wrap gap-2">

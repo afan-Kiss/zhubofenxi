@@ -26,6 +26,37 @@ export function unwrapLuckyGiftData(payload: unknown): Record<string, unknown> |
   return data
 }
 
+/** 从中奖人详情 / 物流详情响应中抽取快递公司与单号 */
+export function extractLuckyGiftLogistics(payload: unknown): {
+  officialCourier: string | null
+  officialTrackingNo: string | null
+  officialShipped: boolean
+} {
+  const data = unwrapLuckyGiftData(payload)
+  const candidates: Array<Record<string, unknown> | null> = [
+    asRecord(data?.logistics),
+    asRecord(asRecord(data?.boy)?.logistics),
+    asRecord(asRecord(data?.target)?.logistics),
+  ]
+  const boys = asArray(data?.boys)
+  if (boys[0]) candidates.push(asRecord(asRecord(boys[0])?.logistics))
+
+  for (const logistics of candidates) {
+    if (!logistics) continue
+    const officialCourier =
+      String(logistics.logisticsCompany ?? logistics.logistics_company ?? '').trim() || null
+    const officialTrackingNo =
+      String(logistics.logisticsNumbers ?? logistics.logistics_numbers ?? '').trim() || null
+    const officialShipped = Boolean(
+      officialTrackingNo && officialTrackingNo !== '-1' && officialTrackingNo !== '-',
+    )
+    if (officialCourier || officialTrackingNo) {
+      return { officialCourier, officialTrackingNo, officialShipped }
+    }
+  }
+  return { officialCourier: null, officialTrackingNo: null, officialShipped: false }
+}
+
 export function normalizeLuckyDrawListItem(
   row: unknown,
   rawIdHint?: string | null,

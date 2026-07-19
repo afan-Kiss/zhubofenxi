@@ -22,6 +22,12 @@ export const LUCKY_GIFT_API = {
   /** GET query: lucky_draw_id（HAR 已确认） */
   winnerWithAddress:
     'https://live-assistant.xiaohongshu.com/api/sns/red/live/lucky_boy_with_address/get',
+  /**
+   * GET query: lucky_draw_id + user_id（平台 API_LIST.GET_DRAW_LOGISTICS_INFO）
+   * 中奖列表接口常无 logistics，物流单号需按中奖人另查。
+   */
+  winnerLogistics:
+    'https://live-assistant.xiaohongshu.com/api/sns/red/live/target_lucky_boy_with_address/get',
 } as const
 
 /** 列表分页：平台前端默认 pageSize=50，page 从 1 起 */

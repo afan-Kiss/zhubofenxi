@@ -396,10 +396,12 @@ export function resolveShopSessionAnchorFromLiveAccount(
   const anchorName = resolveShopSessionAnchorName(shopKey, period)
   if (!anchorName) return null
   const found = findAnchorByName(config, anchorName)
-  if (found?.enabled) {
-    return { anchorId: found.id, anchorName: found.name }
-  }
-  return { anchorId: `extra-${anchorName}`, anchorName }
+  // 已软删/不在配置中：禁止回落 extra-小红 等幽灵名
+  if (!found) return null
+  const dateKey = formatDateKeyShanghai(at)
+  if (!isAnchorEffectiveOnDate(found, dateKey)) return null
+  if (found.enabled === false) return null
+  return { anchorId: found.id, anchorName: found.name }
 }
 
 /**
@@ -615,11 +617,14 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
         .map((r) => r.anchorName.trim())
         .filter(Boolean),
     )
+    const cfg = getAnchorConfigSync()
     for (const r of table.rows) {
       if (!r.enabled || !r.isOnLeave) continue
       const name = r.anchorName.trim()
       if (!name || byName.has(name) || workingNames.has(name)) continue
-      const found = findAnchorByName(getAnchorConfigSync(), name)
+      const found = findAnchorByName(cfg, name)
+      // 离职/删除主播不补休假空卡
+      if (!shouldPadEmptyAnchorSlot(found, dateKey)) continue
       const empty = {
         ...createEmptyAnchorLeaderboardRow(
           found?.id ?? r.anchorId ?? `extra-${name}`,

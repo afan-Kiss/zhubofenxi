@@ -296,7 +296,47 @@ export async function getEffectiveScheduleTableForDate(dateKey: string): Promise
 
   warnings.push(...built.warnings)
 
-  const effectiveRows = built.rows
+  // 过滤已离职/软删正式主播的日排班幽灵行（临时主播保留）
+  const { isAnchorEffectiveOnDate } = await import('../utils/anchor-effective-date.util')
+  const formalLifecycle = await prisma.anchor.findMany({
+    where: { attributionMode: 'schedule', systemKey: null },
+    select: {
+      id: true,
+      name: true,
+      enabled: true,
+      effectiveFrom: true,
+      effectiveTo: true,
+      deletedAt: true,
+    },
+  })
+  const byAnchorId = new Map(formalLifecycle.map((a) => [a.id, a]))
+  const byAnchorName = new Map(
+    formalLifecycle.map((a) => [a.name.trim().toLowerCase(), a] as const),
+  )
+  const effectiveRows = built.rows.filter((r) => {
+    if (r.isTemporaryAnchor) return true
+    const a =
+      (r.anchorId && byAnchorId.get(r.anchorId)) ||
+      byAnchorName.get(r.anchorName.trim().toLowerCase()) ||
+      null
+    if (!a) {
+      // 库里已无此正式主播：不进生效表，避免业绩幽灵卡
+      warnings.push(`已忽略排班「${r.anchorName}」：主播不在主档或已删除。`)
+      return false
+    }
+    if (a.deletedAt) {
+      const lastDay = a.effectiveTo?.trim()
+      if (!lastDay || dateKey > lastDay) {
+        warnings.push(`已忽略排班「${r.anchorName}」：主播已删除且超过最后工作日。`)
+        return false
+      }
+    }
+    if (!isAnchorEffectiveOnDate(a, dateKey)) {
+      warnings.push(`已忽略排班「${r.anchorName}」：主播在${dateKey}不在职。`)
+      return false
+    }
+    return true
+  })
 
   const conflicts = detectScheduleConflicts(
     effectiveRows.map((r) => ({
@@ -637,6 +677,13 @@ export async function saveDailySchedules(params: {
   })
   const byId = new Map(formalAnchors.map((a) => [a.id, a]))
   const byName = new Map(formalAnchors.map((a) => [a.name.trim().toLowerCase(), a]))
+  const deletedFormal = await prisma.anchor.findMany({
+    where: { deletedAt: { not: null }, attributionMode: 'schedule', systemKey: null },
+    select: { name: true, effectiveTo: true },
+  })
+  const deletedByName = new Map(
+    deletedFormal.map((a) => [a.name.trim().toLowerCase(), a] as const),
+  )
 
   // 预校验正式 / 临时主播
   const existingTempKeys = new Set(
@@ -685,6 +732,18 @@ export async function saveDailySchedules(params: {
         : null
     if (!anchor && name) {
       anchor = byName.get(name.toLowerCase()) ?? null
+    }
+    if (!anchor && name) {
+      const gone = deletedByName.get(name.toLowerCase())
+      if (gone) {
+        const last = gone.effectiveTo?.trim() || '未知'
+        throw new ScheduleSaveError([
+          {
+            type: 'anchor_overlap',
+            message: `主播“${name}”已删除，最后工作日为${last}，不能安排到${params.date}。`,
+          },
+        ])
+      }
     }
     if (anchor) {
       const check = canScheduleFormalAnchorOnDate(anchor, params.date)
@@ -827,6 +886,13 @@ export async function copyDailySchedules(params: {
       (row.anchorId && byId.get(row.anchorId)) ||
       byName.get(row.anchorName.trim().toLowerCase()) ||
       null
+    // 正式主播已删除/离职：不得再复制到目标日（此前缺失时会整行拷贝，幽灵名复活）
+    if (!row.isTemporaryAnchor && !anchor) {
+      warnings.push(
+        `已跳过主播“${row.anchorName}”，其不在在职主播名单中（可能已离职或删除）。`,
+      )
+      continue
+    }
     if (anchor) {
       const check = canScheduleFormalAnchorOnDate(anchor, params.toDate)
       if (!check.ok) {

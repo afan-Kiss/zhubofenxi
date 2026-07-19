@@ -308,12 +308,13 @@ export function getAnchorConfigSync(): AnchorConfig {
   return configCache ?? createDefaultAnchorConfig()
 }
 
-/** 自动归属路径：manual 模式主播不可被场次/排班/时段命中 */
+/** 自动归属路径：manual 模式主播不可被场次/排班/时段命中；配置中不存在（含已软删）的名字不可自动归属 */
 export function isAutoAttributableAnchorName(anchorName: string): boolean {
   const name = anchorName.trim()
   if (!name || name === '未归属') return false
   const found = findCachedAnchorByName(name)
-  if (!found) return true
+  // 离职/删除后不在配置缓存中：禁止再以「幽灵名」吃订单（否则会落到 extra-小红 等）
+  if (!found) return false
   return !isManualAttributionMode(found.attributionMode)
 }
 
@@ -665,6 +666,7 @@ export async function softDeleteAnchor(id: string) {
     throw new Error('系统主播不可删除，如需停用请使用停用')
   }
   const { shanghaiYesterdayDateKey } = await import('../utils/anchor-effective-date.util')
+  const { normalizeAnchorName } = await import('../utils/anchor-name-normalize.util')
   const lastDay = existing.effectiveTo?.trim() || shanghaiYesterdayDateKey()
   await prisma.$transaction(async (tx) => {
     await tx.anchor.update({
@@ -690,6 +692,24 @@ export async function softDeleteAnchor(id: string) {
           data: { effectiveTo: lastDay },
         })
       }
+    }
+    // 与离职一致：清掉最后工作日之后的日排班，避免复制排班/生效表继续带出幽灵主播
+    const futureRows = await tx.anchorDailySchedule.findMany({
+      where: {
+        scheduleDate: { gt: lastDay },
+        OR: [{ anchorId: id }, { anchorName: existing.name }],
+      },
+      select: { id: true, anchorId: true, anchorName: true },
+    })
+    const nameKey = normalizeAnchorName(existing.name)
+    const toClear = futureRows.filter(
+      (row) =>
+        row.anchorId === id || normalizeAnchorName(row.anchorName) === nameKey,
+    )
+    if (toClear.length) {
+      await tx.anchorDailySchedule.deleteMany({
+        where: { id: { in: toClear.map((r) => r.id) } },
+      })
     }
   })
   await refreshAnchorConfigCache()

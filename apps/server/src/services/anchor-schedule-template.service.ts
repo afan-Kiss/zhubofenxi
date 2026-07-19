@@ -52,7 +52,8 @@ export const NEW_SCHEDULE_TEMPLATE_SEEDS_20260701: ScheduleTemplateSeed[] = [
     startTime: '09:30',
     endTime: '14:00',
     effectiveFrom: NEW_SCHEDULE_START_DATE,
-    effectiveTo: null,
+    // 已离职：种子不得再以 open-ended 复活模板
+    effectiveTo: '2026-07-16',
     sortOrder: 20,
     note: '早场·和田雅玉',
   },
@@ -74,7 +75,7 @@ export const NEW_SCHEDULE_TEMPLATE_SEEDS_20260701: ScheduleTemplateSeed[] = [
     startTime: '14:00',
     endTime: '18:30',
     effectiveFrom: NEW_SCHEDULE_START_DATE,
-    effectiveTo: null,
+    effectiveTo: '2026-07-16',
     sortOrder: 40,
     note: '午场·和田雅玉',
   },

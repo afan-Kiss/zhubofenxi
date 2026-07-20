@@ -297,7 +297,22 @@ export const GoodReviewsPage: React.FC = () => {
       }
       setError('')
       try {
-        await fetchPage({ shop: shopKey, signal: controller.signal })
+        const data = await fetchPage({ shop: shopKey, signal: controller.signal })
+        // 最近 3 天为空但本地有更早记录时，自动续拉一页，避免空态无法下滑
+        if (
+          data &&
+          data.reviews.length === 0 &&
+          data.hasMore &&
+          data.nextCursor &&
+          !controller.signal.aborted
+        ) {
+          await fetchPage({
+            shop: shopKey,
+            cursor: data.nextCursor,
+            append: true,
+            signal: controller.signal,
+          })
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : '读取最近 3 天好评失败，请稍后重试')
       } finally {
@@ -595,39 +610,43 @@ export const GoodReviewsPage: React.FC = () => {
                     onOpen={setDetailReview}
                   />
                 ))}
-                <div ref={loadMoreRef} className="space-y-2 py-2">
-                  {hasMore ? (
-                    <button
-                      type="button"
-                      data-testid="good-reviews-load-more"
-                      disabled={loadingMore}
-                      onClick={() => void loadMorePage()}
-                      className="mx-auto flex w-full max-w-sm items-center justify-center gap-1.5 rounded-full border border-rose-200 bg-white px-4 py-2.5 text-sm font-medium text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      {loadingMore ? (
-                        <>
-                          <Loader2 size={14} className="animate-spin" />
-                          正在加载更多...
-                        </>
-                      ) : (
-                        '加载更多好评'
-                      )}
-                    </button>
-                  ) : (
-                    <p className="text-center text-xs text-slate-400">已加载全部本地好评</p>
-                  )}
-                  {hasMore && !loadingMore ? (
-                    <p className="text-center text-[11px] text-slate-400">继续下滑也会自动加载</p>
-                  ) : null}
-                </div>
               </>
             ) : (
               <div className="rounded-2xl border border-dashed border-slate-200 bg-white/70 px-4 py-10 text-center text-sm text-slate-500">
                 {filterActive
                   ? '最近 3 天没有找到符合条件的好评，可以放宽筛选条件试试。'
-                  : '当前店铺最近 3 天还没有本地好评；继续下滑可查看更早记录，或点「同步全部店铺好评」拉取最新数据。'}
+                  : hasMore
+                    ? '当前店铺最近 3 天还没有本地好评，可点下方「加载更多」查看更早记录，或点「同步全部店铺好评」拉取最新数据。'
+                    : '当前店铺本地还没有好评；请点「同步全部店铺好评」从平台拉取。'}
               </div>
             )}
+            {!initialLoading ? (
+              <div ref={loadMoreRef} className="space-y-2 py-2">
+                {hasMore ? (
+                  <button
+                    type="button"
+                    data-testid="good-reviews-load-more"
+                    disabled={loadingMore}
+                    onClick={() => void loadMorePage()}
+                    className="mx-auto flex w-full max-w-sm items-center justify-center gap-1.5 rounded-full border border-rose-200 bg-white px-4 py-2.5 text-sm font-medium text-rose-700 shadow-sm transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <Loader2 size={14} className="animate-spin" />
+                        正在加载更多...
+                      </>
+                    ) : (
+                      '加载更多好评'
+                    )}
+                  </button>
+                ) : reviews.length > 0 ? (
+                  <p className="text-center text-xs text-slate-400">已加载全部本地好评</p>
+                ) : null}
+                {hasMore && !loadingMore ? (
+                  <p className="text-center text-[11px] text-slate-400">继续下滑也会自动加载</p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </>
       ) : null}

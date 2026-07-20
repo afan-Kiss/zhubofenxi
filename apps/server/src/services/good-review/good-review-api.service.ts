@@ -157,8 +157,16 @@ export async function fetchAllGoodReviews(
 
     for (const item of pageResult.items) {
       if (cutoff) {
-        if (item.reviewTime) {
-          if (item.reviewTime >= cutoff) {
+        let reviewTime = item.reviewTime
+        if (!reviewTime && item.reviewTimeText) {
+          const parsed = new Date(String(item.reviewTimeText).replace(/\./g, '-'))
+          if (!Number.isNaN(parsed.getTime())) {
+            reviewTime = parsed
+            item.reviewTime = parsed
+          }
+        }
+        if (reviewTime) {
+          if (reviewTime >= cutoff) {
             pageHasInRange = true
             pageAllTimedBeforeCutoff = false
           } else {

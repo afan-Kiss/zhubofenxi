@@ -51,6 +51,16 @@ function main(): void {
   } else {
     fail('GoodReviewsPage 缺少 loadingMoreRef 或 inFlightCursorRef')
   }
+  if (page.includes('data-testid="good-reviews-load-more"') && page.includes('加载更多好评')) {
+    ok('空态/列表均可显示加载更多')
+  } else {
+    fail('缺少加载更多按钮')
+  }
+  if (page.includes('自动续拉') || page.includes('data.hasMore &&') || page.includes('append: true')) {
+    ok('最近 3 天为空时自动续拉历史')
+  } else {
+    fail('缺少最近 3 天为空自动续拉')
+  }
   if (page.includes('requestAnimationFrame(probeVisible)')) {
     ok('GoodReviewsPage 列表懒加载含首屏探测')
   } else {

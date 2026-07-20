@@ -209,9 +209,44 @@ function parseReviewTime(raw: Record<string, unknown>): { date: Date | null; tex
     if (!Number.isNaN(date.getTime())) return { date, text }
   }
 
+  const relative = parseRelativeReviewTimeText(text)
+  if (relative) return { date: relative, text }
+
   const parsed = new Date(text.replace(/\./g, '-'))
   if (!Number.isNaN(parsed.getTime())) return { date: parsed, text }
   return { date: null, text }
+}
+
+/** 解析「刚刚 / 3分钟前 / 昨天 12:30 / 今天 09:01」等相对时间 */
+function parseRelativeReviewTimeText(text: string): Date | null {
+  const s = text.trim()
+  if (!s) return null
+  const now = new Date()
+
+  if (/^刚刚$|^刚才$/.test(s)) return now
+
+  const minutes = s.match(/^(\d+)\s*分钟前$/)
+  if (minutes) {
+    return new Date(now.getTime() - Number(minutes[1]) * 60_000)
+  }
+  const hours = s.match(/^(\d+)\s*小时前$/)
+  if (hours) {
+    return new Date(now.getTime() - Number(hours[1]) * 3_600_000)
+  }
+  const days = s.match(/^(\d+)\s*天前$/)
+  if (days) {
+    return new Date(now.getTime() - Number(days[1]) * 86_400_000)
+  }
+
+  const hm = s.match(/^(今天|昨天|前天)\s*(\d{1,2}):(\d{2})(?::(\d{2}))?$/)
+  if (hm) {
+    const dayOffset = hm[1] === '今天' ? 0 : hm[1] === '昨天' ? 1 : 2
+    const d = new Date(now)
+    d.setHours(Number(hm[2]), Number(hm[3]), hm[4] ? Number(hm[4]) : 0, 0)
+    d.setDate(d.getDate() - dayOffset)
+    return d
+  }
+  return null
 }
 
 function stableStringify(value: unknown): string {

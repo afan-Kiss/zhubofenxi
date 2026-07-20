@@ -83,20 +83,37 @@ async function main(): Promise<void> {
   if (typeof page1.filteredReviewCount === 'number') ok('filteredReviewCount 存在')
   else fail('缺少 filteredReviewCount')
 
-  if (page1.totalReviewCount > page1.filteredReviewCount && page1.reviews.length > 0) {
-    const last = page1.reviews[page1.reviews.length - 1]!
-    const olderProbe = await queryGoodReviews({
-      shop,
-      limit: 5,
-      cursor: page1.nextCursor ?? undefined,
-    })
-    if (page1.hasMore || olderProbe.reviews.length > 0) {
-      ok('最近 3 天结束后仍可继续分页加载更早好评')
+  if (page1.totalReviewCount > page1.filteredReviewCount) {
+    if (page1.reviews.length === 0) {
+      if (page1.hasMore && page1.nextCursor) {
+        const historyPage = await queryGoodReviews({
+          shop,
+          limit: 5,
+          cursor: page1.nextCursor,
+        })
+        if (historyPage.reviews.length > 0) {
+          ok('最近 3 天为空时仍可通过 cursor 加载更早好评')
+        } else {
+          fail('最近 3 天为空且 hasMore，但 cursor 未返回历史好评')
+        }
+      } else {
+        fail('最近 3 天为空但店铺有历史好评，hasMore/cursor 未开放')
+      }
     } else {
-      fail('店铺有更早好评但 hasMore/cursor 未开放继续加载')
-    }
-    if (last.reviewTime && olderProbe.reviews.every((r) => !r.reviewTime || r.reviewTime <= last.reviewTime)) {
-      ok('续页时间不晚于上一页最后一条')
+      const last = page1.reviews[page1.reviews.length - 1]!
+      const olderProbe = await queryGoodReviews({
+        shop,
+        limit: 5,
+        cursor: page1.nextCursor ?? undefined,
+      })
+      if (page1.hasMore || olderProbe.reviews.length > 0) {
+        ok('最近 3 天结束后仍可继续分页加载更早好评')
+      } else {
+        fail('店铺有更早好评但 hasMore/cursor 未开放继续加载')
+      }
+      if (last.reviewTime && olderProbe.reviews.every((r) => !r.reviewTime || r.reviewTime <= last.reviewTime)) {
+        ok('续页时间不晚于上一页最后一条')
+      }
     }
   } else {
     ok('最近 3 天已覆盖全部或数据不足，跳过历史续页探测')

@@ -369,19 +369,21 @@ export async function queryGoodReviews(params?: {
     minProductScore: params?.minProductScore,
     materialTag: params?.materialTag,
   }
-  const decodedCursor = params?.cursor?.trim()
-    ? decodeGoodReviewCursor(params.cursor.trim())
-    : null
+  const rawCursor = params?.cursor?.trim() || ''
+  const decodedCursor = rawCursor ? decodeGoodReviewCursor(rawCursor) : null
   const { rangeStart, rangeEnd } = resolveReviewRange({
     days: params?.days,
     startDate: params?.startDate,
     endDate: params?.endDate,
   })
   const recentFilteredWhere = buildFilteredWhere({ shopKey, rangeStart, rangeEnd, filters })
+  // 非法 cursor 不要回落到「最近 N 天」首屏，否则加载更多会反复空转
   const pageWhere =
     decodedCursor != null
       ? buildCursorWhere(decodedCursor, buildShopReviewBaseWhere({ shopKey, filters }))
-      : recentFilteredWhere
+      : rawCursor
+        ? buildShopReviewBaseWhere({ shopKey, filters })
+        : recentFilteredWhere
 
   const reviewWhereAll = shopKey ? { shopKey } : undefined
 
@@ -401,6 +403,7 @@ export async function queryGoodReviews(params?: {
   let hasMore = reviewRows.length > limit
   const pageRows = hasMore ? reviewRows.slice(0, limit) : reviewRows
   const lastRow = pageRows[pageRows.length - 1]
+  const historyBaseWhere = buildShopReviewBaseWhere({ shopKey, filters })
 
   if (!hasMore && lastRow?.reviewTime) {
     const olderWhere = buildCursorWhere(
@@ -409,20 +412,35 @@ export async function queryGoodReviews(params?: {
         syncedAt: lastRow.syncedAt.toISOString(),
         id: lastRow.id,
       },
-      buildShopReviewBaseWhere({ shopKey, filters }),
+      historyBaseWhere,
     )
     const olderCount = await prisma.goodReview.count({ where: olderWhere })
     hasMore = olderCount > 0
   }
 
+  // 最近 N 天窗口为空时，仍开放「加载更早」：用 rangeStart 作为哨兵游标
+  let emptyWindowHistoryCursor: string | null = null
+  if (!hasMore && !lastRow && decodedCursor == null) {
+    const historyCount = await prisma.goodReview.count({ where: historyBaseWhere })
+    if (historyCount > 0) {
+      hasMore = true
+      emptyWindowHistoryCursor = encodeGoodReviewCursor({
+        reviewTime: rangeStart.toISOString(),
+        syncedAt: new Date(8.64e15).toISOString(),
+        id: '\uffff',
+      })
+    }
+  }
+
   const nextCursor =
-    hasMore && lastRow?.reviewTime
+    emptyWindowHistoryCursor ??
+    (hasMore && lastRow?.reviewTime
       ? encodeGoodReviewCursor({
           reviewTime: lastRow.reviewTime.toISOString(),
           syncedAt: lastRow.syncedAt.toISOString(),
           id: lastRow.id,
         })
-      : null
+      : null)
 
   const snapshotByKey = new Map(snapshotRows.map((row) => [row.shopKey, row]))
   const shops: GoodReviewShopView[] = GOOD_REVIEW_SHOPS.map((def) => {

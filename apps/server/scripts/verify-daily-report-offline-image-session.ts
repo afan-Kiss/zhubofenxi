@@ -32,7 +32,7 @@ async function main() {
   assert.equal(card!.liveDurationMinutes, 0)
   assert.equal(card!.coverClickRate, null)
   assert.equal(card!.id, 'offline::逸凡::2026-07-18')
-  console.log('  ✓ 线下卡片含 GMV/笔数，无发货与流量指标')
+  console.log('  ✓ 线下卡片含 GMV/成交单数，无发货与流量指标')
 
   console.log('verify-daily-report-offline-image-session: OK')
 }

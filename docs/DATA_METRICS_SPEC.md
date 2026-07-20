@@ -166,7 +166,7 @@ npm run accept:gmv:fast
 | 去重 | 第一层 `shopCode::liveId` 保留时长更长/字段更完整者；第二层同店同日重叠 ≥30 分钟合并 |
 | 无真实直播 | 主播行 `liveTimeRange` 显示「未读取到直播场次」，流量指标为 null（前端 `--`），排班时段仍可单独展示 |
 | 调试接口 | `GET /api/board/daily-report/debug-live-sessions?date=YYYY-MM-DD`（只读排查） |
-| **线下 GMV（逸凡）** | 当日有计入业绩的线下成交时，日报图片总览展示「线下 GMV」，并追加逸凡线下卡片；**不**计入真实发货；直播主播列表仍不含 `YIFAN_MANUAL`（由 `buildDailyReport` 单独追加） |
+| **线下 GMV（逸凡）** | 当日有计入业绩的线下成交时，日报图片总览展示「线下 GMV」金额与「线下成交」单数，并追加逸凡线下卡片（成交单数）；**不**计入真实发货 / 真实卖出；直播主播列表仍不含 `YIFAN_MANUAL`（由 `buildDailyReport` 单独追加） |
 
 ### 11.1 订单归属优先级（6.13 起，上海时区）
 

@@ -144,12 +144,20 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(
               </strong>
             </span>
             {showOffline ? (
-              <span>
-                线下 GMV{' '}
-                <strong className="tabular-nums text-slate-900">
-                  {formatMoney(data.summary.offlineGmvYuan ?? 0)}
-                </strong>
-              </span>
+              <>
+                <span>
+                  线下 GMV{' '}
+                  <strong className="tabular-nums text-slate-900">
+                    {formatMoney(data.summary.offlineGmvYuan ?? 0)}
+                  </strong>
+                </span>
+                <span>
+                  线下成交{' '}
+                  <strong className="tabular-nums text-slate-900">
+                    {formatOrderCount(data.summary.offlineDealCount ?? 0)}
+                  </strong>
+                </span>
+              </>
             ) : null}
             <span>
               直播场次{' '}

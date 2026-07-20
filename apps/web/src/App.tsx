@@ -17,12 +17,13 @@ import { RequireAuth } from './components/auth/RequireAuth'
 import { AmountDisplayProvider } from './providers/AmountDisplayProvider'
 import { AuthProvider } from './providers/AuthProvider'
 import { loadAndApplyAppFavicon } from './lib/app-favicon'
+import { lazyWithChunkReload } from './lib/lazy-with-chunk-reload'
 
-const GoodReviewsPage = React.lazy(() =>
+const GoodReviewsPage = lazyWithChunkReload(() =>
   import('./pages/good-reviews/GoodReviewsPage').then((m) => ({ default: m.GoodReviewsPage })),
 )
 
-const RefundAnalysisPage = React.lazy(() =>
+const RefundAnalysisPage = lazyWithChunkReload(() =>
   import('./pages/refund-analysis/RefundAnalysisPage').then((m) => ({
     default: m.RefundAnalysisPage,
   })),

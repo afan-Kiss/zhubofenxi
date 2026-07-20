@@ -21,6 +21,21 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    const msg = error.message || ''
+    const isChunkError =
+      /Failed to fetch dynamically imported module|Importing a module script failed|Loading chunk [\d]+ failed|error loading dynamically imported module/i.test(
+        msg,
+      )
+    if (isChunkError) {
+      const key = `chunk-reload:${window.location.pathname}`
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, '1')
+        window.location.reload()
+        return
+      }
+      sessionStorage.removeItem(key)
+    }
+
     void apiRequest('/api/audit/client-error', {
       method: 'POST',
       body: JSON.stringify({

@@ -106,8 +106,48 @@ install_deps_build() {
     export VITE_BASE_PATH="${bp}/"
     log "VITE_BASE_PATH=$VITE_BASE_PATH"
   fi
+  preserve_lazy_chunk_aliases
   npm run build
   verify_web_build
+  restore_lazy_chunk_aliases
+}
+
+# 部署后旧浏览器可能仍请求上一版 lazy chunk；记录旧文件名并在构建后做软链兼容。
+preserve_lazy_chunk_aliases() {
+  local assets="$DEPLOY_DIR/apps/web/dist/assets"
+  local stamp="/tmp/zhubo-prev-lazy-chunks.list"
+  : >"$stamp"
+  ls "$assets"/GoodReviewsPage-*.js "$assets"/RefundAnalysisPage-*.js 2>/dev/null \
+    | xargs -n1 basename 2>/dev/null >>"$stamp" || true
+  # 已知曾上线过的 hash（用户报错里出现过）
+  printf '%s\n' \
+    'GoodReviewsPage-CYaT68H9.js' \
+    'GoodReviewsPage-BbB05uS8.js' \
+    'GoodReviewsPage-BivPfoWR.js' \
+    'GoodReviewsPage-BTm8l94W.js' \
+    'GoodReviewsPage-BH10exK1.js' \
+    >>"$stamp" || true
+  sort -u "$stamp" -o "$stamp" 2>/dev/null || true
+}
+
+restore_lazy_chunk_aliases() {
+  local assets="$DEPLOY_DIR/apps/web/dist/assets"
+  local stamp="/tmp/zhubo-prev-lazy-chunks.list"
+  [[ -f "$stamp" ]] || return 0
+  local new_good new_refund
+  new_good="$(ls "$assets"/GoodReviewsPage-*.js 2>/dev/null | head -1 || true)"
+  new_refund="$(ls "$assets"/RefundAnalysisPage-*.js 2>/dev/null | head -1 || true)"
+  while IFS= read -r old; do
+    [[ -z "$old" ]] && continue
+    [[ -e "$assets/$old" ]] && continue
+    if [[ "$old" == GoodReviewsPage-* && -n "$new_good" ]]; then
+      ln -sf "$(basename "$new_good")" "$assets/$old"
+      log "lazy alias: $old -> $(basename "$new_good")"
+    elif [[ "$old" == RefundAnalysisPage-* && -n "$new_refund" ]]; then
+      ln -sf "$(basename "$new_refund")" "$assets/$old"
+      log "lazy alias: $old -> $(basename "$new_refund")"
+    fi
+  done <"$stamp"
 }
 
 verify_web_build() {

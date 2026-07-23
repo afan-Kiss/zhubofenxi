@@ -99,8 +99,20 @@ export interface GoodReviewSyncResult {
 export const GOOD_REVIEWS_DEFAULT_DAYS = 3
 export const GOOD_REVIEWS_PAGE_LIMIT = 30
 export const GOOD_REVIEWS_MAX_LIMIT = 50
+/** 超过此时长未同步，打开好评中心时自动拉一次近 3 天 */
+export const GOOD_REVIEWS_STALE_SYNC_MS = 6 * 60 * 60 * 1000
 
-export const GOOD_REVIEW_UI_VERSION = 'good-review-material-v3'
+export const GOOD_REVIEW_UI_VERSION = 'good-review-material-v4'
+
+export function isGoodReviewSyncStale(
+  lastSyncedAt: string | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!lastSyncedAt) return true
+  const t = Date.parse(lastSyncedAt)
+  if (!Number.isFinite(t)) return true
+  return nowMs - t >= GOOD_REVIEWS_STALE_SYNC_MS
+}
 
 /** 列表/详情缩略图：商品图优先，否则买家晒图第一张 */
 export function resolveGoodReviewThumb(review: {

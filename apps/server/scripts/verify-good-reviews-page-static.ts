@@ -33,10 +33,10 @@ function main(): void {
   else fail('GoodReviewsPage 缺少 cursor/hasMore')
   if (page.includes('IntersectionObserver')) ok('GoodReviewsPage 无限滚动')
   else fail('GoodReviewsPage 缺少 IntersectionObserver')
-  if (!page.includes('syncCurrentShop') && !page.includes('autoSyncStatusByShopRef')) {
-    ok('GoodReviewsPage 已移除打开页自动同步')
+  if (page.includes('isGoodReviewSyncStale') || page.includes('silentBanner')) {
+    ok('GoodReviewsPage 含过期自动同步近 3 天')
   } else {
-    fail('GoodReviewsPage 仍含自动同步逻辑')
+    fail('GoodReviewsPage 缺少过期自动同步')
   }
   if (page.includes('AbortController') && page.includes('requestSeqRef')) {
     ok('GoodReviewsPage AbortController + requestSeqRef')
@@ -70,17 +70,17 @@ function main(): void {
     page.includes('自动更新失败') ||
     page.includes('打开页面会自动尝试更新')
   ) {
-    fail('仍保留打开页自动更新提示')
+    fail('仍保留旧版打开页自动更新提示')
   } else {
-    ok('无打开页自动更新提示')
+    ok('无旧版打开页自动更新提示')
   }
   if (
-    page.includes('当前先展示本地已有好评') ||
+    page.includes('自动同步') ||
     page.includes('最后同步')
   ) {
-    ok('背景自动同步失败有用户可见提示')
+    ok('有同步说明与最后同步时间')
   } else {
-    fail('缺少本地列表说明')
+    fail('缺少同步说明')
   }
   if (page.includes('累计评价总数') && page.includes('最近 3 天')) {
     ok('统计卡片区分累计与最近 3 天')

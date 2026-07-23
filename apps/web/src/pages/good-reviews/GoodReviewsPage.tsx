@@ -14,6 +14,7 @@ import {
   GOOD_REVIEW_SHOP_SYNC_ORDER,
   GOOD_REVIEW_UI_VERSION,
   getGoodReviewShopTabIndex,
+  isGoodReviewSyncStale,
   mergeGoodReviewSyncResults,
   resolveGoodReviewThumb,
   type GoodReviewItemView,
@@ -205,8 +206,11 @@ export const GoodReviewsPage: React.FC = () => {
   const inFlightCursorRef = useRef<string | null>(null)
   const queryFiltersRef = useRef(queryFilters)
   const mountedRef = useRef(true)
+  const autoSyncOnceRef = useRef(false)
+  const syncingRef = useRef(false)
 
   queryFiltersRef.current = queryFilters
+  syncingRef.current = syncing
 
   useEffect(() => {
     mountedRef.current = true
@@ -398,12 +402,19 @@ export const GoodReviewsPage: React.FC = () => {
     return shops.find((s) => s.shopKey === activeShop) ?? shops[0] ?? null
   }, [shops, activeShop])
 
-  const handleSyncAll = async () => {
+  const handleSyncAll = useCallback(async (opts?: { silentBanner?: boolean }) => {
+    if (syncingRef.current) return
     setSyncing(true)
     setSyncAllProgress(0)
     setSyncAllLabel('准备同步全部店铺...')
     setError('')
-    setBanner(null)
+    if (!opts?.silentBanner) setBanner(null)
+    else {
+      setBanner({
+        tone: 'warning',
+        text: '本地近 3 天好评可能不是最新，正在自动同步平台数据…',
+      })
+    }
     const startedAt = new Date().toISOString()
     const shopResults: GoodReviewSyncResult['shops'] = []
     const total = SHOP_TAB_ORDER.length
@@ -450,7 +461,17 @@ export const GoodReviewsPage: React.FC = () => {
         setSyncAllLabel('')
       }, 600)
     }
-  }
+  }, [activeShop, loadFirstPage, shopNameByKey])
+
+  useEffect(() => {
+    if (initialLoading || syncing) return
+    if (autoSyncOnceRef.current) return
+    const stale = isGoodReviewSyncStale(lastSyncedAt)
+    const emptyRecent = filteredReviewCount === 0
+    if (!stale && !emptyRecent) return
+    autoSyncOnceRef.current = true
+    void handleSyncAll({ silentBanner: true })
+  }, [initialLoading, syncing, lastSyncedAt, filteredReviewCount, handleSyncAll])
 
   const lastSyncedLabel = formatLocalDateTime(lastSyncedAt)
   const refreshBusy = refreshing
@@ -497,12 +518,12 @@ export const GoodReviewsPage: React.FC = () => {
               />
             </div>
             <p className="mt-2 text-xs text-slate-500">
-              打开页面先读本地缓存；需要拉平台最新数据时，再点「同步全部店铺好评」。
+              打开页面先读本地缓存；若超过 6 小时未同步或近 3 天为空，会自动同步一次平台近 3 天好评。也可手动点「同步全部店铺好评」。
             </p>
           </div>
         </div>
         <p className="max-w-3xl text-sm text-slate-500">
-          默认先展示最近 3 天好评；继续下滑会自动加载更早的本地好评，无需手动刷新。
+          默认先展示最近 3 天好评；继续下滑会自动加载更早的本地好评。
         </p>
         <p className="text-sm text-slate-600">
           {lastSyncedLabel ? `最后同步：${lastSyncedLabel}` : '还没有同步过，可先查看本地已有好评'}

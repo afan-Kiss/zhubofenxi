@@ -77,23 +77,31 @@ export async function syncGoodReviewsForShop(
 
   const env = reviewPayload.managerEnvelope
   const managerSyncedCount = reviewPayload.reviews.length
-  let managerSuccess = managerSyncedCount > 0
-  if (!managerSuccess && env) {
-    if (env.success && env.listCount > 0) managerSuccess = true
-    else if (env.success && env.total != null && env.total > 0 && managerSyncedCount === 0) {
-      managerError = managerError ?? `接口返回 total=${env.total} 但解析明细为 0 条`
-    } else if (!env.success) {
-      managerError =
-        managerError ??
+  const daysWindow = options?.days != null && options.days > 0
+  let managerSuccess = managerSyncedCount > 0 || Boolean(env?.success)
+  let managerErrorFinal = managerError
+  if (!managerSyncedCount && env) {
+    if (env.success) {
+      // days 窗口内本来就没有新评价：不算明细失败（total 多为全量累计）
+      if (!daysWindow && env.total != null && env.total > 0) {
+        managerErrorFinal =
+          managerErrorFinal ?? `接口返回 total=${env.total} 但解析明细为 0 条`
+        managerSuccess = false
+      }
+    } else {
+      managerSuccess = false
+      managerErrorFinal =
+        managerErrorFinal ??
         `review_manager 失败：${env.platformMsg ?? '未知'}（code=${env.platformCode ?? 'n/a'}）`
     }
-  } else if (!managerSuccess && managerSyncedCount === 0 && !managerError) {
-    managerError = 'review_manager 未返回评价明细'
+  } else if (!managerSyncedCount && !env && !managerErrorFinal && !daysWindow) {
+    managerErrorFinal = 'review_manager 未返回评价明细'
+    managerSuccess = false
   }
 
   const statsApiOk = shopScoreSuccess || countSuccess || overviewSuccess
 
-  if (!statsApiOk && managerSyncedCount === 0) {
+  if (!statsApiOk && managerSyncedCount === 0 && !managerSuccess) {
     return {
       shopKey: shop.shopKey,
       shopName: shop.shopName,
@@ -103,7 +111,7 @@ export async function syncGoodReviewsForShop(
       overviewSuccess,
       managerSuccess: false,
       managerSyncedCount: 0,
-      managerError,
+      managerError: managerErrorFinal,
       platformCode: env?.platformCode ?? undefined,
       platformMsg: env?.platformMsg ?? undefined,
       error: partialErrors.join('；') || '同步失败',
@@ -129,8 +137,11 @@ export async function syncGoodReviewsForShop(
     .filter((d): d is Date => d instanceof Date && !Number.isNaN(d.getTime()))
     .sort((a, b) => b.getTime() - a.getTime())[0]
 
-  if (stats.goodReviewCount > 0 && managerSyncedCount === 0) {
-    partialErrors.push(`统计已同步（${stats.goodReviewCount} 条好评），明细同步失败：${managerError ?? '未知原因'}`)
+  // 仅在列表接口真正失败时提示；近 N 天窗口为空属于正常
+  if (!managerSuccess && managerErrorFinal) {
+    partialErrors.push(`好评明细同步失败：${managerErrorFinal}`)
+  } else if (!daysWindow && stats.goodReviewCount > 0 && managerSyncedCount === 0 && managerErrorFinal) {
+    partialErrors.push(`统计已同步（${stats.goodReviewCount} 条好评），明细同步失败：${managerErrorFinal}`)
   }
 
   if (reviewPayload.truncated && reviewPayload.warning) {
@@ -152,7 +163,7 @@ export async function syncGoodReviewsForShop(
     overviewSuccess,
     managerSuccess,
     managerSyncedCount,
-    managerError,
+    managerError: managerErrorFinal,
     platformCode: env?.platformCode ?? undefined,
     platformMsg: env?.platformMsg ?? undefined,
     error: partialErrors.length > 0 ? partialErrors.join('；') : undefined,

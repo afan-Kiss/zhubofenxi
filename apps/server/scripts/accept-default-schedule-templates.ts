@@ -33,6 +33,42 @@ async function main() {
   })
   assert.equal(restored.templates.length, before.templates.length)
 
+  // 完全相同的重复行应被去重后保存
+  if (before.templates.length >= 1) {
+    const base = before.templates[0]!
+    const withDup = await saveCurrentDefaultTemplates({
+      asOfDate: before.date,
+      templates: [
+        ...before.templates.map((t) => ({
+          id: t.id,
+          anchorId: t.anchorId,
+          anchorName: t.anchorName,
+          shopName: t.shopName,
+          liveRoomName: t.liveRoomName,
+          startTime: t.startTime,
+          endTime: t.endTime,
+          note: t.note,
+          sortOrder: t.sortOrder,
+        })),
+        {
+          anchorId: base.anchorId,
+          anchorName: base.anchorName,
+          shopName: base.shopName,
+          liveRoomName: base.liveRoomName,
+          startTime: base.startTime,
+          endTime: base.endTime,
+          note: base.note,
+          sortOrder: 999,
+        },
+      ],
+    })
+    assert.equal(
+      withDup.templates.length,
+      before.templates.length,
+      '提交重复行后数量应不变',
+    )
+  }
+
   // 改备注再还原（避免改直播间触发同店冲突）
   const mid = await saveCurrentDefaultTemplates({
     asOfDate: before.date,

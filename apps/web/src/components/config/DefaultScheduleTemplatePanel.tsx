@@ -32,12 +32,23 @@ function makeLocalKey(): string {
   return `n-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+function resolveSelectAnchorId(
+  row: Pick<TemplateRow, 'anchorId' | 'anchorName'>,
+  anchors: AnchorOption[],
+): string {
+  if (row.anchorId && anchors.some((a) => a.id === row.anchorId)) return row.anchorId
+  const byName = anchors.find((a) => a.name === row.anchorName)
+  if (byName) return byName.id
+  return row.anchorName || ''
+}
+
 export const DefaultScheduleTemplatePanel: React.FC = () => {
   const [rows, setRows] = useState<TemplateRow[]>([])
   const [anchors, setAnchors] = useState<AnchorOption[]>([])
   const [asOfDate, setAsOfDate] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const savingRef = React.useRef(false)
   const [message, setMessage] = useState<Flash | null>(null)
 
   const scheduleAnchors = useMemo(
@@ -64,20 +75,25 @@ export const DefaultScheduleTemplatePanel: React.FC = () => {
         apiRequest<AnchorOption[]>('/api/anchors'),
       ])
       setAsOfDate(tpl.date)
-      setAnchors(Array.isArray(list) ? list : [])
+      const anchorList = Array.isArray(list) ? list : []
+      setAnchors(anchorList)
       setRows(
-        (tpl.templates ?? []).map((t, i) => ({
-          id: t.id,
-          localKey: t.id || makeLocalKey(),
-          anchorId: t.anchorId ?? null,
-          anchorName: t.anchorName,
-          shopName: t.shopName,
-          liveRoomName: t.liveRoomName || t.shopName,
-          startTime: t.startTime,
-          endTime: t.endTime,
-          note: t.note ?? '',
-          sortOrder: t.sortOrder ?? (i + 1) * 10,
-        })),
+        (tpl.templates ?? []).map((t, i) => {
+          const name = t.anchorName
+          const byName = anchorList.find((a) => a.name === name)
+          return {
+            id: t.id,
+            localKey: t.id || makeLocalKey(),
+            anchorId: t.anchorId ?? byName?.id ?? null,
+            anchorName: name,
+            shopName: t.shopName,
+            liveRoomName: t.liveRoomName || t.shopName,
+            startTime: t.startTime,
+            endTime: t.endTime,
+            note: t.note ?? '',
+            sortOrder: t.sortOrder ?? (i + 1) * 10,
+          }
+        }),
       )
     } catch (e) {
       setMessage({
@@ -121,6 +137,8 @@ export const DefaultScheduleTemplatePanel: React.FC = () => {
   }
 
   const save = async () => {
+    if (savingRef.current) return
+    savingRef.current = true
     setSaving(true)
     setMessage(null)
     try {
@@ -146,18 +164,21 @@ export const DefaultScheduleTemplatePanel: React.FC = () => {
       )
       setAsOfDate(saved.date)
       setRows(
-        (saved.templates ?? []).map((t, i) => ({
-          id: t.id,
-          localKey: t.id || makeLocalKey(),
-          anchorId: t.anchorId ?? null,
-          anchorName: t.anchorName,
-          shopName: t.shopName,
-          liveRoomName: t.liveRoomName || t.shopName,
-          startTime: t.startTime,
-          endTime: t.endTime,
-          note: t.note ?? '',
-          sortOrder: t.sortOrder ?? (i + 1) * 10,
-        })),
+        (saved.templates ?? []).map((t, i) => {
+          const byName = scheduleAnchors.find((a) => a.name === t.anchorName)
+          return {
+            id: t.id,
+            localKey: t.id || makeLocalKey(),
+            anchorId: t.anchorId ?? byName?.id ?? null,
+            anchorName: t.anchorName,
+            shopName: t.shopName,
+            liveRoomName: t.liveRoomName || t.shopName,
+            startTime: t.startTime,
+            endTime: t.endTime,
+            note: t.note ?? '',
+            sortOrder: t.sortOrder ?? (i + 1) * 10,
+          }
+        }),
       )
       setMessage({
         type: 'success',
@@ -169,6 +190,7 @@ export const DefaultScheduleTemplatePanel: React.FC = () => {
         text: e instanceof Error ? e.message : '保存失败',
       })
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
@@ -236,7 +258,7 @@ export const DefaultScheduleTemplatePanel: React.FC = () => {
                 <tr key={row.localKey} className="border-t border-slate-100">
                   <td className="px-3 py-2">
                     <select
-                      value={row.anchorId || row.anchorName}
+                      value={resolveSelectAnchorId(row, scheduleAnchors)}
                       onChange={(e) => {
                         const v = e.target.value
                         const hit = scheduleAnchors.find((a) => a.id === v || a.name === v)

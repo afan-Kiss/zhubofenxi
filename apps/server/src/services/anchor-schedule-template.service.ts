@@ -646,7 +646,7 @@ export async function saveCurrentDefaultTemplates(params: {
     throw new Error('日期格式须为 YYYY-MM-DD')
   }
 
-  const draft = params.templates.map((t, i) => ({
+  const draftRaw = params.templates.map((t, i) => ({
     ...t,
     anchorName: t.anchorName.trim(),
     shopName: t.shopName.trim(),
@@ -656,6 +656,19 @@ export async function saveCurrentDefaultTemplates(params: {
     sortOrder: t.sortOrder ?? (i + 1) * 10,
     note: t.note?.trim() || null,
   }))
+
+  // 去掉完全相同的行（双击保存 / 误点新增容易产生）
+  const seenSlot = new Set<string>()
+  const draft: typeof draftRaw = []
+  for (const row of draftRaw) {
+    const key = `${row.anchorName}|${row.shopName}|${row.liveRoomName}|${row.startTime}|${row.endTime}`
+    if (seenSlot.has(key)) continue
+    seenSlot.add(key)
+    draft.push(row)
+  }
+  if (draft.length === 0) {
+    throw new Error('默认排班不能为空')
+  }
 
   const validation = validateScheduleDraft(dateKey, draft)
   if (!validation.ok) {
@@ -676,8 +689,13 @@ export async function saveCurrentDefaultTemplates(params: {
     }
 
     for (const row of draft) {
-      const resolvedAnchorId =
-        (row.anchorId?.trim() || null) ?? (await resolveAnchorIdByName(row.anchorName))
+      let resolvedAnchorId = row.anchorId?.trim() || null
+      if (!resolvedAnchorId) {
+        resolvedAnchorId = await resolveAnchorIdByName(row.anchorName)
+      }
+      if (!resolvedAnchorId) {
+        throw new Error(`找不到可用主播「${row.anchorName}」，请重新选择后再保存`)
+      }
       if (row.id) {
         const existing = await tx.anchorScheduleTemplate.findUnique({ where: { id: row.id } })
         if (!existing) throw new Error(`排班模板不存在：${row.id}`)

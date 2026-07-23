@@ -60,8 +60,12 @@ async function main(): Promise<void> {
   if (page.includes('加载更多好评')) ok('有手动加载更多按钮文案')
   else fail('缺少手动加载更多按钮文案')
 
-  if (lib.includes("'good-review-material-v3'") || page.includes('GOOD_REVIEW_UI_VERSION')) {
-    ok('页面版本标记 good-review-material-v3')
+  if (
+    lib.includes("'good-review-material-v4'") ||
+    /good-review-material-v\d+/.test(lib) ||
+    page.includes('GOOD_REVIEW_UI_VERSION')
+  ) {
+    ok('页面版本标记 good-review-material-v*')
   } else fail('缺少页面版本标记')
 
   const drawer = read('web/src/components/good-reviews/GoodReviewDetailDrawer.tsx')

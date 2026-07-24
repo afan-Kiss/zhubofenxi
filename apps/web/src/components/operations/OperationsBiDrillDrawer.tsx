@@ -96,28 +96,36 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
       open={open}
       onClose={onClose}
       labelledBy="ops-order-detail-title"
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+      mobileFullscreen
+      zIndexClass="z-[100]"
+      backdropClassName="bg-black/35"
+      panelClassName="border border-slate-200/80 bg-white max-sm:pt-[env(safe-area-inset-top)] max-sm:pb-[env(safe-area-inset-bottom)]"
     >
-      <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-start justify-between border-b border-slate-200 px-4 py-3">
+      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        <div className="relative z-[1] flex shrink-0 items-start justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
           <div className="min-w-0 pr-2">
             <h2 id="ops-order-detail-title" className="text-base font-semibold text-slate-900">
               {payload?.title ?? '订单明细'}
             </h2>
-            <p className="mt-1 text-xs text-slate-500">{payload?.subtitle}</p>
-            {payload?.explanation ? (
-              <p className="mt-2 text-xs text-slate-600">{payload.explanation}</p>
-            ) : null}
+            <p className="mt-1 break-words text-xs text-slate-500">{payload?.subtitle}</p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-full border border-slate-200 px-3 py-1 text-sm text-slate-600"
+            aria-label="关闭弹窗"
+            title="关闭"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 text-lg leading-none text-slate-600 transition hover:bg-slate-50 sm:h-9 sm:w-9"
           >
-            关闭
+            ×
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4">
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-4">
+          {payload?.explanation ? (
+            <p className="mb-3 break-words text-xs text-slate-600">{payload.explanation}</p>
+          ) : null}
           {loading && !payload ? (
             <p className="py-8 text-center text-sm text-slate-500">正在加载订单明细…</p>
           ) : null}
@@ -185,8 +193,8 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                     ))}
                   </div>
 
-                  <div className="hidden overflow-hidden rounded-xl border border-slate-200 md:block">
-                    <div className="max-h-[min(52vh,520px)] overflow-y-auto overflow-x-hidden">
+                  <div className="hidden overflow-x-auto rounded-xl border border-slate-200 md:block">
+                    <div className="overflow-x-hidden">
                       <table className="w-full table-fixed border-collapse text-left text-xs">
                         <colgroup>
                           <col className="w-[9%]" />
@@ -278,32 +286,32 @@ export const OperationsBiDrillDrawer: React.FC<Props> = ({
                 </>
               )}
 
-              {payload.pagination.totalPages > 1 ? (
-                <div className="flex items-center gap-2 text-sm">
-                  <button
-                    type="button"
-                    disabled={page <= 1 || loading}
-                    onClick={() => onPageChange(page - 1)}
-                    className="rounded border border-slate-200 px-2 py-1 disabled:opacity-50"
-                  >
-                    上一页
-                  </button>
-                  <span className="text-slate-600">
-                    第 {page} / {payload.pagination.totalPages} 页（共 {payload.pagination.total} 条）
-                  </span>
-                  <button
-                    type="button"
-                    disabled={page >= payload.pagination.totalPages || loading}
-                    onClick={() => onPageChange(page + 1)}
-                    className="rounded border border-slate-200 px-2 py-1 disabled:opacity-50"
-                  >
-                    下一页
-                  </button>
-                </div>
-              ) : null}
             </div>
           ) : null}
         </div>
+        {payload && payload.pagination.totalPages > 1 ? (
+          <div className="relative z-[1] flex shrink-0 items-center gap-2 border-t border-slate-100 bg-white px-4 py-3 text-sm">
+            <button
+              type="button"
+              disabled={page <= 1 || loading}
+              onClick={() => onPageChange(page - 1)}
+              className="rounded border border-slate-200 px-2 py-1 disabled:opacity-50"
+            >
+              上一页
+            </button>
+            <span className="text-slate-600">
+              第 {page} / {payload.pagination.totalPages} 页（共 {payload.pagination.total} 条）
+            </span>
+            <button
+              type="button"
+              disabled={page >= payload.pagination.totalPages || loading}
+              onClick={() => onPageChange(page + 1)}
+              className="rounded border border-slate-200 px-2 py-1 disabled:opacity-50"
+            >
+              下一页
+            </button>
+          </div>
+        ) : null}
       </div>
     </OperationsViewportModal>
   )

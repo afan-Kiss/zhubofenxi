@@ -203,16 +203,17 @@
   animation-delay: calc(min(var(--i, 0), 12) * 35ms);
 }
 
-.board-drawer-panel {
-  width: min(1180px, 96vw);
-  max-width: 96vw;
+.board-modal-panel {
+  /* size ruled by ViewportModal / BoardDrawerShell classes */
 }
 
-@media (max-width: 640px) {
-  .board-drawer-panel {
-    width: 100%;
-    max-width: 100%;
-  }
+.board-modal-content {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* legacy alias kept for any residual references; no slide-from-right */
+.board-drawer-panel {
+  /* deprecated: use board-modal-panel */
 }
 
 .board-drawer-enter {
@@ -375,13 +376,11 @@
 @keyframes opsViewportModalPanelIn {
   from {
     opacity: 0;
-    transform: translateY(14px) scale(0.985);
-    filter: blur(3px);
+    transform: scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0);
+    transform: scale(1);
   }
 }
 

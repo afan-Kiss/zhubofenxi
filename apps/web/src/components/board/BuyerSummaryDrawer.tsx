@@ -98,6 +98,7 @@ export const BuyerSummaryDrawer: React.FC<Props> = ({
       title={`${title}${countSuffix}`}
       subtitle={data?.formula}
       testId="buyer-summary-drawer"
+      scrollResetKey={page}
       footer={
         data && data.pagination.total > data.pagination.pageSize ? (
           <Pagination
@@ -170,14 +171,6 @@ export const BuyerSummaryDrawer: React.FC<Props> = ({
               })}
             </ul>
           )}
-          {data.pagination.total <= data.pagination.pageSize && data.pagination.total > 0 ? (
-            <Pagination
-              page={data.pagination.page}
-              total={data.pagination.total}
-              pageSize={data.pagination.pageSize}
-              onPage={setPage}
-            />
-          ) : null}
         </div>
       ) : null}
     </BoardDrawerShell>

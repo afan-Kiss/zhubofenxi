@@ -79,7 +79,23 @@ export const MetricDetailDrawer: React.FC<Props> = ({
   }, [load])
 
   return (
-    <BoardDrawerShell open={open} onClose={onClose} title={data?.title ?? '指标明细'}>
+    <BoardDrawerShell
+      open={open}
+      onClose={onClose}
+      title={data?.title ?? '指标明细'}
+      scrollResetKey={page}
+      footer={
+        data ? (
+          <Pagination
+            page={page}
+            total={data.pagination.total}
+            pageSize={pageSize}
+            onPage={setPage}
+            disabled={loading}
+          />
+        ) : null
+      }
+    >
       {loading && !data ? (
         <p className="py-8 text-center text-xs text-slate-400">加载中…</p>
       ) : data ? (
@@ -162,13 +178,6 @@ export const MetricDetailDrawer: React.FC<Props> = ({
               </tbody>
             </table>
           </div>
-          <Pagination
-            page={page}
-            total={data.pagination.total}
-            pageSize={pageSize}
-            onPage={setPage}
-            disabled={loading}
-          />
         </div>
       ) : (
         <p className="py-8 text-center text-xs text-red-600">加载失败</p>

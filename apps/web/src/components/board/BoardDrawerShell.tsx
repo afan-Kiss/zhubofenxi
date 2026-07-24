@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react'
-import { createPortal } from 'react-dom'
+import React, { useEffect, useId, useRef } from 'react'
 import { X } from 'lucide-react'
+import { ViewportModal } from '../ui/ViewportModal'
 
 interface Props {
   open: boolean
@@ -11,8 +11,16 @@ interface Props {
   children: React.ReactNode
   footer?: React.ReactNode
   testId?: string
+  /** 变化时将内容区滚回顶部（如翻页） */
+  scrollResetKey?: string | number
+  /** 嵌套弹窗可抬高层级，避免与下层同 z-index 叠影 */
+  zIndexClass?: string
 }
 
+/**
+ * 业务明细弹窗壳（兼容旧名 BoardDrawerShell）。
+ * 居中 Modal：遮罩/Esc 不关闭，仅右上角 X；手机全屏。
+ */
 export const BoardDrawerShell: React.FC<Props> = ({
   open,
   onClose,
@@ -22,72 +30,70 @@ export const BoardDrawerShell: React.FC<Props> = ({
   children,
   footer,
   testId,
+  scrollResetKey,
+  zIndexClass = 'z-[100]',
 }) => {
-  const [visible, setVisible] = useState(false)
-  const [mounted, setMounted] = useState(false)
+  const titleId = useId()
+  const closeBtnRef = useRef<HTMLButtonElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setMounted(true)
-  }, [])
+    if (!open) return
+    contentRef.current?.scrollTo({ top: 0 })
+  }, [open, scrollResetKey])
 
-  useEffect(() => {
-    if (open) {
-      setVisible(true)
-      const prev = document.body.style.overflow
-      document.body.style.overflow = 'hidden'
-      return () => {
-        document.body.style.overflow = prev
-      }
-    }
-    const t = window.setTimeout(() => setVisible(false), 280)
-    return () => window.clearTimeout(t)
-  }, [open])
-
-  if (!mounted || (!open && !visible)) return null
-
-  return createPortal(
-    <div
-      className={`fixed inset-0 z-[100] flex justify-end transition-opacity duration-300 ${
-        open ? 'opacity-100' : 'pointer-events-none opacity-0'
-      }`}
-      style={{ height: '100dvh', maxHeight: '100dvh' }}
-      aria-hidden={!open}
-      role="presentation"
+  return (
+    <ViewportModal
+      open={open}
+      onClose={onClose}
+      labelledBy={titleId}
+      closeOnBackdrop={false}
+      closeOnEscape={false}
+      mobileFullscreen
+      initialFocusRef={closeBtnRef}
+      zIndexClass={zIndexClass}
+      backdropClassName="bg-black/35"
+      panelClassName="border border-rose-100/80 bg-[#fffaf8] max-sm:pt-[env(safe-area-inset-top)] max-sm:pb-[env(safe-area-inset-bottom)]"
     >
-      <button
-        type="button"
-        className={`absolute inset-0 bg-black/30 backdrop-blur-[2px] transition-opacity duration-200 ${
-          open ? 'viewport-modal-backdrop opacity-100' : 'opacity-0'
-        }`}
-        onClick={onClose}
-        aria-label="关闭"
-      />
-      <aside
-        data-testid={testId}
-        className={`board-drawer-panel relative flex h-[100dvh] max-h-[100dvh] w-full flex-col bg-[#fffaf8] shadow-2xl transition-transform duration-300 ease-out ${
-          open ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
-        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-rose-100/80 px-4 py-3">
+      <div data-testid={testId} className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+        <header className="board-modal-header relative z-[1] flex shrink-0 items-start justify-between gap-3 border-b border-rose-100/80 bg-[#fffaf8] px-4 py-3 sm:px-5">
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
-            {subtitle ? <p className="mt-0.5 text-xs text-slate-500">{subtitle}</p> : null}
-            {headerExtra}
+            <h3 id={titleId} className="text-sm font-semibold text-slate-900 sm:text-base">
+              {title}
+            </h3>
+            {subtitle ? (
+              <p className="mt-0.5 break-words text-xs text-slate-500">{subtitle}</p>
+            ) : null}
           </div>
           <button
+            ref={closeBtnRef}
             type="button"
             onClick={onClose}
-            className="shrink-0 rounded-full p-1.5 text-slate-400 transition hover:bg-rose-50 hover:text-slate-700"
+            aria-label="关闭弹窗"
+            title="关闭"
+            className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-slate-400 transition hover:bg-rose-50 hover:text-slate-700 sm:h-9 sm:w-9"
           >
-            <X size={18} />
+            <X size={18} aria-hidden />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
+
+        <div
+          ref={contentRef}
+          className="board-modal-content min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain p-4 sm:p-5"
+        >
+          {headerExtra ? <div className="mb-4 min-w-0">{headerExtra}</div> : null}
+          <div className="min-w-0">{children}</div>
+        </div>
+
         {footer ? (
-          <div className="shrink-0 border-t border-rose-50 bg-[#fffaf8] p-3">{footer}</div>
+          <div className="board-modal-footer relative z-[1] shrink-0 border-t border-rose-50 bg-[#fffaf8] p-3 sm:px-5">
+            {footer}
+          </div>
         ) : null}
-      </aside>
-    </div>,
-    document.body,
+      </div>
+    </ViewportModal>
   )
 }
+
+/** 新名别名，便于后续逐步迁移调用方 */
+export const BoardModalShell = BoardDrawerShell

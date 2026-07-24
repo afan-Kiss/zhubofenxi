@@ -207,6 +207,7 @@
     "check:money": "tsx apps/server/scripts/acceptance/check-money-format.ts",
     "check:quality-return": "tsx apps/server/scripts/acceptance/check-quality-return.ts",
     "check:deprecated-api": "tsx apps/server/scripts/acceptance/check-deprecated-api.ts",
+    "verify:board-modal-shell": "tsx apps/server/scripts/acceptance/check-board-modal-shell.ts",
     "acceptance": "npm run check:business && npm run check:copy && npm run check:finance && npm run check:money && npm run check:quality-return && npm run check:deprecated-api && npm run build",
     "test:metrics": "tsx apps/server/scripts/metrics-acceptance/index.ts",
     "test:metrics:ci": "tsx apps/server/scripts/metrics-acceptance/ci-runner.ts",

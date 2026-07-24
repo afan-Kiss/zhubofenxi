@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { X } from 'lucide-react'
 import {
   centToDisplayYuan,
   fetchBossBillOrders,
   type BossBillOrderRow,
 } from '../../lib/boss-dashboard-api'
 import { formatDataFreshnessTime } from '../../lib/data-freshness'
+import { BoardDrawerShell } from '../board/BoardDrawerShell'
 
 interface Props {
   open: boolean
@@ -50,22 +50,15 @@ export const BossBillDetailDrawer: React.FC<Props> = ({ open, onClose }) => {
     void load()
   }, [open, load])
 
-  if (!open) return null
-
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/30">
-      <div className="flex h-full w-full max-w-xl flex-col bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-          <div>
-            <h3 className="text-base font-semibold text-slate-900">账单明细</h3>
-            <p className="text-xs text-slate-500">只读本地数据库，不请求平台</p>
-          </div>
-          <button type="button" className="rounded-full p-2 hover:bg-slate-100" onClick={onClose}>
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="flex flex-wrap gap-2 border-b border-slate-100 px-4 py-3">
+    <BoardDrawerShell
+      open={open}
+      onClose={onClose}
+      title="账单明细"
+      subtitle="只读本地数据库，不请求平台"
+      scrollResetKey={`${shopKey}-${status}`}
+      headerExtra={
+        <div className="flex flex-wrap gap-2">
           <select
             className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
             value={shopKey}
@@ -95,44 +88,45 @@ export const BossBillDetailDrawer: React.FC<Props> = ({ open, onClose }) => {
             ))}
           </div>
         </div>
-
-        <div className="flex-1 overflow-auto px-4 py-3">
-          {loading ? <p className="text-sm text-slate-500">加载中…</p> : null}
-          {error ? <p className="text-sm text-amber-600">{error}</p> : null}
-          {!loading && items.length === 0 ? (
-            <p className="text-sm text-slate-500">暂无明细</p>
-          ) : (
-            <div className="space-y-3">
-              {items.map((row, idx) => (
-                <div key={`${row.shopKey}-${row.packageId}-${idx}`} className="rounded-xl border border-slate-100 p-3 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium text-slate-900">{row.shopName}</span>
-                    <span className="text-xs text-slate-500">{row.settleStatus ?? '—'}</span>
-                  </div>
-                  <div className="mt-2 space-y-1 text-xs text-slate-600">
-                    <div>订单号 {row.packageId ?? '—'}</div>
-                    <div>
-                      下单时间{' '}
-                      {row.orderCreateTime ? formatDataFreshnessTime(row.orderCreateTime) : '—'}
-                    </div>
-                    <div>订单状态 {row.orderStatus ?? '—'}</div>
-                    <div>预计待结算 {centToDisplayYuan(row.expectedSettleAmountCent)}</div>
-                    <div>
-                      预计结算时间{' '}
-                      {row.expectedSettleTime ? formatDataFreshnessTime(row.expectedSettleTime) : '—'}
-                    </div>
-                    <div>
-                      实际结算时间{' '}
-                      {row.actualSettleTime ? formatDataFreshnessTime(row.actualSettleTime) : '—'}
-                    </div>
-                    <div>平台佣金 {centToDisplayYuan(row.platformCommissionCent)}</div>
-                  </div>
+      }
+    >
+      {loading ? <p className="text-sm text-slate-500">加载中…</p> : null}
+      {error ? <p className="text-sm text-amber-600">{error}</p> : null}
+      {!loading && items.length === 0 ? (
+        <p className="text-sm text-slate-500">暂无明细</p>
+      ) : (
+        <div className="space-y-3">
+          {items.map((row, idx) => (
+            <div
+              key={`${row.shopKey}-${row.packageId}-${idx}`}
+              className="rounded-xl border border-slate-100 p-3 text-sm"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium text-slate-900">{row.shopName}</span>
+                <span className="text-xs text-slate-500">{row.settleStatus ?? '—'}</span>
+              </div>
+              <div className="mt-2 space-y-1 break-words text-xs text-slate-600">
+                <div>订单号 {row.packageId ?? '—'}</div>
+                <div>
+                  下单时间{' '}
+                  {row.orderCreateTime ? formatDataFreshnessTime(row.orderCreateTime) : '—'}
                 </div>
-              ))}
+                <div>订单状态 {row.orderStatus ?? '—'}</div>
+                <div>预计待结算 {centToDisplayYuan(row.expectedSettleAmountCent)}</div>
+                <div>
+                  预计结算时间{' '}
+                  {row.expectedSettleTime ? formatDataFreshnessTime(row.expectedSettleTime) : '—'}
+                </div>
+                <div>
+                  实际结算时间{' '}
+                  {row.actualSettleTime ? formatDataFreshnessTime(row.actualSettleTime) : '—'}
+                </div>
+                <div>平台佣金 {centToDisplayYuan(row.platformCommissionCent)}</div>
+              </div>
             </div>
-          )}
+          ))}
         </div>
-      </div>
-    </div>
+      )}
+    </BoardDrawerShell>
   )
 }

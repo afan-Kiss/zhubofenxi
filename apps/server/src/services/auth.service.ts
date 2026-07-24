@@ -18,6 +18,7 @@ import {
   findUserByUsername,
   toSafeUserFromRecord,
   recordUserLogin,
+  recordUserLoginIfStale,
   type SafeUser,
 } from './user.service'
 import { verifyPassword } from '../utils/password'
@@ -83,7 +84,10 @@ export async function loginUser(input: {
     ip: input.audit?.ip,
     userAgent: input.audit?.userAgent,
   })
-  const user = toSafeUserFromRecord(row)
+  // 必须重新读取：recordUserLogin 之后再用旧 row 会返回过期的 lastLoginAt
+  const fresh = await findUserById(row.id)
+  if (!fresh) throw new Error('账号不存在')
+  const user = toSafeUserFromRecord(fresh)
 
   await writeOperationLog({
     userId: row.id,
@@ -124,7 +128,10 @@ export async function logoutUser(token: string | undefined): Promise<void> {
   }
 }
 
-export async function buildAuthMePayload(user: SessionUser): Promise<{
+export async function buildAuthMePayload(
+  user: SessionUser,
+  client?: { ip?: string | null; userAgent?: string | null },
+): Promise<{
   user: SafeUser | {
     id: string
     username: string
@@ -161,6 +168,9 @@ export async function buildAuthMePayload(user: SessionUser): Promise<{
       permissions,
     }
   }
+
+  // 会话可续 7 天：打开应用时节流刷新最近登录，避免账号管理长期显示过期时间
+  await recordUserLoginIfStale(user.id, client)
 
   const row = await findUserById(user.id)
   if (!row) {

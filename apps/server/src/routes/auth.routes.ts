@@ -94,7 +94,7 @@ authRouter.get('/me', async (req, res) => {
       sendFail(res, '请先登录', 401)
       return
     }
-    sendOk(res, await buildAuthMePayload(user))
+    sendOk(res, await buildAuthMePayload(user, authAuditFromRequest(req)))
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '读取登录状态失败', 500)
   }

@@ -30,7 +30,19 @@ const ROLE_LABEL: Record<string, string> = {
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return '—'
-  return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  // 与经营口径一致：固定 Asia/Shanghai，避免浏览器/系统时区导致偏差
+  return d.toLocaleString('zh-CN', {
+    hour12: false,
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
 }
 
 export const UserManagementPanel: React.FC = () => {

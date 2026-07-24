@@ -289,6 +289,35 @@ export async function recordUserLogin(
 
 }
 
+/** 会话期内打开应用时刷新最近登录；默认 30 分钟节流，避免每次 /me 写库 */
+const LAST_LOGIN_STALE_MS = 30 * 60 * 1000
+
+export async function recordUserLoginIfStale(
+
+  userId: string,
+
+  client?: { ip?: string | null; userAgent?: string | null },
+
+  staleMs: number = LAST_LOGIN_STALE_MS,
+
+): Promise<void> {
+
+  const row = await prisma.user.findUnique({
+
+    where: { id: userId },
+
+    select: { lastLoginAt: true },
+
+  })
+
+  if (!row) return
+
+  if (row.lastLoginAt && Date.now() - row.lastLoginAt.getTime() < staleMs) return
+
+  await recordUserLogin(userId, client)
+
+}
+
 
 
 export async function touchLastLogin(userId: string): Promise<void> {

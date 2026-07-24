@@ -42,10 +42,10 @@ DB_OVERWRITE_CONFIRM = "YES_I_KNOW_THIS_WILL_OVERWRITE_PRODUCTION_DB"
 FORCED_LOCAL_DB_REMOTE = "/tmp/zhubo-upload/forced-local-app.db"
 MIN_PRESERVE_DB_BYTES = 5 * 1024 * 1024
 DB_BACKUP_DIR = "/www/backups/zhubo-analysis-db"
-# 有订单的库快照只留最近几份，避免撑盘
-MIN_DB_BACKUP_KEEP_WITH_ORDERS = 5
-# 全量目录备份（已改为轻量、排除 node_modules）只留最近几份
-MIN_FULL_DIR_BACKUP_KEEP = 2
+# 默认不在服务器落盘备份（曾反复撑满磁盘）；仅 /tmp 临时 preserve 用于部署中恢复生产库
+ENABLE_SERVER_BACKUP = os.environ.get("DEPLOY_ENABLE_SERVER_BACKUP", "0").strip() == "1"
+MIN_DB_BACKUP_KEEP_WITH_ORDERS = 0
+MIN_FULL_DIR_BACKUP_KEEP = 0
 
 
 def load_ssh_pass() -> str:
@@ -300,11 +300,23 @@ PRESERVE_REPORT_IMAGES=/tmp/zhubo-upload/preserve-daily-report-images
 FORCED_LOCAL_DB={FORCED_LOCAL_DB_REMOTE}
 MIN_PRESERVE_DB_BYTES={MIN_PRESERVE_DB_BYTES}
 DB_BACKUP_DIR={DB_BACKUP_DIR}
+ENABLE_SERVER_BACKUP={1 if ENABLE_SERVER_BACKUP else 0}
 MIN_DB_BACKUP_KEEP_WITH_ORDERS={MIN_DB_BACKUP_KEEP_WITH_ORDERS}
 MIN_FULL_DIR_BACKUP_KEEP={MIN_FULL_DIR_BACKUP_KEEP}
 rm -f /tmp/zhubo-upload/app.db "$PRESERVE_DB" "$PRESERVE_ENV"
 rm -rf "$PRESERVE_REPORT_IMAGES"
-mkdir -p "$DB_BACKUP_DIR"
+# 仅临时目录；默认不 mkdir 持久备份目录
+mkdir -p /tmp/zhubo-upload
+if [ "$ENABLE_SERVER_BACKUP" = "1" ]; then
+  mkdir -p "$DB_BACKUP_DIR"
+fi
+
+# 每次部署先清掉历史服务器备份，避免磁盘被撑满
+rm -rf /www/wwwroot/zhubo-analysis-backup-*
+rm -rf /www/backups/zhubo-analysis-db
+echo "(none)" > /www/wwwroot/.zhubo-analysis-last-backup
+echo "cleaned-$(date +%Y%m%d-%H%M%S)" > /www/wwwroot/.zhubo-analysis-last-backup-name
+echo "Cleared historical server backups (code dirs + db snapshots)"
 
 count_table() {{
   local db_file="$1"
@@ -411,7 +423,11 @@ if [ -f "$DEPLOY_DIR/apps/server/data/app.db" ]; then
   PRE_DEPLOY_STATS=$(collect_db_stats "$DEPLOY_DIR/apps/server/data/app.db")
   echo "Pre-deploy db stats: $PRE_DEPLOY_STATS"
   safe_sqlite_snapshot "$DEPLOY_DIR/apps/server/data/app.db" "$PRESERVE_DB"
-  backup_production_db_with_stats "$DEPLOY_DIR/apps/server/data/app.db" "$PRE_DEPLOY_STATS"
+  if [ "$ENABLE_SERVER_BACKUP" = "1" ]; then
+    backup_production_db_with_stats "$DEPLOY_DIR/apps/server/data/app.db" "$PRE_DEPLOY_STATS"
+  else
+    echo "Skipped persistent db backup (DEPLOY_ENABLE_SERVER_BACKUP!=1); keep /tmp preserve only"
+  fi
   echo "Preserved production app.db before deploy"
 fi
 if [ -f "$DEPLOY_DIR/apps/server/.env" ]; then
@@ -422,7 +438,7 @@ if [ -d "$DEPLOY_DIR/apps/server/data/daily-report-images" ]; then
   cp -a "$DEPLOY_DIR/apps/server/data/daily-report-images" "$PRESERVE_REPORT_IMAGES"
   echo "Preserved production daily-report-images before deploy"
 fi
-if [ -d "$DEPLOY_DIR" ] && [ "$(ls -A "$DEPLOY_DIR" 2>/dev/null | wc -l)" -gt 0 ]; then
+if [ "$ENABLE_SERVER_BACKUP" = "1" ] && [ -d "$DEPLOY_DIR" ] && [ "$(ls -A "$DEPLOY_DIR" 2>/dev/null | wc -l)" -gt 0 ]; then
   ts=$(date +%Y%m%d-%H%M%S)
   # 轻量代码备份：排除 node_modules 与库文件（库已单独 .backup）
   mkdir -p "/www/wwwroot/zhubo-analysis-backup-$ts"
@@ -452,6 +468,8 @@ if [ -d "$DEPLOY_DIR" ] && [ "$(ls -A "$DEPLOY_DIR" 2>/dev/null | wc -l)" -gt 0 
   echo "/www/wwwroot/zhubo-analysis-backup-$ts" > /www/wwwroot/.zhubo-analysis-last-backup
   prune_full_dir_backups
   echo "Created lightweight code backup (no node_modules/db): zhubo-analysis-backup-$ts"
+elif [ -d "$DEPLOY_DIR" ]; then
+  echo "Skipped full-dir code backup (DEPLOY_ENABLE_SERVER_BACKUP!=1)"
 fi
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
@@ -593,7 +611,9 @@ if [ -n "$RESTORE_SOURCE" ]; then
     echo "[deploy][FAIL] 拒绝部署：app.db 体积异常缩小（${{PRE_SIZE}}B -> ${{POST_SIZE}}B）"
     exit 1
   fi
-  prune_db_backups
+  if [ "$ENABLE_SERVER_BACKUP" = "1" ]; then
+    prune_db_backups
+  fi
 fi
 if [ -d "$PRESERVE_REPORT_IMAGES" ]; then
   cp -a "$PRESERVE_REPORT_IMAGES" "$DEPLOY_DIR/apps/server/data/daily-report-images"

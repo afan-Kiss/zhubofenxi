@@ -17,6 +17,11 @@ require_cmd() {
 }
 
 backup_existing() {
+  # 默认不做服务器目录备份（易撑满磁盘）；仅显式 ENABLE_SERVER_BACKUP=1 时启用
+  if [[ "${ENABLE_SERVER_BACKUP:-0}" != "1" ]]; then
+    log "跳过目录备份（ENABLE_SERVER_BACKUP!=1）"
+    return 0
+  fi
   if [[ -d "$DEPLOY_DIR" ]] && [[ -n "$(ls -A "$DEPLOY_DIR" 2>/dev/null || true)" ]]; then
     local ts
     ts="$(date +%Y%m%d-%H%M%S)"

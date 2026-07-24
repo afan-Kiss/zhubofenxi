@@ -15,14 +15,15 @@ function rowFromSnapshot(snap: DailyOperationsReportPayload): OperationsDailyTre
     (sum, p) => sum + p.returnOrderCount,
     0,
   )
-  const productSoldOrderCount = snap.products.reduce((sum, p) => sum + p.soldOrderCount, 0)
+  // 退货率分母必须用支付 P 单，禁止用有效成交订单数
+  const productPaidOrderCount = snap.products.reduce((sum, p) => sum + p.paidOrderCount, 0)
   return {
     date: snap.startDate,
     validAmountYuan: snap.summary.validAmountYuan,
     soldOrderCount: snap.summary.soldOrderCount,
     productReturnOrderCount,
     productReturnRate: computeProductReturnRateByOrder(
-      productSoldOrderCount,
+      productPaidOrderCount,
       productReturnOrderCount,
     ),
   }

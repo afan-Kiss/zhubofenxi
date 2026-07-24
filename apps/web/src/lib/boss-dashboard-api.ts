@@ -22,6 +22,8 @@ export interface BossFundView {
   statementPeriodDays: number | null
   lastSyncedAt: string | null
   isStale: boolean
+  todayIncomeCentStale: boolean
+  withdrawnAmountCentStale: boolean
   syncStatus: string
   syncError: string | null
 }
@@ -105,6 +107,29 @@ export interface BossMoneyTrendPoint {
 
 export type BossTrendPoint = BossMoneyTrendPoint
 
+export interface BossCoverageSumResult {
+  valueCent: number | null
+  complete: boolean
+  coveredShopCount: number
+  requiredShopCount: number
+  missingShopKeys: string[]
+  staleShopKeys: string[]
+  partialValueCent: number | null
+}
+
+export type BossTotalsCoverageKey =
+  | 'availableAmountCent'
+  | 'withdrawingAmountCent'
+  | 'withdrawnAmountCent'
+  | 'afterSaleFrozenAmountCent'
+  | 'todayIncomeCent'
+  | 'yesterdayIncomeCent'
+  | 'yesterdaySettlementNetCent'
+  | 'pendingSettlementAmountCent'
+  | 'pendingSettlementOrderCount'
+  | 'currentMonthSettlementNetCent'
+  | 'currentMonthCommissionCent'
+
 export const BOSS_TREND_KEYS = ['total', 'shiyuju', 'hetianyayu', 'xiangyu', 'xyxiangyu'] as const
 
 export const BOSS_TREND_LABELS: Record<(typeof BOSS_TREND_KEYS)[number], string> = {
@@ -115,34 +140,45 @@ export const BOSS_TREND_LABELS: Record<(typeof BOSS_TREND_KEYS)[number], string>
   xyxiangyu: 'XY祥钰珠宝',
 }
 
+export interface BossShopDataThroughDate {
+  shopKey: string
+  shopName: string
+  dataThroughDate: string | null
+}
+
 export interface BossDashboardPayload {
   generatedAt: string
   dataNotes: string[]
   totals: {
-    availableAmountCent: number
-    withdrawingAmountCent: number
-    withdrawnAmountCent: number
-    afterSaleFrozenAmountCent: number
-    todayIncomeCent: number
+    availableAmountCent: number | null
+    withdrawingAmountCent: number | null
+    withdrawnAmountCent: number | null
+    afterSaleFrozenAmountCent: number | null
+    todayIncomeCent: number | null
     yesterdayIncomeCent: number | null
     yesterdaySettlementNetCent: number | null
-    pendingSettlementAmountCent: number
-    pendingSettlementOrderCount: number
-    currentMonthSettlementNetCent: number
-    currentMonthCommissionCent: number
+    pendingSettlementAmountCent: number | null
+    pendingSettlementOrderCount: number | null
+    currentMonthSettlementNetCent: number | null
+    currentMonthCommissionCent: number | null
+    coverage: Record<BossTotalsCoverageKey, BossCoverageSumResult>
     billReconciliationWarningShopCount: number
     scoreDownShopCount: number
     cannotWithdrawShopCount: number
   }
   combinedMonthlyIncome: BossMoneyTrendPoint[]
   combinedMonthlySettlement: BossMoneyTrendPoint[]
+  commonDataThroughDate: string | null
+  maxDataThroughDate: string | null
+  perShopDataThroughDates: BossShopDataThroughDate[]
+  laggingShops: BossShopDataThroughDate[]
   shops: Array<{
     rank: number
     shopKey: string
     shopName: string
     fund: BossFundView | null
     score: BossScoreView | null
-    monthlyIncome: Array<{ month: string; amountCent: number }>
+    monthlyIncome: Array<{ month: string; amountCent: number | null }>
     monthlySettlementTrend: BossMonthlySettlementTrendPoint[]
     pendingSettlement: BossPendingSettlementView
     currentMonthBill: BossCurrentMonthBillView
@@ -159,6 +195,11 @@ export interface BossDashboardPayload {
   unreadAnnouncementCount: number
   lastBossSyncAt: string | null
   lastBossSyncStatus: string | null
+  /** 最近一次同步尝试开始时间（不论成败） */
+  lastAttemptAt?: string | null
+  lastAttemptStatus?: string | null
+  /** 最近一次整次同步成功结束时间 */
+  lastSuccessfulRunAt?: string | null
 }
 
 export interface BossBillOrderView {

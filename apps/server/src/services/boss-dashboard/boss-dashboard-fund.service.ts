@@ -23,6 +23,10 @@ function mergeErrors(parts: Array<string | null | undefined>): string | null {
   return msgs.length ? msgs.join('；') : null
 }
 
+function flowSyncFailed(syncError: string | null | undefined): boolean {
+  return Boolean(syncError?.includes('流水同步失败'))
+}
+
 export async function syncBossFundForShop(shop: GoodReviewShopDefinition): Promise<{
   success: boolean
   partial?: boolean
@@ -93,11 +97,8 @@ export async function syncBossFundForShop(shop: GoodReviewShopDefinition): Promi
       }
 
   const partial = !aggregateOk || !afterSaleOk || !canWithdrawOk
-  const syncErrors = mergeErrors([
-    !aggregateOk ? aggregateRes.errorMessage ?? '账户汇总失败' : null,
-    !afterSaleOk ? afterSaleRes.errorMessage ?? '售后冻结失败' : null,
-    !canWithdrawOk ? canWithdrawRes.errorMessage ?? '可提现查询失败' : null,
-  ])
+  let flowOk = true
+  let flowError: string | null = null
 
   try {
     await syncBossAccountFlowsForShop({
@@ -106,14 +107,23 @@ export async function syncBossFundForShop(shop: GoodReviewShopDefinition): Promi
       firstSync: false,
     })
   } catch (err) {
-    const flowMsg = err instanceof Error ? err.message : String(err)
-    logWarn('老板同步', `${shop.shopName} 流水同步失败：${flowMsg}`)
+    flowOk = false
+    flowError = err instanceof Error ? err.message : String(err)
+    logWarn('老板同步', `${shop.shopName} 流水同步失败：${flowError}`)
   }
 
-  const withdrawnAmountCent = await computeWithdrawnAmountCent(shop.shopKey)
-  const todayIncomeCent = await computeTodayIncomeCent(shop.shopKey)
+  const syncErrors = mergeErrors([
+    !aggregateOk ? aggregateRes.errorMessage ?? '账户汇总失败' : null,
+    !afterSaleOk ? afterSaleRes.errorMessage ?? '售后冻结失败' : null,
+    !canWithdrawOk ? canWithdrawRes.errorMessage ?? '可提现查询失败' : null,
+    !flowOk ? `流水同步失败：${flowError ?? '未知'}` : null,
+  ])
 
-  const syncStatus = partial ? 'partial_success' : 'success'
+  const withdrawnAmountCent = flowOk ? await computeWithdrawnAmountCent(shop.shopKey) : null
+  const todayIncomeCent = flowOk ? await computeTodayIncomeCent(shop.shopKey) : null
+
+  const syncStatus = partial || !flowOk ? 'partial_success' : 'success'
+  const isStale = partial || !flowOk
 
   await prisma.bossFundSnapshot.create({
     data: {
@@ -143,7 +153,7 @@ export async function syncBossFundForShop(shop: GoodReviewShopDefinition): Promi
       statementPeriodDays: aggregate.statementPeriodDays ?? previous?.statementPeriodDays ?? null,
       syncStatus,
       syncError: syncErrors,
-      isStale: partial,
+      isStale,
       fetchedAt: aggregateOk ? new Date() : (previous?.fetchedAt ?? new Date()),
     },
   })

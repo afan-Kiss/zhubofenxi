@@ -14,22 +14,78 @@ import {
   type ParsedBossFlowRow,
 } from './boss-dashboard-normalize.service'
 import { formatDateKeyShanghai, shanghaiMonthKey } from '../../utils/business-timezone'
+
+const FLOW_ROW_SELECT = {
+  id: true,
+  flowKind: true,
+  flowType: true,
+  flowTypeDesc: true,
+  occurredAt: true,
+  incomeAmountCent: true,
+  outcomeAmountCent: true,
+  businessNo: true,
+  balanceAfterCent: true,
+} as const
 import { logInfo } from '../../utils/server-log'
+
+function flowRowChanged(
+  existing: {
+    flowKind: string
+    flowType: string | null
+    flowTypeDesc: string | null
+    occurredAt: Date
+    incomeAmountCent: number
+    outcomeAmountCent: number
+    businessNo: string | null
+    balanceAfterCent: number | null
+  },
+  row: ParsedBossFlowRow,
+): boolean {
+  return (
+    existing.flowKind !== row.flowKind ||
+    existing.flowType !== row.flowType ||
+    existing.flowTypeDesc !== row.flowTypeDesc ||
+    existing.occurredAt.getTime() !== row.occurredAt.getTime() ||
+    existing.incomeAmountCent !== row.incomeAmountCent ||
+    existing.outcomeAmountCent !== row.outcomeAmountCent ||
+    existing.businessNo !== row.businessNo ||
+    existing.balanceAfterCent !== row.balanceAfterCent
+  )
+}
 
 async function upsertFlowRows(
   shop: GoodReviewShopDefinition,
   liveAccountId: string,
   rows: ParsedBossFlowRow[],
-): Promise<{ inserted: number; knownHits: number }> {
+): Promise<{ inserted: number; updated: number; knownHits: number }> {
   let inserted = 0
+  let updated = 0
   let knownHits = 0
   for (const row of rows) {
     const existing = await prisma.bossAccountFlow.findUnique({
       where: { shopKey_platformFlowId: { shopKey: shop.shopKey, platformFlowId: row.platformFlowId } },
-      select: { id: true },
+      select: FLOW_ROW_SELECT,
     })
     if (existing) {
-      knownHits++
+      if (flowRowChanged(existing, row)) {
+        await prisma.bossAccountFlow.update({
+          where: { id: existing.id },
+          data: {
+            flowKind: row.flowKind,
+            flowType: row.flowType,
+            flowTypeDesc: row.flowTypeDesc,
+            occurredAt: row.occurredAt,
+            incomeAmountCent: row.incomeAmountCent,
+            outcomeAmountCent: row.outcomeAmountCent,
+            businessNo: row.businessNo,
+            balanceAfterCent: row.balanceAfterCent,
+            rawJson: JSON.stringify(row.raw),
+          },
+        })
+        updated++
+      } else {
+        knownHits++
+      }
       continue
     }
     await prisma.bossAccountFlow.create({
@@ -50,7 +106,7 @@ async function upsertFlowRows(
     })
     inserted++
   }
-  return { inserted, knownHits }
+  return { inserted, updated, knownHits }
 }
 
 async function getLatestLocalFlowTime(shopKey: string): Promise<Date | null> {
@@ -142,11 +198,17 @@ export async function computeTodayIncomeCent(shopKey: string, dateKey = formatDa
 
 export function buildRecentMonthKeys(count = BOSS_INCOME_MONTHS): string[] {
   const keys: string[] = []
-  const now = new Date()
-  for (let i = count - 1; i >= 0; i--) {
-    const d = new Date(now)
-    d.setMonth(d.getMonth() - i)
-    keys.push(shanghaiMonthKey(d))
+  const today = formatDateKeyShanghai()
+  const [y, m] = today.split('-').map(Number)
+  let year = y!
+  let month = m!
+  for (let i = 0; i < count; i++) {
+    keys.unshift(`${year}-${String(month).padStart(2, '0')}`)
+    month -= 1
+    if (month <= 0) {
+      month = 12
+      year -= 1
+    }
   }
   return keys
 }
@@ -154,19 +216,22 @@ export function buildRecentMonthKeys(count = BOSS_INCOME_MONTHS): string[] {
 export async function aggregateMonthlyStatementIncome(
   shopKey: string,
   monthKeys: string[],
-): Promise<Array<{ month: string; amountCent: number }>> {
+): Promise<Array<{ month: string; amountCent: number | null }>> {
+  const monthSet = new Set(monthKeys)
   const rows = await prisma.bossAccountFlow.findMany({
     where: { shopKey, flowKind: 'statement_in', incomeAmountCent: { gt: 0 } },
     select: { occurredAt: true, incomeAmountCent: true },
   })
   const map = new Map<string, number>()
-  for (const m of monthKeys) map.set(m, 0)
   for (const row of rows) {
     const m = shanghaiMonthKey(row.occurredAt)
-    if (!map.has(m)) continue
+    if (!monthSet.has(m)) continue
     map.set(m, (map.get(m) ?? 0) + row.incomeAmountCent)
   }
-  return monthKeys.map((month) => ({ month, amountCent: map.get(month) ?? 0 }))
+  return monthKeys.map((month) => ({
+    month,
+    amountCent: map.has(month) ? map.get(month)! : null,
+  }))
 }
 
 export { isSettlementIncomeRow, isWithdrawSuccessRow }

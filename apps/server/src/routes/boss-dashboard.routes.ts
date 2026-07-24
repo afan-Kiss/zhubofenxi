@@ -44,19 +44,6 @@ bossDashboardRouter.get('/bill-orders', requirePagePermission('boss_dashboard'),
   }
 })
 
-bossDashboardRouter.get('/bill-orders', requirePagePermission('boss_dashboard'), async (req, res) => {
-  try {
-    const shopKey = typeof req.query.shopKey === 'string' ? req.query.shopKey.trim() : undefined
-    const status = req.query.status === 'settled' ? 'settled' : 'pending'
-    const page = Math.max(1, Number(req.query.page ?? 1) || 1)
-    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize ?? 20) || 20))
-    const data = await listBossBillOrders({ shopKey, status, page, pageSize })
-    sendOk(res, data)
-  } catch (err) {
-    sendFail(res, err instanceof Error ? err.message : '加载账单明细失败', 500)
-  }
-})
-
 bossDashboardRouter.get('/shops/:shopKey', requirePagePermission('boss_dashboard'), async (req, res) => {
   try {
     const shopKey = String(req.params.shopKey ?? '').trim()

@@ -284,9 +284,31 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
         core={
           <>
             <OperationsMetricDrillCard
-              label="全店有效成交"
+              label="支付 GMV"
+              value={formatIntegerMoney(s.paymentGmvYuan ?? null)}
+              footer={
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">按支付日统计，含已退款订单支付额</p>
+              }
+            />
+            <OperationsMetricDrillCard
+              label="当前有效成交"
               value={formatIntegerMoney(s.validAmountYuan)}
               drillRequest={{ ...drillBase, target: 'summary_valid_amount' }}
+              footer={
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                  支付日订单截至当前售后状态
+                  {s.afterSaleObservationImmature
+                    ? ` · 近7天观察期未成熟（截至 ${s.dataAsOfAt ? new Date(s.dataAsOfAt).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }) : '—'}）`
+                    : ''}
+                </p>
+              }
+            />
+            <OperationsMetricDrillCard
+              label="实际签收金额"
+              value={formatIntegerMoney(s.actualSignedAmountYuan ?? null)}
+              footer={
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">按签收事实，独立于有效成交</p>
+              }
             />
             <OperationsMetricDrillCard
               label="有效成交订单"
@@ -294,13 +316,15 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
               drillRequest={{ ...drillBase, target: 'summary_orders' }}
             />
             <OperationsMetricDrillCard
-              label="全店无效/刷单"
-              value={formatOrderCount(s.invalidOrderCount)}
-            />
-            <OperationsMetricDrillCard
               label="退货单率"
               value={formatRatePercent(s.returnOrderRate)}
               drillRequest={{ ...drillBase, target: 'summary_return_rate' }}
+              footer={
+                <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                  退款 P 单 ÷ 支付 P 单
+                  {s.paidOrderCount != null ? `（${s.returnOrderCount}/${s.paidOrderCount}）` : ''}
+                </p>
+              }
             />
             <OperationsMetricDrillCard
               label="成交率"
@@ -312,6 +336,10 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
         more={
           <>
             <OperationsMetricDrillCard label="客单价" value={formatIntegerMoney(s.avgOrderAmountYuan)} />
+            <OperationsMetricDrillCard
+              label="全店无效/刷单"
+              value={formatOrderCount(s.invalidOrderCount)}
+            />
             <OperationsMetricDrillCard
               label="成交人数"
               value={formatPeopleCount(s.dealUserCount)}

@@ -23,9 +23,25 @@ export const BossDashboardPage: React.FC = () => {
   }, [rankedShops, selectedShopKey])
 
   const updatedLine = useMemo(() => {
-    if (!data?.lastBossSyncAt) return '平台数据最近更新时间：—'
-    return `平台数据最近更新时间：${formatDataFreshnessTime(data.lastBossSyncAt)}`
-  }, [data?.lastBossSyncAt])
+    if (!data) return '数据新鲜度：—'
+    const attempt = data.lastAttemptAt
+      ? `${formatDataFreshnessTime(data.lastAttemptAt)}（${data.lastAttemptStatus ?? '未知'}）`
+      : '—'
+    const success = data.lastSuccessfulRunAt
+      ? formatDataFreshnessTime(data.lastSuccessfulRunAt)
+      : '—'
+    const oldestShop = [...(data.shops ?? [])]
+      .map((s) => ({
+        name: s.shopName,
+        at: s.fund?.lastSyncedAt ?? null,
+      }))
+      .filter((s) => s.at)
+      .sort((a, b) => String(a.at).localeCompare(String(b.at)))[0]
+    const oldest = oldestShop
+      ? `${oldestShop.name} ${formatDataFreshnessTime(oldestShop.at)}`
+      : '—'
+    return `最近同步尝试：${attempt} · 最近整次成功：${success} · 数据最旧店铺：${oldest}`
+  }, [data])
 
   if (!data && loading) {
     return (

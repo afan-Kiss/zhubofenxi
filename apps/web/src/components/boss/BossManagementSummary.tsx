@@ -3,6 +3,7 @@ import { Info } from 'lucide-react'
 import type { BossDashboardPayload } from '../../lib/boss-dashboard-api'
 import { centToDisplayYuan } from '../../lib/boss-dashboard-api'
 import { formatDataFreshnessTime } from '../../lib/data-freshness'
+import { BossCoverageHint, formatCoverageSub } from './BossCoverageHint'
 
 interface Props {
   data: BossDashboardPayload
@@ -26,7 +27,11 @@ function MetricCard({
   return (
     <div className="min-w-0 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm md:p-5">
       <div className="text-xs text-slate-500">{title}</div>
-      <div className={`mt-2 text-2xl font-semibold tracking-tight md:text-3xl ${warn ? 'text-amber-700' : 'text-slate-900'}`}>
+      <div
+        className={`mt-2 text-2xl font-semibold tracking-tight md:text-3xl ${
+          warn ? 'text-amber-700' : 'text-slate-900'
+        }`}
+      >
         {centToDisplayYuan(amountCent ?? null)}
       </div>
       {sub ? <div className="mt-2 text-xs text-slate-500">{sub}</div> : null}
@@ -49,6 +54,7 @@ export const BossManagementSummary: React.FC<Props> = ({ data }) => {
     .filter(Boolean)
     .sort()
     .reverse()[0]
+  const cov = data.totals.coverage
 
   return (
     <section className="space-y-3">
@@ -57,7 +63,9 @@ export const BossManagementSummary: React.FC<Props> = ({ data }) => {
           title="四店可提现"
           amountCent={data.totals.availableAmountCent}
           updatedAt={data.lastBossSyncAt}
-          hint="平台当前可提现余额合计"
+          hint="平台当前可提现余额合计；缺店时不显示完整合计"
+          sub={<BossCoverageHint coverage={cov?.availableAmountCent} />}
+          warn={cov?.availableAmountCent ? !cov.availableAmountCent.complete : false}
         />
         <MetricCard
           title="待结算订单金额"
@@ -65,28 +73,55 @@ export const BossManagementSummary: React.FC<Props> = ({ data }) => {
           updatedAt={latestPendingAt}
           hint="平台预计待结算金额，订单取消、退款或延迟结算后可能变化，最终以实际到账为准。"
           sub={
-            data.totals.pendingSettlementOrderCount != null
-              ? `共 ${data.totals.pendingSettlementOrderCount} 笔待结算`
-              : undefined
+            <>
+              {data.totals.pendingSettlementOrderCount != null
+                ? `共 ${data.totals.pendingSettlementOrderCount} 笔待结算`
+                : null}
+              {formatCoverageSub(cov?.pendingSettlementAmountCent) ? (
+                <div>
+                  <BossCoverageHint coverage={cov?.pendingSettlementAmountCent} />
+                </div>
+              ) : null}
+            </>
           }
-          warn={data.shops.some((s) => s.pendingSettlement.syncStatus === 'reconciliation_warning')}
+          warn={
+            data.shops.some((s) => s.pendingSettlement.syncStatus === 'reconciliation_warning') ||
+            (cov?.pendingSettlementAmountCent ? !cov.pendingSettlementAmountCent.complete : false)
+          }
         />
         <MetricCard
           title="本月已结算净额"
           amountCent={data.totals.currentMonthSettlementNetCent}
           updatedAt={data.lastBossSyncAt}
-          hint="本月日账单结算净额合计，进行中月份可能继续变化"
+          hint={
+            data.commonDataThroughDate
+              ? `本月日账单结算净额合计，共同截至 ${data.commonDataThroughDate}`
+              : '本月日账单结算净额合计，进行中月份可能继续变化'
+          }
+          sub={<BossCoverageHint coverage={cov?.currentMonthSettlementNetCent} />}
+          warn={
+            cov?.currentMonthSettlementNetCent
+              ? !cov.currentMonthSettlementNetCent.complete
+              : false
+          }
         />
         <MetricCard
           title="累计已提现"
           amountCent={data.totals.withdrawnAmountCent}
           updatedAt={data.lastBossSyncAt}
-          hint="只统计提现成功流水"
+          hint="只统计提现成功流水；流水同步失败时不展示完整合计"
+          sub={<BossCoverageHint coverage={cov?.withdrawnAmountCent} />}
+          warn={cov?.withdrawnAmountCent ? !cov.withdrawnAmountCent.complete : false}
         />
       </div>
 
       <div className="flex flex-wrap gap-2 rounded-xl border border-slate-100 bg-white/80 px-3 py-2 text-xs text-slate-600">
-        <span>今日实际到账 {centToDisplayYuan(data.totals.todayIncomeCent)}</span>
+        <span>
+          今日实际到账 {centToDisplayYuan(data.totals.todayIncomeCent)}
+          {formatCoverageSub(cov?.todayIncomeCent)
+            ? ` · ${formatCoverageSub(cov.todayIncomeCent)}`
+            : ''}
+        </span>
         <span className="text-slate-300">|</span>
         <span>昨日入账 {centToDisplayYuan(data.totals.yesterdayIncomeCent)}</span>
         <span className="text-slate-300">|</span>

@@ -19,12 +19,7 @@ export const BossCurrentMonthBillCard: React.FC<Props> = ({ data, onOpenDetail }
     (acc, s) => acc + (s.currentMonthBill.settleOrderCount ?? 0),
     0,
   )
-  const throughDate =
-    data.shops
-      .map((s) => s.currentMonthBill.dataThroughDate)
-      .filter(Boolean)
-      .sort()
-      .reverse()[0] ?? null
+  const throughDate = data.commonDataThroughDate
 
   return (
     <section className="rounded-2xl border border-slate-100 bg-white p-4 shadow-sm md:p-5">

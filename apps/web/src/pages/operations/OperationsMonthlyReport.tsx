@@ -152,7 +152,10 @@ export const OperationsMonthlyReport: React.FC<Props> = ({ month, onLoadingChang
                   </p>
                 ) : s.productReturnOrderCount > 0 ? (
                   <p className="mt-1 text-xs text-slate-500">
-                    {s.productReturnOrderCount} 单退货 / {s.soldOrderCount} 单成交
+                    {s.productReturnOrderCount} 单退货 / {s.paidOrderCount ?? '—'} 单支付
+                    {s.productReturnRate != null
+                      ? `（退货率 = 退款 P 单 ÷ 支付 P 单）`
+                      : ''}
                   </p>
                 ) : null
               }

@@ -201,6 +201,35 @@ npm run accept:gmv:fast
 
 ---
 
+## 12. 运营报表：支付 GMV / 有效成交 / 实际签收 / 退货率
+
+| 指标 | 口径 |
+|------|------|
+| 支付 GMV | 支付日落入统计日的已支付金额（分汇总） |
+| 当前有效成交 | `sumValidRevenueFromViews`：支付日订单截至当前售后状态的有效成交池；P 单去重 |
+| 实际签收 | `actualSignedAmount` / `signedOrderCount`，签收事实；**禁止**写入 `validAmountYuan` |
+| 退货率 | 退款成功 P 单唯一数 ÷ 支付 P 单唯一数；分母 0 → `null`；禁止用有效成交订单作分母 |
+| 月报买家数 | 全日期范围有效成交买家身份去重；禁止各商品 `buyerCount` 相加 |
+
+金额全过程按分汇总，仅展示层转元。验收：`npm run verify:operations-report-data-integrity`
+
+---
+
+## 13. 老板查看：四店合计与新鲜度
+
+| 规则 | 说明 |
+|------|------|
+| 完整合计 | 仅当四店均有非 null 值且无 stale 时输出 `valueCent`；否则 `complete=false` 且完整合计为 `null` |
+| 部分数据 | 可展示 `partialValueCent` 与缺失店铺列表，不得静默按 0 凑满四店 |
+| 真实 0 | 字段存在且为 0 → 显示 ¥0.00；字段缺失 → `null` / `—` |
+| 流水失败 | 进入资金 `syncStatus`；今日到账 / 累计提现标 stale，不刷新流水成功时间 |
+| 共同截止日期 | `commonDataThroughDate = min(各店 dataThroughDate)` |
+| 店铺顺序 | 固定展示序，可提现余额不作经营名次 |
+
+验收：`npm run verify:boss-dashboard-data-integrity`、`npm run verify:boss-dashboard-route-uniqueness`
+
+---
+
 ## 变更流程
 
 1. 改代码前确认是否影响上表口径  

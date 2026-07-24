@@ -21,10 +21,10 @@ export const BossShopDetailPanel: React.FC<Props> = ({ shop }) => {
       shop.monthlyIncome.map((row) => ({
         month: row.month,
         amountCent: row.amountCent,
-        shiyuju: shop.shopKey === 'shiyuju' ? row.amountCent : 0,
-        hetianyayu: shop.shopKey === 'hetianyayu' ? row.amountCent : 0,
-        xiangyu: shop.shopKey === 'xiangyu' ? row.amountCent : 0,
-        xyxiangyu: shop.shopKey === 'xyxiangyu' ? row.amountCent : 0,
+        shiyuju: shop.shopKey === 'shiyuju' ? row.amountCent : null,
+        hetianyayu: shop.shopKey === 'hetianyayu' ? row.amountCent : null,
+        xiangyu: shop.shopKey === 'xiangyu' ? row.amountCent : null,
+        xyxiangyu: shop.shopKey === 'xyxiangyu' ? row.amountCent : null,
       })),
     [shop],
   )
@@ -33,11 +33,11 @@ export const BossShopDetailPanel: React.FC<Props> = ({ shop }) => {
     () =>
       shop.monthlySettlementTrend.map((row) => ({
         month: row.month,
-        amountCent: row.amountCent ?? 0,
-        shiyuju: shop.shopKey === 'shiyuju' ? (row.amountCent ?? 0) : 0,
-        hetianyayu: shop.shopKey === 'hetianyayu' ? (row.amountCent ?? 0) : 0,
-        xiangyu: shop.shopKey === 'xiangyu' ? (row.amountCent ?? 0) : 0,
-        xyxiangyu: shop.shopKey === 'xyxiangyu' ? (row.amountCent ?? 0) : 0,
+        amountCent: row.amountCent,
+        shiyuju: shop.shopKey === 'shiyuju' ? row.amountCent : null,
+        hetianyayu: shop.shopKey === 'hetianyayu' ? row.amountCent : null,
+        xiangyu: shop.shopKey === 'xiangyu' ? row.amountCent : null,
+        xyxiangyu: shop.shopKey === 'xyxiangyu' ? row.amountCent : null,
       })),
     [shop],
   )
@@ -47,7 +47,7 @@ export const BossShopDetailPanel: React.FC<Props> = ({ shop }) => {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
         <div>
           <h3 className="text-base font-semibold text-slate-900">{shop.shopName}</h3>
-          <p className="text-xs text-slate-500">店铺详情 · 排名第 {shop.rank}</p>
+          <p className="text-xs text-slate-500">店铺资金详情</p>
         </div>
         {shop.pendingSettlement.syncStatus !== 'success' && shop.pendingSettlement.syncError ? (
           <span className="text-xs text-amber-600">

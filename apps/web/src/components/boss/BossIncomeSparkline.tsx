@@ -3,7 +3,7 @@ import { Line, LineChart, ResponsiveContainer } from 'recharts'
 import { bossSparklineMargin, useBossChartCompact } from './boss-chart-layout'
 
 interface Props {
-  points: Array<{ month: string; amountCent: number }>
+  points: Array<{ month: string; amountCent: number | null }>
   color?: string
 }
 

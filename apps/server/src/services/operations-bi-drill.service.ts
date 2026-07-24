@@ -6,7 +6,8 @@ import {
   getAnchorPerformanceViews,
 } from './board-scoped-views.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
-import { isValidRevenueOrder, resolveValidRevenueAmountCent } from './valid-revenue-order.service'
+import { isValidRevenueOrder, resolveValidRevenueAmountCent, dedupeValidRevenueViewsByOrderNoBestValue } from './valid-revenue-order.service'
+import { centToYuan } from '../utils/money'
 import { viewCountsAsPaidOrder } from './business-metrics.service'
 import { attachRawByMatchToViews } from './low-price-brush-order.service'
 import { resolveRequestCacheIdentity } from './operations-report-cache.service'
@@ -439,7 +440,12 @@ export async function buildOperationsBiDrill(
     username: viewer.username,
   })
   const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
-  const filtered = filterViewsForTarget(performanceViews, scoped.rawByMatch, input, mode)
+  const filteredRaw = filterViewsForTarget(performanceViews, scoped.rawByMatch, input, mode)
+  // 成交下钻：与汇总同源，按 P 单去重后取最优视图
+  const filtered =
+    mode === 'after_sale'
+      ? filteredRaw
+      : dedupeValidRevenueViewsByOrderNoBestValue(filteredRaw).filter((v) => isValidRevenueOrder(v))
 
   const inclusionReason = TARGET_LABELS[effectiveTarget]
   const rowsAll = filtered.map((view) =>
@@ -458,20 +464,20 @@ export async function buildOperationsBiDrill(
     mode === 'after_sale'
       ? afterSaleOrderCount
       : filtered.filter((v) => isActualAfterSaleOrder(v)).length
-  const validAmountYuan =
-    mode === 'after_sale'
-      ? 0
-      : filtered.reduce(
-          (sum, v) => sum + Math.round(resolveValidRevenueAmountCent(v) / 100),
-          0,
-        )
-  const refundAmountYuan =
-    mode === 'after_sale'
-      ? filtered.reduce(
-          (sum, v) => sum + Math.round(resolveOperationsAfterSalesRefundAmountCent(v) / 100),
-          0,
-        )
-      : 0
+  // 金额先按分汇总，最后统一转元，禁止逐单 Math.round(cent/100) 再求和
+  let validAmountCent = 0
+  let refundAmountCent = 0
+  if (mode === 'after_sale') {
+    for (const v of filtered) {
+      refundAmountCent += resolveOperationsAfterSalesRefundAmountCent(v)
+    }
+  } else {
+    for (const v of filtered) {
+      validAmountCent += resolveValidRevenueAmountCent(v)
+    }
+  }
+  const validAmountYuan = mode === 'after_sale' ? 0 : centToYuan(validAmountCent)
+  const refundAmountYuan = mode === 'after_sale' ? centToYuan(refundAmountCent) : 0
   const paidOrderCount = countPaidOrdersInScope(performanceViews, scoped.rawByMatch, input)
   const buyers = new Set<string>()
   for (const v of filtered) {

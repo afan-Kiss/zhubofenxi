@@ -481,8 +481,14 @@ async function main() {
     { shopKey: 'shiyuju', shopName: '拾玉居和田玉', fund: { availableAmountCent: 5000 } },
     { shopKey: 'hetianyayu', shopName: '和田雅玉', fund: { availableAmountCent: null } },
   ] as never)
-  if (ranked[0]?.shopKey === 'shiyuju' && ranked[2]?.shopKey === 'hetianyayu') ok('店铺按可提现金额降序，null 排最后')
-  else fail('店铺排序错误')
+  // 固定展示顺序，禁止按可提现余额做经营名次
+  if (
+    ranked[0]?.shopKey === 'shiyuju' &&
+    ranked[1]?.shopKey === 'hetianyayu' &&
+    ranked[2]?.shopKey === 'xiangyu'
+  ) {
+    ok('店铺按固定展示顺序排列（非可提现经营名次）')
+  } else fail(`店铺排序错误：${ranked.map((s) => s.shopKey).join(',')}`)
 
   if (
     verifyMonthlyTrendTotals([

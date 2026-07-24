@@ -126,13 +126,17 @@ function makeItem(params: {
 
 function productReturnRate(p: ProductRankListItem): number | null {
   if (p.returnRate != null) return p.returnRate
-  if (p.soldOrderCount > 0) return p.returnOrderCount / p.soldOrderCount
+  const paid = p.paidOrderCount > 0 ? p.paidOrderCount : 0
+  if (paid > 0) return p.returnOrderCount / paid
   return null
 }
 
 function anchorReturnRate(a: AnchorRankItem): number | null {
   if (a.returnRate != null) return a.returnRate
-  if (a.soldOrderCount > 0) return a.returnOrderCount / a.soldOrderCount
+  const paid = 'paidOrderCount' in a && typeof (a as { paidOrderCount?: number }).paidOrderCount === 'number'
+    ? (a as { paidOrderCount: number }).paidOrderCount
+    : 0
+  if (paid > 0) return a.returnOrderCount / paid
   return null
 }
 

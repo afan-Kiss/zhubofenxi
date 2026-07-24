@@ -24,6 +24,7 @@ import { viewCountsAsPaidOrder } from './business-metrics.service'
 import { viewCountsAsRefundOrder } from './order-refund-metrics.service'
 import { centToYuan } from '../utils/money'
 import { roundMoneyYuan } from './daily-report-order.util'
+import { resolveBuyerIdentityFromView } from './buyer-identity.service'
 
 export interface OperationsProductRow {
   productKey: string
@@ -205,6 +206,33 @@ export async function buildProductsForDateRange(params: {
   })
   const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
   return buildOperationsProductAnalysis(performanceViews, scoped.rawByMatch)
+}
+
+/** 全范围有效成交买家唯一数（禁止把各商品 buyerCount 相加） */
+export async function countUniqueValidBuyersForDateRange(params: {
+  startDate: string
+  endDate: string
+  role?: UserRole
+  username?: string
+}): Promise<number> {
+  const scoped = await getBoardScopedViewsForRange({
+    preset: 'custom',
+    startDate: params.startDate,
+    endDate: params.endDate,
+    role: params.role,
+    username: params.username,
+  })
+  const performanceViews = await getAnchorPerformanceViews(scoped.views, scoped.rawByMatch)
+  const withRaw = attachRawByMatchToViews(performanceViews, scoped.rawByMatch)
+  const deduped = dedupeValidRevenueViewsByOrderNoBestValue(withRaw)
+  const buyers = new Set<string>()
+  for (const v of deduped) {
+    if (!isValidRevenueOrder(v)) continue
+    const identity = resolveBuyerIdentityFromView(v)
+    const key = identity?.key ?? v.buyerKey ?? v.buyerId
+    if (key) buyers.add(String(key))
+  }
+  return buyers.size
 }
 
 export async function buildOperationsProductDetail(params: {

@@ -34,6 +34,7 @@ import {
 import { calculateBusinessMetrics } from './business-metrics.service'
 import { centToYuan } from '../utils/money'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
+import { sumValidRevenueFromViews } from './valid-revenue-order.service'
 import { aggregateAfterSalesReasons } from './after-sales-reason-normalize.service'
 import { buildOperationsPriceBandAnalysis } from './operations-price-band.service'
 import {
@@ -75,19 +76,6 @@ function isUnassignedOperationsView(v: AnalyzedOrderView): boolean {
   return name === '未归属' || v.attributionType === 'unassigned'
 }
 
-function sumSignedDisplayFromViews(views: AnalyzedOrderView[]): {
-  validAmountCent: number
-  validAmountYuan: number
-  soldOrderCount: number
-} {
-  const m = calculateBusinessMetrics(views)
-  return {
-    validAmountCent: Math.round(m.actualSignedAmount * 100),
-    validAmountYuan: m.actualSignedAmount,
-    soldOrderCount: m.signedOrderCount,
-  }
-}
-
 export interface DailyOperationsAnchorRow extends AnchorAttendanceStatusPayload {
   anchorId?: string
   systemKey?: string | null
@@ -125,16 +113,26 @@ export interface DailyOperationsAnchorRow extends AnchorAttendanceStatusPayload 
 }
 
 export interface DailyOperationsSummary {
+  /** 支付 GMV（支付日口径，分） */
+  paymentGmvCent: number
+  paymentGmvYuan: number
+  /** 当前有效成交（支付日订单截至当前售后状态；与 sumValidRevenueFromViews 同源） */
   validAmountCent: number
   validAmountYuan: number
+  /** 实际签收（签收事实，独立于有效成交） */
+  actualSignedAmountCent: number
+  actualSignedAmountYuan: number
+  signedOrderCount: number
   anchorAssignedValidAmountYuan: number
   unassignedValidAmountYuan: number
   unassignedValidOrderCount: number
+  /** 有效成交订单数（与 validAmount 同一订单池） */
   soldOrderCount: number
   invalidOrderCount: number
   anchorAssignedInvalidOrderCount: number
   unassignedInvalidOrderCount: number
   returnOrderCount: number
+  /** 退款 P 单 ÷ 支付 P 单；分母为 0 时 null */
   returnOrderRate: number | null
   paidOrderCount: number
   dealUserCount: number | null
@@ -152,6 +150,9 @@ export interface DailyOperationsSummary {
   liveRoomNewFollowers: LiveRoomNewFollowerRow[]
   totalNewFollowerCount: number
   newFollowerRate: number | null
+  /** 数据截至时间（ISO）；近 7 天售后可能继续变化 */
+  dataAsOfAt: string
+  afterSaleObservationImmature: boolean
 }
 
 export interface DailyOperationsReportPayload {
@@ -382,7 +383,7 @@ export async function buildDailyOperationsAnchorRowsForDay(params: {
     )
     // 主播行业绩：排除线下成交，避免逸凡/线下 GMV 进入日报
     const performanceViews = performanceViewsRaw.filter((v) => !isOfflineDealView(v))
-    const validRevenue = sumSignedDisplayFromViews(performanceViews)
+    const validRevenue = sumValidRevenueFromViews(performanceViews)
     const validAmountCent = validRevenue.validAmountCent
     const validAmountYuan = validRevenue.validAmountYuan
     const anchorAllViews = filterViewsByAnchorSpec(
@@ -488,16 +489,28 @@ export async function buildDailyOperationsReport(params: {
 
   const anchorRows = await buildDailyOperationsAnchorRowsForDay(params)
 
-  const storeWideValid = sumSignedDisplayFromViews(performanceViewsAll)
+  const storeWideValid = sumValidRevenueFromViews(performanceViewsAll)
+  const storeWideMetrics = calculateBusinessMetrics(performanceViewsAll)
   const anchorAssignedValidCent = anchorRows.reduce((sum, row) => sum + row.validAmountCent, 0)
   const unassignedViews = dedupeViewsByMetricOrderNo(performanceViewsAll).filter(
     isUnassignedOperationsView,
   )
-  const unassignedValid = sumSignedDisplayFromViews(unassignedViews)
+  const unassignedValid = sumValidRevenueFromViews(unassignedViews)
 
   const validAmountCent = storeWideValid.validAmountCent
   const validAmountYuan = storeWideValid.validAmountYuan
   const soldOrderCount = storeWideValid.soldOrderCount
+  const paymentGmvCent = Math.round(storeWideMetrics.totalGmv * 100)
+  const paymentGmvYuan = storeWideMetrics.totalGmv
+  const actualSignedAmountCent = Math.round(storeWideMetrics.actualSignedAmount * 100)
+  const actualSignedAmountYuan = storeWideMetrics.actualSignedAmount
+  const signedOrderCount = storeWideMetrics.signedOrderCount
+  const dataAsOfAt = new Date().toISOString()
+  const afterSaleObservationImmature = (() => {
+    const startMs = Date.parse(`${params.startDate}T00:00:00+08:00`)
+    if (!Number.isFinite(startMs)) return false
+    return Date.now() - startMs < 7 * 24 * 60 * 60 * 1000
+  })()
   for (const row of anchorRows) {
     row.amountRatio = safeRatioPercent(row.validAmountYuan, validAmountYuan)
   }
@@ -562,7 +575,7 @@ export async function buildDailyOperationsReport(params: {
   const statisticsIntegrityWarnings: string[] = []
   if (unassignedValid.soldOrderCount > 0) {
     statisticsIntegrityWarnings.push(
-      `有 ${unassignedValid.soldOrderCount} 单已签收金额未归属主播（${unassignedValid.validAmountYuan.toFixed(2)} 元），全店汇总已计入、主播表为已归属口径。`,
+      `有 ${unassignedValid.soldOrderCount} 单有效成交未归属主播（${unassignedValid.validAmountYuan.toFixed(2)} 元），全店汇总已计入、主播表为已归属口径。`,
     )
   }
   if (unassignedInvalidOrderCount > 0) {
@@ -639,8 +652,13 @@ export async function buildDailyOperationsReport(params: {
     startDate: params.startDate,
     endDate: params.endDate,
     summary: {
+      paymentGmvCent,
+      paymentGmvYuan,
       validAmountCent,
       validAmountYuan,
+      actualSignedAmountCent,
+      actualSignedAmountYuan,
+      signedOrderCount,
       anchorAssignedValidAmountYuan: centToYuan(anchorAssignedValidCent),
       unassignedValidAmountYuan: unassignedValid.validAmountYuan,
       unassignedValidOrderCount: unassignedValid.soldOrderCount,
@@ -668,6 +686,8 @@ export async function buildDailyOperationsReport(params: {
       liveRoomNewFollowers,
       totalNewFollowerCount,
       newFollowerRate: summaryTraffic.newFollowerRate,
+      dataAsOfAt,
+      afterSaleObservationImmature,
     },
     anchors: anchorRows,
     products,

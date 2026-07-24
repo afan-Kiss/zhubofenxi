@@ -51,7 +51,7 @@ import {
   aggregateWeeklySummaryForAcceptance,
   changePercent,
 } from './weekly-operations-report.service'
-import { buildProductsForDateRange } from './operations-product-analysis.service'
+import { buildProductsForDateRange, countUniqueValidBuyersForDateRange } from './operations-product-analysis.service'
 import { buildPriceBandsForDateRange } from './operations-price-band.service'
 
 const MONTH_KEY_RE = /^\d{4}-\d{2}$/
@@ -175,12 +175,10 @@ async function loadDailySnapshots(params: {
 function buildMonthlySummary(
   snapshots: DailyOperationsReportPayload[],
   products: ReturnType<typeof aggregateProductsFromSnapshots>,
+  uniqueBuyerCount: number,
 ): MonthlyOperationsReportSummary {
   const base = aggregateWeeklySummaryForAcceptance(snapshots)
   const soldCount = products.reduce((sum, p) => sum + p.soldCount, 0)
-  const buyerCount = products.reduce((sum, p) => sum + p.buyerCount, 0)
-  const liveDurationHours =
-    base.totalLiveDurationMinutes > 0 ? base.totalLiveDurationMinutes / 60 : null
   const productReturnRate = computeReturnOrderRateRatio(
     base.paidOrderCount,
     base.returnOrderCount,
@@ -191,12 +189,14 @@ function buildMonthlySummary(
     validAmountYuan: base.validAmountYuan,
     soldOrderCount: base.soldOrderCount,
     soldCount,
-    buyerCount,
+    buyerCount: uniqueBuyerCount,
     averageOrderValue: base.avgOrderAmountYuan,
     productReturnOrderCount: base.returnOrderCount,
+    paidOrderCount: base.paidOrderCount,
     productReturnRate,
     productReturnRateAbnormal: isReturnOrderRateAbnormal(productReturnRate),
-    liveDurationHours,
+    liveDurationHours:
+      base.totalLiveDurationMinutes > 0 ? base.totalLiveDurationMinutes / 60 : null,
     hourlyAmountYuan: base.hourlyAmountYuan,
     viewSessionCount: base.viewSessionCount,
     joinUserCount: base.joinUserCount,
@@ -233,7 +233,13 @@ async function buildPreviousMonthSummary(params: {
     role: params.role,
     username: params.username,
   })
-  return buildMonthlySummary(prevSnapshots, prevProducts)
+  const prevBuyers = await countUniqueValidBuyersForDateRange({
+    startDate: params.prevStartDate,
+    endDate: params.prevEndDate,
+    role: params.role,
+    username: params.username,
+  })
+  return buildMonthlySummary(prevSnapshots, prevProducts, prevBuyers)
 }
 
 function buildCompareWithPreviousMonth(
@@ -434,7 +440,13 @@ export async function getMonthlyOperationsReport(params: {
     role: params.role,
     username: params.username,
   })
-  const summary = buildMonthlySummary(snapshots, products)
+  const uniqueBuyerCount = await countUniqueValidBuyersForDateRange({
+    startDate: range.startDate,
+    endDate: range.endDate,
+    role: params.role,
+    username: params.username,
+  })
+  const summary = buildMonthlySummary(snapshots, products, uniqueBuyerCount)
   const previousSummary = await buildPreviousMonthSummary({
     prevStartDate: compareRange.prevStartDate,
     prevEndDate: compareRange.prevEndDate,
@@ -474,9 +486,6 @@ export async function getMonthlyOperationsReport(params: {
   const dataQualityWarnings: string[] = [...(rankingsPayload.dataQuality?.warnings ?? [])]
   if (summary.dealConversionRate == null) {
     dataQualityWarnings.push('缺少官方成交人数，暂时算不出成交率')
-  }
-  if (summary.buyerCount > 0) {
-    dataQualityWarnings.push('成交买家数为商品维度汇总，同一买家购买多件商品可能重复计数')
   }
 
   let businessInsights = rankingsPayload.businessInsights

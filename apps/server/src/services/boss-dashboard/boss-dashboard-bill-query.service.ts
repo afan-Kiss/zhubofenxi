@@ -118,15 +118,16 @@ export async function loadCurrentMonthBillView(shopKey: string): Promise<BossCur
   const settlementNetCent = monthBills.reduce((acc, b) => acc + (b.totalChangeCent ?? 0), 0)
   const commissionCent = monthBills.reduce((acc, b) => acc + (b.totalCommissionCent ?? 0), 0)
   const settleOrderCount = monthBills.reduce((acc, b) => acc + (b.settleOrderCount ?? 0), 0)
-  const refundRaw = merged.STATEMENT_REFUND ?? 0
+  const refundRaw = merged.STATEMENT_REFUND
+  const otherFeeCent = sumFeeDetailExceptStatement(merged)
 
   return {
     settlementNetCent,
     statementInCent: merged.STATEMENT_IN ?? null,
     statementRefundCent: refundRaw != null ? Math.abs(refundRaw) : null,
-    otherFeeCent: sumFeeDetailExceptStatement(merged) || null,
-    commissionCent: commissionCent || null,
-    settleOrderCount: settleOrderCount || null,
+    otherFeeCent,
+    commissionCent,
+    settleOrderCount,
     dataThroughDate: monthBills[0]?.billDate ?? null,
     isPartialMonth: true,
   }
@@ -156,8 +157,8 @@ export async function loadYesterdaySettlementView(shopKey: string): Promise<Boss
   return {
     settlementNetCent: dayBills.reduce((acc, b) => acc + (b.totalChangeCent ?? 0), 0),
     billDate: yesterday,
-    settleOrderCount: dayBills.reduce((acc, b) => acc + (b.settleOrderCount ?? 0), 0) || null,
-    commissionCent: dayBills.reduce((acc, b) => acc + (b.totalCommissionCent ?? 0), 0) || null,
+    settleOrderCount: dayBills.reduce((acc, b) => acc + (b.settleOrderCount ?? 0), 0),
+    commissionCent: dayBills.reduce((acc, b) => acc + (b.totalCommissionCent ?? 0), 0),
   }
 }
 
@@ -222,19 +223,15 @@ export async function loadMonthlySettlementTrend(
   return result
 }
 
-export function rankBossShops<T extends { shopKey: BossDashboardShopKey; fund: { availableAmountCent: number | null } | null }>(
+/** 固定店铺展示顺序（非经营名次；可提现余额不得作为经营排名） */
+export function rankBossShops<T extends { shopKey: BossDashboardShopKey }>(
   shops: T[],
 ): Array<T & { rank: number }> {
-  const orderIndex = (key: BossDashboardShopKey) => BOSS_SHOP_RANK_ORDER.indexOf(key)
-  const sorted = [...shops].sort((a, b) => {
-    const avA = a.fund?.availableAmountCent
-    const avB = b.fund?.availableAmountCent
-    if (avA == null && avB == null) return orderIndex(a.shopKey) - orderIndex(b.shopKey)
-    if (avA == null) return 1
-    if (avB == null) return -1
-    if (avB !== avA) return avB - avA
-    return orderIndex(a.shopKey) - orderIndex(b.shopKey)
-  })
+  const orderIndex = (key: BossDashboardShopKey) => {
+    const i = BOSS_SHOP_RANK_ORDER.indexOf(key)
+    return i >= 0 ? i : 999
+  }
+  const sorted = [...shops].sort((a, b) => orderIndex(a.shopKey) - orderIndex(b.shopKey))
   return sorted.map((shop, index) => ({ ...shop, rank: index + 1 }))
 }
 

@@ -29,11 +29,11 @@ const SHOP_COLORS: Record<string, string> = {
 
 interface Point {
   month: string
-  amountCent: number
-  shiyuju: number
-  hetianyayu: number
-  xiangyu: number
-  xyxiangyu: number
+  amountCent: number | null
+  shiyuju: number | null
+  hetianyayu: number | null
+  xiangyu: number | null
+  xyxiangyu: number | null
 }
 
 interface Props {
@@ -68,11 +68,11 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
       trimmedPoints.map((p) => ({
         month: p.month.slice(5),
         fullMonth: p.month,
-        total: p.amountCent / 100,
-        shiyuju: p.shiyuju / 100,
-        hetianyayu: p.hetianyayu / 100,
-        xiangyu: p.xiangyu / 100,
-        xyxiangyu: p.xyxiangyu / 100,
+        total: p.amountCent != null ? p.amountCent / 100 : null,
+        shiyuju: p.shiyuju != null ? p.shiyuju / 100 : null,
+        hetianyayu: p.hetianyayu != null ? p.hetianyayu / 100 : null,
+        xiangyu: p.xiangyu != null ? p.xiangyu / 100 : null,
+        xyxiangyu: p.xyxiangyu != null ? p.xyxiangyu / 100 : null,
       })),
     [trimmedPoints],
   )
@@ -99,6 +99,14 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
   if (data.length === 1 && mode === 'shop') {
     const row = data[0]
     const key = shopKey ?? 'total'
+    const rawCent = trimmedPoints[0]?.amountCent
+    if (rawCent == null) {
+      return (
+        <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500">
+          暂无到账趋势数据
+        </div>
+      )
+    }
     const value = row[key as keyof typeof row]
     return (
       <div className="rounded-xl border border-slate-100 bg-slate-50/60 px-4 py-3">
@@ -135,9 +143,11 @@ export const BossIncomeTrendChart: React.FC<Props> = ({
             />
             <Tooltip
               wrapperStyle={{ zIndex: 20, maxWidth: compact ? 220 : undefined }}
-              formatter={(value: number, name: string) => [
-                centToDisplayYuan(Math.round(value * 100)),
-                name,
+              formatter={(value, name) => [
+                value == null || typeof value !== 'number'
+                  ? '—'
+                  : centToDisplayYuan(Math.round(value * 100)),
+                String(name),
               ]}
               labelFormatter={(label, payload) => {
                 const full = payload?.[0]?.payload?.fullMonth

@@ -381,17 +381,25 @@ export interface OpsReviewNotePayload {
 }
 
 export interface DailyOperationsSummary {
-  /** 全店已签收金额（与经营总览 actualSignedAmount 同源） */
+  /** 支付 GMV（支付日口径） */
+  paymentGmvYuan?: number
+  /** 当前有效成交（支付日订单截至当前售后状态；与 sumValidRevenueFromViews 同源） */
   validAmountYuan: number
+  /** 实际签收金额（签收事实，独立于有效成交） */
+  actualSignedAmountYuan?: number
+  signedOrderCount?: number
   anchorAssignedValidAmountYuan?: number
   unassignedValidAmountYuan?: number
   unassignedValidOrderCount?: number
+  /** 有效成交订单数 */
   soldOrderCount: number
   invalidOrderCount: number
   anchorAssignedInvalidOrderCount?: number
   unassignedInvalidOrderCount?: number
   returnOrderCount: number
+  /** 退款 P 单 ÷ 支付 P 单 */
   returnOrderRate: number | null
+  paidOrderCount?: number
   dealUserCount: number | null
   dealConversionRate: number | null
   joinUserCount: number | null
@@ -407,6 +415,8 @@ export interface DailyOperationsSummary {
   liveRoomNewFollowers: LiveRoomNewFollowerRow[]
   totalNewFollowerCount: number
   newFollowerRate: number | null
+  dataAsOfAt?: string
+  afterSaleObservationImmature?: boolean
 }
 
 export interface DailyOperationsReportPayload {
@@ -437,6 +447,7 @@ export interface WeeklyAnchorRow {
   anchorName: string
   validAmountYuan: number
   soldOrderCount: number
+  paidOrderCount: number
   returnOrderCount: number
   returnOrderRate: number | null
   liveDurationMinutes: number
@@ -459,6 +470,7 @@ export interface WeeklyProductHighlight {
   barType: string
   soldCount: number
   soldOrderCount: number
+  paidOrderCount: number
   soldAmountYuan: number
   validAmountYuan: number
   buyerCount: number
@@ -517,6 +529,7 @@ export interface MonthlyOperationsReportPayload {
     buyerCount: number
     averageOrderValue: number | null
     productReturnOrderCount: number
+    paidOrderCount?: number
     productReturnRate: number | null
     productReturnRateAbnormal?: boolean
     liveDurationHours: number | null

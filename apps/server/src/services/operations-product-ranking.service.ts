@@ -65,7 +65,7 @@ function rowToRankBase(p: OperationsProductRow): Omit<ProductRankItem, 'rankReas
     barType: p.barType,
     soldCount: p.soldCount,
     soldOrderCount: p.soldOrderCount,
-    paidOrderCount: p.paidOrderCount ?? p.soldOrderCount,
+    paidOrderCount: p.paidOrderCount,
     validAmountYuan: p.soldAmountYuan,
     buyerCount: p.buyerCount,
     returnOrderCount: p.returnOrderCount,

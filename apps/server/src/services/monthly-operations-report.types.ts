@@ -24,6 +24,8 @@ export interface MonthlyOperationsReportSummary {
   buyerCount: number
   averageOrderValue: number | null
   productReturnOrderCount: number
+  /** 支付 P 单（退货率分母） */
+  paidOrderCount: number
   productReturnRate: number | null
   productReturnRateAbnormal?: boolean
   liveDurationHours: number | null

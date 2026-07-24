@@ -67,7 +67,7 @@ export const BossMoneyTrendChart: React.FC<Props> = ({
   const source = mode === 'income' ? incomePoints : settlementPoints
 
   const trimmedPoints = useMemo(
-    () => trimLeadingEmptyMonths(source, (p) => p.amountCent ?? 0),
+    () => trimLeadingEmptyMonths(source, (p) => p.amountCent),
     [source],
   )
 

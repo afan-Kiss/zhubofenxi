@@ -128,6 +128,9 @@ function aggregateWeeklySummary(
   snapshots: DailyOperationsReportPayload[],
 ): DailyOperationsReportPayload['summary'] {
   let validAmountCent = 0
+  let paymentGmvCent = 0
+  let actualSignedAmountCent = 0
+  let signedOrderCount = 0
   let soldOrderCount = 0
   let invalidOrderCount = 0
   let returnOrderCount = 0
@@ -149,10 +152,22 @@ function aggregateWeeklySummary(
   let avgOnlineWeight = 0
   let avgStayWeighted = 0
   let avgStayWeight = 0
+  let afterSaleObservationImmature = false
+  let dataAsOfAt: string | null = null
   const liveRoomMap = new Map<string, number>()
 
   for (const snap of snapshots) {
     validAmountCent += snap.summary.validAmountCent ?? Math.round(snap.summary.validAmountYuan * 100)
+    paymentGmvCent +=
+      snap.summary.paymentGmvCent ?? Math.round((snap.summary.paymentGmvYuan ?? 0) * 100)
+    actualSignedAmountCent +=
+      snap.summary.actualSignedAmountCent ??
+      Math.round((snap.summary.actualSignedAmountYuan ?? 0) * 100)
+    signedOrderCount += snap.summary.signedOrderCount ?? 0
+    if (snap.summary.afterSaleObservationImmature) afterSaleObservationImmature = true
+    if (snap.summary.dataAsOfAt) {
+      if (!dataAsOfAt || snap.summary.dataAsOfAt > dataAsOfAt) dataAsOfAt = snap.summary.dataAsOfAt
+    }
     soldOrderCount += snap.summary.soldOrderCount
     invalidOrderCount += snap.summary.invalidOrderCount
     returnOrderCount += snap.summary.returnOrderCount
@@ -194,8 +209,13 @@ function aggregateWeeklySummary(
   const validAmountYuan = validAmountCent / 100
 
   return {
+    paymentGmvCent,
+    paymentGmvYuan: paymentGmvCent / 100,
     validAmountCent,
     validAmountYuan,
+    actualSignedAmountCent,
+    actualSignedAmountYuan: actualSignedAmountCent / 100,
+    signedOrderCount,
     anchorAssignedValidAmountYuan: anchorAssignedValidCent / 100,
     unassignedValidAmountYuan: unassignedValidCent / 100,
     unassignedValidOrderCount,
@@ -232,6 +252,8 @@ function aggregateWeeklySummary(
       viewSessionCount != null && viewSessionCount > 0 && totalNewFollowerCount > 0
         ? totalNewFollowerCount / viewSessionCount
         : null,
+    dataAsOfAt: dataAsOfAt ?? new Date().toISOString(),
+    afterSaleObservationImmature,
   }
 }
 

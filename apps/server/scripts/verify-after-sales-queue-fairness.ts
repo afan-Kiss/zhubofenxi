@@ -43,6 +43,37 @@ function main(): void {
   console.log(
     `✓ 公平轮询：shop1=${shop1Count} shop2=${counts.get('shop2')} shop3=${counts.get('shop3')} shop4=${counts.get('shop4')}`,
   )
+
+  // 同店调度：priority DESC 再按 signalDetectedAt/createdAt
+  type Q = {
+    priority: number
+    signalDetectedAt: number | null
+    nextAttemptAt: number | null
+    createdAt: number
+    id: string
+  }
+  const candidates: Q[] = [
+    { id: 'low-old', priority: 40, signalDetectedAt: 1, nextAttemptAt: null, createdAt: 1 },
+    { id: 'high-new', priority: 90, signalDetectedAt: 100, nextAttemptAt: null, createdAt: 100 },
+    { id: 'high-old', priority: 90, signalDetectedAt: 10, nextAttemptAt: null, createdAt: 10 },
+  ]
+  const sorted = [...candidates].sort((a, b) => {
+    if (b.priority !== a.priority) return b.priority - a.priority
+    const sa = a.signalDetectedAt ?? a.createdAt
+    const sb = b.signalDetectedAt ?? b.createdAt
+    if (sa !== sb) return sa - sb
+    const na = a.nextAttemptAt ?? a.createdAt
+    const nb = b.nextAttemptAt ?? b.createdAt
+    if (na !== nb) return na - nb
+    return a.createdAt - b.createdAt
+  })
+  assert.deepEqual(
+    sorted.map((x) => x.id),
+    ['high-old', 'high-new', 'low-old'],
+    '同店应先高 priority，同优先级先更早信号',
+  )
+  console.log('✓ 同店 priority DESC 再按 signalDetectedAt ASC')
+
   console.log('\nPASS')
 }
 

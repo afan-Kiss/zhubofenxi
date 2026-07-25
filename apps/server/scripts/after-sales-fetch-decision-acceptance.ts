@@ -85,6 +85,16 @@ const cases: Array<{ name: string; input: Parameters<typeof shouldFetchAfterSale
     expect: true,
   },
   {
+    name: '空 afterSaleInfo 不算信号',
+    input: {
+      ...baseOrder,
+      orderStatusText: '已签收',
+      afterSaleStatusText: '无售后',
+      raw: { afterSaleInfo: {}, afterSaleStatus: 0, refundAmount: 0 },
+    },
+    expect: false,
+  },
+  {
     name: 'refundSource pending',
     input: {
       ...baseOrder,

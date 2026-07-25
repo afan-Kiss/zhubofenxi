@@ -323,7 +323,10 @@ async function loadDueCandidatesForShop(
         status = 'pending'
         OR (status = 'retry_wait' AND (nextAttemptAt IS NULL OR nextAttemptAt <= datetime('now')))
       )
-    ORDER BY COALESCE(nextAttemptAt, createdAt) ASC, createdAt ASC
+    ORDER BY priority DESC,
+             COALESCE(signalDetectedAt, createdAt) ASC,
+             COALESCE(nextAttemptAt, createdAt) ASC,
+             createdAt ASC
     LIMIT ${take}
   `
 }

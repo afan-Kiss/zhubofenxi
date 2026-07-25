@@ -490,6 +490,12 @@ model XhsAfterSalesWorkbenchQueue {
   claimToken            String?
   claimedAt             DateTime?
   statusChangedAt       DateTime?
+  /// 业务优先级：官方品退/进行中售后 > 普通重试；调度按 priority DESC
+  priority              Int       @default(0)
+  /// 最近一次入队/重开原因（资格判定 reason）
+  triggerReason         String?
+  /// 首次检测到有效售后信号的时间（调度次关键字）
+  signalDetectedAt      DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -498,6 +504,7 @@ model XhsAfterSalesWorkbenchQueue {
   @@index([liveAccountId])
   @@index([status, nextAttemptAt])
   @@index([liveAccountId, status, nextAttemptAt])
+  @@index([liveAccountId, status, priority, nextAttemptAt])
 }
 
 /// 售后任务状态变更审计（不含 Cookie）

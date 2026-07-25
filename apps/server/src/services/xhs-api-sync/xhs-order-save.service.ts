@@ -1,5 +1,6 @@
 import { prisma } from '../../lib/prisma'
 import { enqueueWorkbenchSync } from '../xhs-after-sales-workbench.service'
+import { resolveAfterSalesQueueEligibility } from '../after-sales-fetch-decision.service'
 import { Prisma } from '@prisma/client'
 import type { SyncOrderListOnlyParams, SyncOrderListOnlyResult } from './xhs-order-sync.service'
 import {
@@ -123,10 +124,12 @@ async function saveOrderPackage(
         ...structured,
       },
     })
-    const displayNo = (packageId || orderId || '').trim()
-    if (displayNo && /^P/i.test(displayNo)) {
-      void enqueueWorkbenchSync(displayNo, liveAccountId)
-    }
+    maybeEnqueueAfterSalesWorkbench({
+      displayNo: (packageId || orderId || '').trim(),
+      liveAccountId,
+      structured,
+      raw: item,
+    })
     return { saved: true, created: !existing }
   }
 
@@ -160,7 +163,40 @@ async function saveOrderPackage(
       },
     })
   }
+  maybeEnqueueAfterSalesWorkbench({
+    displayNo: (packageId || orderId || '').trim(),
+    liveAccountId,
+    structured,
+    raw: item,
+  })
   return { saved: true, created: !existing }
+}
+
+/** 仅有售后信号时入队；无信号的普通 P 单不进队列 */
+function maybeEnqueueAfterSalesWorkbench(params: {
+  displayNo: string
+  liveAccountId: string
+  structured: {
+    afterSaleStatusText?: string | null
+    orderStatusText?: string | null
+    isReturned?: boolean | null
+  }
+  raw: Record<string, unknown>
+}): void {
+  const displayNo = params.displayNo.trim()
+  if (!displayNo || !/^P/i.test(displayNo)) return
+  const elig = resolveAfterSalesQueueEligibility({
+    displayOrderNo: displayNo,
+    officialOrderNo: displayNo,
+    afterSaleStatusText: params.structured.afterSaleStatusText ?? undefined,
+    orderStatusText: params.structured.orderStatusText ?? undefined,
+    isReturned: Boolean(params.structured.isReturned),
+    raw: params.raw,
+  })
+  if (!elig.eligible) return
+  void enqueueWorkbenchSync(displayNo, params.liveAccountId, {
+    source: 'order_save',
+  })
 }
 
 export async function syncOrderListOnlyWithSave(

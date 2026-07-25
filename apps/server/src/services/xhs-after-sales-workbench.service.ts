@@ -7,6 +7,7 @@ import { parseMoneyToCent } from '../utils/money'
 import {
   buildLiveAccountOrderQueries,
   liveAccountOrderKey,
+  liveAccountPackageKey,
   resolveLiveAccountId,
   type LiveAccountOrderQuery,
 } from '../utils/live-account-cache-key.util'
@@ -31,11 +32,18 @@ import { yuanApiAmountToCent } from './business-refund-caliber.service'
 import {
   buildWorkbenchBusinessFingerprint,
   extractOrderAfterSaleContextFromRaw,
+  isWorkbenchCacheCurrentlyValid,
   resolvePreferredWorkbenchRefund,
+  resolveWorkbenchCacheValidity,
   shouldReopenWorkbenchQueueTask,
   type OrderAfterSaleContext,
+  type WorkbenchCacheSnapshot,
 } from './workbench-cache-validity.service'
 import { logInfo, logWarn } from '../utils/server-log'
+import {
+  resolveAfterSalesQueueEligibility,
+  type ShouldFetchWorkbenchInput,
+} from './after-sales-fetch-decision.service'
 
 const WORKBENCH_URL =
   'https://ark.xiaohongshu.com/api/edith/after-sales/returns/v3'
@@ -716,7 +724,7 @@ export async function enqueueWorkbenchSync(
   orderNo: string,
   liveAccountId?: string,
   opts?: { force?: boolean; source?: string },
-): Promise<{ reopened: boolean; reason: string }> {
+): Promise<{ reopened: boolean; reason: string; priority?: number }> {
   const trimmed = orderNo.trim()
   const accountId = resolveLiveAccountId(liveAccountId)
   if (!trimmed || !/^P/i.test(trimmed)) return { reopened: false, reason: 'invalid_order_no' }
@@ -725,8 +733,11 @@ export async function enqueueWorkbenchSync(
     './after-sales-queue.service'
   )
   const { writeAfterSalesQueueAudit } = await import('./after-sales-queue-audit.service')
+  const { loadAllQualityBadCases, getOfficialQualityPackageIdSet } = await import(
+    './quality-badcase-store.service'
+  )
 
-  const [existingQueue, cacheRow, orderCtx, externalHealth] = await Promise.all([
+  const [existingQueue, cacheRow, orderCtx, externalHealth, qualityCases] = await Promise.all([
     prisma.xhsAfterSalesWorkbenchQueue.findUnique({
       where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
       select: {
@@ -734,6 +745,9 @@ export async function enqueueWorkbenchSync(
         nextAttemptAt: true,
         errorType: true,
         lastError: true,
+        priority: true,
+        triggerReason: true,
+        signalDetectedAt: true,
       },
     }),
     prisma.xhsAfterSalesWorkbenchCache.findUnique({
@@ -762,44 +776,103 @@ export async function enqueueWorkbenchSync(
     }),
     loadOrderAfterSaleContext(accountId, trimmed),
     getShopExternalHealth(accountId),
+    loadAllQualityBadCases(),
   ])
+
+  const orderContext = orderCtx ?? extractOrderAfterSaleContextFromRaw({})
+  const cacheSnapshot: WorkbenchCacheSnapshot | null = cacheRow
+    ? {
+        fetchStatus: cacheRow.fetchStatus,
+        fetchedAt: cacheRow.fetchedAt,
+        updatedAt: cacheRow.updatedAt,
+        officialRefundAmountCent: cacheRow.officialRefundAmountCent,
+        expectedRefundAmountCent: cacheRow.expectedRefundAmountCent,
+        appliedAmountCent: cacheRow.appliedAmountCent,
+        appliedShipFeeAmountCent: cacheRow.appliedShipFeeAmountCent,
+        freightRefundAmountCent: cacheRow.appliedShipFeeAmountCent,
+        successReturnCount: cacheRow.successReturnCount,
+        returnRefundCount: cacheRow.returnRefundCount,
+        refundOnlyCount: cacheRow.refundOnlyCount,
+        hasReturnRefund: cacheRow.hasReturnRefund,
+        hasRefundOnly: cacheRow.hasRefundOnly,
+        afterSaleStatus: cacheRow.afterSaleStatus,
+        afterSaleReason: cacheRow.afterSaleReason,
+        afterSaleType: cacheRow.afterSaleType,
+        returnTypeCodes: cacheRow.returnTypeCodes,
+        classificationSource: cacheRow.classificationSource,
+        returnsIds: cacheRow.returnsIds,
+        refundIncludesFreight: cacheRow.refundIncludesFreight,
+      }
+    : null
+
+  const cacheValidity = resolveWorkbenchCacheValidity(cacheSnapshot, orderContext)
+  const cacheCurrentlyValid = isWorkbenchCacheCurrentlyValid(cacheSnapshot, orderContext)
+  const officialSet = getOfficialQualityPackageIdSet(qualityCases)
+  const officialQualityCaseMatched = officialSet.has(
+    liveAccountPackageKey(accountId, trimmed),
+  )
+
+  const fetchInput: ShouldFetchWorkbenchInput = {
+    orderStatusText: orderContext.orderStatusText ?? undefined,
+    afterSaleStatusText: orderContext.afterSaleStatusText ?? undefined,
+    isReturned: orderContext.isReturned === true,
+    raw: undefined,
+    displayOrderNo: trimmed,
+    officialOrderNo: trimmed,
+    cacheFetchStatus: cacheRow?.fetchStatus ?? null,
+  }
+  // 带上订单 raw，供 ID/金额语义判定
+  try {
+    const rawRow = await prisma.xhsRawOrder.findFirst({
+      where: {
+        liveAccountId: accountId,
+        OR: [{ packageId: trimmed }, { orderId: trimmed }, { displayOrderNo: trimmed }],
+      },
+      select: { rawJson: true, isReturned: true, afterSaleStatusText: true, orderStatusText: true },
+      orderBy: { updatedAt: 'desc' },
+    })
+    if (rawRow?.rawJson && typeof rawRow.rawJson === 'object') {
+      fetchInput.raw = rawRow.rawJson as Record<string, unknown>
+    }
+    if (rawRow?.afterSaleStatusText) fetchInput.afterSaleStatusText = rawRow.afterSaleStatusText
+    if (rawRow?.orderStatusText) fetchInput.orderStatusText = rawRow.orderStatusText
+    if (rawRow?.isReturned != null) fetchInput.isReturned = Boolean(rawRow.isReturned)
+  } catch {
+    // ignore
+  }
+
+  const eligibility = resolveAfterSalesQueueEligibility(fetchInput, {
+    officialQualityCaseMatched,
+    cacheMissingOrStale: !cacheRow || !cacheValidity.valid,
+    cacheCurrentlyValid,
+  })
+
+  const force = opts?.force === true
+  if (!existingQueue && !eligibility.eligible && !force) {
+    return { reopened: false, reason: eligibility.reason, priority: 0 }
+  }
+
+  const prevPriority = existingQueue?.priority ?? 0
+  const nextPriority = Math.max(prevPriority, eligibility.priority, force ? 40 : 0)
+  const higherSignal =
+    eligibility.eligible && eligibility.priority > prevPriority && eligibility.priority >= 75
 
   const decision = shouldReopenWorkbenchQueueTask({
     queueStatus: existingQueue?.status,
     nextAttemptAt: existingQueue?.nextAttemptAt,
     errorType: existingQueue?.errorType,
     lastError: existingQueue?.lastError,
-    cache: cacheRow
-      ? {
-          fetchStatus: cacheRow.fetchStatus,
-          fetchedAt: cacheRow.fetchedAt,
-          updatedAt: cacheRow.updatedAt,
-          officialRefundAmountCent: cacheRow.officialRefundAmountCent,
-          expectedRefundAmountCent: cacheRow.expectedRefundAmountCent,
-          appliedAmountCent: cacheRow.appliedAmountCent,
-          appliedShipFeeAmountCent: cacheRow.appliedShipFeeAmountCent,
-          freightRefundAmountCent: cacheRow.appliedShipFeeAmountCent,
-          successReturnCount: cacheRow.successReturnCount,
-          returnRefundCount: cacheRow.returnRefundCount,
-          refundOnlyCount: cacheRow.refundOnlyCount,
-          hasReturnRefund: cacheRow.hasReturnRefund,
-          hasRefundOnly: cacheRow.hasRefundOnly,
-          afterSaleStatus: cacheRow.afterSaleStatus,
-          afterSaleReason: cacheRow.afterSaleReason,
-          afterSaleType: cacheRow.afterSaleType,
-          returnTypeCodes: cacheRow.returnTypeCodes,
-          classificationSource: cacheRow.classificationSource,
-          returnsIds: cacheRow.returnsIds,
-          refundIncludesFreight: cacheRow.refundIncludesFreight,
-        }
-      : null,
-    order: orderCtx ?? extractOrderAfterSaleContextFromRaw({}),
-    force: opts?.force === true,
+    cache: cacheSnapshot,
+    order: orderContext,
+    force: force || higherSignal,
     source: opts?.source ?? 'enqueueWorkbenchSync',
     externalHealth,
   })
 
   if (!existingQueue) {
+    if (!eligibility.eligible && !force) {
+      return { reopened: false, reason: eligibility.reason, priority: 0 }
+    }
     const now = new Date()
     await prisma.xhsAfterSalesWorkbenchQueue.create({
       data: {
@@ -807,6 +880,9 @@ export async function enqueueWorkbenchSync(
         orderNo: trimmed,
         status: 'pending',
         statusChangedAt: now,
+        priority: nextPriority,
+        triggerReason: eligibility.reason || (force ? 'force_create' : 'created'),
+        signalDetectedAt: eligibility.eligible ? now : null,
       },
     })
     await writeAfterSalesQueueAudit({
@@ -814,31 +890,54 @@ export async function enqueueWorkbenchSync(
       orderNo: trimmed,
       fromStatus: null,
       toStatus: 'pending',
-      reason: 'created',
+      reason: eligibility.reason || 'created',
       source: opts?.source ?? 'enqueueWorkbenchSync',
       cacheStatus: cacheRow?.fetchStatus,
-      orderAfterSaleStatus: orderCtx.afterSaleStatusText,
+      orderAfterSaleStatus: orderContext.afterSaleStatusText,
+      force,
+      operator: force ? 'admin_force' : null,
     })
     logInfo(
       '售后补查',
-      `入队 create pending shop=${accountId} order=${trimmed} source=${opts?.source ?? 'enqueue'}`,
+      `入队 create pending shop=${accountId} order=${trimmed} priority=${nextPriority} reason=${eligibility.reason} source=${opts?.source ?? 'enqueue'}`,
     )
-    return { reopened: true, reason: 'created' }
+    return { reopened: true, reason: 'created', priority: nextPriority }
+  }
+
+  // 已有队列：更新 priority / triggerReason；无资格且非 force 则不重开
+  if (!eligibility.eligible && !force) {
+    if (nextPriority !== prevPriority) {
+      await prisma.xhsAfterSalesWorkbenchQueue.update({
+        where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
+        data: { priority: nextPriority },
+      })
+    }
+    return { reopened: false, reason: eligibility.reason || decision.reason, priority: nextPriority }
   }
 
   if (!decision.reopen) {
-    return { reopened: false, reason: decision.reason }
+    // 仍更新优先级元数据
+    const nowMeta = new Date()
+    await prisma.xhsAfterSalesWorkbenchQueue.update({
+      where: { liveAccountId_orderNo: { liveAccountId: accountId, orderNo: trimmed } },
+      data: {
+        priority: nextPriority,
+        triggerReason: eligibility.reason || existingQueue.triggerReason,
+        signalDetectedAt: existingQueue.signalDetectedAt ?? (eligibility.eligible ? nowMeta : null),
+      },
+    })
+    return { reopened: false, reason: decision.reason, priority: nextPriority }
   }
 
-  if (decision.force) {
+  if (decision.force || force) {
     logWarn(
       '售后补查',
-      `FORCE 重开 ${decision.fromStatus}→pending shop=${accountId} order=${trimmed} reason=${decision.reason} cache=${cacheRow?.fetchStatus ?? 'none'} afterSale=${orderCtx.afterSaleStatusText ?? ''}`,
+      `FORCE/高信号重开 ${decision.fromStatus}→pending shop=${accountId} order=${trimmed} reason=${decision.reason} eligibility=${eligibility.reason} priority=${nextPriority}`,
     )
   } else {
     logInfo(
       '售后补查',
-      `重开 ${decision.fromStatus}→pending shop=${accountId} order=${trimmed} reason=${decision.reason}`,
+      `重开 ${decision.fromStatus}→pending shop=${accountId} order=${trimmed} reason=${decision.reason} priority=${nextPriority}`,
     )
   }
 
@@ -856,6 +955,9 @@ export async function enqueueWorkbenchSync(
       claimToken: null,
       claimedAt: null,
       statusChangedAt: now,
+      priority: nextPriority,
+      triggerReason: eligibility.reason || decision.reason,
+      signalDetectedAt: existingQueue.signalDetectedAt ?? now,
     },
   })
   await writeAfterSalesQueueAudit({
@@ -863,14 +965,14 @@ export async function enqueueWorkbenchSync(
     orderNo: trimmed,
     fromStatus: decision.fromStatus,
     toStatus: 'pending',
-    reason: decision.reason,
-    force: decision.force,
+    reason: eligibility.reason || decision.reason,
+    force: decision.force || force,
     source: opts?.source ?? 'enqueueWorkbenchSync',
     cacheStatus: cacheRow?.fetchStatus,
-    orderAfterSaleStatus: orderCtx.afterSaleStatusText,
-    operator: decision.force ? 'admin_force' : null,
+    orderAfterSaleStatus: orderContext.afterSaleStatusText,
+    operator: force || decision.force ? 'admin_force' : null,
   })
-  return { reopened: true, reason: decision.reason }
+  return { reopened: true, reason: decision.reason, priority: nextPriority }
 }
 
 /** @deprecated 请使用 shouldFetchAfterSalesWorkbench */
@@ -1198,6 +1300,100 @@ export async function enqueueWorkbenchSyncBatch(
   return stats
 }
 
+/**
+ * 仅扫描并入队「有售后信号且缓存缺失/过期」的订单。
+ * 禁止全量 P 单入队。
+ */
+export async function syncEligibleAfterSalesWorkbenchFromRaw(opts?: {
+  /** 仅扫描近 N 天订单（按 paymentTime/orderedAt）；默认 45 */
+  lookbackDays?: number
+  source?: string
+}): Promise<{
+  enqueued: number
+  processed: number
+  scanned: number
+  eligible: number
+  batch?: {
+    scanned: number
+    created: number
+    reopened: number
+    skipped: number
+    failed: number
+  }
+}> {
+  const lookbackDays = Math.max(1, opts?.lookbackDays ?? 45)
+  const sinceMs = Date.now() - lookbackDays * 24 * 60 * 60 * 1000
+  const PAGE = 400
+  let cursor: string | undefined
+  const keys: Array<{ liveAccountId: string; orderNo: string }> = []
+  let scanned = 0
+  for (;;) {
+    const rows = await prisma.xhsRawOrder.findMany({
+      take: PAGE,
+      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+      orderBy: { id: 'asc' },
+      select: {
+        id: true,
+        packageId: true,
+        orderId: true,
+        displayOrderNo: true,
+        liveAccountId: true,
+        afterSaleStatusText: true,
+        orderStatusText: true,
+        isReturned: true,
+        paymentTime: true,
+        orderedAt: true,
+        rawJson: true,
+      },
+    })
+    if (rows.length === 0) break
+    for (const o of rows) {
+      scanned++
+      const payRaw = o.paymentTime ?? o.orderedAt
+      const payMs =
+        payRaw instanceof Date
+          ? payRaw.getTime()
+          : typeof payRaw === 'number'
+            ? payRaw
+            : 0
+      if (payMs > 0 && payMs < sinceMs) continue
+      const no = (o.packageId || o.displayOrderNo || o.orderId || '').trim()
+      if (!no || !/^P/i.test(no)) continue
+      const input: ShouldFetchWorkbenchInput = {
+        displayOrderNo: no,
+        officialOrderNo: no,
+        afterSaleStatusText: o.afterSaleStatusText ?? undefined,
+        orderStatusText: o.orderStatusText ?? undefined,
+        isReturned: Boolean(o.isReturned),
+        raw:
+          o.rawJson && typeof o.rawJson === 'object'
+            ? (o.rawJson as Record<string, unknown>)
+            : undefined,
+      }
+      const elig = resolveAfterSalesQueueEligibility(input, {
+        cacheMissingOrStale: true,
+        cacheCurrentlyValid: false,
+      })
+      if (!elig.eligible) continue
+      keys.push({ liveAccountId: o.liveAccountId, orderNo: no })
+    }
+    cursor = rows[rows.length - 1]!.id
+    if (rows.length < PAGE) break
+  }
+  const batch = await enqueueWorkbenchSyncBatch(keys, {
+    source: opts?.source ?? 'syncEligibleAfterSalesWorkbenchFromRaw',
+  })
+  await refreshWorkbenchMemoryCache()
+  return {
+    enqueued: batch.created + batch.reopened,
+    processed: 0,
+    scanned,
+    eligible: keys.length,
+    batch,
+  }
+}
+
+/** @deprecated 请使用 syncEligibleAfterSalesWorkbenchFromRaw；内部不再全量 P 单入队 */
 export async function syncAllOrdersWorkbenchFromRaw(): Promise<{
   enqueued: number
   processed: number
@@ -1209,34 +1405,13 @@ export async function syncAllOrdersWorkbenchFromRaw(): Promise<{
     failed: number
   }
 }> {
-  const PAGE = 400
-  let cursor: string | undefined
-  const keys: Array<{ liveAccountId: string; orderNo: string }> = []
-  for (;;) {
-    const rows = await prisma.xhsRawOrder.findMany({
-      take: PAGE,
-      ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
-      orderBy: { id: 'asc' },
-      select: { id: true, packageId: true, orderId: true, liveAccountId: true },
-    })
-    if (rows.length === 0) break
-    for (const o of rows) {
-      const no = (o.packageId || o.orderId || '').trim()
-      if (no && /^P/i.test(no)) {
-        keys.push({ liveAccountId: o.liveAccountId, orderNo: no })
-      }
-    }
-    cursor = rows[rows.length - 1]!.id
-    if (rows.length < PAGE) break
-  }
-  const batch = await enqueueWorkbenchSyncBatch(keys, {
+  const r = await syncEligibleAfterSalesWorkbenchFromRaw({
+    lookbackDays: 45,
     source: 'syncAllOrdersWorkbenchFromRaw',
   })
-  // 不在此处 process 5000；由后台 worker 限流消化
-  await refreshWorkbenchMemoryCache()
   return {
-    enqueued: batch.created + batch.reopened,
-    processed: 0,
-    batch,
+    enqueued: r.enqueued,
+    processed: r.processed,
+    batch: r.batch,
   }
 }

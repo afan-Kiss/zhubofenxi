@@ -92,6 +92,7 @@ export function createApp() {
       gitCommit: meta.gitCommit,
       cache: getBusinessCacheHealthStats(),
       afterSalesOps,
+      afterSalesDegraded: Boolean(afterSalesOps && (afterSalesOps as { afterSalesDegraded?: boolean }).afterSalesDegraded),
     })
   })
 

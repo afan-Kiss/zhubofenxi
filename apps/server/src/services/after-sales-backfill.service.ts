@@ -43,6 +43,10 @@ export async function runAfterSalesBackfillBatch(
   retryWait: number
   blocked: number
 }> {
+  // 本地队列维护：即使全店 cooling / 无候选，也必须先恢复超时 running
+  const { recoverStuckAfterSalesRunningTasks } = await import('./after-sales-queue.service')
+  await recoverStuckAfterSalesRunningTasks()
+
   const pending = await selectAfterSalesQueueTasks(limits)
 
   if (pending.length === 0) {

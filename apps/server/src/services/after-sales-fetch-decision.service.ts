@@ -21,6 +21,8 @@ export interface ShouldFetchWorkbenchInput {
   afterSaleClosedNoRefund?: boolean
   displayOrderNo?: string
   officialOrderNo?: string
+  /** 仅用于未知状态码审计日志，不参与资格 */
+  liveAccountId?: string
   buyerProductRefundAmountCent?: number
   buyerProductRefundSource?: string
   afterSalesWorkbenchRefundAmountCent?: number
@@ -227,16 +229,131 @@ export function hasMeaningfulAfterSaleId(value: unknown): boolean {
   return true
 }
 
+export type AfterSaleStatusCodeSemantic =
+  | 'no_after_sale'
+  | 'active_after_sale'
+  | 'completed_after_sale'
+  | 'unknown'
+
+export type AfterSaleStatusCodeResolution = {
+  code: number | null
+  known: boolean
+  hasAfterSaleSignal: boolean
+  semantic: AfterSaleStatusCodeSemantic
+}
+
+/**
+ * 现网已确认的 afterSaleStatus 数字语义（未知码不得静默当成售后）。
+ * 1=无售后；2=进行中；3/5/7=关闭/完成/取消类；6=平台介入。
+ */
+const KNOWN_AFTER_SALE_STATUS_CODES: Record<
+  number,
+  Exclude<AfterSaleStatusCodeSemantic, 'unknown'>
+> = {
+  0: 'no_after_sale',
+  1: 'no_after_sale',
+  2: 'active_after_sale',
+  3: 'completed_after_sale',
+  5: 'completed_after_sale',
+  6: 'active_after_sale',
+  7: 'completed_after_sale',
+}
+
+/** shop+code → last log ms；短窗去重，避免刷日志 */
+const unknownStatusCodeLogAt = new Map<string, number>()
+const UNKNOWN_STATUS_CODE_LOG_DEDUP_MS = 10 * 60 * 1000
+
+export function resolveAfterSaleStatusCode(value: unknown): AfterSaleStatusCodeResolution {
+  if (value == null || value === '') {
+    return { code: null, known: true, hasAfterSaleSignal: false, semantic: 'no_after_sale' }
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      return { code: null, known: true, hasAfterSaleSignal: false, semantic: 'no_after_sale' }
+    }
+    const code = value
+    if (code < 0) {
+      return { code, known: true, hasAfterSaleSignal: false, semantic: 'no_after_sale' }
+    }
+    const semantic = KNOWN_AFTER_SALE_STATUS_CODES[code]
+    if (semantic) {
+      return {
+        code,
+        known: true,
+        hasAfterSaleSignal: semantic !== 'no_after_sale',
+        semantic,
+      }
+    }
+    return { code, known: false, hasAfterSaleSignal: false, semantic: 'unknown' }
+  }
+  const s = String(value).trim()
+  if (!s) {
+    return { code: null, known: true, hasAfterSaleSignal: false, semantic: 'no_after_sale' }
+  }
+  if (MEANINGLESS_STRINGS.has(s.toLowerCase()) || MEANINGLESS_STRINGS.has(s)) {
+    return { code: null, known: true, hasAfterSaleSignal: false, semantic: 'no_after_sale' }
+  }
+  if (/^0+(\.0+)?$/.test(s)) {
+    return { code: 0, known: true, hasAfterSaleSignal: false, semantic: 'no_after_sale' }
+  }
+  if (/^-?\d+$/.test(s)) {
+    return resolveAfterSaleStatusCode(Number(s))
+  }
+  // 非数字文案交由关键词路径；此处不算数字状态码
+  return { code: null, known: true, hasAfterSaleSignal: false, semantic: 'no_after_sale' }
+}
+
+/**
+ * 记录未知 afterSaleStatus（脱敏、短窗去重）。禁止写 Cookie / 完整 rawJson。
+ */
+export function noteUnknownAfterSaleStatusCode(params: {
+  code: number
+  liveAccountId?: string | null
+  orderNo?: string | null
+  nowMs?: number
+}): boolean {
+  const shop = (params.liveAccountId ?? 'legacy').trim() || 'legacy'
+  const order = (params.orderNo ?? '').trim() || '-'
+  const key = `${shop}::${params.code}`
+  const now = params.nowMs ?? Date.now()
+  const prev = unknownStatusCodeLogAt.get(key) ?? 0
+  if (now - prev < UNKNOWN_STATUS_CODE_LOG_DEDUP_MS) return false
+  unknownStatusCodeLogAt.set(key, now)
+  // 延迟 import，避免循环依赖拖垮冷启动
+  void import('../utils/server-log')
+    .then(({ logWarn }) => {
+      logWarn(
+        '售后状态码',
+        `发现未知 afterSaleStatus code=${params.code} shop=${shop} order=${order}`,
+      )
+    })
+    .catch(() => undefined)
+  return true
+}
+
+/** 测试用：清空未知码去重窗 */
+export function resetUnknownAfterSaleStatusCodeDedupForTests(): void {
+  unknownStatusCodeLogAt.clear()
+}
+
+/** health：当前去重窗内见过的未知码种类数（不含订单号） */
+export function getUnknownAfterSaleStatusCodeUniqueCount(): number {
+  const codes = new Set<number>()
+  for (const key of unknownStatusCodeLogAt.keys()) {
+    const code = Number(key.split('::').pop())
+    if (Number.isFinite(code)) codes.add(code)
+  }
+  return codes.size
+}
+
 /**
  * 状态字段：0/"0"/1/"1"/none/无售后为 false。
- * 小红书订单 raw：afterSaleStatus=1 表示「无售后」；真实售后常见 2/3/5/6/7…
+ * 仅已知售后状态码（2/3/5/6/7…）或售后文案算信号；未知数字码本身不算。
  */
 export function hasMeaningfulAfterSaleStatus(value: unknown): boolean {
   if (value == null) return false
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) return false
-    // 0=空，1=无售后，负数（如 secondAfterSaleStatus=-1）无意义
-    return value > 1
+  if (typeof value === 'number' || (typeof value === 'string' && /^-?\d+(\.0+)?$/.test(value.trim()))) {
+    return resolveAfterSaleStatusCode(value).hasAfterSaleSignal
   }
   const s = String(value).trim()
   if (!s) return false
@@ -244,12 +361,39 @@ export function hasMeaningfulAfterSaleStatus(value: unknown): boolean {
   if (MEANINGLESS_STRINGS.has(lower) || MEANINGLESS_STRINGS.has(s)) return false
   if (/^0+(\.0+)?$/.test(s)) return false
   if (textHasAfterSaleKeyword(s)) return true
-  // 纯数字字符串：与数值口径一致，1 不算信号
-  if (/^\d+$/.test(s)) {
-    const n = Number(s)
-    return Number.isFinite(n) && n > 1
-  }
   return false
+}
+
+/** 扫描 raw 顶层/ sku 状态码，对未知码写去重日志（不改变入队资格） */
+export function auditUnknownAfterSaleStatusCodesInRaw(
+  raw: Record<string, unknown> | undefined,
+  ctx?: { liveAccountId?: string | null; orderNo?: string | null },
+): number[] {
+  if (!raw || typeof raw !== 'object') return []
+  const unknown: number[] = []
+  const consider = (v: unknown) => {
+    const r = resolveAfterSaleStatusCode(v)
+    if (r.code != null && !r.known) {
+      unknown.push(r.code)
+      noteUnknownAfterSaleStatusCode({
+        code: r.code,
+        liveAccountId: ctx?.liveAccountId,
+        orderNo: ctx?.orderNo,
+      })
+    }
+  }
+  for (const k of STATUS_FIELD_KEYS) {
+    if (k in raw) consider(raw[k])
+  }
+  const skus = raw.skus
+  if (Array.isArray(skus)) {
+    for (const sku of skus) {
+      if (!sku || typeof sku !== 'object') continue
+      const s = sku as Record<string, unknown>
+      consider(s.afterSaleStatus ?? s.after_sale_status)
+    }
+  }
+  return [...new Set(unknown)]
 }
 
 export function hasPositiveRefundAmount(value: unknown): boolean {
@@ -466,6 +610,14 @@ export function resolveAfterSalesQueueEligibility(
   }
   if (isOfflineOrder(input)) {
     return none('offline_order')
+  }
+
+  // 未知数字状态码：脱敏去重日志；单独未知码不构成入队信号
+  if (input.raw) {
+    auditUnknownAfterSaleStatusCodesInRaw(input.raw, {
+      liveAccountId: input.liveAccountId,
+      orderNo,
+    })
   }
 
   const text = combinedStatusText(input)

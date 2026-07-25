@@ -61,6 +61,11 @@ export async function getAfterSalesOpsSummary(): Promise<{
     etaMinutes: number | null
   }>
   totals: Record<string, number>
+  stuckRunning: number
+  oldestRunningAgeSeconds: number | null
+  runningWithoutTimestamp: number
+  unknownAfterSaleStatusCodes: number
+  afterSalesDegraded: boolean
 }> {
   const [queues, runtimes, creds] = await Promise.all([
     prisma.xhsAfterSalesWorkbenchQueue.findMany({
@@ -70,6 +75,10 @@ export async function getAfterSalesOpsSummary(): Promise<{
         statusChangedAt: true,
         lastError: true,
         createdAt: true,
+        runningSince: true,
+        claimedAt: true,
+        lastAttemptAt: true,
+        updatedAt: true,
       },
     }),
     prisma.shopAfterSalesRuntime.findMany(),
@@ -78,6 +87,12 @@ export async function getAfterSalesOpsSummary(): Promise<{
       select: { id: true, platformName: true, displayName: true },
     }),
   ])
+
+  const { AFTER_SALES_RUNNING_TIMEOUT_MS } = await import('./after-sales-queue.types')
+  const { isRunningTimedOut } = await import('./after-sales-queue.service')
+  const { getUnknownAfterSaleStatusCodeUniqueCount } = await import(
+    './after-sales-fetch-decision.service'
+  )
 
   const runtimeByShop = new Map(runtimes.map((r) => [r.liveAccountId, r]))
   const nameById = new Map(
@@ -89,6 +104,11 @@ export async function getAfterSalesOpsSummary(): Promise<{
   for (const c of creds) shopIds.add(c.id)
 
   const totals: Record<string, number> = {}
+  let stuckRunning = 0
+  let runningWithoutTimestamp = 0
+  let oldestRunningAgeSeconds: number | null = null
+  const nowMs = Date.now()
+
   const byShop = [...shopIds].map((liveAccountId) => {
     const rows = queues.filter((q) => (q.liveAccountId || 'legacy') === liveAccountId)
     const count = (s: string) => rows.filter((r) => r.status === s).length
@@ -119,6 +139,21 @@ export async function getAfterSalesOpsSummary(): Promise<{
       oldestOpenAgeSec = Math.floor(
         (Date.now() - (oldest.statusChangedAt ?? oldest.createdAt).getTime()) / 1000,
       )
+    }
+    for (const r of rows) {
+      if (r.status !== 'running') continue
+      const info = isRunningTimedOut(r, {
+        nowMs,
+        timeoutMs: AFTER_SALES_RUNNING_TIMEOUT_MS,
+      })
+      if (info.timestampMissing) runningWithoutTimestamp++
+      if (info.timedOut) stuckRunning++
+      if (info.ageMs != null) {
+        const ageSec = Math.floor(info.ageMs / 1000)
+        if (oldestRunningAgeSeconds == null || ageSec > oldestRunningAgeSeconds) {
+          oldestRunningAgeSeconds = ageSec
+        }
+      }
     }
     const rt = runtimeByShop.get(liveAccountId)
     const openLoad = pending + running + retry_wait
@@ -156,5 +191,16 @@ export async function getAfterSalesOpsSummary(): Promise<{
     }
   })
 
-  return { byShop, totals }
+  const unknownAfterSaleStatusCodes = getUnknownAfterSaleStatusCodeUniqueCount()
+  const afterSalesDegraded = stuckRunning > 0 || runningWithoutTimestamp > 0
+
+  return {
+    byShop,
+    totals,
+    stuckRunning,
+    oldestRunningAgeSeconds,
+    runningWithoutTimestamp,
+    unknownAfterSaleStatusCodes,
+    afterSalesDegraded,
+  }
 }

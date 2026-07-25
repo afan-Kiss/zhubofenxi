@@ -819,6 +819,7 @@ export async function enqueueWorkbenchSync(
     raw: undefined,
     displayOrderNo: trimmed,
     officialOrderNo: trimmed,
+    liveAccountId: accountId,
     cacheFetchStatus: cacheRow?.fetchStatus ?? null,
   }
   // 带上订单 raw，供 ID/金额语义判定

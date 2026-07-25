@@ -139,12 +139,89 @@ export function computeNextAttemptAt(
   return new Date(now + minutes * 60_000 + jitterMs)
 }
 
+/** running 超时起始时间：按可信度回退，避免 Prisma DateTime 与 raw 文本比较失败 */
+export function pickRunningAnchorTime(row: {
+  runningSince?: Date | null
+  claimedAt?: Date | null
+  lastAttemptAt?: Date | null
+  statusChangedAt?: Date | null
+  updatedAt?: Date | null
+}): Date | null {
+  const candidates = [
+    row.runningSince,
+    row.claimedAt,
+    row.lastAttemptAt,
+    row.statusChangedAt,
+    row.updatedAt,
+  ]
+  for (const c of candidates) {
+    if (c instanceof Date && !Number.isNaN(c.getTime())) return c
+  }
+  return null
+}
+
+export function isRunningTimedOut(
+  row: Parameters<typeof pickRunningAnchorTime>[0],
+  opts?: { nowMs?: number; timeoutMs?: number },
+): { timedOut: boolean; timestampMissing: boolean; anchor: Date | null; ageMs: number | null } {
+  const nowMs = opts?.nowMs ?? Date.now()
+  const timeoutMs = opts?.timeoutMs ?? AFTER_SALES_RUNNING_TIMEOUT_MS
+  const anchor = pickRunningAnchorTime(row)
+  if (!anchor) {
+    return { timedOut: true, timestampMissing: true, anchor: null, ageMs: null }
+  }
+  const ageMs = nowMs - anchor.getTime()
+  return {
+    timedOut: ageMs >= timeoutMs,
+    timestampMissing: false,
+    anchor,
+    ageMs,
+  }
+}
+
+export type StuckRunningDisposition = 'done' | 'retry_wait'
+
+export function decideStuckRunningDisposition(eligible: boolean): StuckRunningDisposition {
+  return eligible ? 'retry_wait' : 'done'
+}
+
+export type RecoverStuckRunningStats = {
+  scanned: number
+  skippedFresh: number
+  closedNoSignal: number
+  restoredRetryWait: number
+  skippedCas: number
+  timestampMissing: number
+}
+
+/**
+ * 本地队列维护：恢复超时 running。
+ * 不依赖店铺 Cookie / 熔断 / 是否有可请求任务。
+ *
+ * 根因：claim 用 $executeRaw 写入 text 时间，Prisma `runningSince: { lt: Date }`
+ * 会把 Date 绑成毫秒整数，与 text 比较恒为 0 行。此处改为拉全量 running 后在 JS 比较。
+ */
 export async function recoverStuckAfterSalesRunningTasks(
   timeoutMs = AFTER_SALES_RUNNING_TIMEOUT_MS,
 ): Promise<number> {
-  const cutoff = new Date(Date.now() - timeoutMs)
-  const stuck = await prisma.xhsAfterSalesWorkbenchQueue.findMany({
-    where: { status: 'running', runningSince: { lt: cutoff } },
+  const stats = await recoverStuckAfterSalesRunningTasksDetailed(timeoutMs)
+  return stats.closedNoSignal + stats.restoredRetryWait
+}
+
+export async function recoverStuckAfterSalesRunningTasksDetailed(
+  timeoutMs = AFTER_SALES_RUNNING_TIMEOUT_MS,
+): Promise<RecoverStuckRunningStats> {
+  const stats: RecoverStuckRunningStats = {
+    scanned: 0,
+    skippedFresh: 0,
+    closedNoSignal: 0,
+    restoredRetryWait: 0,
+    skippedCas: 0,
+    timestampMissing: 0,
+  }
+
+  const running = await prisma.xhsAfterSalesWorkbenchQueue.findMany({
+    where: { status: 'running' },
     select: {
       id: true,
       liveAccountId: true,
@@ -153,42 +230,232 @@ export async function recoverStuckAfterSalesRunningTasks(
       status: true,
       claimToken: true,
       workerId: true,
+      priority: true,
+      triggerReason: true,
+      signalDetectedAt: true,
+      runningSince: true,
+      claimedAt: true,
+      lastAttemptAt: true,
+      statusChangedAt: true,
+      updatedAt: true,
     },
   })
-  if (stuck.length === 0) return 0
+
+  if (running.length === 0) return stats
+
+  const { resolveAfterSalesQueueEligibility } = await import(
+    './after-sales-fetch-decision.service'
+  )
+  const { loadAllQualityBadCases, getOfficialQualityPackageIdSet } = await import(
+    './quality-badcase-store.service'
+  )
+  const { liveAccountPackageKey } = await import('../utils/live-account-cache-key.util')
+
+  let officialSet: Set<string> | null = null
   const now = new Date()
-  for (const row of stuck) {
-    const nextAt = computeNextAttemptAt(row.temporaryAttemptCount + 1, 'running_timeout')
-    await prisma.xhsAfterSalesWorkbenchQueue.update({
-      where: { id: row.id },
-      data: {
-        status: 'retry_wait',
-        errorType: 'running_timeout',
-        lastError: 'running 超时，已安全恢复为 retry_wait',
-        nextAttemptAt: nextAt,
-        lastAttemptAt: now,
-        runningSince: null,
-        workerId: null,
-        claimToken: null,
-        claimedAt: null,
-        statusChangedAt: now,
-        temporaryAttemptCount: { increment: 1 },
-        attempts: { increment: 1 },
+  const nowMs = now.getTime()
+
+  for (const row of running) {
+    stats.scanned++
+    const timeoutInfo = isRunningTimedOut(row, { nowMs, timeoutMs })
+    if (!timeoutInfo.timedOut) {
+      stats.skippedFresh++
+      continue
+    }
+    if (timeoutInfo.timestampMissing) stats.timestampMissing++
+
+    const order = await prisma.xhsRawOrder.findFirst({
+      where: {
+        liveAccountId: row.liveAccountId,
+        OR: [
+          { packageId: row.orderNo },
+          { displayOrderNo: row.orderNo },
+          { orderId: row.orderNo },
+        ],
       },
+      select: {
+        afterSaleStatusText: true,
+        orderStatusText: true,
+        isReturned: true,
+        rawJson: true,
+      },
+      orderBy: { updatedAt: 'desc' },
     })
+
+    if (!officialSet) {
+      try {
+        officialSet = getOfficialQualityPackageIdSet(await loadAllQualityBadCases())
+      } catch {
+        officialSet = new Set()
+      }
+    }
+    const officialQualityCaseMatched = officialSet.has(
+      liveAccountPackageKey(row.liveAccountId, row.orderNo),
+    )
+
+    const elig = resolveAfterSalesQueueEligibility(
+      {
+        displayOrderNo: row.orderNo,
+        officialOrderNo: row.orderNo,
+        liveAccountId: row.liveAccountId,
+        afterSaleStatusText: order?.afterSaleStatusText ?? undefined,
+        orderStatusText: order?.orderStatusText ?? undefined,
+        isReturned: Boolean(order?.isReturned),
+        raw:
+          order?.rawJson && typeof order.rawJson === 'object'
+            ? (order.rawJson as Record<string, unknown>)
+            : undefined,
+      },
+      {
+        officialQualityCaseMatched,
+        cacheMissingOrStale: true,
+        cacheCurrentlyValid: false,
+      },
+    )
+
+    const disposition = decideStuckRunningDisposition(elig.eligible)
+    const nextAttemptCount = row.temporaryAttemptCount + 1
+    const auditReason = timeoutInfo.timestampMissing
+      ? 'running_timestamp_missing'
+      : disposition === 'done'
+        ? 'no_after_sale_signal_stuck_running_closed'
+        : 'running_timeout'
+
+    const lastErrorText = timeoutInfo.timestampMissing
+      ? 'running 时间戳缺失，已恢复等待重试'
+      : 'running 超时，已恢复等待重试'
+    const nextAt = computeNextAttemptAt(nextAttemptCount, lastErrorText, nowMs)
+    const nextPriority = Math.max(row.priority ?? 0, elig.priority)
+    const triggerReason = elig.reason || row.triggerReason || 'running_timeout'
+
+    let changed = 0
+    if (disposition === 'done') {
+      if (row.claimToken == null) {
+        changed = Number(
+          await prisma.$executeRaw`
+            UPDATE XhsAfterSalesWorkbenchQueue
+            SET
+              status = 'done',
+              priority = 0,
+              completedAt = ${now},
+              nextAttemptAt = NULL,
+              lastError = NULL,
+              errorType = NULL,
+              runningSince = NULL,
+              workerId = NULL,
+              claimToken = NULL,
+              claimedAt = NULL,
+              statusChangedAt = ${now},
+              triggerReason = 'no_after_sale_signal_stuck_running_closed',
+              temporaryAttemptCount = ${nextAttemptCount},
+              attempts = attempts + 1
+            WHERE id = ${row.id}
+              AND status = 'running'
+              AND claimToken IS NULL
+          `,
+        )
+      } else {
+        changed = Number(
+          await prisma.$executeRaw`
+            UPDATE XhsAfterSalesWorkbenchQueue
+            SET
+              status = 'done',
+              priority = 0,
+              completedAt = ${now},
+              nextAttemptAt = NULL,
+              lastError = NULL,
+              errorType = NULL,
+              runningSince = NULL,
+              workerId = NULL,
+              claimToken = NULL,
+              claimedAt = NULL,
+              statusChangedAt = ${now},
+              triggerReason = 'no_after_sale_signal_stuck_running_closed',
+              temporaryAttemptCount = ${nextAttemptCount},
+              attempts = attempts + 1
+            WHERE id = ${row.id}
+              AND status = 'running'
+              AND claimToken = ${row.claimToken}
+          `,
+        )
+      }
+    } else if (row.claimToken == null) {
+      changed = Number(
+        await prisma.$executeRaw`
+          UPDATE XhsAfterSalesWorkbenchQueue
+          SET
+            status = 'retry_wait',
+            errorType = 'running_timeout',
+            lastError = ${lastErrorText},
+            nextAttemptAt = ${nextAt},
+            lastAttemptAt = ${now},
+            runningSince = NULL,
+            workerId = NULL,
+            claimToken = NULL,
+            claimedAt = NULL,
+            statusChangedAt = ${now},
+            priority = ${nextPriority},
+            triggerReason = ${triggerReason},
+            temporaryAttemptCount = ${nextAttemptCount},
+            attempts = attempts + 1
+          WHERE id = ${row.id}
+            AND status = 'running'
+            AND claimToken IS NULL
+        `,
+      )
+    } else {
+      changed = Number(
+        await prisma.$executeRaw`
+          UPDATE XhsAfterSalesWorkbenchQueue
+          SET
+            status = 'retry_wait',
+            errorType = 'running_timeout',
+            lastError = ${lastErrorText},
+            nextAttemptAt = ${nextAt},
+            lastAttemptAt = ${now},
+            runningSince = NULL,
+            workerId = NULL,
+            claimToken = NULL,
+            claimedAt = NULL,
+            statusChangedAt = ${now},
+            priority = ${nextPriority},
+            triggerReason = ${triggerReason},
+            temporaryAttemptCount = ${nextAttemptCount},
+            attempts = attempts + 1
+          WHERE id = ${row.id}
+            AND status = 'running'
+            AND claimToken = ${row.claimToken}
+        `,
+      )
+    }
+
+    if (Number(changed) !== 1) {
+      stats.skippedCas++
+      continue
+    }
+
+    if (disposition === 'done') stats.closedNoSignal++
+    else stats.restoredRetryWait++
+
     await writeAfterSalesQueueAudit({
       liveAccountId: row.liveAccountId,
       orderNo: row.orderNo,
       fromStatus: 'running',
-      toStatus: 'retry_wait',
-      reason: 'running_timeout',
-      errorType: 'running_timeout',
+      toStatus: disposition === 'done' ? 'done' : 'retry_wait',
+      reason: auditReason,
+      errorType: disposition === 'done' ? null : 'running_timeout',
+      source: 'recover_stuck_running',
       workerId: row.workerId,
       claimToken: row.claimToken,
+      orderAfterSaleStatus: order?.afterSaleStatusText ?? null,
     })
-    logWarn('售后补查', `running 超时恢复：shop=${row.liveAccountId} order=${row.orderNo}`)
+    logWarn(
+      '售后补查',
+      `running 超时恢复：shop=${row.liveAccountId} order=${row.orderNo} -> ${disposition} reason=${auditReason}`,
+    )
   }
-  return stuck.length
+
+  return stats
 }
 
 export async function loadOrderAfterSaleContext(

@@ -72,6 +72,12 @@ export const GoodReviewDetailDrawer: React.FC<Props> = ({
               <dd className="min-w-0">{formatGoodReviewBuyerLabel(review)}</dd>
             </div>
             <div className="flex gap-2">
+              <dt className="w-16 shrink-0 text-slate-500">评价</dt>
+              <dd className="min-w-0 leading-relaxed" data-testid="good-review-detail-text">
+                {review.reviewText?.trim() || '买家未填写文字评价'}
+              </dd>
+            </div>
+            <div className="flex gap-2">
               <dt className="w-16 shrink-0 text-slate-500">晒图</dt>
               <dd>{review.reviewImages.length} 张</dd>
             </div>

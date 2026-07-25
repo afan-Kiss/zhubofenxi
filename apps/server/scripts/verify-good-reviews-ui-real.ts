@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   else fail('缺少手动加载更多按钮文案')
 
   if (
-    lib.includes("'good-review-material-v4'") ||
+    lib.includes("'good-review-material-v5'") ||
     /good-review-material-v\d+/.test(lib) ||
     page.includes('GOOD_REVIEW_UI_VERSION')
   ) {

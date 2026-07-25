@@ -102,7 +102,7 @@ export const GOOD_REVIEWS_MAX_LIMIT = 50
 /** 超过此时长未同步，打开好评中心时自动拉一次近 3 天 */
 export const GOOD_REVIEWS_STALE_SYNC_MS = 6 * 60 * 60 * 1000
 
-export const GOOD_REVIEW_UI_VERSION = 'good-review-material-v4'
+export const GOOD_REVIEW_UI_VERSION = 'good-review-material-v5'
 
 export function isGoodReviewSyncStale(
   lastSyncedAt: string | null | undefined,
@@ -257,7 +257,7 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
 
 const LIVE_SCRIPT_FORBIDDEN = ['保证', '绝对', '升值', '收藏级']
 
-function truncateReviewText(text: string, maxLen: number): string {
+export function truncateReviewText(text: string, maxLen: number): string {
   const trimmed = text.trim()
   if (trimmed.length <= maxLen) return trimmed
   return `${trimmed.slice(0, maxLen)}…`

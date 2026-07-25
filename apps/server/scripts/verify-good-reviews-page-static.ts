@@ -61,11 +61,6 @@ function main(): void {
   } else {
     fail('缺少最近 3 天为空自动续拉')
   }
-  if (page.includes('requestAnimationFrame(probeVisible)')) {
-    ok('GoodReviewsPage 列表懒加载含首屏探测')
-  } else {
-    fail('GoodReviewsPage 列表懒加载缺少首屏探测')
-  }
   if (
     page.includes('自动更新失败') ||
     page.includes('打开页面会自动尝试更新')
@@ -93,12 +88,23 @@ function main(): void {
     fail('好评卡片未展示买家昵称')
   }
   if (
-    !page.includes('review.reviewText') &&
-    !page.includes('买家未填写文字评价')
+    page.includes('review.reviewText') &&
+    page.includes('买家未填写文字评价') &&
+    page.includes('data-testid="good-review-card-text"')
   ) {
-    ok('好评卡片不再展示评价正文')
+    ok('好评卡片展示评价正文')
   } else {
-    fail('好评卡片仍展示评价正文')
+    fail('好评卡片未展示评价正文')
+  }
+  if (page.includes('故意不依赖 reviews.length') || page.includes('连环拉取')) {
+    ok('懒加载 Observer 避免 reviews.length 连环重建')
+  } else {
+    fail('懒加载仍可能因 reviews.length 连环重建')
+  }
+  if (page.includes('requestAnimationFrame(probeVisible)')) {
+    fail('仍保留首屏 probeVisible（易连环拉取）')
+  } else {
+    ok('已移除首屏 probeVisible')
   }
 
   const image = read('web/src/components/good-reviews/GoodReviewImage.tsx')
@@ -110,10 +116,14 @@ function main(): void {
   const drawer = read('web/src/components/good-reviews/GoodReviewDetailDrawer.tsx')
   if (drawer.includes('buildGoodReviewImageProxyUrl')) ok('DetailDrawer 图片用 buildGoodReviewImageProxyUrl')
   else fail('DetailDrawer 未用 buildGoodReviewImageProxyUrl')
-  if (drawer.includes('formatGoodReviewBuyerLabel') && !drawer.includes('review.reviewText')) {
-    ok('DetailDrawer 展示买家昵称且不展示评价正文')
+  if (
+    drawer.includes('formatGoodReviewBuyerLabel') &&
+    drawer.includes('review.reviewText') &&
+    drawer.includes('data-testid="good-review-detail-text"')
+  ) {
+    ok('DetailDrawer 展示买家昵称与评价正文')
   } else {
-    fail('DetailDrawer 仍展示评价正文或缺少买家昵称')
+    fail('DetailDrawer 缺少买家昵称或评价正文')
   }
 
   if (lib.includes('buyerNickname') && lib.includes('formatGoodReviewBuyerLabel')) {

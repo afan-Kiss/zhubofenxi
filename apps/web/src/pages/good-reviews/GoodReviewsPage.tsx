@@ -17,6 +17,7 @@ import {
   isGoodReviewSyncStale,
   mergeGoodReviewSyncResults,
   resolveGoodReviewThumb,
+  truncateReviewText,
   type GoodReviewItemView,
   type GoodReviewListFilters,
   type GoodReviewPagePayload,
@@ -84,6 +85,7 @@ function ReviewCard({
   const timeLabel = review.reviewTimeText ?? formatLocalDateTime(review.reviewTime)
   const thumbUrl = resolveGoodReviewThumb(review)
   const thumbFromReview = !review.itemImage && Boolean(review.reviewImages?.[0])
+  const reviewText = review.reviewText?.trim() || ''
   return (
     <article
       className="cursor-pointer rounded-2xl border border-slate-100 bg-white p-3 shadow-sm transition hover:border-rose-100 hover:shadow-md"
@@ -113,6 +115,16 @@ function ReviewCard({
           <div className="mt-0.5 truncate text-[12px] text-slate-700">
             买家：{formatGoodReviewBuyerLabel(review)}
           </div>
+          <p
+            className={`mt-1.5 text-[13px] leading-relaxed ${
+              reviewText ? 'text-slate-800' : 'text-slate-400'
+            }`}
+            data-testid="good-review-card-text"
+          >
+            {reviewText
+              ? truncateReviewText(reviewText, 120)
+              : '买家未填写文字评价'}
+          </p>
           <div className="mt-0.5 flex flex-wrap gap-2 text-[11px] text-slate-500">
             {shopName ? <span>{shopName}</span> : null}
             {price ? <span>{price}</span> : null}
@@ -204,6 +216,8 @@ export const GoodReviewsPage: React.FC = () => {
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const loadingMoreRef = useRef(false)
   const inFlightCursorRef = useRef<string | null>(null)
+  const nextCursorRef = useRef<string | null>(null)
+  const hasMoreRef = useRef(false)
   const queryFiltersRef = useRef(queryFilters)
   const mountedRef = useRef(true)
   const autoSyncOnceRef = useRef(false)
@@ -211,6 +225,8 @@ export const GoodReviewsPage: React.FC = () => {
 
   queryFiltersRef.current = queryFilters
   syncingRef.current = syncing
+  nextCursorRef.current = nextCursor
+  hasMoreRef.current = hasMore
 
   useEffect(() => {
     mountedRef.current = true
@@ -252,9 +268,20 @@ export const GoodReviewsPage: React.FC = () => {
     setLastSyncedAt(data.lastSyncedAt)
     setFilteredReviewCount(data.filteredReviewCount ?? data.reviews.length)
     setTotalReviewCount(data.totalReviewCount ?? 0)
-    setReviews((prev) => (append ? mergeUniqueReviews(prev, data.reviews) : data.reviews))
-    setNextCursor(data.nextCursor ?? null)
-    setHasMore(Boolean(data.hasMore))
+    let added = data.reviews.length
+    setReviews((prev) => {
+      if (!append) {
+        added = data.reviews.length
+        return data.reviews
+      }
+      const merged = mergeUniqueReviews(prev, data.reviews)
+      added = merged.length - prev.length
+      return merged
+    })
+    // 游标空转 / 重复页：停止继续拉取，避免 IntersectionObserver 连环请求
+    const stagnant = append && (data.reviews.length === 0 || added === 0)
+    setNextCursor(stagnant ? null : (data.nextCursor ?? null))
+    setHasMore(stagnant ? false : Boolean(data.hasMore))
   }, [])
 
   const fetchPage = useCallback(
@@ -344,10 +371,10 @@ export const GoodReviewsPage: React.FC = () => {
   }, [activeShop, queryFilters, loadFirstPage])
 
   const loadMorePage = useCallback(async () => {
-    if (loadingMoreRef.current || !hasMore || !nextCursor) return
-    if (inFlightCursorRef.current === nextCursor) return
+    const cursorToLoad = nextCursorRef.current
+    if (loadingMoreRef.current || !hasMoreRef.current || !cursorToLoad) return
+    if (inFlightCursorRef.current === cursorToLoad) return
 
-    const cursorToLoad = nextCursor
     loadingMoreRef.current = true
     inFlightCursorRef.current = cursorToLoad
     setLoadingMore(true)
@@ -365,38 +392,30 @@ export const GoodReviewsPage: React.FC = () => {
       inFlightCursorRef.current = null
       if (mountedRef.current) setLoadingMore(false)
     }
-  }, [activeShop, fetchPage, hasMore, nextCursor])
+  }, [activeShop, fetchPage])
 
   useEffect(() => {
     const el = loadMoreRef.current
     if (!el || !hasMore || initialLoading) return
 
     let disposed = false
-    const triggerLoad = () => {
-      if (disposed) return
-      void loadMorePage()
-    }
-
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) triggerLoad()
+        if (disposed) return
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void loadMorePage()
+        }
       },
       { rootMargin: '240px' },
     )
     observer.observe(el)
 
-    const probeVisible = () => {
-      if (disposed || loadingMoreRef.current) return
-      const rect = el.getBoundingClientRect()
-      if (rect.top <= window.innerHeight + 240) triggerLoad()
-    }
-    requestAnimationFrame(probeVisible)
-
     return () => {
       disposed = true
       observer.disconnect()
     }
-  }, [hasMore, initialLoading, loadMorePage, reviews.length])
+    // 故意不依赖 reviews.length / nextCursor：避免每次追加后重建 Observer 触发连环拉取
+  }, [hasMore, initialLoading, loadMorePage])
 
   const activeShopView = useMemo<GoodReviewShopView | null>(() => {
     return shops.find((s) => s.shopKey === activeShop) ?? shops[0] ?? null

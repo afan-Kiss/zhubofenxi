@@ -19,6 +19,8 @@ export interface ViewportModalProps {
   closeOnEscape?: boolean
   /** 小屏全屏；业务明细弹窗传 true */
   mobileFullscreen?: boolean
+  /** 覆盖默认面板尺寸（如已签收宽屏 92vw/1560px） */
+  sizeClassName?: string
   /** 打开时聚焦目标；默认聚焦面板内第一个可聚焦元素 */
   initialFocusRef?: React.RefObject<HTMLElement | null>
 }
@@ -35,6 +37,7 @@ export const ViewportModal: React.FC<ViewportModalProps> = ({
   closeOnBackdrop = true,
   closeOnEscape = true,
   mobileFullscreen = false,
+  sizeClassName,
   initialFocusRef,
 }) => {
   const [mounted, setMounted] = useState(false)
@@ -126,9 +129,11 @@ export const ViewportModal: React.FC<ViewportModalProps> = ({
   if (!mounted || (!open && !visible)) return null
 
   // 业务全屏壳：固定可视高度，避免仅 max-h 时 flex 子项无法收缩、页脚被裁切/与内容重叠
-  const defaultPanelSize = mobileFullscreen
-    ? 'h-[100dvh] max-h-[100dvh] w-screen rounded-none sm:h-[calc(100dvh-48px)] sm:max-h-[calc(100dvh-48px)] sm:w-[min(1280px,calc(100vw-48px))] sm:rounded-[20px]'
-    : 'max-h-[min(76dvh,calc(100dvh-2rem))] w-[min(1180px,calc(100vw-1.5rem))] rounded-2xl'
+  const defaultPanelSize =
+    sizeClassName ||
+    (mobileFullscreen
+      ? 'h-[100dvh] max-h-[100dvh] w-screen rounded-none sm:h-[calc(100dvh-48px)] sm:max-h-[calc(100dvh-48px)] sm:w-[min(1280px,calc(100vw-48px))] sm:rounded-[20px]'
+      : 'max-h-[min(76dvh,calc(100dvh-2rem))] w-[min(1180px,calc(100vw-1.5rem))] rounded-2xl')
 
   // 进场只用 CSS keyframes（.viewport-modal-*）；退出仅淡出 opacity，避免与 animation 的 transform 叠抢
   const backdropMotion = open

@@ -20,6 +20,8 @@ import {
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
 import { isStatusSignedView } from './order-sign-status.service'
 import { isOfflineDealView } from '../utils/offline-deal-view.util'
+import { parseLiveSessionTimeMs } from '../utils/business-timezone'
+import { resolveSignedTimeFromRaw } from './signed-order-sort.service'
 
 export function pickProductName(raw: Record<string, unknown> | undefined): string {
   if (!raw) return '—'
@@ -40,15 +42,17 @@ function pickString(obj: Record<string, unknown>, keys: string[]): string {
   return ''
 }
 
-function pickSignTime(raw: Record<string, unknown> | undefined): string | null {
-  if (!raw) return null
-  const t =
-    raw.signedAt ??
-    raw.signTime ??
-    raw.receiveTime ??
-    raw.finishTime ??
-    raw.completedAt
-  return t != null && String(t).trim() ? String(t).trim() : null
+function pickSignTimeResolved(raw: Record<string, unknown> | undefined): {
+  signTime: string | null
+  signTimeMs: number | null
+  signTimeSource: string | null
+} {
+  const resolved = resolveSignedTimeFromRaw(raw)
+  return {
+    signTime: resolved.displayText,
+    signTimeMs: resolved.timestampMs,
+    signTimeSource: resolved.source,
+  }
 }
 
 function pickBuyerNickname(raw: Record<string, unknown> | undefined, buyerId: string): string {
@@ -94,6 +98,9 @@ export interface BoardOrderRow {
   productName: string
   orderTime: string
   signTime: string | null
+  signTimeMs?: number | null
+  signTimeSource?: string | null
+  orderTimeMs?: number | null
   productTotalAmount: number
   freightAmount: number
   userPayableAmount: number
@@ -371,6 +378,10 @@ export function mapViewToBoardOrderRow(
       ? resolveBuyerOrderQualityRefund(v).isQualityRefund
       : viewCountsAsQualityRefund(v)
 
+  const signedTime = pickSignTimeResolved(raw)
+  const orderTimeText = v.orderTimeText || '—'
+  const orderTimeMs = parseLiveSessionTimeMs(orderTimeText)
+
   return {
     orderNo: displayOrderNo,
     displayOrderNo,
@@ -381,8 +392,11 @@ export function mapViewToBoardOrderRow(
     buyerKey,
     buyerIdentityCode,
     productName: pickProductName(raw),
-    orderTime: v.orderTimeText || '—',
-    signTime: pickSignTime(raw),
+    orderTime: orderTimeText,
+    orderTimeMs,
+    signTime: signedTime.signTime,
+    signTimeMs: signedTime.signTimeMs,
+    signTimeSource: signedTime.signTimeSource,
     productTotalAmount,
     freightAmount,
     userPayableAmount,

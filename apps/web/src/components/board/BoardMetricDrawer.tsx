@@ -5,6 +5,7 @@ import { Pagination } from '../ui/Pagination'
 import { UNMATCHED_OFFICIAL_QUALITY_HINT } from './OfficialQualitySyncNote'
 import { BoardDrawerShell } from './BoardDrawerShell'
 import { BoardDrillOrderTable, type BoardDrillOrderRow } from './BoardDrillOrderTable'
+import { SignedOrdersDrillView } from './SignedOrdersDrillView'
 import { useManualOrderAnchorAssign } from '../../hooks/useManualOrderAnchorAssign'
 
 export type BoardMetricKey =
@@ -118,15 +119,17 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     clearAssignError,
     clearAssignSuccess,
   } = useManualOrderAnchorAssign({
-    enabled: open && metric !== 'offlineGmv',
+    enabled: open && metric !== 'offlineGmv' && metric !== 'actualSignedAmount',
     onAssigned: () => {
       bumpReload()
       onOrderAnchorAssigned?.()
     },
   })
 
+  const isSignedAmountMetric = metric === 'actualSignedAmount'
+
   useEffect(() => {
-    if (!open || !startDate || !endDate) return
+    if (!open || !startDate || !endDate || isSignedAmountMetric) return
 
     const controller = new AbortController()
     setLoading(true)
@@ -145,8 +148,11 @@ export const BoardMetricDrawer: React.FC<Props> = ({
         if (tab) qs.set('tab', tab)
         if (anchorId) qs.set('anchorId', anchorId)
         if (anchorName) qs.set('anchorName', anchorName)
-        if (metric === 'actualSignedAmount' && !anchorId && !anchorName) {
-          qs.set('sort', 'anchor_asc')
+        if (
+          (metric === 'signedCount' || metric === 'signRate') &&
+          tab !== 'unsigned'
+        ) {
+          qs.set('sort', 'shop_anchor_sign_desc')
         }
         if (overviewStableSnapshot) qs.set('overviewStableSnapshot', 'true')
         const res = await apiRequest<MetricDetailData>(`/api/board/metric-detail?${qs}`, {
@@ -166,16 +172,34 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     })()
 
     return () => controller.abort()
-  }, [open, metric, startDate, endDate, page, tab, preset, anchorId, anchorName, pageSize, reloadNonce, overviewStableSnapshot])
+  }, [open, metric, startDate, endDate, page, tab, preset, anchorId, anchorName, pageSize, reloadNonce, overviewStableSnapshot, isSignedAmountMetric])
 
   useEffect(() => {
+    if (isSignedAmountMetric) return
     setPage(1)
     setTab('')
     setData(null)
     setError(null)
     clearAssignError()
     clearAssignSuccess()
-  }, [metric, startDate, endDate, open, anchorId, anchorName, preset, overviewStableSnapshot, clearAssignError, clearAssignSuccess])
+  }, [metric, startDate, endDate, open, anchorId, anchorName, preset, overviewStableSnapshot, clearAssignError, clearAssignSuccess, isSignedAmountMetric])
+
+  if (isSignedAmountMetric) {
+    return (
+      <SignedOrdersDrillView
+        open={open}
+        onClose={onClose}
+        startDate={startDate}
+        endDate={endDate}
+        preset={preset}
+        anchorId={anchorId}
+        anchorName={anchorName}
+        overviewStableSnapshot={overviewStableSnapshot}
+        onOrderAnchorAssigned={onOrderAnchorAssigned}
+        metric="actualSignedAmount"
+      />
+    )
+  }
 
   const isRefundMetric = metric === 'returnAmount' || metric === 'returnCount'
   const isQualityMetric = metric === 'qualityReturnCount' || metric === 'qualityReturnRate'
@@ -235,6 +259,9 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     return rangePart
   })()
 
+  const useSignedEmbeddedView =
+    (metric === 'signedCount' || metric === 'signRate') && tab !== 'unsigned'
+
   return (
     <BoardDrawerShell
       open={open}
@@ -243,7 +270,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
       subtitle={drawerSubtitle}
       scrollResetKey={page}
       footer={
-        data ? (
+        data && !useSignedEmbeddedView ? (
           <Pagination
             page={data.pagination.page}
             total={data.pagination.total}
@@ -383,34 +410,51 @@ export const BoardMetricDrawer: React.FC<Props> = ({
               ))}
             </div>
           ) : null}
-          <BoardDrillOrderTable
-            rows={data.rows}
-            listKey={`${metric}-${tab}-${data.pagination.page}-${data.rows.length}`}
-            blacklistedBuyerIds={liveBlacklist}
-            loading={loading && !!data}
-            emptyText={
-              isOfflineGmvMetric
-                ? '当前日期范围内暂无已确认的逸凡线下成交'
-                : '该指标下暂无匹配订单'
-            }
-            amountMode={metric === 'actualSignedAmount' ? 'signed' : 'default'}
-            variant={isOfflineGmvMetric ? 'offline' : 'board'}
-            manualAnchorAssign={
-              allowManualAssign
-                ? {
-                    anchorOptions,
-                    assigningOrderNo,
-                    onAssign: (orderNo, targetAnchorName) => {
-                      void handleManualAssign(orderNo, targetAnchorName)
-                    },
-                    onClearManualOverride: (orderNo) => {
-                      void handleClearManualOverride(orderNo)
-                    },
-                  }
-                : undefined
-            }
-          />
-          {allowManualAssign && optionsError ? (
+          {(metric === 'signedCount' || metric === 'signRate') && tab !== 'unsigned' ? (
+            <SignedOrdersDrillView
+              embedded
+              open={open}
+              onClose={onClose}
+              startDate={startDate}
+              endDate={endDate}
+              preset={preset}
+              anchorId={anchorId}
+              anchorName={anchorName}
+              overviewStableSnapshot={overviewStableSnapshot}
+              onOrderAnchorAssigned={onOrderAnchorAssigned}
+              metric={metric}
+              tab="signed"
+            />
+          ) : (
+            <BoardDrillOrderTable
+              rows={data.rows}
+              listKey={`${metric}-${tab}-${data.pagination.page}-${data.rows.length}`}
+              blacklistedBuyerIds={liveBlacklist}
+              loading={loading && !!data}
+              emptyText={
+                isOfflineGmvMetric
+                  ? '当前日期范围内暂无已确认的逸凡线下成交'
+                  : '该指标下暂无匹配订单'
+              }
+              amountMode="default"
+              variant={isOfflineGmvMetric ? 'offline' : 'board'}
+              manualAnchorAssign={
+                allowManualAssign
+                  ? {
+                      anchorOptions,
+                      assigningOrderNo,
+                      onAssign: (orderNo, targetAnchorName) => {
+                        void handleManualAssign(orderNo, targetAnchorName)
+                      },
+                      onClearManualOverride: (orderNo) => {
+                        void handleClearManualOverride(orderNo)
+                      },
+                    }
+                  : undefined
+              }
+            />
+          )}
+          {allowManualAssign && !useSignedEmbeddedView && optionsError ? (
             <div className="flex flex-wrap items-center gap-2 text-xs text-red-600">
               <span>主播选项加载失败：{optionsError}</span>
               <button
@@ -422,8 +466,12 @@ export const BoardMetricDrawer: React.FC<Props> = ({
               </button>
             </div>
           ) : null}
-          {allowManualAssign && assignError ? <p className="text-xs text-red-600">{assignError}</p> : null}
-          {allowManualAssign && assignSuccess ? <p className="text-xs text-emerald-700">{assignSuccess}</p> : null}
+          {allowManualAssign && !useSignedEmbeddedView && assignError ? (
+            <p className="text-xs text-red-600">{assignError}</p>
+          ) : null}
+          {allowManualAssign && !useSignedEmbeddedView && assignSuccess ? (
+            <p className="text-xs text-emerald-700">{assignSuccess}</p>
+          ) : null}
         </div>
       ) : null}
     </BoardDrawerShell>

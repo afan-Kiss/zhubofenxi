@@ -12,10 +12,15 @@ export interface BoardDrillOrderRow {
   orderTime: string
   payTime?: string | null
   signTime?: string | null
+  signTimeMs?: number | null
+  signTimeSource?: string | null
+  orderTimeMs?: number | null
   afterSaleApplyTime?: string | null
   afterSaleCompleteTime?: string | null
   anchorName: string
+  anchorId?: string
   liveAccountName?: string
+  liveAccountId?: string
   buyerNickname: string
   buyerId: string
   buyerKey?: string
@@ -194,12 +199,23 @@ export function normalizeBoardOrderRow(raw: Record<string, unknown>): BoardDrill
     orderTime: displayCell(raw.orderTime),
     payTime: raw.payTime != null ? displayCell(raw.payTime) : undefined,
     signTime: raw.signTime != null ? displayCell(raw.signTime) : undefined,
+    signTimeMs:
+      raw.signTimeMs != null && Number.isFinite(Number(raw.signTimeMs))
+        ? Number(raw.signTimeMs)
+        : undefined,
+    signTimeSource: raw.signTimeSource != null ? String(raw.signTimeSource) : undefined,
+    orderTimeMs:
+      raw.orderTimeMs != null && Number.isFinite(Number(raw.orderTimeMs))
+        ? Number(raw.orderTimeMs)
+        : undefined,
     afterSaleApplyTime:
       raw.afterSaleApplyTime != null ? displayCell(raw.afterSaleApplyTime) : undefined,
     afterSaleCompleteTime:
       raw.afterSaleCompleteTime != null ? displayCell(raw.afterSaleCompleteTime) : undefined,
     anchorName: formatAnchorDisplayName(String(raw.anchorName ?? '')),
+    anchorId: raw.anchorId != null ? String(raw.anchorId).trim() : undefined,
     liveAccountName: displayCell(raw.liveAccountName ?? '未知直播号'),
+    liveAccountId: raw.liveAccountId != null ? String(raw.liveAccountId).trim() : undefined,
     buyerNickname: displayCell(raw.buyerNickname),
     buyerId: displayCell(raw.buyerIdentityCode ?? raw.buyerId),
     buyerKey: displayCell(raw.buyerKey),

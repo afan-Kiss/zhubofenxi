@@ -44,6 +44,13 @@ import {
 import { loadOfflineDealViewsForRange } from './offline-deal.service'
 import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import { logInfo } from '../utils/server-log'
+import {
+  SIGNED_ORDER_SORT_SHOP_ANCHOR_SIGN_DESC,
+  buildSignedGroupSummary,
+  normalizeSignedOrderSort,
+  sortSignedOrderRows,
+  type SignedGroupSummary,
+} from './signed-order-sort.service'
 
 export type BoardDataSource = 'local_db' | 'live_api'
 
@@ -414,6 +421,9 @@ function buildPageSummary(views: AnalyzedOrderView[]): Record<string, unknown> {
 }
 
 function sortRows(rows: BoardDrillOrderRow[], sort: string): BoardDrillOrderRow[] {
+  if (sort === SIGNED_ORDER_SORT_SHOP_ANCHOR_SIGN_DESC) {
+    return sortSignedOrderRows(rows)
+  }
   const list = [...rows]
   const anchorSortKey = (name: string | undefined) => {
     const n = (name || '').trim()
@@ -434,6 +444,123 @@ function sortRows(rows: BoardDrillOrderRow[], sort: string): BoardDrillOrderRow[
     list.sort((a, b) => b.orderTime.localeCompare(a.orderTime))
   }
   return list
+}
+
+function isSignedOrdersDrillMetric(metric: BoardMetricKey, tab?: string): boolean {
+  if (metric === 'actualSignedAmount') return true
+  if (metric === 'signedCount' || metric === 'signRate') {
+    return tab !== 'unsigned'
+  }
+  return false
+}
+
+function applySignedListFilters(
+  rows: BoardDrillOrderRow[],
+  filters: { shopId?: string; listAnchorId?: string; keyword?: string },
+): BoardDrillOrderRow[] {
+  let out = rows
+  const shopId = filters.shopId?.trim()
+  if (shopId) {
+    out = out.filter((r) => (r.liveAccountId || '').trim() === shopId)
+  }
+  const listAnchorId = filters.listAnchorId?.trim()
+  if (listAnchorId) {
+    if (listAnchorId === '__unassigned__' || listAnchorId === '未归属') {
+      out = out.filter((r) => {
+        const n = (r.anchorName || '').trim()
+        return !n || n === '未归属' || n === '—'
+      })
+    } else {
+      out = out.filter(
+        (r) =>
+          (r.anchorId || '').trim() === listAnchorId ||
+          (r.anchorName || '').trim() === listAnchorId,
+      )
+    }
+  }
+  const keyword = filters.keyword?.trim().toLowerCase()
+  if (keyword) {
+    out = out.filter((r) => {
+      const orderNo = (r.displayOrderNo || r.orderNo || '').toLowerCase()
+      const buyer = (r.buyerNickname || '').toLowerCase()
+      const product = (r.productName || '').toLowerCase()
+      return orderNo.includes(keyword) || buyer.includes(keyword) || product.includes(keyword)
+    })
+  }
+  return out
+}
+
+function buildSignedFilterOptions(rows: BoardDrillOrderRow[]): {
+  shops: Array<{ id: string; name: string; count: number }>
+  anchors: Array<{ id: string; name: string; liveAccountId: string; count: number }>
+} {
+  const shopMap = new Map<string, { id: string; name: string; count: number }>()
+  const anchorMap = new Map<string, { id: string; name: string; liveAccountId: string; count: number }>()
+
+  for (const row of rows) {
+    const shopId = (row.liveAccountId || 'unknown').trim() || 'unknown'
+    const shopName = (row.liveAccountName || '未知直播号').trim() || '未知直播号'
+    const shop = shopMap.get(shopId)
+    if (shop) shop.count += 1
+    else shopMap.set(shopId, { id: shopId, name: shopName, count: 1 })
+
+    const anchorName = (row.anchorName || '未归属').trim() || '未归属'
+    const isUnassigned = !anchorName || anchorName === '未归属' || anchorName === '—'
+    const anchorId = isUnassigned
+      ? '__unassigned__'
+      : (row.anchorId || '').trim() || anchorName
+    const aKey = `${shopId}::${anchorId}`
+    const anchor = anchorMap.get(aKey)
+    if (anchor) anchor.count += 1
+    else {
+      anchorMap.set(aKey, {
+        id: anchorId,
+        name: isUnassigned ? '未归属' : anchorName,
+        liveAccountId: shopId,
+        count: 1,
+      })
+    }
+  }
+
+  const shops = [...shopMap.values()].sort((a, b) =>
+    a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }),
+  )
+  const anchors = [...anchorMap.values()].sort((a, b) => {
+    const byShop = a.liveAccountId.localeCompare(b.liveAccountId)
+    if (byShop !== 0) return byShop
+    if (a.id === '__unassigned__' && b.id !== '__unassigned__') return 1
+    if (b.id === '__unassigned__' && a.id !== '__unassigned__') return -1
+    return a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
+  })
+  return { shops, anchors }
+}
+
+function buildSignedFilteredSummary(rows: BoardDrillOrderRow[]): {
+  orderCount: number
+  signedAmount: number
+  shopCount: number
+  anchorCount: number
+  missingSignTimeCount: number
+} {
+  const shopIds = new Set<string>()
+  const anchorKeys = new Set<string>()
+  let signedAmount = 0
+  let missingSignTimeCount = 0
+  for (const row of rows) {
+    shopIds.add((row.liveAccountId || 'unknown').trim() || 'unknown')
+    const anchorName = (row.anchorName || '未归属').trim() || '未归属'
+    const anchorId = (row.anchorId || anchorName).trim() || anchorName
+    anchorKeys.add(`${row.liveAccountId || ''}::${anchorId}::${anchorName}`)
+    signedAmount += Number(row.signedAmount ?? 0) || 0
+    if (row.signTimeMs == null) missingSignTimeCount += 1
+  }
+  return {
+    orderCount: rows.length,
+    signedAmount: Number(signedAmount.toFixed(2)),
+    shopCount: shopIds.size,
+    anchorCount: anchorKeys.size,
+    missingSignTimeCount,
+  }
 }
 
 function formatValueText(metric: BoardMetricKey, value: number | null): string {
@@ -464,6 +591,9 @@ export async function buildBoardMetricDetail(params: {
   pageSize?: number
   tab?: string
   sort?: string
+  shopId?: string
+  listAnchorId?: string
+  keyword?: string
   role: UserRole
   username: string
   overviewStableSnapshot?: boolean
@@ -582,32 +712,64 @@ export async function buildBoardMetricDetail(params: {
   const unsignedTabCount = countDedupedUnsignedViews(viewsForTotals)
   const blacklist = buildBlacklistedBuyerIds(viewsForTotals)
 
-  const sortMode =
-    params.sort ??
-    (params.metric === 'actualSignedAmount' && !anchorId && !anchorName ? 'anchor_asc' : 'time_desc')
+  const signedDrill = isSignedOrdersDrillMetric(params.metric, params.tab)
+  const sortMode = signedDrill
+    ? normalizeSignedOrderSort(params.sort)
+    : params.sort?.trim() || 'time_desc'
 
-  const allRows = sortRows(
-    sourceViews
-      .map((v) => {
-        const raw = rawByMatch.get(v.matchOrderId || v.orderId)
-        const row = mapViewToBoardDrillRow(
-          Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
-          { useBuyerRefund: true },
-        )
-        const blocked = blacklist.has(row.buyerKey)
-        return { ...row, isBlacklistedBuyer: blocked }
+  const mappedRows = sourceViews
+    .map((v) => {
+      const raw = rawByMatch.get(v.matchOrderId || v.orderId)
+      const row = mapViewToBoardDrillRow(
+        Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
+        { useBuyerRefund: true },
+      )
+      const blocked = blacklist.has(row.buyerKey)
+      return { ...row, isBlacklistedBuyer: blocked }
+    })
+    .filter((row) => {
+      if (params.metric !== 'actualSignedAmount') return true
+      return Number(row.signedAmount ?? 0) > 0
+    })
+
+  const listShopId = params.shopId?.trim() || undefined
+  const listAnchorId = params.listAnchorId?.trim() || undefined
+  const listKeyword = params.keyword?.trim() || undefined
+  const filteredRows = signedDrill
+    ? applySignedListFilters(mappedRows, {
+        shopId: listShopId,
+        listAnchorId,
+        keyword: listKeyword,
       })
-      .filter((row) => {
-        if (params.metric !== 'actualSignedAmount') return true
-        return Number(row.signedAmount ?? 0) > 0
-      }),
-    sortMode,
-  )
+    : mappedRows
+
+  const allRows = sortRows(filteredRows, sortMode)
 
   const page = Math.max(1, Math.floor(params.page ?? 1))
-  const pageSize = Math.min(100, Math.max(1, Math.floor(params.pageSize ?? 20)))
+  const pageSize = Math.min(100, Math.max(1, Math.floor(params.pageSize ?? (signedDrill ? 50 : 20))))
   const total = allRows.length
   const rows = allRows.slice((page - 1) * pageSize, page * pageSize)
+
+  const signedExtras = signedDrill
+    ? (() => {
+        const filterOptions = buildSignedFilterOptions(mappedRows)
+        const filteredSummary = buildSignedFilteredSummary(allRows)
+        const groupSummary: SignedGroupSummary = buildSignedGroupSummary(allRows)
+        const allSummary = buildSignedFilteredSummary(mappedRows)
+        return {
+          sort: sortMode,
+          filters: {
+            shopId: listShopId ?? null,
+            anchorId: listAnchorId ?? null,
+            keyword: listKeyword ?? '',
+          },
+          filterOptions,
+          filteredSummary,
+          allSummary,
+          groupSummary,
+        }
+      })()
+    : null
 
   const tabs =
     params.metric === 'signRate' || params.metric === 'signedCount'
@@ -703,6 +865,7 @@ export async function buildBoardMetricDetail(params: {
     pageSummary: buildPageSummary(viewsForTotals),
     blacklistedBuyerIds: [...blacklist],
     source: 'local_db' as BoardDataSource,
+    ...(signedExtras ?? {}),
     ...(stableDrawer
       ? {
           overviewStableWarning: stableDrawer.overviewStableWarning,

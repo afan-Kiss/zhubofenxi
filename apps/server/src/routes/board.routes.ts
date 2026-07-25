@@ -309,6 +309,13 @@ boardRouter.get('/metric-detail', async (req, res) => {
       pageSize: req.query.pageSize ? Number(req.query.pageSize) : 20,
       tab: req.query.tab ? String(req.query.tab) : undefined,
       sort: req.query.sort ? String(req.query.sort) : undefined,
+      shopId: req.query.shopId ? String(req.query.shopId) : undefined,
+      listAnchorId: req.query.listAnchorId
+        ? String(req.query.listAnchorId)
+        : req.query.filterAnchorId
+          ? String(req.query.filterAnchorId)
+          : undefined,
+      keyword: req.query.keyword ? String(req.query.keyword) : undefined,
       overviewStableSnapshot:
         req.query.overviewStableSnapshot === 'true' ||
         req.query.overviewStableSnapshot === '1',

@@ -71,7 +71,8 @@ const AFTER_SALE_STATUS_KEYWORDS = [
   '退款成功',
   '待商家收货',
   '退款中',
-  '待收货',
+  // 不用裸「待收货」：物流订单态也是「待收货」，会误判；售后用「待商家收货」等
+  '待商家收货',
   '待审核',
   '待退货',
   '待寄回',
@@ -87,7 +88,6 @@ const ACTIVE_AFTER_SALE_KEYWORDS = [
   '待寄回',
   '买家退货中',
   '待商家收货',
-  '待收货',
 ]
 
 const RETURN_IN_TRANSIT_KEYWORDS = ['待商家收货', '买家退货中', '待寄回', '待退货']
@@ -228,15 +228,15 @@ export function hasMeaningfulAfterSaleId(value: unknown): boolean {
 }
 
 /**
- * 状态字段：0/"0"/none/无售后为 false。
- * 未知数字状态码不默认 true（除明确非 0）；优先文案。
+ * 状态字段：0/"0"/1/"1"/none/无售后为 false。
+ * 小红书订单 raw：afterSaleStatus=1 表示「无售后」；真实售后常见 2/3/5/6/7…
  */
 export function hasMeaningfulAfterSaleStatus(value: unknown): boolean {
   if (value == null) return false
   if (typeof value === 'number') {
-    if (!Number.isFinite(value) || value === 0) return false
-    // 平台常见：非 0 表示进入售后流程；仍保守要求 > 0
-    return value > 0
+    if (!Number.isFinite(value)) return false
+    // 0=空，1=无售后，负数（如 secondAfterSaleStatus=-1）无意义
+    return value > 1
   }
   const s = String(value).trim()
   if (!s) return false
@@ -244,10 +244,10 @@ export function hasMeaningfulAfterSaleStatus(value: unknown): boolean {
   if (MEANINGLESS_STRINGS.has(lower) || MEANINGLESS_STRINGS.has(s)) return false
   if (/^0+(\.0+)?$/.test(s)) return false
   if (textHasAfterSaleKeyword(s)) return true
-  // 纯数字字符串
+  // 纯数字字符串：与数值口径一致，1 不算信号
   if (/^\d+$/.test(s)) {
     const n = Number(s)
-    return Number.isFinite(n) && n > 0
+    return Number.isFinite(n) && n > 1
   }
   return false
 }

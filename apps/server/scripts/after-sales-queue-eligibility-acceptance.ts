@@ -141,6 +141,59 @@ function main(): void {
     console.log('✓ 高优先级真实售后 > 普通重试')
   }
 
+  // 平台 raw：afterSaleStatus=1 + 文案「无售后」不算信号（曾导致全量积压）
+  {
+    const r = resolveAfterSalesQueueEligibility(
+      base({
+        orderStatusText: '已签收',
+        afterSaleStatusText: '无售后',
+        raw: {
+          afterSaleStatus: 1,
+          firstAfterSaleStatus: 1,
+          secondAfterSaleStatus: -1,
+          skus: [{ afterSaleStatus: 1, afterSaleStatusDesc: '无售后' }],
+        },
+      }),
+    )
+    assert.equal(r.eligible, false, 'status=1 无售后不应入队')
+    assert.equal(rawHasAfterSaleField({ afterSaleStatus: 1, firstAfterSaleStatus: 1 }), false)
+    console.log('✓ afterSaleStatus=1 / 无售后 不入队')
+  }
+
+  // 物流「待收货」≠ 售后信号
+  {
+    const r = resolveAfterSalesQueueEligibility(
+      base({
+        orderStatusText: '待收货',
+        afterSaleStatusText: '无售后',
+        raw: { afterSaleStatus: 1 },
+      }),
+    )
+    assert.equal(r.eligible, false, '订单物流待收货不应入队')
+    console.log('✓ 订单物流待收货不入队')
+  }
+
+  // 真实售后码 2/3 仍入队
+  {
+    const r2 = resolveAfterSalesQueueEligibility(
+      base({
+        afterSaleStatusText: undefined,
+        orderStatusText: '已发货',
+        raw: { afterSaleStatus: 2, firstAfterSaleStatus: 2 },
+      }),
+    )
+    assert.equal(r2.eligible, true, 'status=2 应入队')
+    const r3 = resolveAfterSalesQueueEligibility(
+      base({
+        afterSaleStatusText: '售后关闭',
+        isReturned: true,
+        raw: { afterSaleStatus: 3, firstAfterSaleStatus: 3 },
+      }),
+    )
+    assert.equal(r3.eligible, true, 'status=3 售后关闭应入队')
+    console.log('✓ afterSaleStatus=2/3 真实售后仍入队')
+  }
+
   console.log('\nALL PASS')
 }
 

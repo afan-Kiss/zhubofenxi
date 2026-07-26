@@ -186,7 +186,7 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(
         ) : null}
 
         <section className="mb-4">
-          <DailyReportImageTimeline sessions={sessions} shopScores={data.shopScores} />
+          <DailyReportImageTimeline sessions={sessions} />
         </section>
 
         <section className="mb-4">

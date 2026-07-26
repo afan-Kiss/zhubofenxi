@@ -149,6 +149,12 @@ function checkDailyReportImageSheetStatic(): void {
   } else {
     ok('日报图片未展示品退率')
   }
+  // 体验分只应出现在独立区块，不得重复塞进时间轴 props
+  if (text.includes('shopScores={data.shopScores}')) {
+    fail('时间轴不应再传入 shopScores（避免重复展示）')
+  } else {
+    ok('体验分未重复传入时间轴')
+  }
 }
 
 function checkAnchorPerformanceSignedAmountLabel(): void {

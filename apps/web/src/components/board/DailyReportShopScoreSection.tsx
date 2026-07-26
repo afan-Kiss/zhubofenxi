@@ -28,19 +28,20 @@ const SUB_ITEMS: Array<{
   { label: '服务', scoreKey: 'serviceScore', deltaKey: 'serviceDelta', accent: '#15803d' },
 ]
 
-function formatScore(value: number | null | undefined): string {
+export function formatShopScore(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—'
   return value.toFixed(2)
 }
 
-function formatDelta(delta: number | null | undefined): string {
+export function formatShopScoreDelta(delta: number | null | undefined): string {
   if (delta == null || !Number.isFinite(delta)) return '—'
   if (delta === 0) return '0.00'
   const abs = Math.abs(delta).toFixed(2)
   return delta > 0 ? `+${abs}` : `-${abs}`
 }
 
-function deltaTone(delta: number | null | undefined): {
+/** 当前体验分指标均为「越高越好」：上涨绿、下降红、持平灰 */
+export function shopScoreDeltaTone(delta: number | null | undefined): {
   text: string
   bg: string
   arrow: string
@@ -54,8 +55,13 @@ function deltaTone(delta: number | null | undefined): {
   return { text: 'text-rose-700', bg: 'bg-rose-50', arrow: '↓' }
 }
 
+function formatMd(dateKey: string | null | undefined): string {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return ''
+  return dateKey.slice(5)
+}
+
 function ScoreDeltaBadge({ delta, size = 'md' }: { delta: number | null; size?: 'sm' | 'md' }) {
-  const tone = deltaTone(delta)
+  const tone = shopScoreDeltaTone(delta)
   const pad = size === 'sm' ? 'px-1 py-0' : 'px-1.5 py-0.5'
   const text = size === 'sm' ? 'text-[10px]' : 'text-[11px]'
   return (
@@ -65,13 +71,13 @@ function ScoreDeltaBadge({ delta, size = 'md' }: { delta: number | null; size?: 
       <span aria-hidden className="leading-none">
         {tone.arrow}
       </span>
-      <span>{formatDelta(delta)}</span>
+      <span>{formatShopScoreDelta(delta)}</span>
     </span>
   )
 }
 
 /**
- * 日报长图：四店体验分卡片区（独立区块，避免与时间轴发货气泡重叠）
+ * 日报长图：四店体验分卡片区（唯一展示位，时间轴不再重复）
  */
 export function DailyReportShopScoreSection({
   scores,
@@ -80,18 +86,12 @@ export function DailyReportShopScoreSection({
   scores: DailyReportShopScoreItem[]
   reportDate: string
 }) {
-  if (!scores.length) return null
+  if (!Array.isArray(scores) || scores.length === 0) return null
 
+  const anyAvailable = scores.some((s) => s.available)
   const scoreDates = [
     ...new Set(scores.map((s) => s.scoreDate).filter((d): d is string => Boolean(d))),
   ].sort()
-  const latestScoreDate = scoreDates[scoreDates.length - 1] ?? null
-  const staleNote =
-    latestScoreDate && latestScoreDate !== reportDate
-      ? `快照日期 ${latestScoreDate}（日报日暂无更新时取最近可用）`
-      : latestScoreDate
-        ? `快照日期 ${latestScoreDate}`
-        : '暂无体验分快照'
 
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -99,19 +99,46 @@ export function DailyReportShopScoreSection({
         <div className="min-w-0">
           <h3 className="text-sm font-semibold text-slate-800">店铺体验分</h3>
           <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
-            四店平台体验分 · 较前一快照变化（绿↑上升 / 红↓下降）
+            平台体验分快照 · 箭头表示较上次快照（不是日报经营日环比）
           </p>
         </div>
-        <p className="shrink-0 text-[10px] tabular-nums text-slate-400">{staleNote}</p>
+        <div className="shrink-0 text-right text-[10px] leading-snug tabular-nums text-slate-400">
+          <div>日报日 {reportDate || '—'}</div>
+          <div>
+            {!anyAvailable
+              ? '暂无体验分快照'
+              : scoreDates.length === 1
+                ? `快照日 ${scoreDates[0]}`
+                : `快照日见各店（${scoreDates.join(' / ')}）`}
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-0 divide-x divide-slate-100">
         {scores.map((shop) => {
-          const overallTone = deltaTone(shop.overallDelta)
+          const scoreMd = formatMd(shop.scoreDate)
+          const prevMd = formatMd(shop.previousScoreDate)
+          const staleVsReport = Boolean(
+            shop.scoreDate && reportDate && shop.scoreDate !== reportDate,
+          )
           return (
-            <div key={shop.shopKey} className="min-w-0 px-3 py-3">
-              <div className="truncate text-[12px] font-semibold text-slate-800" title={shop.shopName}>
+            <div key={shop.shopKey} className="min-w-0 overflow-hidden px-2.5 py-3 sm:px-3">
+              <div
+                className="truncate text-[12px] font-semibold leading-tight text-slate-800"
+                title={shop.shopName}
+              >
                 {shop.shopName}
+              </div>
+              <div
+                className={`mt-0.5 text-[10px] tabular-nums ${
+                  staleVsReport ? 'text-amber-700' : 'text-slate-400'
+                }`}
+              >
+                {shop.scoreDate
+                  ? staleVsReport
+                    ? `快照 ${scoreMd}（非日报日）`
+                    : `快照 ${scoreMd}`
+                  : '无快照'}
               </div>
 
               {!shop.available ? (
@@ -120,19 +147,26 @@ export function DailyReportShopScoreSection({
                 </div>
               ) : (
                 <>
-                  <div className="mt-2 flex items-end gap-2">
+                  <div className="mt-2 flex min-w-0 items-end gap-1.5">
                     <div className="min-w-0">
                       <div className="text-[10px] text-slate-400">综合</div>
-                      <div className="text-[22px] font-bold leading-none tabular-nums tracking-tight text-slate-900">
-                        {formatScore(shop.overallScore)}
+                      <div className="text-[20px] font-bold leading-none tabular-nums tracking-tight text-slate-900">
+                        {formatShopScore(shop.overallScore)}
                       </div>
                     </div>
-                    <div className={`mb-0.5 ${overallTone.text}`}>
+                    <div className="mb-0.5 min-w-0 shrink-0">
                       <ScoreDeltaBadge delta={shop.overallDelta} />
                     </div>
                   </div>
+                  {prevMd ? (
+                    <div className="mt-1 text-[10px] leading-tight text-slate-400">
+                      较上次快照 {prevMd}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-[10px] leading-tight text-slate-400">无上次快照可比</div>
+                  )}
 
-                  <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2">
+                  <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
                     {SUB_ITEMS.map((item) => {
                       const score = shop[item.scoreKey]
                       const delta = shop[item.deltaKey]
@@ -141,7 +175,7 @@ export function DailyReportShopScoreSection({
                           key={item.scoreKey}
                           className="flex min-w-0 items-center justify-between gap-1"
                         >
-                          <div className="flex min-w-0 items-center gap-1.5">
+                          <div className="flex min-w-0 items-center gap-1 overflow-hidden">
                             <span
                               className="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
                               style={{ backgroundColor: item.accent }}
@@ -149,7 +183,7 @@ export function DailyReportShopScoreSection({
                             />
                             <span className="shrink-0 text-[10px] text-slate-500">{item.label}</span>
                             <span className="truncate text-[12px] font-semibold tabular-nums text-slate-800">
-                              {formatScore(score)}
+                              {formatShopScore(score)}
                             </span>
                           </div>
                           <ScoreDeltaBadge delta={delta} size="sm" />

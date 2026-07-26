@@ -8,12 +8,16 @@ export interface DailyReportShopScoreItem {
   previousScoreDate: string | null
   overallScore: number | null
   overallDelta: number | null
+  overallTrend?: ShopScoreTrendLabel
   qualityScore: number | null
   logisticsScore: number | null
   serviceScore: number | null
   qualityDelta: number | null
   logisticsDelta: number | null
   serviceDelta: number | null
+  qualityTrend?: ShopScoreTrendLabel
+  logisticsTrend?: ShopScoreTrendLabel
+  serviceTrend?: ShopScoreTrendLabel
   available: boolean
 }
 
@@ -36,46 +40,72 @@ const SUB_ITEMS: Array<{
   label: string
   scoreKey: 'qualityScore' | 'logisticsScore' | 'serviceScore'
   deltaKey: 'qualityDelta' | 'logisticsDelta' | 'serviceDelta'
+  trendKey: 'qualityTrend' | 'logisticsTrend' | 'serviceTrend'
   accent: string
 }> = [
-  { label: '品质', scoreKey: 'qualityScore', deltaKey: 'qualityDelta', accent: '#be123c' },
-  { label: '物流', scoreKey: 'logisticsScore', deltaKey: 'logisticsDelta', accent: '#0369a1' },
-  { label: '服务', scoreKey: 'serviceScore', deltaKey: 'serviceDelta', accent: '#15803d' },
+  {
+    label: '品质',
+    scoreKey: 'qualityScore',
+    deltaKey: 'qualityDelta',
+    trendKey: 'qualityTrend',
+    accent: '#be123c',
+  },
+  {
+    label: '物流',
+    scoreKey: 'logisticsScore',
+    deltaKey: 'logisticsDelta',
+    trendKey: 'logisticsTrend',
+    accent: '#0369a1',
+  },
+  {
+    label: '服务',
+    scoreKey: 'serviceScore',
+    deltaKey: 'serviceDelta',
+    trendKey: 'serviceTrend',
+    accent: '#15803d',
+  },
 ]
 
-/** 官方综合分展示：1 位小数 */
+export type ShopScoreTrendLabel = '上升' | '下降' | '持平'
+
+/** 官方展示总分：1 位小数；不做「内部精细值再四舍五入冒充官方」以外的额外处理 */
 export function formatOverallShopScore(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—'
   return (Math.round(value * 10) / 10).toFixed(1)
 }
 
-/** 分项分数：保留 2 位小数 */
+/** 分项分数：官方页面同为 1 位小数 */
 export function formatShopScore(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return '—'
-  return value.toFixed(2)
+  return (Math.round(value * 10) / 10).toFixed(1)
 }
 
 export function formatShopScoreDelta(delta: number | null | undefined): string {
   if (delta == null || !Number.isFinite(delta)) return '—'
-  if (delta === 0) return '0.0'
+  if (delta === 0) return ''
   const abs = (Math.round(Math.abs(delta) * 10) / 10).toFixed(1)
   return delta > 0 ? `+${abs}` : `-${abs}`
 }
 
-export type ShopScoreTrendLabel = '上升' | '下降' | '持平'
-
-/** delta > 0 上升；< 0 下降；= 0 / 无效 持平 */
+/**
+ * 趋势必须与展示差值同一口径：展示差为 0 → 持平（禁止「上升 +0.0」）
+ */
 export function shopScoreTrendLabel(delta: number | null | undefined): ShopScoreTrendLabel {
-  if (delta == null || !Number.isFinite(delta) || delta === 0) return '持平'
-  return delta > 0 ? '上升' : '下降'
+  if (delta == null || !Number.isFinite(delta)) return '持平'
+  const displayDelta = Math.round(delta * 10) / 10
+  if (displayDelta === 0) return '持平'
+  return displayDelta > 0 ? '上升' : '下降'
 }
 
-export function shopScoreDeltaTone(delta: number | null | undefined): {
+export function shopScoreDeltaTone(
+  delta: number | null | undefined,
+  trendOverride?: ShopScoreTrendLabel,
+): {
   text: string
   bg: string
   label: ShopScoreTrendLabel
 } {
-  const label = shopScoreTrendLabel(delta)
+  const label = trendOverride ?? shopScoreTrendLabel(delta)
   if (label === '上升') {
     return { text: 'text-emerald-700', bg: 'bg-emerald-50', label }
   }
@@ -87,26 +117,33 @@ export function shopScoreDeltaTone(delta: number | null | undefined): {
 
 function TrendBadge({
   delta,
+  trend,
   size = 'md',
   withDeltaValue = false,
 }: {
   delta: number | null
+  trend?: ShopScoreTrendLabel
   size?: 'sm' | 'md'
   /** 综合分旁可带简洁数值，分项只显示文字以免拥挤 */
   withDeltaValue?: boolean
 }) {
-  const tone = shopScoreDeltaTone(delta)
+  const tone = shopScoreDeltaTone(delta, trend)
   const pad = size === 'sm' ? 'px-1.5 py-0.5' : 'px-2 py-0.5'
   const text = size === 'sm' ? 'text-[10px]' : 'text-[11px]'
+  const displayDelta =
+    delta != null && Number.isFinite(delta) ? Math.round(delta * 10) / 10 : null
   const showValue =
-    withDeltaValue && delta != null && Number.isFinite(delta) && delta !== 0
+    withDeltaValue &&
+    tone.label !== '持平' &&
+    displayDelta != null &&
+    displayDelta !== 0
   return (
     <span
       className={`inline-flex shrink-0 items-center gap-0.5 rounded-md ${pad} ${text} font-semibold ${tone.bg} ${tone.text}`}
     >
       <span>{tone.label}</span>
       {showValue ? (
-        <span className="tabular-nums font-medium">{formatShopScoreDelta(delta)}</span>
+        <span className="tabular-nums font-medium">{formatShopScoreDelta(displayDelta)}</span>
       ) : null}
     </span>
   )
@@ -120,17 +157,21 @@ function emptyPlaceholder(shopKey: string): DailyReportShopScoreItem {
     previousScoreDate: null,
     overallScore: null,
     overallDelta: null,
+    overallTrend: '持平',
     qualityScore: null,
     logisticsScore: null,
     serviceScore: null,
     qualityDelta: null,
     logisticsDelta: null,
     serviceDelta: null,
+    qualityTrend: '持平',
+    logisticsTrend: '持平',
+    serviceTrend: '持平',
     available: false,
   }
 }
 
-/** 按固定顺序排列；缺失店铺补占位，不因数据打乱顺序 */
+/** 按固定顺序排列；缺失店铺补占位，不因数据打乱顺序；始终按 shopKey 关联 */
 export function orderDailyReportShopScores(
   scores: DailyReportShopScoreItem[],
 ): DailyReportShopScoreItem[] {
@@ -197,7 +238,11 @@ export function DailyReportShopScoreSection({
                     </div>
                   </div>
                   <div className="mb-0.5 shrink-0">
-                    <TrendBadge delta={shop.overallDelta} withDeltaValue />
+                    <TrendBadge
+                      delta={shop.overallDelta}
+                      trend={shop.overallTrend}
+                      withDeltaValue
+                    />
                   </div>
                 </div>
 
@@ -205,6 +250,7 @@ export function DailyReportShopScoreSection({
                   {SUB_ITEMS.map((item) => {
                     const score = shop[item.scoreKey]
                     const delta = shop[item.deltaKey]
+                    const trend = shop[item.trendKey]
                     return (
                       <div
                         key={item.scoreKey}
@@ -221,7 +267,7 @@ export function DailyReportShopScoreSection({
                             {formatShopScore(score)}
                           </span>
                         </div>
-                        <TrendBadge delta={delta} size="sm" />
+                        <TrendBadge delta={delta} trend={trend} size="sm" />
                       </div>
                     )
                   })}

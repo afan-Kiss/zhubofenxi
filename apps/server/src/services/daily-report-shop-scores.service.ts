@@ -2,7 +2,8 @@
  * 日报长图：读取各店体验分快照（只读本地 BossShopScoreSnapshot，不打千帆）
  * 按 reportDate 取「当日或之前最近」快照，并与上一快照算 delta
  *
- * 注意：delta = 较「上次快照」，不是日报经营日环比，也不是「昨日变化」。
+ * 综合分仅使用 officialOverallScore（千帆 shop_score_dto.score），禁止分项均值兜底。
+ * 趋势基于官方展示 1 位小数（或官方较前日状态），禁止「上升 +0.0」。
  */
 import { prisma } from '../lib/prisma'
 import {
@@ -10,6 +11,12 @@ import {
   type BossDashboardShopKey,
 } from '../config/boss-dashboard.constants'
 import { logWarn } from '../utils/server-log'
+import {
+  normalizeOfficialDisplayScore,
+  resolveOfficialOverallScore,
+  resolveOfficialTrend,
+  type OfficialScoreTrendLabel,
+} from './boss-dashboard/boss-shop-score-official.util'
 
 /** 日报体验分固定顺序（与前端一致；缺数据也占位） */
 export const DAILY_REPORT_SHOP_SCORE_ORDER: BossDashboardShopKey[] = [
@@ -36,14 +43,20 @@ export interface DailyReportShopScoreItem {
   scoreDate: string | null
   /** 对比用的上一快照日期 */
   previousScoreDate: string | null
+  /** 官方总分（shop_score_dto.score）；缺失为 null → 展示 — */
   overallScore: number | null
+  /** 官方展示精度下的综合分变化；持平时为 0 */
   overallDelta: number | null
+  overallTrend: OfficialScoreTrendLabel
   qualityScore: number | null
   logisticsScore: number | null
   serviceScore: number | null
   qualityDelta: number | null
   logisticsDelta: number | null
   serviceDelta: number | null
+  qualityTrend: OfficialScoreTrendLabel
+  logisticsTrend: OfficialScoreTrendLabel
+  serviceTrend: OfficialScoreTrendLabel
   available: boolean
 }
 
@@ -57,21 +70,63 @@ export function scoreDelta(cur: number | null | undefined, prev: number | null |
   return roundScore2(cur - prev)
 }
 
+/**
+ * @deprecated 日报综合分请用 resolveOfficialOverallScore；保留仅供旧调用探测，恒忽略分项
+ */
 export function resolveOverallScore(
-  quality: number | null,
-  logistics: number | null,
-  service: number | null,
+  _quality: number | null,
+  _logistics: number | null,
+  _service: number | null,
   official: number | null,
 ): number | null {
-  if (official != null && Number.isFinite(official)) return roundScore2(official)
-  const parts = [quality, logistics, service].filter(
-    (v): v is number => v != null && Number.isFinite(v),
-  )
-  if (parts.length === 0) return null
-  return roundScore2(parts.reduce((s, v) => s + v, 0) / parts.length)
+  return resolveOfficialOverallScore(official)
 }
 
-/** 至少有一项可展示分数才算 available */
+function pickFinite(n: number | null | undefined): number | null {
+  return n != null && Number.isFinite(n) ? n : null
+}
+
+function readOfficialCompareStatus(rawJson: string | null | undefined): string | null {
+  if (!rawJson) return null
+  try {
+    const raw = JSON.parse(rawJson) as Record<string, unknown>
+    const dto =
+      (raw.shop_score_dto as Record<string, unknown> | undefined) ??
+      (raw.shopScoreDto as Record<string, unknown> | undefined) ??
+      raw
+    const keys = [
+      'compareYesterdayDesc',
+      'compareYesterdayText',
+      'scoreChangeDesc',
+      'changeDesc',
+      'yesterdayCompareDesc',
+      'compareStatus',
+      'scoreTrendDesc',
+    ]
+    for (const k of keys) {
+      const v = dto?.[k]
+      if (v != null && String(v).trim()) return String(v).trim()
+    }
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+function trendFields(
+  current: number | null,
+  previous: number | null,
+  officialCompareStatus?: string | null,
+): { delta: number | null; trend: OfficialScoreTrendLabel } {
+  const resolved = resolveOfficialTrend({
+    current,
+    previous,
+    officialCompareStatus,
+  })
+  return { delta: resolved.displayDelta, trend: resolved.label }
+}
+
+/** 至少有一项可展示分数才算 available（综合分缺失仍可看分项） */
 export function hasUsableShopScore(scores: {
   overallScore: number | null
   qualityScore: number | null
@@ -97,12 +152,16 @@ function emptyShopItem(shop: {
     previousScoreDate: null,
     overallScore: null,
     overallDelta: null,
+    overallTrend: '持平',
     qualityScore: null,
     logisticsScore: null,
     serviceScore: null,
     qualityDelta: null,
     logisticsDelta: null,
     serviceDelta: null,
+    qualityTrend: '持平',
+    logisticsTrend: '持平',
+    serviceTrend: '持平',
     available: false,
   }
 }
@@ -117,7 +176,10 @@ export async function loadDailyReportShopScores(
   }
 
   try {
-    return await Promise.all(
+    // 逐店按 shopKey 查询，禁止用 Promise 结果下标绑定店铺
+    const byKey = new Map<BossDashboardShopKey, DailyReportShopScoreItem>()
+
+    await Promise.all(
       shops.map(async (shop) => {
         const row = await prisma.bossShopScoreSnapshot.findFirst({
           where: { shopKey: shop.shopKey, scoreDate: { lte: dateKey } },
@@ -130,43 +192,31 @@ export async function loadDailyReportShopScores(
             })
           : null
 
-        if (!row) return emptyShopItem(shop)
+        if (!row) {
+          byKey.set(shop.shopKey, emptyShopItem(shop))
+          return
+        }
 
-        const qualityScore =
-          row.qualityScore != null && Number.isFinite(row.qualityScore) ? row.qualityScore : null
-        const logisticsScore =
-          row.logisticsScore != null && Number.isFinite(row.logisticsScore)
-            ? row.logisticsScore
-            : null
-        const serviceScore =
-          row.serviceScore != null && Number.isFinite(row.serviceScore) ? row.serviceScore : null
-        const official =
-          row.officialOverallScore != null && Number.isFinite(row.officialOverallScore)
-            ? row.officialOverallScore
-            : null
+        const qualityScore = pickFinite(row.qualityScore)
+        const logisticsScore = pickFinite(row.logisticsScore)
+        const serviceScore = pickFinite(row.serviceScore)
+        const overallScore = resolveOfficialOverallScore(pickFinite(row.officialOverallScore))
+        const prevOverall = resolveOfficialOverallScore(pickFinite(prev?.officialOverallScore))
+        const officialCompare = readOfficialCompareStatus(row.rawJson)
 
-        const overallScore = resolveOverallScore(
-          qualityScore,
-          logisticsScore,
-          serviceScore,
-          official,
+        const overallTrend = trendFields(overallScore, prevOverall, officialCompare)
+        const qualityTrend = trendFields(
+          normalizeOfficialDisplayScore(qualityScore),
+          normalizeOfficialDisplayScore(pickFinite(prev?.qualityScore)),
         )
-        const prevOverall = prev
-          ? resolveOverallScore(
-              prev.qualityScore != null && Number.isFinite(prev.qualityScore)
-                ? prev.qualityScore
-                : null,
-              prev.logisticsScore != null && Number.isFinite(prev.logisticsScore)
-                ? prev.logisticsScore
-                : null,
-              prev.serviceScore != null && Number.isFinite(prev.serviceScore)
-                ? prev.serviceScore
-                : null,
-              prev.officialOverallScore != null && Number.isFinite(prev.officialOverallScore)
-                ? prev.officialOverallScore
-                : null,
-            )
-          : null
+        const logisticsTrend = trendFields(
+          normalizeOfficialDisplayScore(logisticsScore),
+          normalizeOfficialDisplayScore(pickFinite(prev?.logisticsScore)),
+        )
+        const serviceTrend = trendFields(
+          normalizeOfficialDisplayScore(serviceScore),
+          normalizeOfficialDisplayScore(pickFinite(prev?.serviceScore)),
+        )
 
         const item: DailyReportShopScoreItem = {
           shopKey: shop.shopKey,
@@ -174,34 +224,25 @@ export async function loadDailyReportShopScores(
           scoreDate: row.scoreDate,
           previousScoreDate: prev?.scoreDate ?? null,
           overallScore,
-          overallDelta: scoreDelta(overallScore, prevOverall),
-          qualityScore,
-          logisticsScore,
-          serviceScore,
-          qualityDelta: scoreDelta(
-            qualityScore,
-            prev?.qualityScore != null && Number.isFinite(prev.qualityScore)
-              ? prev.qualityScore
-              : null,
-          ),
-          logisticsDelta: scoreDelta(
-            logisticsScore,
-            prev?.logisticsScore != null && Number.isFinite(prev.logisticsScore)
-              ? prev.logisticsScore
-              : null,
-          ),
-          serviceDelta: scoreDelta(
-            serviceScore,
-            prev?.serviceScore != null && Number.isFinite(prev.serviceScore)
-              ? prev.serviceScore
-              : null,
-          ),
+          overallDelta: overallTrend.delta,
+          overallTrend: overallTrend.trend,
+          qualityScore: normalizeOfficialDisplayScore(qualityScore),
+          logisticsScore: normalizeOfficialDisplayScore(logisticsScore),
+          serviceScore: normalizeOfficialDisplayScore(serviceScore),
+          qualityDelta: qualityTrend.delta,
+          logisticsDelta: logisticsTrend.delta,
+          serviceDelta: serviceTrend.delta,
+          qualityTrend: qualityTrend.trend,
+          logisticsTrend: logisticsTrend.trend,
+          serviceTrend: serviceTrend.trend,
           available: false,
         }
         item.available = hasUsableShopScore(item)
-        return item
+        byKey.set(shop.shopKey, item)
       }),
     )
+
+    return shops.map((shop) => byKey.get(shop.shopKey) ?? emptyShopItem(shop))
   } catch (err) {
     logWarn(
       'daily-report-shop-scores',
@@ -210,3 +251,11 @@ export async function loadDailyReportShopScores(
     return shops.map(emptyShopItem)
   }
 }
+
+export {
+  normalizeOfficialDisplayScore,
+  resolveOfficialOverallScore,
+  resolveOfficialTrend,
+  formatOfficialDisplayScore,
+  formatOfficialScoreDelta,
+} from './boss-dashboard/boss-shop-score-official.util'

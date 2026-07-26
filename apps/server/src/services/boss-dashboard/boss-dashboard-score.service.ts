@@ -42,6 +42,7 @@ function isScoreSnapshotComplete(row: {
   qualityScore: number | null
   logisticsScore: number | null
   serviceScore: number | null
+  officialOverallScore: number | null
   sourceApi: string | null
 } | null): boolean {
   if (!row) return false
@@ -49,6 +50,7 @@ function isScoreSnapshotComplete(row: {
     row.qualityScore != null &&
     row.logisticsScore != null &&
     row.serviceScore != null &&
+    row.officialOverallScore != null &&
     row.sourceApi !== 'boss_shop_score:partial'
   )
 }
@@ -260,6 +262,7 @@ export async function syncBossShopScoreForShop(params: {
         logisticsScore: merged.logisticsScore,
         serviceScore: merged.serviceScore,
         officialOverallScore: merged.officialOverallScore,
+        officialCompareStatus: parsed.officialCompareStatus,
         raw: parsed.raw ?? null,
       },
     })

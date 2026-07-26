@@ -189,7 +189,13 @@ export interface ParsedBossShopScores {
   qualityScore: number | null
   logisticsScore: number | null
   serviceScore: number | null
+  /**
+   * 官方页面「总分」：对应 get_shop_score → shop_score_dto.score（常为字符串 "4.5"）
+   * 与 good-review parseShopScore 对齐；禁止用分项均值冒充
+   */
   officialOverallScore: number | null
+  /** 官方较前日文案（若接口提供，如「无变化」） */
+  officialCompareStatus: string | null
   raw: Record<string, unknown> | null
 }
 
@@ -204,6 +210,27 @@ export function parseBossShopScore(payload: unknown): ParsedBossShopScores {
   const scoreDate =
     pickString(dto, ['scoreDate', 'date', 'indexDate', 'statDate']) ??
     pickString(data, ['scoreDate', 'date'])
+  // 官方展示总分优先取 dto.score（千帆店铺分页实际字段）；勿优先取可能存在的内部精细 shopScore
+  const officialOverallScore =
+    pickNumber(dto, ['score', 'shopScore', 'shop_score', 'sellerShopScore', 'overallScore']) ??
+    pickNumber(data, ['score', 'shopScore', 'shop_score', 'sellerShopScore', 'overallScore', 'totalScore'])
+  const officialCompareStatus =
+    pickString(dto, [
+      'compareYesterdayDesc',
+      'compareYesterdayText',
+      'scoreChangeDesc',
+      'changeDesc',
+      'yesterdayCompareDesc',
+      'compareStatus',
+      'scoreTrendDesc',
+    ]) ??
+    pickString(data, [
+      'compareYesterdayDesc',
+      'compareYesterdayText',
+      'scoreChangeDesc',
+      'changeDesc',
+      'yesterdayCompareDesc',
+    ])
   return {
     scoreDate,
     qualityScore:
@@ -215,9 +242,8 @@ export function parseBossShopScore(payload: unknown): ParsedBossShopScores {
     serviceScore:
       pickNumber(dto, ['sellerServiceScore', 'serviceScore', 'customerServiceScore']) ??
       pickNumber(data, ['sellerServiceScore', 'serviceScore']),
-    officialOverallScore:
-      pickNumber(dto, ['shopScore', 'shop_score', 'sellerShopScore', 'overallScore']) ??
-      pickNumber(data, ['shopScore', 'shop_score', 'score']),
+    officialOverallScore,
+    officialCompareStatus,
     raw: data,
   }
 }

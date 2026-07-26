@@ -33,6 +33,7 @@ async function resolveShopScoreCooldownOverride(
       qualityScore: true,
       logisticsScore: true,
       serviceScore: true,
+      officialOverallScore: true,
       sourceApi: true,
     },
   })
@@ -41,6 +42,7 @@ async function resolveShopScoreCooldownOverride(
     existingToday.qualityScore != null &&
     existingToday.logisticsScore != null &&
     existingToday.serviceScore != null &&
+    existingToday.officialOverallScore != null &&
     existingToday.sourceApi !== 'boss_shop_score:partial'
   if (existingToday?.fetchedAt && complete) return undefined
   if (!shouldBypassBossShopScoreCooldown(shop.shopKey)) return undefined

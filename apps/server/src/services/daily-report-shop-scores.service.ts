@@ -11,6 +11,24 @@ import {
 } from '../config/boss-dashboard.constants'
 import { logWarn } from '../utils/server-log'
 
+/** 日报体验分固定顺序（与前端一致；缺数据也占位） */
+export const DAILY_REPORT_SHOP_SCORE_ORDER: BossDashboardShopKey[] = [
+  'shiyuju',
+  'xyxiangyu',
+  'hetianyayu',
+  'xiangyu',
+]
+
+const SHOPS_BY_KEY = new Map(BOSS_DASHBOARD_SHOPS.map((s) => [s.shopKey, s]))
+
+function shopsInReportOrder() {
+  return DAILY_REPORT_SHOP_SCORE_ORDER.map((key) => {
+    const shop = SHOPS_BY_KEY.get(key)
+    if (!shop) throw new Error(`missing shop definition: ${key}`)
+    return shop
+  })
+}
+
 export interface DailyReportShopScoreItem {
   shopKey: BossDashboardShopKey
   shopName: string
@@ -93,13 +111,14 @@ export async function loadDailyReportShopScores(
   reportDate: string,
 ): Promise<DailyReportShopScoreItem[]> {
   const dateKey = reportDate.trim()
+  const shops = shopsInReportOrder()
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
-    return BOSS_DASHBOARD_SHOPS.map(emptyShopItem)
+    return shops.map(emptyShopItem)
   }
 
   try {
     return await Promise.all(
-      BOSS_DASHBOARD_SHOPS.map(async (shop) => {
+      shops.map(async (shop) => {
         const row = await prisma.bossShopScoreSnapshot.findFirst({
           where: { shopKey: shop.shopKey, scoreDate: { lte: dateKey } },
           orderBy: { scoreDate: 'desc' },
@@ -188,6 +207,6 @@ export async function loadDailyReportShopScores(
       'daily-report-shop-scores',
       `加载体验分失败，日报继续生成：${err instanceof Error ? err.message : String(err)}`,
     )
-    return BOSS_DASHBOARD_SHOPS.map(emptyShopItem)
+    return shops.map(emptyShopItem)
   }
 }

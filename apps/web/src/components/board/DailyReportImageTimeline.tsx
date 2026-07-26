@@ -8,11 +8,12 @@ import {
   type DailyReportImageSession,
   type DailyReportTimelineBar,
 } from './dailyReportImageModel'
+import type { DailyReportShopScoreItem } from './DailyReportShopScoreSection'
 
 const AXIS_HEIGHT = 28
-/** 预留发货气泡高度，避免被父级 overflow 裁切 */
-const ROW_HEIGHT = 64
-const LABEL_WIDTH = 112
+/** 预留发货气泡高度，避免被父级 overflow 裁切；底部留给店名+体验分 */
+const ROW_HEIGHT = 72
+const LABEL_WIDTH = 132
 
 function barLeftPercent(startMin: number, viewStart: number, viewSpan: number): number {
   return ((startMin - viewStart) / viewSpan) * 100
@@ -20,6 +21,33 @@ function barLeftPercent(startMin: number, viewStart: number, viewSpan: number): 
 
 function barWidthPercent(startMin: number, endMin: number, viewSpan: number): number {
   return (Math.max(endMin - startMin, 15) / viewSpan) * 100
+}
+
+function formatScore(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return '—'
+  return value.toFixed(2)
+}
+
+function compactDelta(delta: number | null | undefined): {
+  arrow: string
+  text: string
+  className: string
+} {
+  if (delta == null || !Number.isFinite(delta) || delta === 0) {
+    return { arrow: '→', text: '持平', className: 'text-slate-500' }
+  }
+  if (delta > 0) {
+    return {
+      arrow: '↑',
+      text: `+${Math.abs(delta).toFixed(2)}`,
+      className: 'text-emerald-600',
+    }
+  }
+  return {
+    arrow: '↓',
+    text: `-${Math.abs(delta).toFixed(2)}`,
+    className: 'text-rose-600',
+  }
 }
 
 function TimelineBarBlock({
@@ -37,7 +65,7 @@ function TimelineBarBlock({
 
   return (
     <div
-      className="absolute top-5 bottom-2 overflow-visible rounded-md border px-1.5 py-0.5 shadow-sm"
+      className="absolute top-6 bottom-2 overflow-visible rounded-md border px-1.5 py-0.5 shadow-sm"
       style={{
         left: `${left}%`,
         width: `${Math.max(width, 4)}%`,
@@ -70,15 +98,57 @@ function TimelineBarBlock({
   )
 }
 
+function ShopLabelCell({
+  shopName,
+  score,
+}: {
+  shopName: string
+  score: DailyReportShopScoreItem | undefined
+}) {
+  const delta = score?.available ? compactDelta(score.overallDelta) : null
+  return (
+    <div className="flex min-w-0 flex-col justify-center gap-0.5 py-1">
+      <span className="line-clamp-2 text-[12px] font-medium leading-snug text-slate-700">
+        {shopName}
+      </span>
+      {score?.available ? (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5">
+          <span className="text-[10px] text-slate-400">体验分</span>
+          <span className="text-[12px] font-bold tabular-nums text-slate-800">
+            {formatScore(score.overallScore)}
+          </span>
+          {delta ? (
+            <span
+              className={`inline-flex items-center gap-0.5 text-[10px] font-semibold tabular-nums ${delta.className}`}
+            >
+              <span aria-hidden>{delta.arrow}</span>
+              <span>{delta.text}</span>
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /** 展示型直播时间轴（非编辑器） */
 export function DailyReportImageTimeline({
   sessions,
+  shopScores,
 }: {
   sessions: DailyReportImageSession[]
+  shopScores?: DailyReportShopScoreItem[]
 }) {
   const rows = useMemo(() => buildDailyReportTimelineRows(sessions), [sessions])
   const view = useMemo(() => resolveDailyReportTimelineView(rows), [rows])
   const viewSpan = Math.max(60, view.viewEnd - view.viewStart)
+  const scoreByName = useMemo(() => {
+    const map = new Map<string, DailyReportShopScoreItem>()
+    for (const s of shopScores ?? []) {
+      map.set(s.shopName, s)
+    }
+    return map
+  }, [shopScores])
 
   const ticks = useMemo(() => {
     const out: number[] = []
@@ -98,7 +168,9 @@ export function DailyReportImageTimeline({
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-4 py-2.5">
         <h3 className="text-sm font-semibold text-slate-800">直播时间轴总览</h3>
-        <p className="mt-0.5 text-[11px] text-slate-500">按店铺分行，仅展示当日有实际直播场次的店铺</p>
+        <p className="mt-0.5 text-[11px] text-slate-500">
+          按店铺分行，仅展示当日有实际直播场次的店铺；左侧同步展示体验分变化
+        </p>
       </div>
 
       <div className="flex">
@@ -110,15 +182,15 @@ export function DailyReportImageTimeline({
             className="flex items-end px-2 pb-1 text-[10px] font-medium text-slate-500"
             style={{ height: AXIS_HEIGHT }}
           >
-            店铺 / 直播间
+            店铺 / 体验分
           </div>
           {rows.map((row) => (
             <div
               key={row.shopName}
-              className="flex items-center border-t border-slate-100 px-2 text-[12px] font-medium leading-snug text-slate-700"
+              className="border-t border-slate-100 px-2"
               style={{ height: ROW_HEIGHT }}
             >
-              <span className="line-clamp-2">{row.shopName}</span>
+              <ShopLabelCell shopName={row.shopName} score={scoreByName.get(row.shopName)} />
             </div>
           ))}
         </div>

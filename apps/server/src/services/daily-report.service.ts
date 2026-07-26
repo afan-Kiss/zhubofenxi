@@ -76,11 +76,16 @@ import {
   buildEmptyLeaveImageSession,
   type DailyReportImageSession,
 } from './daily-report-image-session'
+import {
+  loadDailyReportShopScores,
+  type DailyReportShopScoreItem,
+} from './daily-report-shop-scores.service'
 
 export type {
   DailyReportImageSession,
   DailyReportImageSessionStatus,
 } from './daily-report-image-session'
+export type { DailyReportShopScoreItem } from './daily-report-shop-scores.service'
 export {
   buildDailyReportImageSessionsForAnchor,
   buildDailyReportOfflineImageSession,
@@ -199,6 +204,8 @@ export interface DailyReportPayload {
    * 无直播展示班次的店铺不会出现；同一店多场 → 多条。
    */
   imageSessions?: DailyReportImageSession[]
+  /** 各店体验分（本地快照，含较前一快照 delta） */
+  shopScores?: DailyReportShopScoreItem[]
 }
 
 /** 线下成交明细行（复用 shippedOrders 结构，前端按 systemKey 改文案） */
@@ -981,6 +988,8 @@ export async function buildDailyReport(params: {
     return a.startTime.localeCompare(b.startTime)
   })
 
+  const shopScores = await loadDailyReportShopScores(params.startDate)
+
   return {
     dateLabel,
     title: `${dateLabel} 主播日报`,
@@ -1010,5 +1019,6 @@ export async function buildDailyReport(params: {
     },
     anchors: anchorRows,
     imageSessions,
+    shopScores,
   }
 }

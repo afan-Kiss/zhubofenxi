@@ -4,6 +4,10 @@ import type { AnchorLivePeriodView } from '../../lib/anchor-live-period'
 import type { AnchorTrend } from '../../lib/anchor-leaderboard-row'
 import { DailyReportImageTimeline } from './DailyReportImageTimeline'
 import { DailyReportSessionCardGrid } from './DailyReportSessionCards'
+import {
+  DailyReportShopScoreSection,
+  type DailyReportShopScoreItem,
+} from './DailyReportShopScoreSection'
 import type { DailyReportImageSession } from './dailyReportImageModel'
 
 export interface DailyReportShippedOrderLine {
@@ -88,6 +92,8 @@ export interface DailyReportPayload {
   anchors: DailyReportAnchorRow[]
   /** 长图场次列表；缺省时时间轴/卡片为空（不回退写死四店） */
   imageSessions?: DailyReportImageSession[]
+  /** 各店体验分（含较前一快照变化） */
+  shopScores?: DailyReportShopScoreItem[]
 }
 
 interface Props {
@@ -173,8 +179,14 @@ export const DailyReportImageSheet = React.forwardRef<HTMLDivElement, Props>(
           ) : null}
         </header>
 
+        {data.shopScores && data.shopScores.length > 0 ? (
+          <section className="mb-4">
+            <DailyReportShopScoreSection scores={data.shopScores} reportDate={data.startDate} />
+          </section>
+        ) : null}
+
         <section className="mb-4">
-          <DailyReportImageTimeline sessions={sessions} />
+          <DailyReportImageTimeline sessions={sessions} shopScores={data.shopScores} />
         </section>
 
         <section className="mb-4">

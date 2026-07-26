@@ -130,6 +130,8 @@ function checkDailyReportImageSheetStatic(): void {
     '主播业绩日报',
     'DailyReportImageTimeline',
     'DailyReportSessionCardGrid',
+    'DailyReportShopScoreSection',
+    'shopScores',
     'imageSessions',
     '真实发货',
   ]

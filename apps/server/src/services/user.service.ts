@@ -289,41 +289,58 @@ export async function recordUserLogin(
 
 }
 
-/** 会话期内打开应用时刷新最近登录；默认 30 分钟节流，避免每次 /me 写库 */
-const LAST_LOGIN_STALE_MS = 30 * 60 * 1000
-
-export async function recordUserLoginIfStale(
-
-  userId: string,
-
-  client?: { ip?: string | null; userAgent?: string | null },
-
-  staleMs: number = LAST_LOGIN_STALE_MS,
-
-): Promise<void> {
-
-  const row = await prisma.user.findUnique({
-
-    where: { id: userId },
-
-    select: { lastLoginAt: true },
-
+/**
+ * 用 login_success 审计日志回填 lastLoginAt（纠正曾被 /me 误写成「最近活跃」的值）。
+ * 仅在显式修复脚本中调用，不在请求路径自动执行。
+ */
+export async function reconcileLastLoginAtFromLoginLogs(): Promise<{
+  updated: number
+  skipped: number
+}> {
+  const users = await prisma.user.findMany({
+    select: {
+      id: true,
+      username: true,
+      lastLoginAt: true,
+      lastLoginIp: true,
+      lastLoginUserAgent: true,
+    },
   })
-
-  if (!row) return
-
-  if (row.lastLoginAt && Date.now() - row.lastLoginAt.getTime() < staleMs) return
-
-  await recordUserLogin(userId, client)
-
+  let updated = 0
+  let skipped = 0
+  for (const user of users) {
+    const log = await prisma.operationLog.findFirst({
+      where: { username: user.username, action: 'login_success' },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true, ip: true, userAgent: true },
+    })
+    if (!log) {
+      skipped += 1
+      continue
+    }
+    const sameTime =
+      user.lastLoginAt != null &&
+      Math.abs(user.lastLoginAt.getTime() - log.createdAt.getTime()) < 2000
+    const sameIp = (log.ip ?? null) === (user.lastLoginIp ?? null)
+    if (sameTime && sameIp) {
+      skipped += 1
+      continue
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: log.createdAt,
+        lastLoginIp: log.ip?.trim() || user.lastLoginIp,
+        lastLoginUserAgent: log.userAgent?.trim() || user.lastLoginUserAgent,
+      },
+    })
+    updated += 1
+  }
+  return { updated, skipped }
 }
 
-
-
 export async function touchLastLogin(userId: string): Promise<void> {
-
   await recordUserLogin(userId)
-
 }
 
 

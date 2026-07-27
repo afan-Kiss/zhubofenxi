@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Copy, Eye, EyeOff } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
+import { formatDateTimeShanghai } from '../../lib/business-timezone'
 
 interface UserRow {
   id: string
@@ -29,20 +30,7 @@ const ROLE_LABEL: Record<string, string> = {
 }
 
 function formatDateTime(iso: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  // 与经营口径一致：固定 Asia/Shanghai，避免浏览器/系统时区导致偏差
-  return d.toLocaleString('zh-CN', {
-    hour12: false,
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  })
+  return formatDateTimeShanghai(iso)
 }
 
 export const UserManagementPanel: React.FC = () => {
@@ -136,7 +124,7 @@ export const UserManagementPanel: React.FC = () => {
         <div>
           <h3 className="text-base font-semibold text-slate-900">账号管理</h3>
           <p className="mt-1 text-xs text-slate-500">
-            创建或停用登录账号，查看密码、注册时间与登录环境。用户自行改密后将不再显示密码。
+            创建或停用登录账号，查看密码、注册时间与登录环境。「最近登录」为账号密码登录时间（不是打开页面）。用户自行改密后将不再显示密码。
           </p>
         </div>
         <button

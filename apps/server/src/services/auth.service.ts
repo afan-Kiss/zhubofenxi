@@ -18,7 +18,6 @@ import {
   findUserByUsername,
   toSafeUserFromRecord,
   recordUserLogin,
-  recordUserLoginIfStale,
   type SafeUser,
 } from './user.service'
 import { verifyPassword } from '../utils/password'
@@ -130,7 +129,7 @@ export async function logoutUser(token: string | undefined): Promise<void> {
 
 export async function buildAuthMePayload(
   user: SessionUser,
-  client?: { ip?: string | null; userAgent?: string | null },
+  _client?: { ip?: string | null; userAgent?: string | null },
 ): Promise<{
   user: SafeUser | {
     id: string
@@ -169,9 +168,7 @@ export async function buildAuthMePayload(
     }
   }
 
-  // 会话可续 7 天：打开应用时节流刷新最近登录，避免账号管理长期显示过期时间
-  await recordUserLoginIfStale(user.id, client)
-
+  // 最近登录 = 账号密码登录时间；不要在 /me 会话续期时改写，否则会变成「最近打开页面」
   const row = await findUserById(user.id)
   if (!row) {
     throw new Error('账号不存在')

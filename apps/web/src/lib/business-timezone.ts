@@ -22,6 +22,25 @@ export function formatDateKeyShanghai(date: Date = new Date()): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
+/** Asia/Shanghai 本地时间：YYYY-MM-DD HH:mm:ss */
+export function formatDateTimeShanghai(input: Date | string | null | undefined): string {
+  if (input == null || input === '') return '—'
+  const date = input instanceof Date ? input : new Date(input)
+  if (Number.isNaN(date.getTime())) return '—'
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: BUSINESS_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date)
+  const pick = (type: string) => parts.find((p) => p.type === type)?.value ?? '00'
+  return `${pick('year')}-${pick('month')}-${pick('day')} ${pick('hour')}:${pick('minute')}:${pick('second')}`
+}
+
 export function addDaysShanghai(dateKey: string, deltaDays: number): string {
   const ms = Date.parse(`${dateKey}T00:00:00+08:00`) + deltaDays * 86_400_000
   return formatDateKeyShanghai(new Date(ms))

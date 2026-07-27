@@ -229,10 +229,29 @@ export function buildEffectiveScheduleRowsForDate(params: {
     )
   }
 
+  // 同一主播多条默认模板时只保留先出现的一条（按 sortOrder），避免系统自己排出两场
+  const keptVirtual: typeof filtered.kept = []
+  const seenVirtualAnchors = new Set<string>()
+  for (const v of filtered.kept) {
+    const key = normalizeAnchorName(v.anchorName)
+    if (!key) {
+      keptVirtual.push(v)
+      continue
+    }
+    if (seenVirtualAnchors.has(key)) {
+      warnings.push(
+        `${v.anchorName} 默认模板重复（${v.liveRoomName} ${hmFromDate(v.startAt, dateKey)}-${hmFromDate(v.endAt, dateKey)}）已自动跳过，请检查默认排班设置。`,
+      )
+      continue
+    }
+    seenVirtualAnchors.add(key)
+    keptVirtual.push(v)
+  }
+
   const effectiveRows: EffectiveScheduleRow[] = [
     ...manualRows.map((r) => dbRowToEffective(r, 'manual', dateConfirmed)),
     ...generatedRows.map((r) => dbRowToEffective(r, 'generated_default', dateConfirmed)),
-    ...filtered.kept.map((v) => ({
+    ...keptVirtual.map((v) => ({
       rowId: v.id,
       source: 'virtual_template' as const,
       anchorId: v.anchorId ?? null,

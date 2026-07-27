@@ -400,6 +400,39 @@ export async function ensureScheduleTemplatesSeeded(): Promise<void> {
   for (const seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
     await upsertScheduleTemplateSeed(seed)
   }
+  // 兜底：种子里小白只在 XY 午场；若库里仍有「小白·和田雅玉」开放模板，停用以免系统自动排出两场
+  await disableInvalidXiaobaiHetianMorningTemplates()
+}
+
+/** 错误默认模板：小白挂在和田雅玉早场且未结束，会与 XY 午场叠加 */
+async function disableInvalidXiaobaiHetianMorningTemplates(): Promise<void> {
+  const bad = await prisma.anchorScheduleTemplate.findMany({
+    where: {
+      enabled: true,
+      anchorName: '小白',
+      shopName: '和田雅玉',
+      startTime: '09:30',
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: '2026-07-17' } }],
+    },
+  })
+  for (const row of bad) {
+    const inSeeds = DEFAULT_SCHEDULE_TEMPLATE_SEEDS.some(
+      (s) =>
+        s.anchorName === row.anchorName &&
+        s.shopName === row.shopName &&
+        s.startTime === row.startTime &&
+        s.effectiveFrom === row.effectiveFrom,
+    )
+    if (inSeeds) continue
+    await prisma.anchorScheduleTemplate.update({
+      where: { id: row.id },
+      data: {
+        enabled: false,
+        note: `${row.note ?? ''}（系统停用：小白不得默认挂在和田雅玉早场）`.trim(),
+        updatedAt: new Date(),
+      },
+    })
+  }
 }
 
 export async function listActiveTemplatesForDate(dateKey: string) {

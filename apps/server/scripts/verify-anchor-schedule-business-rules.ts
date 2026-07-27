@@ -7,6 +7,7 @@ import { buildScheduleBounds, detectScheduleConflicts } from '../src/utils/ancho
 import { buildEffectiveScheduleRowsForDate } from '../src/utils/anchor-effective-schedule.util'
 import {
   NEW_SCHEDULE_TEMPLATE_SEEDS_20260701,
+  templateAppliesOnDate,
   validateScheduleDraft,
 } from '../src/services/anchor-schedule-template.service'
 import type { EffectiveScheduleRow } from '../src/services/anchor-daily-schedule.service'
@@ -133,16 +134,32 @@ function resolveAnchorFromAssignment(
 function main(): void {
   const templates = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701
   const records = templateRecords()
+  const templatesOnDate = templates.filter((t) => templateAppliesOnDate(t, DATE))
+  const recordsOnDate = records.filter((t) =>
+    templateAppliesOnDate(
+      {
+        anchorName: t.anchorName,
+        shopName: t.shopName,
+        liveRoomName: t.liveRoomName,
+        startTime: t.startTime,
+        endTime: t.endTime,
+        effectiveFrom: t.effectiveFrom,
+        effectiveTo: t.effectiveTo,
+        sortOrder: t.sortOrder,
+      },
+      DATE,
+    ),
+  )
 
   const s1 = buildEffectiveScheduleRowsForDate({
     dateKey: DATE,
     dateConfirmed: false,
     dbRows: [],
-    templates,
-    templateRecords: records,
+    templates: templatesOnDate,
+    templateRecords: recordsOnDate,
   })
-  assert.equal(s1.rows.length, 5, '场景1 应有 5 条有效排班')
-  for (const seed of templates) {
+  assert.equal(s1.rows.length, templatesOnDate.length, `场景1 应有 ${templatesOnDate.length} 条有效排班`)
+  for (const seed of templatesOnDate) {
     assert.ok(
       s1.rows.some(
         (r) =>
@@ -154,17 +171,17 @@ function main(): void {
       `场景1 缺少 ${seed.anchorName} ${seed.shopName} ${seed.startTime}-${seed.endTime}`,
     )
   }
-  assert.equal(s1.sourceSummary.virtualCount, 5)
-  console.log('PASS 场景1: 默认 5 条排班')
+  assert.equal(s1.sourceSummary.virtualCount, templatesOnDate.length)
+  console.log(`PASS 场景1: 默认 ${templatesOnDate.length} 条排班`)
 
   const s2 = buildEffectiveScheduleRowsForDate({
     dateKey: DATE,
     dateConfirmed: false,
     dbRows: [manualDbRow('m-xb', '小白', 'XY祥钰珠宝', '14:20', '18:30')],
-    templates,
-    templateRecords: records,
+    templates: templatesOnDate,
+    templateRecords: recordsOnDate,
   })
-  assert.equal(s2.rows.length, 5, '场景2 仍应有 5 条')
+  assert.equal(s2.rows.length, templatesOnDate.length, `场景2 仍应有 ${templatesOnDate.length} 条`)
   const xb = s2.rows.find((r) => r.anchorName === '小白')!
   assert.equal(xb.source, 'manual')
   assert.equal(xb.startTime, '14:20')
@@ -172,18 +189,18 @@ function main(): void {
   assert.ok(s2.rows.some((r) => r.anchorName === '飞云'), '场景2 飞云仍在')
   console.log('PASS 场景2: 部分 manual 覆盖默认')
 
-  const fullManual = templates.map((t, i) =>
+  const fullManual = templatesOnDate.map((t, i) =>
     manualDbRow(`m-${i}`, t.anchorName, t.shopName, t.startTime, t.endTime),
   )
   const s3 = buildEffectiveScheduleRowsForDate({
     dateKey: DATE,
     dateConfirmed: true,
     dbRows: fullManual,
-    templates,
-    templateRecords: records,
+    templates: templatesOnDate,
+    templateRecords: recordsOnDate,
   })
-  assert.equal(s3.rows.length, 5)
-  assert.equal(s3.sourceSummary.manualCount, 5)
+  assert.equal(s3.rows.length, templatesOnDate.length)
+  assert.equal(s3.sourceSummary.manualCount, templatesOnDate.length)
   assert.equal(s3.sourceSummary.virtualCount, 0)
   console.log('PASS 场景3: 完整 manual 不重复补齐')
 
@@ -230,7 +247,7 @@ function main(): void {
   )
   console.log('PASS 场景5: 同店重叠失败')
 
-  const defaultSchedules = templates.map((t, i) => scheduleRowFromTemplate(t, i))
+  const defaultSchedules = templatesOnDate.map((t, i) => scheduleRowFromTemplate(t, i))
   const zijieLive = liveSession('拾玉居和田玉', 'shiyuju', 'live-zijie-0704', '09:20', '14:02')
   const assign6 = assignDailyReportLiveSessionsToAnchors([zijieLive], defaultSchedules, DATE)
   assert.ok(assign6.byAnchor.has('子杰'), '场景6 应识别子杰')
@@ -266,8 +283,8 @@ function main(): void {
     dateKey: DATE,
     dateConfirmed: true,
     dbRows: s8Manual,
-    templates,
-    templateRecords: records,
+    templates: templatesOnDate,
+    templateRecords: recordsOnDate,
   })
   assert.equal(s8.rows.length, 4, '场景8 生效排班应为 4 条')
   assert.equal(s8.sourceSummary.manualCount, 4)
@@ -288,16 +305,96 @@ function main(): void {
     `场景8 不应有同主播重复 warning: ${s8.warnings.join('; ')}`,
   )
 
+  const s8NextTemplates = templates.filter((t) => templateAppliesOnDate(t, '2026-07-05'))
+  const s8NextRecords = records.filter((t) =>
+    templateAppliesOnDate(
+      {
+        anchorName: t.anchorName,
+        shopName: t.shopName,
+        liveRoomName: t.liveRoomName,
+        startTime: t.startTime,
+        endTime: t.endTime,
+        effectiveFrom: t.effectiveFrom,
+        effectiveTo: t.effectiveTo,
+        sortOrder: t.sortOrder,
+      },
+      '2026-07-05',
+    ),
+  )
   const s8Next = buildEffectiveScheduleRowsForDate({
     dateKey: '2026-07-05',
     dateConfirmed: false,
     dbRows: [],
-    templates,
-    templateRecords: records,
+    templates: s8NextTemplates,
+    templateRecords: s8NextRecords,
   })
-  assert.equal(s8Next.rows.length, 5, '场景8 2026-07-05 仍应有 5 条默认模板')
-  assert.equal(s8Next.sourceSummary.virtualCount, 5)
+  assert.equal(s8Next.rows.length, s8NextTemplates.length, `场景8 2026-07-05 仍应有 ${s8NextTemplates.length} 条默认模板`)
+  assert.equal(s8Next.sourceSummary.virtualCount, s8NextTemplates.length)
   console.log('PASS 场景8: 2026-07-04 小红只有手动午场')
+
+  // 场景9：错误默认模板把小白同时挂在和田雅玉早场 + XY午场时，系统只保留一条，不报硬冲突
+  const dateDup = '2026-07-27'
+  const dupRecords = [
+    {
+      id: 'bad-xb-ht',
+      anchorName: '小白',
+      shopName: '和田雅玉',
+      liveRoomName: '和田雅玉',
+      startTime: '09:30',
+      endTime: '14:00',
+      effectiveFrom: '2026-07-01',
+      effectiveTo: null as string | null,
+      enabled: true,
+      sortOrder: 20,
+      note: '误挂·和田雅玉',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+    {
+      id: 'ok-xb-xy',
+      anchorName: '小白',
+      shopName: 'XY祥钰珠宝',
+      liveRoomName: 'XY祥钰珠宝',
+      startTime: '14:00',
+      endTime: '18:30',
+      effectiveFrom: '2026-07-01',
+      effectiveTo: null as string | null,
+      enabled: true,
+      sortOrder: 30,
+      note: '午场·XY',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    },
+  ]
+  const s9 = buildEffectiveScheduleRowsForDate({
+    dateKey: dateDup,
+    dateConfirmed: false,
+    dbRows: [],
+    templates: dupRecords.map((r) => ({
+      anchorName: r.anchorName,
+      shopName: r.shopName,
+      liveRoomName: r.liveRoomName,
+      startTime: r.startTime,
+      endTime: r.endTime,
+      effectiveFrom: r.effectiveFrom,
+      effectiveTo: r.effectiveTo,
+      sortOrder: r.sortOrder,
+      note: r.note,
+    })),
+    templateRecords: dupRecords,
+  })
+  const s9Xb = s9.rows.filter((r) => r.anchorName === '小白')
+  assert.equal(s9Xb.length, 1, '场景9 小白只保留 1 条虚拟模板')
+  assert.equal(s9Xb[0]!.shopName, '和田雅玉', '场景9 按 sortOrder 先保留和田雅玉那条')
+  assert.ok(
+    s9.warnings.some((w) => w.includes('默认模板重复') && w.includes('XY祥钰')),
+    `场景9 应提示跳过重复模板: ${s9.warnings.join('; ')}`,
+  )
+  assert.ok(
+    !s9.warnings.some((w) => w.includes('不能再给她排第二场')),
+    '场景9 不应再出现硬冲突文案',
+  )
+  console.log('PASS 场景9: 重复小白默认模板自动去重')
 
   console.log('verify-anchor-schedule-business-rules: ALL PASS')
 }

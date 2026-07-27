@@ -391,6 +391,7 @@ export async function repairScheduleTemplatesFrom20260701(options?: {
       upserted[result] += 1
     }
     await ensureXiaobaiHetianMorningTemplateAlive()
+    await disableDuplicateOpenEndedXiaoxiaoTemplates()
   } else {
     for (const _seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
       void _seed
@@ -463,6 +464,7 @@ export async function ensureScheduleTemplatesSeeded(): Promise<void> {
   await truncateObsoleteJulyScheduleTemplates()
   // 保证小白·和田雅玉早场默认模板可用
   await ensureXiaobaiHetianMorningTemplateAlive()
+  await disableDuplicateOpenEndedXiaoxiaoTemplates()
 }
 
 /** 截断已废弃的 7 月错误模板，保留历史可追溯（不物理删除） */
@@ -525,14 +527,19 @@ async function ensureXiaobaiHetianMorningTemplateAlive(): Promise<void> {
   const { isAnchorEffectiveOnDate } = await import('../utils/anchor-effective-date.util')
   if (!isAnchorEffectiveOnDate(xiaobai, dateKey)) return
 
-  const existing = await prisma.anchorScheduleTemplate.findFirst({
+  const candidates = await prisma.anchorScheduleTemplate.findMany({
     where: {
       anchorName: '小白',
       shopName: '和田雅玉',
       startTime: '09:30',
       effectiveFrom: seed.effectiveFrom,
     },
+    orderBy: [{ updatedAt: 'desc' }],
   })
+  const existing =
+    candidates.find((r) => r.enabled && (!r.effectiveTo || r.effectiveTo >= dateKey)) ??
+    candidates.find((r) => !r.effectiveTo || r.effectiveTo >= dateKey) ??
+    candidates[0]
   if (existing) {
     if (existing.effectiveTo && existing.effectiveTo < dateKey) return
     await prisma.anchorScheduleTemplate.update({
@@ -546,6 +553,22 @@ async function ensureXiaobaiHetianMorningTemplateAlive(): Promise<void> {
         effectiveTo: null,
         sortOrder: seed.sortOrder,
         note: seed.note ?? existing.note,
+        updatedAt: new Date(),
+      },
+    })
+    // 关闭同键重复行，避免设置页/虚排重复出卡
+    await prisma.anchorScheduleTemplate.updateMany({
+      where: {
+        id: { not: existing.id },
+        anchorName: '小白',
+        shopName: '和田雅玉',
+        startTime: '09:30',
+        effectiveFrom: seed.effectiveFrom,
+        OR: [{ enabled: true }, { effectiveTo: null }, { effectiveTo: { gt: NEW_SCHEDULE_CUTOFF_DATE } }],
+      },
+      data: {
+        enabled: false,
+        effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
         updatedAt: new Date(),
       },
     })
@@ -567,6 +590,35 @@ async function ensureXiaobaiHetianMorningTemplateAlive(): Promise<void> {
       note: seed.note ?? null,
     },
   })
+}
+
+/** 关闭非种子的小小开放模板（错误店名 / 错误 effectiveFrom） */
+async function disableDuplicateOpenEndedXiaoxiaoTemplates(): Promise<void> {
+  const seed = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.find((s) => s.anchorName === '小小')
+  if (!seed) return
+  const rows = await prisma.anchorScheduleTemplate.findMany({
+    where: {
+      anchorName: '小小',
+      enabled: true,
+      OR: [{ effectiveTo: null }, { effectiveTo: { gte: seed.effectiveFrom! } }],
+    },
+  })
+  for (const row of rows) {
+    const isCanonical =
+      row.shopName === seed.shopName &&
+      row.startTime === seed.startTime &&
+      row.endTime === seed.endTime &&
+      row.effectiveFrom === seed.effectiveFrom
+    if (isCanonical) continue
+    await prisma.anchorScheduleTemplate.update({
+      where: { id: row.id },
+      data: {
+        enabled: false,
+        effectiveTo: row.effectiveTo ?? NEW_SCHEDULE_CUTOFF_DATE,
+        updatedAt: new Date(),
+      },
+    })
+  }
 }
 
 export async function listActiveTemplatesForDate(dateKey: string) {

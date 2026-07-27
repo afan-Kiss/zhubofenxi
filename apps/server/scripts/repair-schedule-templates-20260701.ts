@@ -59,20 +59,22 @@ async function main() {
       console.log('  ', formatTemplateRow(row))
     }
 
-    const active0701 = after.filter((row) =>
-      templateAppliesOnDate(
-        {
-          anchorName: row.anchorName,
-          shopName: row.shopName,
-          liveRoomName: row.liveRoomName,
-          startTime: row.startTime,
-          endTime: row.endTime,
-          effectiveFrom: row.effectiveFrom,
-          effectiveTo: row.effectiveTo,
-          sortOrder: row.sortOrder,
-        },
-        NEW_SCHEDULE_START_DATE,
-      ),
+    const active0701 = after.filter(
+      (row) =>
+        row.enabled &&
+        templateAppliesOnDate(
+          {
+            anchorName: row.anchorName,
+            shopName: row.shopName,
+            liveRoomName: row.liveRoomName,
+            startTime: row.startTime,
+            endTime: row.endTime,
+            effectiveFrom: row.effectiveFrom,
+            effectiveTo: row.effectiveTo,
+            sortOrder: row.sortOrder,
+          },
+          NEW_SCHEDULE_START_DATE,
+        ),
     )
 
     const seedsOn0701 = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.filter((seed) =>

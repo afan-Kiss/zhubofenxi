@@ -12,6 +12,7 @@ import {
   startPageView,
   writeOperationLog,
 } from '../services/audit.service'
+import { recordUserAccessIfStale } from '../services/user.service'
 import { sendFail, sendOk } from '../utils/response'
 
 export const auditRouter = Router()
@@ -53,6 +54,10 @@ auditRouter.post('/page-view/start', async (req, res) => {
       role: req.user!.role,
       page,
       path: req.body?.path != null ? String(req.body.path) : undefined,
+      ip: getClientIp(req),
+      userAgent: req.headers['user-agent'] ?? undefined,
+    })
+    await recordUserAccessIfStale(req.user!.id, {
       ip: getClientIp(req),
       userAgent: req.headers['user-agent'] ?? undefined,
     })

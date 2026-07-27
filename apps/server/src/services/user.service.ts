@@ -263,39 +263,31 @@ export async function disableUser(id: string): Promise<SafeUser> {
 
 
 
-export async function recordUserLogin(
-
+/** 写入 User.lastLoginAt（语义：最新访问系统时间） */
+export async function recordUserAccess(
   userId: string,
-
   client?: { ip?: string | null; userAgent?: string | null },
-
 ): Promise<void> {
-
   await prisma.user.update({
-
     where: { id: userId },
-
     data: {
-
       lastLoginAt: new Date(),
-
       lastLoginIp: client?.ip?.trim() || null,
-
       lastLoginUserAgent: client?.userAgent?.trim() || null,
-
     },
-
   })
-
 }
 
-/** 打开系统时节流刷新最近登录；默认 30 分钟，避免每次 /me 写库 */
-const LAST_LOGIN_STALE_MS = 30 * 60 * 1000
+/** @deprecated 使用 recordUserAccess */
+export const recordUserLogin = recordUserAccess
 
-export async function recordUserLoginIfStale(
+/** 进入系统时节流刷新最新访问；默认 5 分钟，避免每次 /me 写库 */
+const LAST_ACCESS_STALE_MS = 5 * 60 * 1000
+
+export async function recordUserAccessIfStale(
   userId: string,
   client?: { ip?: string | null; userAgent?: string | null },
-  staleMs: number = LAST_LOGIN_STALE_MS,
+  staleMs: number = LAST_ACCESS_STALE_MS,
 ): Promise<void> {
   const row = await prisma.user.findUnique({
     where: { id: userId },
@@ -303,8 +295,11 @@ export async function recordUserLoginIfStale(
   })
   if (!row) return
   if (row.lastLoginAt && Date.now() - row.lastLoginAt.getTime() < staleMs) return
-  await recordUserLogin(userId, client)
+  await recordUserAccess(userId, client)
 }
+
+/** @deprecated 使用 recordUserAccessIfStale */
+export const recordUserLoginIfStale = recordUserAccessIfStale
 
 /**
  * 仅当 lastLoginAt 为空时，用 login_success 审计回填（不覆盖已有的较新访问时间）。
@@ -352,7 +347,7 @@ export async function reconcileLastLoginAtFromLoginLogs(): Promise<{
 }
 
 export async function touchLastLogin(userId: string): Promise<void> {
-  await recordUserLogin(userId)
+  await recordUserAccess(userId)
 }
 
 

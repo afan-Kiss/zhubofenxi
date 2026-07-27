@@ -1,12 +1,12 @@
 /**
- * 最近登录：密码登录 + 保持登录打开系统（/me 节流刷新）
+ * 最新访问：密码登录 + /me 与页面进入时节流刷新
  * npx tsx apps/server/scripts/verify-last-login-from-audit.ts
  */
 import assert from 'node:assert/strict'
 import { prisma } from '../src/lib/prisma'
 import {
-  recordUserLogin,
-  recordUserLoginIfStale,
+  recordUserAccess,
+  recordUserAccessIfStale,
   reconcileLastLoginAtFromLoginLogs,
 } from '../src/services/user.service'
 import { buildAuthMePayload } from '../src/services/auth.service'
@@ -31,29 +31,35 @@ async function main() {
     data: { lastLoginAt: oldTime },
   })
 
-  await buildAuthMePayload({
-    id: user.id,
-    username: user.username,
-    role: user.role as UserRole,
-  }, { ip: '127.0.0.1', userAgent: 'verify-me' })
+  await buildAuthMePayload(
+    {
+      id: user.id,
+      username: user.username,
+      role: user.role as UserRole,
+    },
+    { ip: '127.0.0.1', userAgent: 'verify-me' },
+  )
   const afterMe = await prisma.user.findUnique({
     where: { id: user.id },
     select: { lastLoginAt: true, lastLoginIp: true },
   })
-  assert.ok(afterMe?.lastLoginAt && afterMe.lastLoginAt.getTime() > oldTime.getTime(), '/me 应刷新超过 30 分钟的 lastLoginAt')
+  assert.ok(
+    afterMe?.lastLoginAt && afterMe.lastLoginAt.getTime() > oldTime.getTime(),
+    '/me 应刷新超过 5 分钟的最新访问时间',
+  )
   assert.equal(afterMe?.lastLoginIp, '127.0.0.1')
 
   const beforeThrottle = afterMe!.lastLoginAt!
-  await recordUserLoginIfStale(user.id, { ip: '127.0.0.2' })
+  await recordUserAccessIfStale(user.id, { ip: '127.0.0.2' })
   const throttled = await prisma.user.findUnique({
     where: { id: user.id },
     select: { lastLoginAt: true, lastLoginIp: true },
   })
-  assert.equal(throttled?.lastLoginAt?.getTime(), beforeThrottle.getTime(), '30 分钟内不应重复写库')
+  assert.equal(throttled?.lastLoginAt?.getTime(), beforeThrottle.getTime(), '5 分钟内不应重复写库')
   assert.equal(throttled?.lastLoginIp, '127.0.0.1')
 
   const t0 = Date.now()
-  await recordUserLogin(user.id, { ip: '127.0.0.3', userAgent: 'verify-login' })
+  await recordUserAccess(user.id, { ip: '127.0.0.3', userAgent: 'verify-login' })
   const afterLogin = await prisma.user.findUnique({
     where: { id: user.id },
     select: { lastLoginAt: true, lastLoginIp: true },
@@ -62,7 +68,7 @@ async function main() {
   assert.equal(afterLogin?.lastLoginIp, '127.0.0.3')
 
   const result = await reconcileLastLoginAtFromLoginLogs()
-  assert.ok(result.skipped >= 1, '已有 lastLoginAt 时不应被审计日志覆盖')
+  assert.ok(result.skipped >= 1, '已有最新访问时间时不应被审计日志覆盖')
 
   console.log('PASS verify-last-login-from-audit', result)
 }

@@ -17,8 +17,8 @@ import {
   findUserById,
   findUserByUsername,
   toSafeUserFromRecord,
-  recordUserLogin,
-  recordUserLoginIfStale,
+  recordUserAccess,
+  recordUserAccessIfStale,
   type SafeUser,
 } from './user.service'
 import { verifyPassword } from '../utils/password'
@@ -80,11 +80,11 @@ export async function loginUser(input: {
   }
 
   const { token } = await createSession(row.id)
-  await recordUserLogin(row.id, {
+  await recordUserAccess(row.id, {
     ip: input.audit?.ip,
     userAgent: input.audit?.userAgent,
   })
-  // 必须重新读取：recordUserLogin 之后再用旧 row 会返回过期的 lastLoginAt
+  // 必须重新读取：recordUserAccess 之后再用旧 row 会返回过期的 lastLoginAt
   const fresh = await findUserById(row.id)
   if (!fresh) throw new Error('账号不存在')
   const user = toSafeUserFromRecord(fresh)
@@ -169,8 +169,8 @@ export async function buildAuthMePayload(
     }
   }
 
-  // 保持登录状态下打开系统也算「最近登录」；30 分钟节流，避免每次 /me 写库
-  await recordUserLoginIfStale(user.id, client)
+  // 保持登录状态下进入系统：节流刷新最新访问时间
+  await recordUserAccessIfStale(user.id, client)
 
   const row = await findUserById(user.id)
   if (!row) {

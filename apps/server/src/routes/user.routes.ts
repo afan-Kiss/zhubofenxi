@@ -20,6 +20,12 @@ export const userRouter = Router()
 userRouter.use(requireAuth, requireRole('super_admin'))
 
 function serializeAdminUser(u: AdminUserView) {
+  const lastAccessAt = u.lastLoginAt?.toISOString() ?? null
+  const lastAccessClientLabel = formatUserAgentLabel(u.lastLoginUserAgent)
+  const lastAccessClientInfo = formatClientInfo({
+    ip: u.lastLoginIp,
+    userAgent: u.lastLoginUserAgent,
+  })
   return {
     ...u,
     managedPassword: u.managedPassword,
@@ -32,13 +38,13 @@ function serializeAdminUser(u: AdminUserView) {
     }),
     lastLoginIp: u.lastLoginIp,
     lastLoginUserAgent: u.lastLoginUserAgent,
-    lastLoginClientLabel: formatUserAgentLabel(u.lastLoginUserAgent),
-    lastLoginClientInfo: formatClientInfo({
-      ip: u.lastLoginIp,
-      userAgent: u.lastLoginUserAgent,
-    }),
+    lastLoginClientLabel: lastAccessClientLabel,
+    lastLoginClientInfo: lastAccessClientInfo,
+    lastAccessAt,
+    lastAccessClientLabel,
+    lastAccessClientInfo,
     passwordChangedAt: u.passwordChangedAt?.toISOString() ?? null,
-    lastLoginAt: u.lastLoginAt?.toISOString() ?? null,
+    lastLoginAt: lastAccessAt,
     createdAt: u.createdAt.toISOString(),
     updatedAt: u.updatedAt.toISOString(),
   }

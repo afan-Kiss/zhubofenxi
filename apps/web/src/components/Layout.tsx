@@ -22,6 +22,7 @@ import { MainNavTabs } from './ui/MainNavTabs'
 import { SettingsPasswordDialog } from './settings/SettingsPasswordDialog'
 import { isSettingsUnlocked, unlockSettings } from '../lib/settings-gate'
 import { useAuth } from '../providers/AuthProvider'
+import { usePageView } from '../hooks/usePageView'
 import type { PagePermissionKey } from '../lib/page-permissions'
 import type { LucideIcon } from 'lucide-react'
 
@@ -116,6 +117,7 @@ export const Layout: React.FC = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, mode, canAccess, logout } = useAuth()
+  usePageView('app', location.pathname)
 
   const mainNav = useMemo(
     () =>

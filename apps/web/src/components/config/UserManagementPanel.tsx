@@ -10,11 +10,15 @@ interface UserRow {
   enabled: boolean
   managedPassword: string | null
   createdAt: string
-  lastLoginAt: string | null
+  lastAccessAt?: string | null
+  lastAccessClientInfo?: string
+  lastAccessClientLabel?: string
+  /** @deprecated 兼容旧字段，等同 lastAccessAt */
+  lastLoginAt?: string | null
   registeredClientInfo: string
   registeredClientLabel: string
-  lastLoginClientInfo: string
-  lastLoginClientLabel: string
+  lastLoginClientInfo?: string
+  lastLoginClientLabel?: string
 }
 
 const ROLE_OPTIONS = [
@@ -31,6 +35,18 @@ const ROLE_LABEL: Record<string, string> = {
 
 function formatDateTime(iso: string | null): string {
   return formatDateTimeShanghai(iso)
+}
+
+function resolveLastAccess(row: UserRow): string | null {
+  return row.lastAccessAt ?? row.lastLoginAt ?? null
+}
+
+function resolveLastAccessClientLabel(row: UserRow): string {
+  return row.lastAccessClientLabel ?? row.lastLoginClientLabel ?? '—'
+}
+
+function resolveLastAccessClientInfo(row: UserRow): string {
+  return row.lastAccessClientInfo ?? row.lastLoginClientInfo ?? '—'
 }
 
 export const UserManagementPanel: React.FC = () => {
@@ -51,6 +67,19 @@ export const UserManagementPanel: React.FC = () => {
 
   useEffect(() => {
     void load().catch(() => setMessage('读取用户列表失败'))
+    const timer = window.setInterval(() => {
+      void load().catch(() => undefined)
+    }, 60_000)
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void load().catch(() => undefined)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
   }, [])
 
   const create = async () => {
@@ -124,7 +153,7 @@ export const UserManagementPanel: React.FC = () => {
         <div>
           <h3 className="text-base font-semibold text-slate-900">账号管理</h3>
           <p className="mt-1 text-xs text-slate-500">
-            创建或停用登录账号，查看密码、注册时间与登录环境。「最近登录」含保持登录状态下进入系统的时间。用户自行改密后将不再显示密码。
+            创建或停用登录账号，查看密码、注册时间与访问环境。「最新访问」为最近一次进入系统的时间（含保持登录）。用户自行改密后将不再显示密码。
           </p>
         </div>
         <button
@@ -182,8 +211,8 @@ export const UserManagementPanel: React.FC = () => {
               <th className="py-2 pr-3">登录密码</th>
               <th className="py-2 pr-3">注册时间</th>
               <th className="py-2 pr-3">注册环境</th>
-              <th className="py-2 pr-3">最近登录</th>
-              <th className="py-2 pr-3">最近登录环境</th>
+              <th className="py-2 pr-3">最新访问</th>
+              <th className="py-2 pr-3">最新访问环境</th>
               <th className="py-2 pr-3">角色</th>
               <th className="py-2 pr-3">状态</th>
               <th className="py-2">操作</th>
@@ -228,13 +257,15 @@ export const UserManagementPanel: React.FC = () => {
                     ) : null}
                   </td>
                   <td className="py-2 pr-3 whitespace-nowrap text-slate-700">
-                    {formatDateTime(u.lastLoginAt)}
+                    {formatDateTime(resolveLastAccess(u))}
                   </td>
                   <td className="py-2 pr-3 min-w-[8rem] text-xs text-slate-600">
-                    <div>{u.lastLoginClientLabel}</div>
-                    {u.lastLoginClientInfo !== u.lastLoginClientLabel &&
-                    u.lastLoginClientInfo !== '—' ? (
-                      <div className="mt-0.5 text-[10px] text-slate-400">{u.lastLoginClientInfo}</div>
+                    <div>{resolveLastAccessClientLabel(u)}</div>
+                    {resolveLastAccessClientInfo(u) !== resolveLastAccessClientLabel(u) &&
+                    resolveLastAccessClientInfo(u) !== '—' ? (
+                      <div className="mt-0.5 text-[10px] text-slate-400">
+                        {resolveLastAccessClientInfo(u)}
+                      </div>
                     ) : null}
                   </td>
                   <td className="py-2 pr-3">

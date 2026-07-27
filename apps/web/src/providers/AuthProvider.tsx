@@ -69,6 +69,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     })()
   }, [])
 
+  // 切回页面时刷新 /me，更新「最新访问」时间
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible') return
+      void refresh().catch(() => undefined)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
+    }
+  }, [refresh])
+
   const logout = useCallback(async () => {
     try {
       await apiRequest('/api/auth/logout', { method: 'POST' })

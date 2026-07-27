@@ -170,7 +170,22 @@ function testShopSessionAnchorRules(issues: string[]) {
 
   assert(
     resolveShopSessionAnchorName('xiangyu', 'morning') === '子杰',
-    '早场祥钰→子杰',
+    '6.13 起未传日期时早场祥钰→子杰（兼容旧调用）',
+    issues,
+  )
+  assert(
+    resolveShopSessionAnchorName('xiangyu', 'morning', '2026-06-20') === '子杰',
+    '6 月早场祥钰→子杰',
+    issues,
+  )
+  assert(
+    resolveShopSessionAnchorName('xiangyu', 'morning', '2026-07-02') === '小小',
+    '7.1 起早场祥钰→小小（子杰已改拾玉居）',
+    issues,
+  )
+  assert(
+    resolveShopSessionAnchorName('shiyu', 'morning', '2026-07-02') === '子杰',
+    '7.1 起早场拾玉居→子杰',
     issues,
   )
   assert(

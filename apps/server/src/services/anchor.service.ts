@@ -381,6 +381,11 @@ export function getAnchorConfigSync(): AnchorConfig {
   return configCache ?? createDefaultAnchorConfig()
 }
 
+/** 是否已从数据库加载主播配置（未加载时禁止依赖缺省二人配置做业绩归属） */
+export function isAnchorConfigCacheLoaded(): boolean {
+  return configCache != null
+}
+
 function findCachedAnchorByName(name: string) {
   const n = name.trim().toLowerCase()
   return getAnchorConfigSync().anchors.find(

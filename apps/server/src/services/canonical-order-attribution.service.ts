@@ -19,6 +19,7 @@ import {
   findAnchorForAttributionByName,
   getAnchorConfigSync,
   isAnchorAutoAttributableOnDate,
+  isAnchorConfigCacheLoaded,
 } from './anchor.service'
 import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import {
@@ -746,8 +747,9 @@ export async function resolveCanonicalOrderAttribution(
   }
 
   // 7–8) 小白固定午场 + 其他店铺场次规则（6.13 起；小白另有入职日起限制）
+  // 主播配置未从 DB 加载时，禁止走缺省二人配置的固定场次，否则 7 月 XY 会被误归子杰
   const orderDateKey = scheduleDateFromPayMs(create.ms)
-  if (onOrAfterShopSessionRules) {
+  if (onOrAfterShopSessionRules && isAnchorConfigCacheLoaded()) {
     if (isXiaoBaiOrderAttribution(view, create.ms)) {
       const xb =
         findAnchorByName(getAnchorConfigSync(), '小白') ??

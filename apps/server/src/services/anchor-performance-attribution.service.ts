@@ -18,6 +18,7 @@ import {
 } from './anchor-session-cutoff.util'
 import { resolveXiaoBaiSlotMinutesForDate } from './anchor-xiaobai-slot.util'
 import { resolveCanonicalShopName } from '../utils/shop-name-normalize.util'
+import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
 import {
   aggregateViewsMetrics,
   type BoardAnchorMetrics,
@@ -49,29 +50,39 @@ const RAW_LIVE_ACCOUNT_KEYS = [
   'live_nick',
 ] as const
 
-/** 6.13 起各主播在日报中的固定场次 / 店铺展示 */
+/** 6.13 起各主播在日报中的固定场次 / 店铺展示（7.1 起子杰改早场拾玉居） */
 export const ANCHOR_SESSION_DISPLAY_FROM_0613: Record<
   string,
   { sessionLabel: string; shopName: string }
 > = {
-  子杰: { sessionLabel: '早场·XY祥钰珠宝', shopName: 'XY祥钰珠宝' },
+  子杰: { sessionLabel: '早场·拾玉居和田玉', shopName: '拾玉居和田玉' },
   小红: { sessionLabel: '早场·和田雅玉', shopName: '和田雅玉' },
   飞云: { sessionLabel: '晚场·拾玉居和田玉', shopName: '拾玉居和田玉' },
   小艺: { sessionLabel: '晚场·和田雅玉', shopName: '和田雅玉' },
   小白: { sessionLabel: '午场·XY祥钰珠宝 14:30-18:00', shopName: 'XY祥钰珠宝' },
   /** 2026-07-17 起接手和田雅玉（接替小红/小艺） */
   橙橙: { sessionLabel: '和田雅玉', shopName: '和田雅玉' },
-  小小: { sessionLabel: '晚场·XY祥钰珠宝', shopName: 'XY祥钰珠宝' },
+  小小: { sessionLabel: '早场·XY祥钰珠宝', shopName: 'XY祥钰珠宝' },
 }
 
 /** 和田雅玉新主播上场日：此前仍按小红/小艺固定场次 */
 const HETIAN_CHENGCHENG_START_DATE = '2026-07-17'
 
+/** 6.13–6.30：按直播号早晚场固定归属（7.1 起见 NEW_SCHEDULE 映射） */
 const SHOP_SESSION_ANCHOR_MAP: Record<
   LiveSessionPeriod,
   Partial<Record<ShopSessionKey, string>>
 > = {
   morning: { xiangyu: '子杰', hetian: '小红' },
+  evening: { shiyu: '飞云', hetian: '小艺' },
+}
+
+/** 7.1 起新排班：子杰早场拾玉；XY 早场小小；午场仍由小白专用规则优先 */
+const SHOP_SESSION_ANCHOR_MAP_FROM_0701: Record<
+  LiveSessionPeriod,
+  Partial<Record<ShopSessionKey, string>>
+> = {
+  morning: { xiangyu: '小小', shiyu: '子杰', hetian: '小红' },
   evening: { shiyu: '飞云', hetian: '小艺' },
 }
 
@@ -360,7 +371,11 @@ export function resolveShopSessionAnchorName(
   if (shopKey === 'hetian' && dateKey && dateKey >= HETIAN_CHENGCHENG_START_DATE) {
     return '橙橙'
   }
-  return SHOP_SESSION_ANCHOR_MAP[period][shopKey] ?? null
+  const map =
+    dateKey && dateKey >= ANCHOR_NEW_SCHEDULE_START_DATE
+      ? SHOP_SESSION_ANCHOR_MAP_FROM_0701
+      : SHOP_SESSION_ANCHOR_MAP
+  return map[period][shopKey] ?? null
 }
 
 function pickLiveAccountFromRaw(raw: Record<string, unknown> | undefined): string {

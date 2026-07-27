@@ -402,6 +402,8 @@ export async function ensureScheduleTemplatesSeeded(): Promise<void> {
   }
   // 兜底：种子里小白只在 XY 午场；若库里仍有「小白·和田雅玉」开放模板，停用以免系统自动排出两场
   await disableInvalidXiaobaiHetianMorningTemplates()
+  // 误停用 / 误修脚本可能导致 XY 午场消失；在职时自动恢复开放区间模板
+  await ensureXiaobaiXyAfternoonTemplateAlive()
 }
 
 /** 错误默认模板：小白挂在和田雅玉早场且未结束，会与 XY 午场叠加 */
@@ -433,6 +435,112 @@ async function disableInvalidXiaobaiHetianMorningTemplates(): Promise<void> {
       },
     })
   }
+}
+
+/**
+ * 小白在职时，保证「XY祥钰珠宝 14:00-18:30」默认模板可用。
+ * 仅恢复 effectiveTo 仍开放（null 或未结束）却被 enabled=false 的行；
+ * 设置页删除并已截断 effectiveTo 的，不复活。
+ */
+async function ensureXiaobaiXyAfternoonTemplateAlive(): Promise<void> {
+  const seed = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.find(
+    (s) => s.anchorName === '小白' && s.shopName === 'XY祥钰珠宝' && s.startTime === '14:00',
+  )
+  if (!seed) return
+
+  const dateKey = todayShanghaiDateKey()
+  if (!templateAppliesOnDate(seed, dateKey)) return
+
+  const xiaobai = await prisma.anchor.findFirst({
+    where: {
+      name: '小白',
+      deletedAt: null,
+      enabled: true,
+      attributionMode: 'schedule',
+      systemKey: null,
+    },
+    select: { id: true, enabled: true, effectiveFrom: true, effectiveTo: true },
+  })
+  if (!xiaobai) return
+  const { isAnchorEffectiveOnDate } = await import('../utils/anchor-effective-date.util')
+  if (!isAnchorEffectiveOnDate(xiaobai, dateKey)) return
+
+  const enabledRows = await prisma.anchorScheduleTemplate.findMany({
+    where: {
+      enabled: true,
+      shopName: 'XY祥钰珠宝',
+      startTime: '14:00',
+      OR: [{ anchorId: xiaobai.id }, { anchorName: '小白' }],
+    },
+  })
+  const active = enabledRows.find((t) =>
+    templateAppliesOnDate(
+      {
+        anchorName: t.anchorName,
+        shopName: t.shopName,
+        liveRoomName: t.liveRoomName,
+        startTime: t.startTime,
+        endTime: t.endTime,
+        effectiveFrom: t.effectiveFrom,
+        effectiveTo: t.effectiveTo,
+        sortOrder: t.sortOrder,
+      },
+      dateKey,
+    ),
+  )
+  if (active) {
+    if (active.anchorId !== xiaobai.id || active.anchorName !== '小白') {
+      await prisma.anchorScheduleTemplate.update({
+        where: { id: active.id },
+        data: { anchorId: xiaobai.id, anchorName: '小白', updatedAt: new Date() },
+      })
+    }
+    return
+  }
+
+  const existing = await prisma.anchorScheduleTemplate.findFirst({
+    where: {
+      anchorName: '小白',
+      shopName: 'XY祥钰珠宝',
+      startTime: '14:00',
+      effectiveFrom: seed.effectiveFrom,
+    },
+  })
+  if (existing) {
+    // 已截断到今日之前：视为设置页主动移除，不复活
+    if (existing.effectiveTo && existing.effectiveTo < dateKey) return
+    await prisma.anchorScheduleTemplate.update({
+      where: { id: existing.id },
+      data: {
+        enabled: true,
+        anchorId: xiaobai.id,
+        anchorName: '小白',
+        liveRoomName: seed.liveRoomName,
+        endTime: seed.endTime,
+        effectiveTo: null,
+        sortOrder: seed.sortOrder,
+        note: seed.note ?? existing.note,
+        updatedAt: new Date(),
+      },
+    })
+    return
+  }
+
+  await prisma.anchorScheduleTemplate.create({
+    data: {
+      anchorId: xiaobai.id,
+      anchorName: seed.anchorName,
+      shopName: seed.shopName,
+      liveRoomName: seed.liveRoomName,
+      startTime: seed.startTime,
+      endTime: seed.endTime,
+      effectiveFrom: seed.effectiveFrom,
+      effectiveTo: seed.effectiveTo,
+      enabled: true,
+      sortOrder: seed.sortOrder,
+      note: seed.note ?? null,
+    },
+  })
 }
 
 export async function listActiveTemplatesForDate(dateKey: string) {
@@ -714,20 +822,42 @@ export async function saveCurrentDefaultTemplates(params: {
   await prisma.$transaction(async (tx) => {
     for (const old of before) {
       if (!keepIds.has(old.id)) {
+        // 截断生效区间，避免仅 enabled=false 时被种子/兜底逻辑误复活
+        const closedTo =
+          old.effectiveTo && old.effectiveTo < dateKey
+            ? old.effectiveTo
+            : addDaysShanghai(dateKey, -1)
         await tx.anchorScheduleTemplate.update({
           where: { id: old.id },
-          data: { enabled: false, updatedAt: new Date() },
+          data: { enabled: false, effectiveTo: closedTo, updatedAt: new Date() },
         })
       }
     }
 
     for (const row of draft) {
       let resolvedAnchorId = row.anchorId?.trim() || null
-      if (!resolvedAnchorId) {
+      let resolvedAnchorName = row.anchorName
+      if (resolvedAnchorId) {
+        const byId = await tx.anchor.findFirst({
+          where: {
+            id: resolvedAnchorId,
+            deletedAt: null,
+            enabled: true,
+            attributionMode: 'schedule',
+            systemKey: null,
+          },
+          select: { id: true, name: true },
+        })
+        if (!byId) {
+          throw new Error(`找不到可用主播「${row.anchorName}」，请重新选择后再保存`)
+        }
+        resolvedAnchorId = byId.id
+        resolvedAnchorName = byId.name
+      } else {
         resolvedAnchorId = await resolveAnchorIdByName(row.anchorName)
-      }
-      if (!resolvedAnchorId) {
-        throw new Error(`找不到可用主播「${row.anchorName}」，请重新选择后再保存`)
+        if (!resolvedAnchorId) {
+          throw new Error(`找不到可用主播「${row.anchorName}」，请重新选择后再保存`)
+        }
       }
       if (row.id) {
         const existing = await tx.anchorScheduleTemplate.findUnique({ where: { id: row.id } })
@@ -736,7 +866,7 @@ export async function saveCurrentDefaultTemplates(params: {
           where: { id: row.id },
           data: {
             anchorId: resolvedAnchorId,
-            anchorName: row.anchorName,
+            anchorName: resolvedAnchorName,
             shopName: row.shopName,
             liveRoomName: row.liveRoomName,
             startTime: row.startTime,
@@ -750,7 +880,7 @@ export async function saveCurrentDefaultTemplates(params: {
         await tx.anchorScheduleTemplate.create({
           data: {
             anchorId: resolvedAnchorId,
-            anchorName: row.anchorName,
+            anchorName: resolvedAnchorName,
             shopName: row.shopName,
             liveRoomName: row.liveRoomName,
             startTime: row.startTime,

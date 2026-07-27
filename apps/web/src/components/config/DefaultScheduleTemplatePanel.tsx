@@ -37,9 +37,10 @@ function resolveSelectAnchorId(
   anchors: AnchorOption[],
 ): string {
   if (row.anchorId && anchors.some((a) => a.id === row.anchorId)) return row.anchorId
-  const byName = anchors.find((a) => a.name === row.anchorName)
-  if (byName) return byName.id
-  return row.anchorName || ''
+  // 仅按全名精确匹配，避免「小白 / 小小」等相近名误选
+  const byName = anchors.filter((a) => a.name === row.anchorName)
+  if (byName.length === 1) return byName[0]!.id
+  return row.anchorId || row.anchorName || ''
 }
 
 export const DefaultScheduleTemplatePanel: React.FC = () => {
@@ -261,7 +262,8 @@ export const DefaultScheduleTemplatePanel: React.FC = () => {
                       value={resolveSelectAnchorId(row, scheduleAnchors)}
                       onChange={(e) => {
                         const v = e.target.value
-                        const hit = scheduleAnchors.find((a) => a.id === v || a.name === v)
+                        // 只按 id 解析，禁止 name 回退（防止小白/小小互相覆盖）
+                        const hit = scheduleAnchors.find((a) => a.id === v)
                         if (hit) {
                           updateRow(row.localKey, {
                             anchorId: hit.id,
@@ -278,7 +280,9 @@ export const DefaultScheduleTemplatePanel: React.FC = () => {
                       !scheduleAnchors.some(
                         (a) => a.id === row.anchorId || a.name === row.anchorName,
                       ) ? (
-                        <option value={row.anchorName}>{row.anchorName}（当前）</option>
+                        <option value={row.anchorId || row.anchorName}>
+                          {row.anchorName}（当前）
+                        </option>
                       ) : null}
                       {scheduleAnchors.map((a) => (
                         <option key={a.id} value={a.id}>

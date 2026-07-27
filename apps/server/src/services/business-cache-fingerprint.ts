@@ -9,7 +9,7 @@ import { AFTER_SALES_METRICS_VERSION } from './workbench-cache-validity.service'
 
 /** 与 canonical-order-attribution.service 保持同步 */
 export const CANONICAL_ATTRIBUTION_VERSION =
-  'canonical-v6-four-shop-date-aware-fallback-2026-07-27'
+  'canonical-v7-create-time-only-no-pay-fallback-2026-07-27'
 
 /** 业绩榜/走势分组：正式主播按配置 id 合并，避免同名裂成两条（如小白） */
 export const LEADERBOARD_GROUP_VERSION = 'leaderboard-group-v2-formal-id-2026-07-19'

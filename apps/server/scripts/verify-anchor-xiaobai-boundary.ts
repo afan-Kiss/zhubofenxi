@@ -62,15 +62,20 @@ async function main(): Promise<void> {
   } else ok('18:00:00 不激活小白归属')
 
   const xyView = view('XY祥钰珠宝')
+  const plainXiangyuView = view('祥钰珠宝')
   const hetianView = view('和田雅玉')
   if (!isXiaoBaiOrderAttribution(xyView, t175959)) {
-    fail('祥钰 17:59:59 应归小白')
+    fail('XY祥钰 17:59:59 应归小白')
     failures++
-  } else ok('祥钰 17:59:59 归小白')
+  } else ok('XY祥钰 17:59:59 归小白')
   if (isXiaoBaiOrderAttribution(xyView, t1800)) {
-    fail('祥钰 18:00:00 不应归小白')
+    fail('XY祥钰 18:00:00 不应归小白')
     failures++
-  } else ok('祥钰 18:00:00 不归小白')
+  } else ok('XY祥钰 18:00:00 不归小白')
+  if (isXiaoBaiOrderAttribution(plainXiangyuView, t175959)) {
+    fail('普通祥钰在小白时段不应归小白')
+    failures++
+  } else ok('普通祥钰 17:59:59 不归小白')
   if (isXiaoBaiOrderAttribution(hetianView, t175959)) {
     fail('非祥钰店铺在小白时段不应归小白')
     failures++
@@ -97,9 +102,13 @@ async function main(): Promise<void> {
     failures++
   } else ok('7月 18:30:00 不归小白')
   if (!isXiaoBaiOrderAttribution(xyView, tJul1400)) {
-    fail('7月 祥钰 14:00 应归小白')
+    fail('7月 XY祥钰 14:00 应归小白')
     failures++
-  } else ok('7月 祥钰 14:00 归小白')
+  } else ok('7月 XY祥钰 14:00 归小白')
+  if (isXiaoBaiOrderAttribution(plainXiangyuView, tJul1400)) {
+    fail('7月 普通祥钰 14:00 不应归小白')
+    failures++
+  } else ok('7月 普通祥钰 14:00 不归小白')
 
   if (failures > 0) {
     console.log(`\nFAIL (${failures} 项)`)

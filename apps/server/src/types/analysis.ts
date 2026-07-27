@@ -236,6 +236,8 @@ export interface AnalyzedOrderView {
   officialOrderNo: string
   matchOrderId: string
   orderTimeText: string
+  /** 下单时间（若分析链路已挂载；归属禁止用支付时间） */
+  orderedAt?: Date | null
   buyerId: string
   anchorId: string
   anchorName: string

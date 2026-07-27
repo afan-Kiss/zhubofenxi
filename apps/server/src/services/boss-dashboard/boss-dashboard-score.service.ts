@@ -21,6 +21,29 @@ import {
 } from './boss-dashboard-score-cooldown.util'
 import { logInfo, logWarn } from '../../utils/server-log'
 
+type ScoreFetchResult = Awaited<ReturnType<typeof fetchBossShopScoreAudited>>
+type TrendFetchResult = Awaited<ReturnType<typeof fetchBossShopScoreTrendAudited>>
+
+/** 验收注入：直接测生产 syncBossShopScoreForShop，勿复制 skip/upsert 逻辑 */
+let scoreFetchOverrideForTests:
+  | ((shop: GoodReviewShopDefinition) => Promise<ScoreFetchResult>)
+  | null = null
+let trendFetchOverrideForTests:
+  | ((shop: GoodReviewShopDefinition, label: string, nDayRecent: number) => Promise<TrendFetchResult>)
+  | null = null
+
+export function setBossShopScoreFetchersForTests(opts: {
+  score?: ((shop: GoodReviewShopDefinition) => Promise<ScoreFetchResult>) | null
+  trend?: ((
+    shop: GoodReviewShopDefinition,
+    label: string,
+    nDayRecent: number,
+  ) => Promise<TrendFetchResult>) | null
+} | null): void {
+  scoreFetchOverrideForTests = opts?.score ?? null
+  trendFetchOverrideForTests = opts?.trend ?? null
+}
+
 function shanghaiHmNow(): string {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Shanghai',
@@ -99,7 +122,9 @@ async function loadTrendScores(
   shop: GoodReviewShopDefinition,
   label: string,
 ): Promise<{ points: Array<{ date: string; score: number }>; error?: string }> {
-  const res = await fetchBossShopScoreTrendAudited(shop, label, BOSS_SCORE_TREND_DAYS)
+  const res = await (trendFetchOverrideForTests
+    ? trendFetchOverrideForTests(shop, label, BOSS_SCORE_TREND_DAYS)
+    : fetchBossShopScoreTrendAudited(shop, label, BOSS_SCORE_TREND_DAYS))
   if (!res.ok || res.data == null) {
     return { points: [], error: res.errorMessage ?? '趋势请求失败' }
   }
@@ -129,7 +154,9 @@ export async function syncBossShopScoreForShop(params: {
     return { skipped: true, saved: false, scoreDate: todayKey, reason: '今日快照已完整' }
   }
 
-  const scoreRes = await fetchBossShopScoreAudited(params.shop)
+  const scoreRes = await (scoreFetchOverrideForTests
+    ? scoreFetchOverrideForTests(params.shop)
+    : fetchBossShopScoreAudited(params.shop))
   if (!scoreRes.ok || scoreRes.data == null) {
     return {
       skipped: false,
@@ -237,7 +264,12 @@ export async function syncBossShopScoreForShop(params: {
     duplicate.serviceScore === merged.serviceScore &&
     duplicate.officialOverallScore === merged.officialOverallScore
   ) {
-    return { skipped: true, saved: false, scoreDate: finalDate, reason: '评分未变化' }
+    // 分数相同但旧快照为 partial、本次已完整 → 仍须升级 sourceApi/rawJson/fetchedAt
+    const upgradingPartialToComplete =
+      duplicate.sourceApi === 'boss_shop_score:partial' && !partial
+    if (!upgradingPartialToComplete) {
+      return { skipped: true, saved: false, scoreDate: finalDate, reason: '评分未变化' }
+    }
   }
 
   const prev = await prisma.bossShopScoreSnapshot.findFirst({

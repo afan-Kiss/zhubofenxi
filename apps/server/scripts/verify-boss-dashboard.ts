@@ -31,7 +31,8 @@ import { summarizeBossRun } from '../src/services/boss-dashboard/boss-dashboard-
 import { BOSS_BILL_API, BOSS_BILL_WINDOW_DAYS } from '../src/config/boss-dashboard.constants'
 import { addDaysShanghai } from '../src/utils/business-timezone'
 import { isBossDashboardSyncRunning } from '../src/services/boss-dashboard/boss-dashboard-sync.service'
-import { shouldFetchShopScoreToday } from '../src/services/boss-dashboard/boss-dashboard-score.service'
+import { shouldFetchShopScoreToday, setBossShopScoreFetchersForTests, syncBossShopScoreForShop } from '../src/services/boss-dashboard/boss-dashboard-score.service'
+import { formatDateKeyShanghai } from '../src/utils/business-timezone'
 import {
   markBossShopScoreStale,
   resetBossShopScoreStaleForTests,
@@ -521,6 +522,80 @@ async function main() {
   ) {
     ok('月度四店合计校验通过')
   } else fail('月度四店合计校验失败')
+
+  // --- partial 快照分数相同仍须升级为完整（直接调用生产 syncBossShopScoreForShop） ---
+  {
+    const shopKey = '__verify_partial_upgrade__'
+    const scoreDate = formatDateKeyShanghai()
+    const shop = { shopKey, shopName: '验收店铺分升级' }
+    await prisma.bossShopScoreSnapshot.deleteMany({ where: { shopKey } })
+    await prisma.bossShopScoreSnapshot.create({
+      data: {
+        shopKey,
+        liveAccountId: 'old-live',
+        scoreDate,
+        qualityScore: 4.5,
+        logisticsScore: 4.6,
+        serviceScore: 4.7,
+        officialOverallScore: 4.55,
+        sourceApi: 'boss_shop_score:partial',
+        rawJson: null,
+        fetchedAt: new Date('2026-01-01T00:00:00Z'),
+      },
+    })
+    setBossShopScoreFetchersForTests({
+      score: async () =>
+        ({
+          ok: true,
+          data: {
+            data: {
+              shop_score_dto: {
+                scoreDate,
+                sellerQualityScore: 4.5,
+                sellerLogisticsScore: 4.6,
+                sellerServiceScore: 4.7,
+                score: 4.55,
+              },
+            },
+          },
+          errorMessage: null,
+          auditStatus: 'success',
+          skippedRemote: false,
+        }) as Awaited<ReturnType<typeof import('../src/services/boss-dashboard/boss-dashboard-api.service').fetchBossShopScoreAudited>>,
+      trend: async () =>
+        ({
+          ok: false,
+          data: null,
+          errorMessage: 'skip-trend',
+          auditStatus: 'failed',
+          skippedRemote: true,
+        }) as Awaited<ReturnType<typeof import('../src/services/boss-dashboard/boss-dashboard-api.service').fetchBossShopScoreTrendAudited>>,
+    })
+    try {
+      const result = await syncBossShopScoreForShop({
+        shop,
+        liveAccountId: 'new-live',
+        forceFetch: true,
+      })
+      const row = await prisma.bossShopScoreSnapshot.findUnique({
+        where: { shopKey_scoreDate: { shopKey, scoreDate } },
+      })
+      if (result.saved && !result.skipped) ok('partial→完整：syncBossShopScoreForShop 执行 upsert')
+      else fail(`partial→完整应保存：${JSON.stringify(result)}`)
+      if (row?.sourceApi === 'boss_shop_score') ok('partial→完整：sourceApi 已升级')
+      else fail(`sourceApi 应为 boss_shop_score，实际 ${row?.sourceApi}`)
+      if (row?.liveAccountId === 'new-live') ok('partial→完整：liveAccountId 已更新')
+      else fail(`liveAccountId 应为 new-live，实际 ${row?.liveAccountId}`)
+      if (row?.rawJson) ok('partial→完整：rawJson 已写入')
+      else fail('rawJson 应已写入')
+      if (row?.fetchedAt && row.fetchedAt.getTime() > Date.parse('2026-06-01T00:00:00Z')) {
+        ok('partial→完整：fetchedAt 已刷新')
+      } else fail('fetchedAt 应已刷新')
+    } finally {
+      setBossShopScoreFetchersForTests(null)
+      await prisma.bossShopScoreSnapshot.deleteMany({ where: { shopKey } })
+    }
+  }
 
   console.log(issues.length ? `\nFAILED ${issues.length}` : '\nALL PASS')
   await prisma.$disconnect()

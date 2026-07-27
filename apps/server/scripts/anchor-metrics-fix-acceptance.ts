@@ -54,7 +54,16 @@ function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
 }
 
-function makeView(partial: Partial<AnalyzedOrderView>): AnalyzedOrderView {
+function makeView(
+  partial: Partial<AnalyzedOrderView> & { raw?: Record<string, unknown> },
+): AnalyzedOrderView & { raw?: Record<string, unknown> } {
+  const orderTimeText = partial.orderTimeText ?? '2026-05-01 10:00:00'
+  const raw =
+    partial.raw ??
+    ({
+      orderedAt: orderTimeText,
+      createTime: orderTimeText,
+    } as Record<string, unknown>)
   return {
     orderId: 'o1',
     packageId: 'p1',
@@ -62,7 +71,7 @@ function makeView(partial: Partial<AnalyzedOrderView>): AnalyzedOrderView {
     displayOrderNo: 'P1',
     officialOrderNo: 'P1',
     matchOrderId: 'm1',
-    orderTimeText: '2026-05-01 10:00:00',
+    orderTimeText,
     buyerId: 'u1',
     anchorId: 'a1',
     anchorName: '子杰',
@@ -98,6 +107,7 @@ function makeView(partial: Partial<AnalyzedOrderView>): AnalyzedOrderView {
     paymentBaseCent: 0,
     includedInGmv: true,
     ...partial,
+    raw,
   }
 }
 
@@ -144,6 +154,7 @@ function testShopSessionAnchorRules(issues: string[]) {
       { id: 'anchor-feiyun', name: '飞云', color: '#000', enabled: true },
       { id: 'anchor-xh', name: '小红', color: '#000', enabled: true },
       { id: 'anchor-xy', name: '小艺', color: '#000', enabled: true },
+      { id: 'anchor-xb', name: '小白', color: '#000', enabled: true },
     ],
     timeRules: [],
   }
@@ -162,7 +173,9 @@ function testShopSessionAnchorRules(issues: string[]) {
 
   const june13Morning = new Date('2026-06-13T10:00:00+08:00')
   const june13Evening = new Date('2026-06-13T20:00:00+08:00')
-  assert(normalizeShopSessionKey('xy祥钰珠宝') === 'xiangyu', '祥钰店铺识别', issues)
+  assert(normalizeShopSessionKey('xy祥钰珠宝') === 'xyxiangyu', 'xy祥钰珠宝 → xyxiangyu', issues)
+  assert(normalizeShopSessionKey('XY祥钰珠宝') === 'xyxiangyu', 'XY祥钰珠宝 → xyxiangyu', issues)
+  assert(normalizeShopSessionKey('祥钰珠宝') === 'xiangyu', '普通祥钰 → xiangyu', issues)
   assert(normalizeShopSessionKey('和田雅玉') === 'hetian', '和田雅玉识别', issues)
   assert(normalizeShopSessionKey('拾玉居') === 'shiyu', '拾玉居识别', issues)
   assert(resolveLiveSessionPeriod(june13Morning) === 'morning', '10 点属早场', issues)
@@ -315,7 +328,21 @@ function testShopSessionAnchorRules(issues: string[]) {
     }),
     config,
   )
-  assert(june18XiangyuAfternoon.anchorName === '小白', '6.18 15:00 祥钰应归小白', issues)
+  assert(june18XiangyuAfternoon.anchorName === '小白', '6.18 15:00 XY祥钰应归小白', issues)
+
+  const june18PlainXiangyuAfternoon = resolveAnchorForPerformanceAttribution(
+    makeView({
+      anchorName: '子杰',
+      liveAccountName: '祥钰珠宝',
+      orderTimeText: '2026-06-18 15:00:00',
+    }),
+    config,
+  )
+  assert(
+    june18PlainXiangyuAfternoon.anchorName !== '小白',
+    '6.18 15:00 普通祥钰不得归小白',
+    issues,
+  )
 
   const june18ShiyuAfternoon = resolveAnchorForPerformanceAttribution(
     makeView({
@@ -691,12 +718,12 @@ async function verifyMayLiveDb(issues: string[]) {
     const total = rows.reduce((s, r) => s + (r.actualSignedAmount ?? 0), 0)
 
     const near = (a: number, b: number, tol = 0.05) => Math.abs(a - b) <= tol
-    // 子杰与合计允许 ±120 元容差：低价刷单排除 + 实际签收仅含无售后/取消/退款≤20元订单
-    const nearLive = (a: number, b: number, tol = 120) => Math.abs(a - b) <= tol
+    // 子杰与合计允许更大容差：禁止支付时间兜底后，缺可靠下单时间的历史单会进未归属
+    const nearLive = (a: number, b: number, tol = 200) => Math.abs(a - b) <= tol
     if (!near(xiaohong, 0)) issues.push(`live: 小红签收额=${xiaohong} 期望 0`)
-    if (!nearLive(zijie, 30550.9)) issues.push(`live: 子杰签收额=${zijie} 期望 30550.90`)
+    if (!nearLive(zijie, 30550.9)) issues.push(`live: 子杰签收额=${zijie} 期望约 30550.90（±200）`)
     if (!near(feiyun, 41782.7)) issues.push(`live: 飞云签收额=${feiyun} 期望 41782.70`)
-    if (!nearLive(total, 72333.6)) issues.push(`live: 主播合计=${total} 期望 72333.60`)
+    if (!nearLive(total, 72333.6)) issues.push(`live: 主播合计=${total} 期望约 72333.60（±200）`)
 
     console.log('[live-db]', {
       子杰: zijie,
@@ -712,6 +739,8 @@ async function verifyMayLiveDb(issues: string[]) {
 
 async function main() {
   const issues: string[] = []
+  const { refreshAnchorConfigCache } = await import('../src/services/anchor.service')
+  await refreshAnchorConfigCache()
   testAnchorRuleEffectiveFrom(issues)
   testShopSessionAnchorRules(issues)
   await testLiveDurationDedup(issues)

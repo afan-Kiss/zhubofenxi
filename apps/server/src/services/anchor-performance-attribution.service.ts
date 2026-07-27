@@ -16,7 +16,6 @@ import {
   XIAOBAI_ANCHOR_CUTOFF_MS,
 } from './anchor-session-cutoff.util'
 import { resolveXiaoBaiSlotMinutesForDate } from './anchor-xiaobai-slot.util'
-import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
 import {
   normalizeShopSessionKey,
   resolveLiveSessionPeriod,
@@ -91,8 +90,8 @@ export function isReportDateOnOrAfterXiaoBaiCutoff(startDate: string): boolean {
 }
 
 /**
- * 6.18 起：祥钰系午场 → 小白（不含拾玉居/和田雅玉）。
- * 第二参应对应为下单时间 ms（正式归属走 canonical；本函数供兼容/边界验收）。
+ * 6.18 起：仅 XY祥钰珠宝 午场 → 小白（不含普通祥钰 / 拾玉居 / 和田雅玉）。
+ * 第二参必须为下单时间 ms；禁止用支付时间。
  */
 export function isXiaoBaiOrderAttribution(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
@@ -103,10 +102,8 @@ export function isXiaoBaiOrderAttribution(
   const liveAccountName =
     (view.liveAccountName ?? '').trim() || pickLiveAccountFromRaw(view.raw)
   const key = normalizeShopSessionKey(liveAccountName)
-  const dateKey = formatDateKeyShanghai(new Date(orderCreateMs))
-  // 7.1 起仅 XY祥钰珠宝；6 月保留祥钰系（含普通祥钰）兼容
-  if (dateKey >= ANCHOR_NEW_SCHEDULE_START_DATE) return key === 'xyxiangyu'
-  return key === 'xyxiangyu' || key === 'xiangyu'
+  // 6.18～今：订单/场次/日报时长一律仅 XY祥钰珠宝，禁止与普通祥钰交叉
+  return key === 'xyxiangyu'
 }
 
 export function isXiaoBaiSessionStart(sessionStartMs: number): boolean {
@@ -380,11 +377,11 @@ export function resolveShopSessionAnchorFromLiveAccount(
   at: Date,
   config: AnchorConfig = getAnchorConfigSync(),
 ): { anchorId: string; anchorName: string } | null {
-  void config
   const shopKey = normalizeShopSessionKey(liveAccountName)
   const hit = resolveShopSessionFallbackForDate(shopKey, at.getTime())
   if (!hit) return null
-  const found = findAnchorForAttributionByName(hit.anchorName)
+  const found =
+    findAnchorByName(config, hit.anchorName) ?? findAnchorForAttributionByName(hit.anchorName)
   if (!found) return null
   if (isOfflineOnlyAnchor(found)) return null
   if (isManualAttributionMode(found.attributionMode)) return null
@@ -417,21 +414,22 @@ export function shouldKeepLeaderboardAnchorRow(
 }
 
 /**
- * @deprecated 正式业绩/品退/明细请用 resolveCanonicalOrderAttribution（下单时间 + 有效排班）。
- * 本函数仅作同步兼容路径：优先下单时间判定小白午场，其余仍按支付时间回落旧规则。
+ * @deprecated 正式业绩/品退/明细请用 resolveCanonicalOrderAttribution（下单时间唯一归属）。
+ * 本函数仅作同步兼容路径：只用下单时间；缺少下单时间 → 未归属；禁止支付时间兜底。
  */
 export function resolveAnchorForPerformanceAttribution(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
   config: AnchorConfig = getAnchorConfigSync(),
 ): { anchorId: string; anchorName: string } {
   const createMs = parseLegacyOrderCreateTimeMs(view)
-  const payMs = parseViewPayTimeMs(view)
-  const anchorMs = createMs ?? payMs
-  if (anchorMs == null || anchorMs < SHOP_SESSION_ANCHOR_CUTOFF_MS) {
+  if (createMs == null) {
+    return { anchorId: '', anchorName: '未归属' }
+  }
+  if (createMs < SHOP_SESSION_ANCHOR_CUTOFF_MS) {
     return { anchorId: view.anchorId, anchorName: view.anchorName }
   }
 
-  if (isXiaoBaiOrderAttribution(view, createMs ?? payMs!)) {
+  if (isXiaoBaiOrderAttribution(view, createMs)) {
     return resolveXiaoBaiAnchor(config)
   }
 
@@ -439,17 +437,21 @@ export function resolveAnchorForPerformanceAttribution(
     (view.liveAccountName ?? '').trim() || pickLiveAccountFromRaw(view.raw)
   const resolved = resolveShopSessionAnchorFromLiveAccount(
     liveAccountName,
-    new Date(anchorMs),
+    new Date(createMs),
     config,
   )
   if (resolved) return resolved
   return { anchorId: '', anchorName: '未归属' }
 }
 
-/** 避免与 canonical 循环依赖：仅读取常见下单时间字段 */
+/** 避免与 canonical 循环依赖：仅读取常见下单时间字段（禁止 orderTimeText/支付时间） */
 function parseLegacyOrderCreateTimeMs(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
 ): number | null {
+  const orderedAt = view.orderedAt
+  if (orderedAt instanceof Date && Number.isFinite(orderedAt.getTime())) {
+    return orderedAt.getTime()
+  }
   const raw = view.raw
   if (!raw || typeof raw !== 'object') return null
   for (const k of [
@@ -459,6 +461,8 @@ function parseLegacyOrderCreateTimeMs(
     'create_time',
     'orderCreateTime',
     'order_create_time',
+    'placed_at',
+    'placedAt',
   ] as const) {
     const v = raw[k]
     if (v == null || v === '') continue

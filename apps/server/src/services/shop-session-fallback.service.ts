@@ -88,11 +88,8 @@ export function resolveShopSessionFallbackForDate(
     const period = resolveLegacyLiveSessionPeriod(at)
     if (!period) return null
     let anchorName = LEGACY_MAP[period][shopKey] ?? null
-    // 6.18 起 XY/祥钰 午场段（14:30–18:00）由小白规则优先，这里不抢午场
-    if (
-      dateKey >= ANCHOR_XIAOBAI_SCHEDULE_START_DATE &&
-      (shopKey === 'xyxiangyu' || shopKey === 'xiangyu')
-    ) {
+    // 6.18 起仅 XY 午场段（14:30–18:00）由小白规则优先；普通祥钰不得交叉
+    if (dateKey >= ANCHOR_XIAOBAI_SCHEDULE_START_DATE && shopKey === 'xyxiangyu') {
       const minutes = getTimeMinutes(at)
       if (minutes >= 14 * 60 + 30 && minutes < 18 * 60) {
         return null // 交给 isXiaoBaiOrderAttribution
@@ -125,8 +122,12 @@ export function resolveShopSessionFallbackForDate(
     if (shopKey === 'hetian') {
       anchorName = dateKey >= HETIAN_CHENGCHENG_START_DATE ? '橙橙' : '小艺'
     }
-    if (shopKey === 'xyxiangyu' || shopKey === 'xiangyu') {
+    // 午场仅 XY → 小白（专用规则）；普通祥钰午场无固定回退
+    if (shopKey === 'xyxiangyu') {
       return null // 小白专用路径
+    }
+    if (shopKey === 'xiangyu') {
+      return null
     }
   } else if (period === 'evening') {
     if (shopKey === 'shiyu') anchorName = '飞云'

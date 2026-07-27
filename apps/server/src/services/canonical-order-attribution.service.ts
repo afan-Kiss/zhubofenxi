@@ -44,7 +44,6 @@ import { parseDateTime } from '../utils/time'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
 import {
   isXiaoBaiOrderAttribution,
-  parseViewPayTimeMs,
   resolveShopSessionAnchorFromLiveAccount,
 } from './anchor-performance-attribution.service'
 import { resolveMetricOrderNo } from './calc-refund-rate.service'
@@ -82,6 +81,7 @@ export interface CanonicalOrderAttribution {
   paymentTimeMatchedSessionId?: string | null
 }
 
+/** 仅可靠下单时间字段；禁止 payTime / paymentTime / orderTimeText */
 const RAW_CREATE_TIME_KEYS = [
   'orderedAt',
   'ordered_at',
@@ -89,8 +89,6 @@ const RAW_CREATE_TIME_KEYS = [
   'create_time',
   'orderCreateTime',
   'order_create_time',
-  'order_time',
-  'orderTime',
   'placed_at',
   'placedAt',
 ] as const
@@ -254,10 +252,17 @@ function parseShanghaiTextMs(text: string): number | null {
   return Number.isFinite(ms) ? ms : null
 }
 
-/** 下单时间（禁止用支付时间） */
+/** 下单时间（禁止用支付时间 / orderTimeText 兜底） */
 export function parseViewOrderCreateTimeMs(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
 ): { ms: number | null; text: string } {
+  const orderedAt = view.orderedAt
+  if (orderedAt instanceof Date && Number.isFinite(orderedAt.getTime())) {
+    return {
+      ms: orderedAt.getTime(),
+      text: orderedAt.toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }),
+    }
+  }
   const raw = view.raw
   if (raw && typeof raw === 'object') {
     for (const k of RAW_CREATE_TIME_KEYS) {
@@ -274,13 +279,8 @@ export function parseViewOrderCreateTimeMs(
       if (ms != null) return { ms, text }
     }
   }
-  // 兼容：部分链路未挂 raw 时，orderTimeText 可能是下单或支付；仅作最后兜底
-  const fallback = view.orderTimeText?.trim() ?? ''
-  if (fallback && fallback !== '—') {
-    const ms = parseShanghaiTextMs(fallback)
-    if (ms != null) return { ms, text: fallback }
-  }
-  return { ms: null, text: fallback || '—' }
+  // 故意不回落 orderTimeText / payTime：可能是支付时间，会导致错误归属
+  return { ms: null, text: '缺少下单时间' }
 }
 
 function formatAttributionTime(ms: number | null, text: string): string {
@@ -607,7 +607,6 @@ export async function resolveCanonicalOrderAttribution(
 ): Promise<CanonicalOrderAttribution> {
   const live = pickLiveAccount(view)
   const create = parseViewOrderCreateTimeMs(view)
-  const payMs = parseViewPayTimeMs(view)
 
   // 线下成交台账：人工归属最高优先级，缓存刷新不得用场次/排班覆盖
   if (isOfflineDealView(view)) {

@@ -65,6 +65,8 @@ async function main(): Promise<void> {
   clearCanonicalAttributionCache()
   setCanonicalAttributionTestFixtures(null)
   setManualAnchorOverrideCacheForTests(new Map())
+  const { refreshAnchorConfigCache } = await import('../src/services/anchor.service')
+  await refreshAnchorConfigCache()
 
   const date = '2026-07-11'
   const morning = buildScheduleBounds(date, '09:30', '14:00')
@@ -104,6 +106,26 @@ async function main(): Promise<void> {
     }),
     '10:30',
   )
+
+  const noCreate = parseViewOrderCreateTimeMs(
+    stubView({
+      orderTimeText: '2026-07-11 15:00:00',
+      raw: { paidAt: '2026-07-11 15:00:00', paymentTime: '2026-07-11 15:00:00' },
+    }),
+  )
+  assert.equal(noCreate.ms, null)
+  assert.equal(noCreate.text, '缺少下单时间')
+  {
+    const unassigned = await resolveCanonicalOrderAttribution(
+      stubView({
+        liveAccountName: '拾玉居和田玉',
+        orderTimeText: '2026-07-11 10:00:00',
+        raw: { paidAt: '2026-07-11 10:00:00' },
+      }),
+    )
+    assert.equal(unassigned.canonicalAnchorName, '未归属')
+    assert.match(unassigned.attributionExplain, /缺少下单时间/)
+  }
 
   setCanonicalAttributionTestFixtures({
     liveSessions: [
@@ -267,7 +289,7 @@ async function main(): Promise<void> {
       }),
     )
     assert.equal(morningHit.canonicalAnchorName, '小白')
-    assert.equal(morningHit.attributionType, 'confirmed_schedule')
+    assert.equal(morningHit.attributionType, 'manual_schedule')
     // 未人工确认的有效排班仍应归属（不再要求 confirmed=true）
     const afternoonHit = await resolveCanonicalOrderAttribution(
       stubView({
@@ -276,7 +298,7 @@ async function main(): Promise<void> {
       }),
     )
     assert.equal(afternoonHit.canonicalAnchorName, '小红')
-    assert.equal(afternoonHit.attributionType, 'confirmed_schedule')
+    assert.equal(afternoonHit.attributionType, 'manual_schedule')
   }
 
   // 模板虚排：无真实场次时祥钰午场 → 小白

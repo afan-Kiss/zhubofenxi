@@ -236,6 +236,7 @@ function buildViews(
       officialOrderNo: o.officialOrderNo || o.displayOrderNo,
       matchOrderId: o.matchOrderId,
       orderTimeText: o.orderTimeText,
+      orderedAt: o.orderedAt ?? null,
       buyerId: o.buyerId,
       anchorId: attr.anchorId,
       anchorName: attr.anchorName,

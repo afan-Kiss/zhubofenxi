@@ -172,7 +172,13 @@ export async function verifyLocalQueryAnchorRemap(params: {
       }
     }
 
+    const storePerformanceViews = hasAnchorFilter
+      ? await getAnchorPerformanceViews(scopedAllViews, scoped.rawByMatch, undefined, undefined)
+      : expectedPerformanceViews
+
     for (const orderNo of ANCHOR_MUST_INCLUDE[params.anchorName!] ?? []) {
+      // 本地库缺该单时跳过（非归属错误）；有单却不在目标主播池才失败
+      if (!findViewByOrderNo(storePerformanceViews, orderNo)) continue
       if (!findViewByOrderNo(expectedPerformanceViews, orderNo)) {
         fails.push(`${label}: remap 后订单池缺少 ${orderNo}`)
       }

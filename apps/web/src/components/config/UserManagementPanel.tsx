@@ -124,7 +124,7 @@ export const UserManagementPanel: React.FC = () => {
         <div>
           <h3 className="text-base font-semibold text-slate-900">账号管理</h3>
           <p className="mt-1 text-xs text-slate-500">
-            创建或停用登录账号，查看密码、注册时间与登录环境。「最近登录」为账号密码登录时间（不是打开页面）。用户自行改密后将不再显示密码。
+            创建或停用登录账号，查看密码、注册时间与登录环境。「最近登录」含保持登录状态下进入系统的时间。用户自行改密后将不再显示密码。
           </p>
         </div>
         <button

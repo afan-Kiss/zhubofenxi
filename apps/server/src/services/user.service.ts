@@ -289,9 +289,25 @@ export async function recordUserLogin(
 
 }
 
+/** 打开系统时节流刷新最近登录；默认 30 分钟，避免每次 /me 写库 */
+const LAST_LOGIN_STALE_MS = 30 * 60 * 1000
+
+export async function recordUserLoginIfStale(
+  userId: string,
+  client?: { ip?: string | null; userAgent?: string | null },
+  staleMs: number = LAST_LOGIN_STALE_MS,
+): Promise<void> {
+  const row = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { lastLoginAt: true },
+  })
+  if (!row) return
+  if (row.lastLoginAt && Date.now() - row.lastLoginAt.getTime() < staleMs) return
+  await recordUserLogin(userId, client)
+}
+
 /**
- * 用 login_success 审计日志回填 lastLoginAt（纠正曾被 /me 误写成「最近活跃」的值）。
- * 仅在显式修复脚本中调用，不在请求路径自动执行。
+ * 仅当 lastLoginAt 为空时，用 login_success 审计回填（不覆盖已有的较新访问时间）。
  */
 export async function reconcileLastLoginAtFromLoginLogs(): Promise<{
   updated: number
@@ -309,20 +325,16 @@ export async function reconcileLastLoginAtFromLoginLogs(): Promise<{
   let updated = 0
   let skipped = 0
   for (const user of users) {
+    if (user.lastLoginAt) {
+      skipped += 1
+      continue
+    }
     const log = await prisma.operationLog.findFirst({
       where: { username: user.username, action: 'login_success' },
       orderBy: { createdAt: 'desc' },
       select: { createdAt: true, ip: true, userAgent: true },
     })
     if (!log) {
-      skipped += 1
-      continue
-    }
-    const sameTime =
-      user.lastLoginAt != null &&
-      Math.abs(user.lastLoginAt.getTime() - log.createdAt.getTime()) < 2000
-    const sameIp = (log.ip ?? null) === (user.lastLoginIp ?? null)
-    if (sameTime && sameIp) {
       skipped += 1
       continue
     }

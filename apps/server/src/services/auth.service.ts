@@ -18,6 +18,7 @@ import {
   findUserByUsername,
   toSafeUserFromRecord,
   recordUserLogin,
+  recordUserLoginIfStale,
   type SafeUser,
 } from './user.service'
 import { verifyPassword } from '../utils/password'
@@ -129,7 +130,7 @@ export async function logoutUser(token: string | undefined): Promise<void> {
 
 export async function buildAuthMePayload(
   user: SessionUser,
-  _client?: { ip?: string | null; userAgent?: string | null },
+  client?: { ip?: string | null; userAgent?: string | null },
 ): Promise<{
   user: SafeUser | {
     id: string
@@ -168,7 +169,9 @@ export async function buildAuthMePayload(
     }
   }
 
-  // 最近登录 = 账号密码登录时间；不要在 /me 会话续期时改写，否则会变成「最近打开页面」
+  // 保持登录状态下打开系统也算「最近登录」；30 分钟节流，避免每次 /me 写库
+  await recordUserLoginIfStale(user.id, client)
+
   const row = await findUserById(user.id)
   if (!row) {
     throw new Error('账号不存在')

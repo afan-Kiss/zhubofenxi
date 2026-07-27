@@ -57,8 +57,24 @@ function main() {
     resolveShopSessionFallbackForDate(xy, ms('2026-07-16T10:00:00'))?.anchorName,
     '小小',
   )
-  assert.equal(resolveShopSessionFallbackForDate(xy, ms('2026-07-02T15:00:00')), null) // 小白专用
+  assert.equal(resolveShopSessionFallbackForDate(xy, ms('2026-07-02T15:00:00')), null)
   ok('7 月 XY 不得归子杰；小小生效后早场归小小')
+
+  const hetian = normalizeShopSessionKey('和田雅玉')
+  assert.equal(
+    resolveShopSessionFallbackForDate(hetian, ms('2026-07-02T10:00:00'))?.anchorName,
+    '小白',
+  )
+  assert.equal(resolveShopSessionFallbackForDate(hetian, ms('2026-07-02T14:00:00')), null)
+  assert.equal(
+    resolveShopSessionFallbackForDate(hetian, ms('2026-07-17T10:00:00'))?.anchorName,
+    '小白',
+  )
+  assert.notEqual(
+    resolveShopSessionFallbackForDate(hetian, ms('2026-07-17T10:00:00'))?.anchorName,
+    '橙橙',
+  )
+  ok('7 月和田早场→小白；橙橙不进固定回退')
 
   // 6 月兼容
   assert.equal(

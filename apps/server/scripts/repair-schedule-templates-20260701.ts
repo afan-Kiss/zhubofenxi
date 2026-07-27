@@ -75,10 +75,17 @@ async function main() {
       ),
     )
 
-    if (active0701.length !== NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.length) {
+    const seedsOn0701 = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.filter((seed) =>
+      templateAppliesOnDate(seed, NEW_SCHEDULE_START_DATE),
+    )
+    if (active0701.length !== seedsOn0701.length) {
       throw new Error(
-        `[repair-schedule-20260701] expected ${NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.length} active templates on ${NEW_SCHEDULE_START_DATE}, got ${active0701.length}`,
+        `[repair-schedule-20260701] expected ${seedsOn0701.length} active templates on ${NEW_SCHEDULE_START_DATE}, got ${active0701.length}`,
       )
+    }
+    const names = active0701.map((r) => r.anchorName).sort()
+    if (names.join(',') !== '子杰,小白,飞云') {
+      throw new Error(`[repair-schedule-20260701] unexpected anchors on 7.1: ${names.join(',')}`)
     }
 
     const manualOld = await prisma.anchorDailySchedule.count({

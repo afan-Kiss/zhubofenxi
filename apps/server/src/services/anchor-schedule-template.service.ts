@@ -32,7 +32,10 @@ export interface ScheduleTemplateSeed {
   note?: string
 }
 
-/** 2026-07-01 起生效的新固定排班（5 行） */
+/**
+ * 2026-07-01 起正式长期排班（不含橙橙：橙橙仅为 7.17 一日试播，不走默认模板）。
+ * 小白 7.1 起改挂和田雅玉早场；XY 午场长期模板已结束。
+ */
 export const NEW_SCHEDULE_TEMPLATE_SEEDS_20260701: ScheduleTemplateSeed[] = [
   {
     anchorName: '子杰',
@@ -46,27 +49,15 @@ export const NEW_SCHEDULE_TEMPLATE_SEEDS_20260701: ScheduleTemplateSeed[] = [
     note: '早场·拾玉居和田玉',
   },
   {
-    anchorName: '小红',
+    anchorName: '小白',
     shopName: '和田雅玉',
     liveRoomName: '和田雅玉',
     startTime: '09:30',
     endTime: '14:00',
     effectiveFrom: NEW_SCHEDULE_START_DATE,
-    // 已离职：种子不得再以 open-ended 复活模板
-    effectiveTo: '2026-07-16',
+    effectiveTo: null,
     sortOrder: 20,
     note: '早场·和田雅玉',
-  },
-  {
-    anchorName: '小白',
-    shopName: 'XY祥钰珠宝',
-    liveRoomName: 'XY祥钰珠宝',
-    startTime: '14:00',
-    endTime: '18:30',
-    effectiveFrom: NEW_SCHEDULE_START_DATE,
-    effectiveTo: null,
-    sortOrder: 30,
-    note: '午场·XY祥钰珠宝',
   },
   {
     /** 与 Anchor.effectiveFrom=2026-07-16 对齐；此前 XY 早场无固定主播 */
@@ -81,28 +72,6 @@ export const NEW_SCHEDULE_TEMPLATE_SEEDS_20260701: ScheduleTemplateSeed[] = [
     note: '早场·XY祥钰珠宝',
   },
   {
-    anchorName: '小艺',
-    shopName: '和田雅玉',
-    liveRoomName: '和田雅玉',
-    startTime: '14:00',
-    endTime: '18:30',
-    effectiveFrom: NEW_SCHEDULE_START_DATE,
-    effectiveTo: '2026-07-16',
-    sortOrder: 40,
-    note: '午场·和田雅玉',
-  },
-  {
-    anchorName: '橙橙',
-    shopName: '和田雅玉',
-    liveRoomName: '和田雅玉',
-    startTime: '09:30',
-    endTime: '18:30',
-    effectiveFrom: '2026-07-17',
-    effectiveTo: null,
-    sortOrder: 45,
-    note: '和田雅玉·橙橙',
-  },
-  {
     anchorName: '飞云',
     shopName: '拾玉居和田玉',
     liveRoomName: '拾玉居和田玉',
@@ -112,6 +81,50 @@ export const NEW_SCHEDULE_TEMPLATE_SEEDS_20260701: ScheduleTemplateSeed[] = [
     effectiveTo: null,
     sortOrder: 50,
     note: '晚场·拾玉居和田玉',
+  },
+]
+
+/** 已废弃、须截断保留历史的旧 7 月模板（禁止再 open-ended 复活） */
+export const OBSOLETE_JULY_SCHEDULE_TEMPLATE_CUTOFFS: Array<{
+  anchorName: string
+  shopName: string
+  startTime: string
+  effectiveFrom: string
+  /** 截断后不再对 >= 次日生效；用 CUTOFF 表示 7.1 前结束 */
+  effectiveTo: string
+  noteSuffix: string
+}> = [
+  {
+    anchorName: '小白',
+    shopName: 'XY祥钰珠宝',
+    startTime: '14:00',
+    effectiveFrom: NEW_SCHEDULE_START_DATE,
+    effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
+    noteSuffix: '（已截断：小白 7.1 起改挂和田雅玉早场）',
+  },
+  {
+    anchorName: '小红',
+    shopName: '和田雅玉',
+    startTime: '09:30',
+    effectiveFrom: NEW_SCHEDULE_START_DATE,
+    effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
+    noteSuffix: '（已截断：7.1 起和田早场归小白）',
+  },
+  {
+    anchorName: '小艺',
+    shopName: '和田雅玉',
+    startTime: '14:00',
+    effectiveFrom: NEW_SCHEDULE_START_DATE,
+    effectiveTo: NEW_SCHEDULE_CUTOFF_DATE,
+    noteSuffix: '（已截断：7.1 起和田午场无固定长期主播）',
+  },
+  {
+    anchorName: '橙橙',
+    shopName: '和田雅玉',
+    startTime: '09:30',
+    effectiveFrom: '2026-07-17',
+    effectiveTo: '2026-07-17',
+    noteSuffix: '（已截断：橙橙仅为 7.17 试播日，禁止长期模板）',
   },
 ]
 
@@ -264,7 +277,10 @@ function isNewScheduleTemplateRow(
   )
 }
 
-export async function upsertScheduleTemplateSeed(seed: ScheduleTemplateSeed): Promise<'created' | 'updated' | 'unchanged'> {
+export async function upsertScheduleTemplateSeed(
+  seed: ScheduleTemplateSeed,
+  options?: { force?: boolean },
+): Promise<'created' | 'updated' | 'unchanged'> {
   const existing = await prisma.anchorScheduleTemplate.findFirst({
     where: {
       anchorName: seed.anchorName,
@@ -292,7 +308,30 @@ export async function upsertScheduleTemplateSeed(seed: ScheduleTemplateSeed): Pr
     return 'created'
   }
 
-  // 已有行不再被种子静默覆盖（设置页可手改主播/班次/直播间；强制修复走 repair 脚本）
+  // 已有行：repair 强制对齐种子字段；日常 ensure 不覆盖手改
+  if (options?.force) {
+    const same =
+      existing.liveRoomName === seed.liveRoomName &&
+      existing.endTime === seed.endTime &&
+      existing.effectiveTo === seed.effectiveTo &&
+      existing.enabled === true &&
+      existing.sortOrder === seed.sortOrder &&
+      (existing.note ?? null) === (seed.note ?? null)
+    if (same) return 'unchanged'
+    await prisma.anchorScheduleTemplate.update({
+      where: { id: existing.id },
+      data: {
+        liveRoomName: seed.liveRoomName,
+        endTime: seed.endTime,
+        effectiveTo: seed.effectiveTo,
+        enabled: true,
+        sortOrder: seed.sortOrder,
+        note: seed.note ?? null,
+        updatedAt: new Date(),
+      },
+    })
+    return 'updated'
+  }
   return 'unchanged'
 }
 
@@ -345,10 +384,18 @@ export async function repairScheduleTemplatesFrom20260701(options?: {
   }
 
   const upserted = { created: 0, updated: 0, unchanged: 0 }
-  for (const seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
-    if (dryRun) continue
-    const result = await upsertScheduleTemplateSeed(seed)
-    upserted[result] += 1
+  if (!dryRun) {
+    await truncateObsoleteJulyScheduleTemplates()
+    for (const seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
+      const result = await upsertScheduleTemplateSeed(seed, { force: true })
+      upserted[result] += 1
+    }
+    await ensureXiaobaiHetianMorningTemplateAlive()
+  } else {
+    for (const _seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
+      void _seed
+      upserted.unchanged += 1
+    }
   }
 
   const manualSchedulesKept = dryRun
@@ -412,51 +459,52 @@ export async function ensureScheduleTemplatesSeeded(): Promise<void> {
   for (const seed of DEFAULT_SCHEDULE_TEMPLATE_SEEDS) {
     await upsertScheduleTemplateSeed(seed)
   }
-  // 兜底：种子里小白只在 XY 午场；若库里仍有「小白·和田雅玉」开放模板，停用以免系统自动排出两场
-  await disableInvalidXiaobaiHetianMorningTemplates()
-  // 误停用 / 误修脚本可能导致 XY 午场消失；在职时自动恢复开放区间模板
-  await ensureXiaobaiXyAfternoonTemplateAlive()
+  // 截断错误长期模板（XY 午场 / 橙橙 open-ended / 小红小艺 7 月行）
+  await truncateObsoleteJulyScheduleTemplates()
+  // 保证小白·和田雅玉早场默认模板可用
+  await ensureXiaobaiHetianMorningTemplateAlive()
 }
 
-/** 错误默认模板：小白挂在和田雅玉早场且未结束，会与 XY 午场叠加 */
-async function disableInvalidXiaobaiHetianMorningTemplates(): Promise<void> {
-  const bad = await prisma.anchorScheduleTemplate.findMany({
-    where: {
-      enabled: true,
-      anchorName: '小白',
-      shopName: '和田雅玉',
-      startTime: '09:30',
-      OR: [{ effectiveTo: null }, { effectiveTo: { gte: '2026-07-17' } }],
-    },
-  })
-  for (const row of bad) {
-    const inSeeds = DEFAULT_SCHEDULE_TEMPLATE_SEEDS.some(
-      (s) =>
-        s.anchorName === row.anchorName &&
-        s.shopName === row.shopName &&
-        s.startTime === row.startTime &&
-        s.effectiveFrom === row.effectiveFrom,
-    )
-    if (inSeeds) continue
-    await prisma.anchorScheduleTemplate.update({
-      where: { id: row.id },
-      data: {
-        enabled: false,
-        note: `${row.note ?? ''}（系统停用：小白不得默认挂在和田雅玉早场）`.trim(),
-        updatedAt: new Date(),
+/** 截断已废弃的 7 月错误模板，保留历史可追溯（不物理删除） */
+async function truncateObsoleteJulyScheduleTemplates(): Promise<void> {
+  for (const cut of OBSOLETE_JULY_SCHEDULE_TEMPLATE_CUTOFFS) {
+    const rows = await prisma.anchorScheduleTemplate.findMany({
+      where: {
+        anchorName: cut.anchorName,
+        shopName: cut.shopName,
+        startTime: cut.startTime,
+        effectiveFrom: cut.effectiveFrom,
       },
     })
+    for (const row of rows) {
+      const needsTruncate =
+        row.effectiveTo == null || row.effectiveTo > cut.effectiveTo || row.enabled
+      if (!needsTruncate && row.effectiveTo === cut.effectiveTo) continue
+      // 橙橙：截断到试播当日后禁用，避免虚排长期出场
+      const disable =
+        cut.anchorName === '橙橙' ||
+        (cut.anchorName === '小白' && cut.shopName === 'XY祥钰珠宝') ||
+        cut.anchorName === '小红' ||
+        cut.anchorName === '小艺'
+      await prisma.anchorScheduleTemplate.update({
+        where: { id: row.id },
+        data: {
+          effectiveTo: cut.effectiveTo,
+          enabled: disable ? false : row.enabled,
+          note: `${row.note ?? ''}${cut.noteSuffix}`.trim(),
+          updatedAt: new Date(),
+        },
+      })
+    }
   }
 }
 
 /**
- * 小白在职时，保证「XY祥钰珠宝 14:00-18:30」默认模板可用。
- * 仅恢复 effectiveTo 仍开放（null 或未结束）却被 enabled=false 的行；
- * 设置页删除并已截断 effectiveTo 的，不复活。
+ * 小白在职时，保证「和田雅玉 09:30-14:00」默认模板可用（7.1 起正式长期）。
  */
-async function ensureXiaobaiXyAfternoonTemplateAlive(): Promise<void> {
+async function ensureXiaobaiHetianMorningTemplateAlive(): Promise<void> {
   const seed = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.find(
-    (s) => s.anchorName === '小白' && s.shopName === 'XY祥钰珠宝' && s.startTime === '14:00',
+    (s) => s.anchorName === '小白' && s.shopName === '和田雅玉' && s.startTime === '09:30',
   )
   if (!seed) return
 
@@ -477,49 +525,15 @@ async function ensureXiaobaiXyAfternoonTemplateAlive(): Promise<void> {
   const { isAnchorEffectiveOnDate } = await import('../utils/anchor-effective-date.util')
   if (!isAnchorEffectiveOnDate(xiaobai, dateKey)) return
 
-  const enabledRows = await prisma.anchorScheduleTemplate.findMany({
-    where: {
-      enabled: true,
-      shopName: 'XY祥钰珠宝',
-      startTime: '14:00',
-      OR: [{ anchorId: xiaobai.id }, { anchorName: '小白' }],
-    },
-  })
-  const active = enabledRows.find((t) =>
-    templateAppliesOnDate(
-      {
-        anchorName: t.anchorName,
-        shopName: t.shopName,
-        liveRoomName: t.liveRoomName,
-        startTime: t.startTime,
-        endTime: t.endTime,
-        effectiveFrom: t.effectiveFrom,
-        effectiveTo: t.effectiveTo,
-        sortOrder: t.sortOrder,
-      },
-      dateKey,
-    ),
-  )
-  if (active) {
-    if (active.anchorId !== xiaobai.id || active.anchorName !== '小白') {
-      await prisma.anchorScheduleTemplate.update({
-        where: { id: active.id },
-        data: { anchorId: xiaobai.id, anchorName: '小白', updatedAt: new Date() },
-      })
-    }
-    return
-  }
-
   const existing = await prisma.anchorScheduleTemplate.findFirst({
     where: {
       anchorName: '小白',
-      shopName: 'XY祥钰珠宝',
-      startTime: '14:00',
+      shopName: '和田雅玉',
+      startTime: '09:30',
       effectiveFrom: seed.effectiveFrom,
     },
   })
   if (existing) {
-    // 已截断到今日之前：视为设置页主动移除，不复活
     if (existing.effectiveTo && existing.effectiveTo < dateKey) return
     await prisma.anchorScheduleTemplate.update({
       where: { id: existing.id },

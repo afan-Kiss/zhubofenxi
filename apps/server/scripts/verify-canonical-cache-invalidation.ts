@@ -12,7 +12,7 @@ function main() {
   console.log('verify-canonical-cache-invalidation')
   assert.match(
     CANONICAL_ATTRIBUTION_VERSION,
-    /^canonical-v7-create-time-only-no-pay-fallback-2026-07-27$/,
+    /^canonical-v8-xiaobai-hetian-morning-chengcheng-trial-2026-07-27$/,
   )
   assert.ok(BUSINESS_CACHE_FINGERPRINT.includes(CANONICAL_ATTRIBUTION_VERSION))
   assert.ok(!BUSINESS_CACHE_FINGERPRINT.includes('canonical-v5-offboard-date-2026-07-19'))

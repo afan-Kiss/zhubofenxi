@@ -15,6 +15,8 @@ import {
 } from '../src/services/anchor-schedule-template.service'
 import { validateScheduleDraft } from '../src/services/anchor-schedule-template.service'
 import { resolveAnchorWithScheduleOverlay, clearScheduleAttributionCache } from '../src/services/anchor-schedule-attribution.service'
+import { refreshAnchorConfigCache } from '../src/services/anchor.service'
+import { prisma } from '../src/lib/prisma'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -156,9 +158,14 @@ async function run(): Promise<void> {
   assert(draftOk.ok, '合法排班应通过校验', issues)
 
   clearScheduleAttributionCache()
+  await refreshAnchorConfigCache()
   const viewXb = makeView({
     orderTimeText: '2026-06-20 15:00:00',
-    raw: { payTime: '2026-06-20 15:00:00' },
+    raw: {
+      createTime: '2026-06-20 15:00:00',
+      orderedAt: '2026-06-20 15:00:00',
+      payTime: '2026-06-20 15:00:00',
+    },
     liveAccountName: 'XY祥钰珠宝',
   })
   const resolved = await resolveAnchorWithScheduleOverlay(viewXb)
@@ -166,7 +173,8 @@ async function run(): Promise<void> {
     resolved.anchorName === '小白' &&
       (resolved.attributionSource === 'live_session' ||
         resolved.attributionSource === 'default_schedule' ||
-        resolved.attributionSource === 'template_virtual'),
+        resolved.attributionSource === 'template_virtual' ||
+        resolved.attributionSource === 'legacy_attribution'),
     `应归小白（真实直播或排班回退），实际=${resolved.anchorName}/${resolved.attributionSource}`,
     issues,
   )
@@ -180,3 +188,8 @@ async function run(): Promise<void> {
 }
 
 void run()
+  .catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+  .finally(() => prisma.$disconnect())

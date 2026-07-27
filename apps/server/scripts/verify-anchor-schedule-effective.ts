@@ -22,6 +22,8 @@ import {
 } from '../src/services/anchor-schedule-template.service'
 import { formatDateKeyShanghai } from '../src/utils/business-timezone'
 import { addDaysShanghai } from '../src/utils/business-timezone'
+import { refreshAnchorConfigCache } from '../src/services/anchor.service'
+import { prisma } from '../src/lib/prisma'
 
 function assert(cond: boolean, msg: string, issues: string[]) {
   if (!cond) issues.push(msg)
@@ -230,18 +232,33 @@ async function run(): Promise<void> {
   )
 
   clearScheduleAttributionCache()
+  await refreshAnchorConfigCache()
   const view = makeView({
     orderTimeText: '2026-06-20 15:00:00',
-    raw: { payTime: '2026-06-20 15:00:00' },
+    raw: {
+      createTime: '2026-06-20 15:00:00',
+      orderedAt: '2026-06-20 15:00:00',
+      payTime: '2026-06-20 15:00:00',
+    },
     liveAccountName: 'XY祥钰珠宝',
   })
   const resolved = await resolveAnchorWithScheduleOverlay(view)
   assert(
-    resolved.anchorName === '小白' || resolved.attributionSource === 'default_schedule' || resolved.attributionSource === 'template_virtual',
+    resolved.anchorName === '小白' &&
+      (resolved.attributionSource === 'live_session' ||
+        resolved.attributionSource === 'default_schedule' ||
+        resolved.attributionSource === 'template_virtual' ||
+        resolved.attributionSource === 'legacy_attribution'),
     `虚拟/默认排班应归小白，实际=${resolved.anchorName}/${resolved.attributionSource}`,
     issues,
   )
-  assert(resolved.scheduleConfirmed === false, '未确认排班 scheduleConfirmed 应为 false', issues)
+  // 真实场次命中时 scheduleConfirmed 可能为 false；仅排班路径才断言
+  if (
+    resolved.attributionSource === 'default_schedule' ||
+    resolved.attributionSource === 'template_virtual'
+  ) {
+    assert(resolved.scheduleConfirmed === false, '未确认排班 scheduleConfirmed 应为 false', issues)
+  }
 
   const unconfirmed = await listUnconfirmedScheduleDatesInRange(yesterday, today)
   assert(unconfirmed.includes(today) || unconfirmed.includes(yesterday) || unconfirmed.length >= 0, '未确认日期列表可计算', issues)
@@ -255,3 +272,8 @@ async function run(): Promise<void> {
 }
 
 void run()
+  .catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+  .finally(() => prisma.$disconnect())

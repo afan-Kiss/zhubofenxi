@@ -55,8 +55,8 @@ const NEW_SCHEDULES: EffectiveScheduleRow[] = [
     note: '早场·拾玉居和田玉',
   }),
   row({
-    rowId: 'xiaohong',
-    anchorName: '小红',
+    rowId: 'xiaobai',
+    anchorName: '小白',
     shopName: '和田雅玉',
     liveRoomName: '和田雅玉',
     startTime: '09:30',
@@ -66,19 +66,8 @@ const NEW_SCHEDULES: EffectiveScheduleRow[] = [
     note: '早场·和田雅玉',
   }),
   row({
-    rowId: 'xiaobai',
-    anchorName: '小白',
-    shopName: 'XY祥钰珠宝',
-    liveRoomName: 'XY祥钰珠宝',
-    startTime: '14:00',
-    endTime: '18:30',
-    startAt: '2026-07-01T14:00:00+08:00',
-    endAt: '2026-07-01T18:30:00+08:00',
-    note: '午场·XY祥钰珠宝',
-  }),
-  row({
-    rowId: 'xiaoyi',
-    anchorName: '小艺',
+    rowId: 'noon-slot',
+    anchorName: '临时代班',
     shopName: '和田雅玉',
     liveRoomName: '和田雅玉',
     startTime: '14:00',
@@ -102,24 +91,35 @@ const NEW_SCHEDULES: EffectiveScheduleRow[] = [
 
 const templates0630 = DEFAULT_SCHEDULE_TEMPLATE_SEEDS.filter((seed) => templateAppliesOnDate(seed, '2026-06-30'))
 assert.ok(templates0630.length >= 5, '2026-06-30 legacy templates')
+const july1Seeds = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.filter((seed) =>
+  templateAppliesOnDate(seed, NEW_SCHEDULE_START_DATE),
+)
+const july2Seeds = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.filter((seed) =>
+  templateAppliesOnDate(seed, '2026-07-02'),
+)
+const july16Seeds = NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.filter((seed) =>
+  templateAppliesOnDate(seed, '2026-07-16'),
+)
+assert.equal(july1Seeds.length, 3, '2026-07-01 formal seeds（不含小小）')
+assert.equal(july2Seeds.length, 3, '2026-07-02 formal seeds（不含小小）')
+assert.equal(july16Seeds.length, 4, '2026-07-16 formal seeds（含小小）')
 assert.equal(
   DEFAULT_SCHEDULE_TEMPLATE_SEEDS.filter((seed) => templateAppliesOnDate(seed, NEW_SCHEDULE_START_DATE)).length,
-  NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.length,
+  july1Seeds.length,
   '2026-07-01 template count',
 )
 assert.equal(
-  DEFAULT_SCHEDULE_TEMPLATE_SEEDS.filter((seed) => templateAppliesOnDate(seed, '2026-07-02')).length,
-  NEW_SCHEDULE_TEMPLATE_SEEDS_20260701.length,
-  '2026-07-02 template count',
+  DEFAULT_SCHEDULE_TEMPLATE_SEEDS.filter((seed) => templateAppliesOnDate(seed, '2026-07-16')).length,
+  july16Seeds.length,
+  '2026-07-16 template count',
 )
 console.log('[verify-anchor-attendance] PASS default-templates-by-date')
 
 const SESSION_CASES: Array<{ anchor: string; shop: string; expect: string; schedule: EffectiveScheduleRow }> = [
   { anchor: '子杰', shop: '拾玉居和田玉', expect: '早场·拾玉居和田玉', schedule: NEW_SCHEDULES[0]! },
-  { anchor: '小红', shop: '和田雅玉', expect: '早场·和田雅玉', schedule: NEW_SCHEDULES[1]! },
-  { anchor: '小白', shop: 'XY祥钰珠宝', expect: '午场·XY祥钰珠宝', schedule: NEW_SCHEDULES[2]! },
-  { anchor: '小艺', shop: '和田雅玉', expect: '午场·和田雅玉', schedule: NEW_SCHEDULES[3]! },
-  { anchor: '飞云', shop: '拾玉居和田玉', expect: '晚场·拾玉居和田玉', schedule: NEW_SCHEDULES[4]! },
+  { anchor: '小白', shop: '和田雅玉', expect: '早场·和田雅玉', schedule: NEW_SCHEDULES[1]! },
+  { anchor: '临时代班', shop: '和田雅玉', expect: '午场·和田雅玉', schedule: NEW_SCHEDULES[2]! },
+  { anchor: '飞云', shop: '拾玉居和田玉', expect: '晚场·拾玉居和田玉', schedule: NEW_SCHEDULES[3]! },
 ]
 
 for (const { anchor, shop, expect: expectLabel, schedule } of SESSION_CASES) {
@@ -131,10 +131,9 @@ for (const { anchor, shop, expect: expectLabel, schedule } of SESSION_CASES) {
 }
 
 const zijie = NEW_SCHEDULES[0]!
-const xiaohong = NEW_SCHEDULES[1]!
-const xiaobai = NEW_SCHEDULES[2]!
-const xiaoyi = NEW_SCHEDULES[3]!
-const feiyun = NEW_SCHEDULES[4]!
+const xiaobai = NEW_SCHEDULES[1]!
+const noonSlot = NEW_SCHEDULES[2]!
+const feiyun = NEW_SCHEDULES[3]!
 
 runCase(
   'zijie-late-early',
@@ -154,9 +153,9 @@ runCase(
 )
 
 runCase(
-  'xiaohong-on-time',
+  'xiaobai-on-time',
   calculateAnchorLivePeriodStatus(
-    xiaohong,
+    xiaobai,
     Date.parse('2026-07-01T09:30:00+08:00'),
     '2026-07-01T09:30:00+08:00',
     Date.parse('2026-07-01T14:00:00+08:00'),
@@ -173,22 +172,22 @@ runCase(
   'xiaobai-late-early',
   calculateAnchorLivePeriodStatus(
     xiaobai,
-    Date.parse('2026-07-01T14:10:00+08:00'),
-    '2026-07-01T14:10:00+08:00',
-    Date.parse('2026-07-01T18:00:00+08:00'),
-    '2026-07-01T18:00:00+08:00',
+    Date.parse('2026-07-01T09:40:00+08:00'),
+    '2026-07-01T09:40:00+08:00',
+    Date.parse('2026-07-01T13:50:00+08:00'),
+    '2026-07-01T13:50:00+08:00',
   ),
   {
     hasSchedule: true,
-    actualStartText: '14:10',
-    actualEndText: '18:00',
+    actualStartText: '09:40',
+    actualEndText: '13:50',
   },
 )
 
 runCase(
-  'xiaoyi-early-only',
+  'noon-slot-early-only',
   calculateAnchorLivePeriodStatus(
-    xiaoyi,
+    noonSlot,
     Date.parse('2026-07-01T13:58:00+08:00'),
     '2026-07-01T13:58:00+08:00',
     Date.parse('2026-07-01T18:20:00+08:00'),
@@ -314,7 +313,8 @@ const legacyAfternoon = row({
   note: '午场·XY祥钰',
 })
 assert.equal(deriveSessionLabelFromSchedule(legacyAfternoon, '2026-06-30'), '下午场', 'legacy 午场 -> 下午场')
-assert.equal(deriveSessionLabelFromSchedule(xiaobai, NEW_SCHEDULE_START_DATE), '午场', 'new 午场 label')
+assert.equal(deriveSessionLabelFromSchedule(noonSlot, NEW_SCHEDULE_START_DATE), '午场', 'new 午场 label')
+assert.equal(deriveSessionLabelFromSchedule(xiaobai, NEW_SCHEDULE_START_DATE), '早场', '小白 7.1 早场 label')
 console.log('[verify-anchor-attendance] PASS legacy-vs-new-session-label')
 
 const sessions = [

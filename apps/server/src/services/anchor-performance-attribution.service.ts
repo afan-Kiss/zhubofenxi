@@ -16,6 +16,7 @@ import {
   XIAOBAI_ANCHOR_CUTOFF_MS,
 } from './anchor-session-cutoff.util'
 import { resolveXiaoBaiSlotMinutesForDate } from './anchor-xiaobai-slot.util'
+import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
 import {
   normalizeShopSessionKey,
   resolveLiveSessionPeriod,
@@ -69,9 +70,9 @@ export const ANCHOR_SESSION_DISPLAY_FROM_0613: Record<
   小红: { sessionLabel: '早场·和田雅玉', shopName: '和田雅玉' },
   飞云: { sessionLabel: '晚场·拾玉居和田玉', shopName: '拾玉居和田玉' },
   小艺: { sessionLabel: '晚场·和田雅玉', shopName: '和田雅玉' },
-  小白: { sessionLabel: '午场·XY祥钰珠宝', shopName: 'XY祥钰珠宝' },
-  /** 2026-07-17 起接手和田雅玉（接替小红/小艺） */
-  橙橙: { sessionLabel: '和田雅玉', shopName: '和田雅玉' },
+  小白: { sessionLabel: '早场·和田雅玉', shopName: '和田雅玉' },
+  /** 2026-07-17 一日试播（非长期正式主播） */
+  橙橙: { sessionLabel: '试播·和田雅玉', shopName: '和田雅玉' },
   小小: { sessionLabel: '早场·XY祥钰珠宝', shopName: 'XY祥钰珠宝' },
 }
 
@@ -90,8 +91,8 @@ export function isReportDateOnOrAfterXiaoBaiCutoff(startDate: string): boolean {
 }
 
 /**
- * 6.18 起：仅 XY祥钰珠宝 午场 → 小白（不含普通祥钰 / 拾玉居 / 和田雅玉）。
- * 第二参必须为下单时间 ms；禁止用支付时间。
+ * 6.18～6.30：仅 XY祥钰珠宝 午场 → 小白。
+ * 7.1 起小白改挂和田雅玉早场，本专用路径关闭，改走排班/固定回退。
  */
 export function isXiaoBaiOrderAttribution(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
@@ -99,10 +100,11 @@ export function isXiaoBaiOrderAttribution(
 ): boolean {
   if (!isXiaoBaiAttributionActive(orderCreateMs)) return false
   if (!isInXiaoBaiOrderSlot(new Date(orderCreateMs))) return false
+  const dateKey = formatDateKeyShanghai(new Date(orderCreateMs))
+  if (dateKey >= ANCHOR_NEW_SCHEDULE_START_DATE) return false
   const liveAccountName =
     (view.liveAccountName ?? '').trim() || pickLiveAccountFromRaw(view.raw)
   const key = normalizeShopSessionKey(liveAccountName)
-  // 6.18～今：订单/场次/日报时长一律仅 XY祥钰珠宝，禁止与普通祥钰交叉
   return key === 'xyxiangyu'
 }
 
@@ -118,7 +120,7 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-/** 直播场次与当日小白午场有交集（6月 14:30–18:00 / 7月起 14:00–18:30） */
+/** 直播场次与当日小白时段有交集（6月 XY 14:30–18:00 / 7月起和田早场 09:30–14:00） */
 export function sessionOverlapsXiaoBaiSlot(startMs: number, endMs: number): boolean {
   if (!Number.isFinite(startMs) || startMs < XIAOBAI_ANCHOR_CUTOFF_MS) return false
   const { slotStartMs, slotEndMs } = resolveXiaoBaiSlotBoundsMs(startMs)

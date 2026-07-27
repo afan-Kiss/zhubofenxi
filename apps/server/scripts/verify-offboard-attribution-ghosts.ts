@@ -1,5 +1,6 @@
 /**
  * 离职后幽灵主播归属验收（7 场景）
+ * 与正式规则对齐：7.1 起和田早场固定回退→小白；橙橙仅 7.17 一日试播、不进固定回退。
  * npx tsx apps/server/scripts/verify-offboard-attribution-ghosts.ts
  */
 import assert from 'node:assert/strict'
@@ -23,7 +24,8 @@ import type { AnchorConfig } from '../src/types/analysis'
 import { CANONICAL_ATTRIBUTION_VERSION } from '../src/services/business-cache-fingerprint'
 
 const OFFBOARD_TO = '2026-07-16'
-const AFTER = '2026-07-17'
+const TRIAL = '2026-07-17'
+const AFTER = '2026-07-18'
 const TODAY = '2026-07-19'
 
 function buildConfig(): AnchorConfig {
@@ -51,10 +53,10 @@ function buildConfig(): AnchorConfig {
         id: 'a-chengcheng',
         name: '橙橙',
         color: '#00f',
-        enabled: true,
+        enabled: false,
         attributionMode: 'schedule',
-        effectiveFrom: AFTER,
-        effectiveTo: null,
+        effectiveFrom: TRIAL,
+        effectiveTo: TRIAL,
       },
       {
         id: 'a-xiaobai',
@@ -100,17 +102,20 @@ function main() {
   console.log('verify-offboard-attribution-ghosts\n')
   seedOffboarded()
 
-  // 1) 店铺场次：离职次日和田雅玉早场不得归小红，应归橙橙（或未命中软删）
-  assert.equal(resolveShopSessionAnchorName('hetian', 'morning', AFTER), '橙橙')
-  const shopAfter = resolveShopSessionAnchorFromLiveAccount(
+  // 1) 店铺场次：离职次日和田雅玉早场不得归小红，应归小白；橙橙不进固定回退
+  assert.equal(resolveShopSessionAnchorName('hetian', 'morning', TRIAL), '小白')
+  assert.equal(resolveShopSessionAnchorName('hetian', 'morning', AFTER), '小白')
+  const shopTrial = resolveShopSessionAnchorFromLiveAccount(
     '和田雅玉',
-    new Date(`${AFTER}T10:00:00+08:00`),
+    new Date(`${TRIAL}T10:00:00+08:00`),
   )
-  assert.equal(shopAfter?.anchorName, '橙橙')
-  assert.equal(isAnchorAutoAttributableOnDate('小红', AFTER), false)
-  console.log('  ✓ 1 店铺场次：离职次日不归小红，归橙橙')
+  assert.equal(shopTrial?.anchorName, '小白')
+  assert.equal(isAnchorAutoAttributableOnDate('小红', TRIAL), false)
+  assert.equal(isAnchorAutoAttributableOnDate('橙橙', TRIAL), true)
+  assert.equal(isAnchorAutoAttributableOnDate('橙橙', AFTER), false)
+  console.log('  ✓ 1 店铺场次：离职后和田早场→小白；橙橙仅试播日可归因')
 
-  // 2) 离职当天仍可自动归属（含软删 + enabled=false）
+  // 2) 离职当天仍可自动归属（含软删 + enabled=false）；固定回退仍归小白（非小红）
   assert.equal(isAnchorEffectiveOnDate({ effectiveTo: OFFBOARD_TO, enabled: false }, OFFBOARD_TO), true)
   assert.equal(isAnchorAutoAttributableOnDate('小红', OFFBOARD_TO), true)
   assert.equal(isAnchorAutoAttributableOnDate('小艺', OFFBOARD_TO), true)
@@ -118,25 +123,21 @@ function main() {
     '和田雅玉',
     new Date(`${OFFBOARD_TO}T10:30:00+08:00`),
   )
-  assert.equal(shopLastDay?.anchorName, '小红')
-  assert.equal(shopLastDay?.anchorId, 'a-xiaohong')
-  console.log('  ✓ 2 离职当天（含软删）仍可店铺场次归属')
+  assert.equal(shopLastDay?.anchorName, '小白')
+  assert.equal(shopLastDay?.anchorId, 'a-xiaobai')
+  console.log('  ✓ 2 离职当天小红仍可归因；和田早场固定回退仍→小白')
 
-  // 3) 晚场小艺：离职次日禁止
-  assert.equal(isAnchorAutoAttributableOnDate('小艺', AFTER), false)
+  // 3) 晚场：7.1 起和田无固定回退；离职次日禁止小艺
+  assert.equal(isAnchorAutoAttributableOnDate('小艺', TRIAL), false)
+  assert.equal(resolveShopSessionAnchorName('hetian', 'evening', TRIAL), null)
   const eveAfter = resolveShopSessionAnchorFromLiveAccount(
     '和田雅玉',
-    new Date(`${AFTER}T20:00:00+08:00`),
+    new Date(`${TRIAL}T20:00:00+08:00`),
   )
-  assert.equal(eveAfter?.anchorName, '橙橙')
-  const eveLast = resolveShopSessionAnchorFromLiveAccount(
-    '和田雅玉',
-    new Date(`${OFFBOARD_TO}T20:00:00+08:00`),
-  )
-  assert.equal(eveLast?.anchorName, '小艺')
-  console.log('  ✓ 3 晚场：离职当天小艺 / 次日橙橙')
+  assert.equal(eveAfter, null)
+  console.log('  ✓ 3 和田晚场无固定回退；离职后小艺不可归因')
 
-  // 4) 空卡：离职次日不补小红/小艺
+  // 4) 空卡：离职后不补小红/小艺；橙橙仅试播日有空卡；今日补小白
   assert.equal(
     shouldPadEmptyAnchorSlot(
       { enabled: false, effectiveFrom: '2026-01-01', effectiveTo: OFFBOARD_TO },
@@ -144,13 +145,19 @@ function main() {
     ),
     false,
   )
+  const paddedTrial = ensureAnchorPerformanceLeaderboardSlots([], TRIAL)
+  const trialNames = paddedTrial.map((r) => r.anchorName)
+  assert.ok(trialNames.includes('橙橙'), '试播日橙橙应有空卡')
+  assert.ok(trialNames.includes('小白'), '试播日小白应有空卡')
+
   const padded = ensureAnchorPerformanceLeaderboardSlots([], TODAY)
   const names = padded.map((r) => r.anchorName)
   assert.ok(!names.includes('小红'), `unexpected 小红 in ${names.join(',')}`)
   assert.ok(!names.includes('小艺'), `unexpected 小艺 in ${names.join(',')}`)
-  assert.ok(names.includes('橙橙'), '橙橙应有空卡')
+  assert.ok(!names.includes('橙橙'), '试播日后不得再补橙橙空卡')
+  assert.ok(names.includes('小白'), '小白应有空卡')
   assert.ok(!padded.some((r) => String(r.anchorId).startsWith('extra-')), '禁止 extra-*')
-  console.log('  ✓ 4 离职后不补小红/小艺空卡，无 extra-*')
+  console.log('  ✓ 4 空卡：试播日含橙橙；之后不含小红/小艺/橙橙')
 
   // 5) 历史日：区间重叠时保留业绩行
   assert.equal(
@@ -254,8 +261,11 @@ function main() {
   assert.ok(!afterOnly.some((r) => r.anchorName === '小红'), '完全离职后区间应隐藏小红')
   console.log('  ✓ 7 日期区间重叠过滤正确')
 
-  assert.equal(CANONICAL_ATTRIBUTION_VERSION, 'canonical-v5-offboard-date-2026-07-19')
-  console.log('  ✓ CANONICAL_ATTRIBUTION_VERSION bumped\n')
+  assert.match(
+    CANONICAL_ATTRIBUTION_VERSION,
+    /^canonical-v8-xiaobai-hetian-morning-chengcheng-trial-2026-07-27$/,
+  )
+  console.log('  ✓ CANONICAL_ATTRIBUTION_VERSION v8\n')
   console.log('ALL PASS')
   setAnchorConfigCacheForTests(null)
 }

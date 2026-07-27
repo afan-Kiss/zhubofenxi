@@ -20,7 +20,6 @@ export type LegacyLiveSessionPeriod = 'morning' | 'evening'
 export type NewLiveSessionPeriod = 'morning' | 'noon' | 'evening'
 
 const XIAOXIAO_XY_MORNING_START = '2026-07-16'
-const HETIAN_CHENGCHENG_START_DATE = '2026-07-17'
 
 export function normalizeShopSessionKey(liveAccountName: string): ShopSessionKey | null {
   const n = String(liveAccountName || '').trim()
@@ -105,7 +104,7 @@ export function resolveShopSessionFallbackForDate(
     }
   }
 
-  // 7.1 起：严格三班制
+  // 7.1 起：严格三班制（宁可未归属，不得猜主播；橙橙不走固定回退）
   const period = resolveNewLiveSessionPeriod(at)
   if (!period) return null
 
@@ -113,27 +112,14 @@ export function resolveShopSessionFallbackForDate(
   if (period === 'morning') {
     if (shopKey === 'shiyu') anchorName = '子杰'
     else if (shopKey === 'xyxiangyu' && dateKey >= XIAOXIAO_XY_MORNING_START) anchorName = '小小'
-    else if (shopKey === 'hetian') {
-      anchorName = dateKey >= HETIAN_CHENGCHENG_START_DATE ? '橙橙' : '小红'
-    }
+    else if (shopKey === 'hetian') anchorName = '小白'
     // 普通祥钰珠宝：7 月无固定早场回退
   } else if (period === 'noon') {
-    // 午场 XY → 小白（由专用规则处理）；此处仅和田雅玉
-    if (shopKey === 'hetian') {
-      anchorName = dateKey >= HETIAN_CHENGCHENG_START_DATE ? '橙橙' : '小艺'
-    }
-    // 午场仅 XY → 小白（专用规则）；普通祥钰午场无固定回退
-    if (shopKey === 'xyxiangyu') {
-      return null // 小白专用路径
-    }
-    if (shopKey === 'xiangyu') {
-      return null
-    }
+    // 和田/XY/普通祥钰午场：无固定回退 → 未归属
+    return null
   } else if (period === 'evening') {
     if (shopKey === 'shiyu') anchorName = '飞云'
-    else if (shopKey === 'hetian' && dateKey < HETIAN_CHENGCHENG_START_DATE) {
-      anchorName = '小艺'
-    }
+    // 和田晚场无固定回退
   }
 
   if (!anchorName) return null
@@ -167,6 +153,5 @@ export function resolveShopSessionAnchorName(
     return resolveShopSessionFallbackForDate(shopKey, ms)?.anchorName ?? null
   }
   if (period === 'noon') return null
-  if (shopKey === 'hetian' && dk && dk >= HETIAN_CHENGCHENG_START_DATE) return '橙橙'
   return LEGACY_MAP[period as LegacyLiveSessionPeriod][shopKey] ?? null
 }

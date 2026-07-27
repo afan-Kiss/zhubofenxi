@@ -184,9 +184,15 @@ function liveSessionMatchesAnchor(
     }
   } else if (startMs >= SHOP_SESSION_ANCHOR_CUTOFF_MS) {
     if (target.anchorName === '小白') {
-      if (!isXiaoBaiLiveSession(session)) return false
       const liveName = pickSessionLiveAccountName(session)
-      return normalizeShopSessionKey(liveName) === 'xyxiangyu'
+      const key = normalizeShopSessionKey(liveName)
+      const dateKey = formatDateKeyShanghai(new Date(startMs))
+      // 7.1 起：和田雅玉早场；6.18～6.30：XY 午场
+      if (dateKey >= ANCHOR_NEW_SCHEDULE_START_DATE) {
+        return key === 'hetian' && isXiaoBaiLiveSession(session)
+      }
+      if (!isXiaoBaiLiveSession(session)) return false
+      return key === 'xyxiangyu'
     }
     return sessionMatchesShopSessionRule(session, target)
   }

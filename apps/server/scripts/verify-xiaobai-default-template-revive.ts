@@ -1,5 +1,5 @@
 /**
- * 小白 XY 午场默认模板误停用后应自动恢复
+ * 小白·和田雅玉早场默认模板误停用后应自动恢复
  * npx tsx apps/server/scripts/verify-xiaobai-default-template-revive.ts
  */
 import assert from 'node:assert/strict'
@@ -34,12 +34,12 @@ async function main() {
   const tpl = await prisma.anchorScheduleTemplate.findFirst({
     where: {
       anchorName: '小白',
-      shopName: 'XY祥钰珠宝',
-      startTime: '14:00',
+      shopName: '和田雅玉',
+      startTime: '09:30',
       effectiveFrom: '2026-07-01',
     },
   })
-  assert.ok(tpl, '应存在小白 XY 14:00 种子模板行')
+  assert.ok(tpl, '应存在小白·和田雅玉 09:30 种子模板行')
 
   // 1) 仅 enabled=false、区间仍开放 → 应复活
   await prisma.anchorScheduleTemplate.update({
@@ -55,9 +55,9 @@ async function main() {
   const admin = await listCurrentDefaultTemplatesForAdmin(dateKey)
   assert.ok(
     admin.templates.some(
-      (t) => t.anchorName === '小白' && t.shopName === 'XY祥钰珠宝' && t.startTime === '14:00',
+      (t) => t.anchorName === '小白' && t.shopName === '和田雅玉' && t.startTime === '09:30',
     ),
-    '设置页当日默认排班应含小白 XY 午场',
+    '设置页当日默认排班应含小白·和田早场',
   )
 
   // 2) 设置页删除（截断 effectiveTo）→ 不应复活
@@ -93,29 +93,18 @@ async function main() {
       effectiveTo: null,
       anchorId: xiaobai.id,
       anchorName: '小白',
-      endTime: '18:30',
-      liveRoomName: 'XY祥钰珠宝',
-      note: '午场·XY祥钰珠宝',
-      sortOrder: 30,
+      endTime: '14:00',
+      liveRoomName: '和田雅玉',
+      shopName: '和田雅玉',
+      note: '早场·和田雅玉',
+      sortOrder: 20,
     },
   })
-  const restoredList = [
-    ...withoutXiaobai,
-    {
-      id: tpl.id,
-      anchorId: xiaobai.id,
-      anchorName: '小白',
-      shopName: 'XY祥钰珠宝',
-      liveRoomName: 'XY祥钰珠宝',
-      startTime: '14:00',
-      endTime: '18:30',
-      note: '午场·XY祥钰珠宝',
-      sortOrder: 30,
-    },
-  ]
+  await ensureScheduleTemplatesSeeded()
+  const restoredAdmin = await listCurrentDefaultTemplatesForAdmin(dateKey)
   await saveCurrentDefaultTemplates({
     asOfDate: dateKey,
-    templates: restoredList.map((t) => ({
+    templates: restoredAdmin.templates.map((t) => ({
       id: t.id,
       anchorId: t.anchorId,
       anchorName: t.anchorName,
@@ -128,14 +117,12 @@ async function main() {
     })),
   })
 
-  console.log('PASS verify-xiaobai-default-template-revive')
+  console.log('PASS')
 }
 
 main()
-  .catch((e) => {
-    console.error(e)
+  .catch((err) => {
+    console.error(err)
     process.exit(1)
   })
-  .finally(async () => {
-    await prisma.$disconnect()
-  })
+  .finally(() => prisma.$disconnect())

@@ -208,7 +208,22 @@ function testShopSessionAnchorRules(issues: string[]) {
   )
   assert(
     resolveShopSessionAnchorName('hetian', 'morning') === '小红',
-    '早场和田雅玉→小红',
+    '未传日期时和田早场兼容旧宽时段→小红',
+    issues,
+  )
+  assert(
+    resolveShopSessionAnchorName('hetian', 'morning', '2026-07-02') === '小白',
+    '7.1 起早场和田雅玉→小白',
+    issues,
+  )
+  assert(
+    resolveShopSessionAnchorName('hetian', 'morning', '2026-07-18') === '小白',
+    '7.18 和田早场仍归小白（非橙橙）',
+    issues,
+  )
+  assert(
+    resolveShopSessionAnchorName('hetian', 'noon', '2026-07-17') == null,
+    '7 月和田午场无固定回退',
     issues,
   )
   assert(
@@ -274,8 +289,8 @@ function testShopSessionAnchorRules(issues: string[]) {
 
   const emptySlots618 = ensureAnchorPerformanceLeaderboardSlots([], '2026-06-18')
   assert(
-    ANCHOR_SESSION_DISPLAY_FROM_0613['小白']?.shopName === 'XY祥钰珠宝',
-    '小白归属店铺应为 XY祥钰珠宝',
+    ANCHOR_SESSION_DISPLAY_FROM_0613['小白']?.shopName === '和田雅玉',
+    '小白归属店铺应为 和田雅玉',
     issues,
   )
 

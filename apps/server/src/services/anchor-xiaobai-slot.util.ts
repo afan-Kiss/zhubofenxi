@@ -15,10 +15,10 @@ export function resolveXiaoBaiSlotMinutesForDate(dateKey: string): {
   endMinutes: number
 } {
   if (dateKey >= ANCHOR_NEW_SCHEDULE_START_DATE) {
-    // 2026-07-01 起：14:00–18:30
-    return { startMinutes: 14 * 60, endMinutes: 18 * 60 + 30 }
+    // 2026-07-01 起小白正式早场：09:30–14:00（和田雅玉）；专用午场路径已关闭
+    return { startMinutes: 9 * 60 + 30, endMinutes: 14 * 60 }
   }
-  // 2026-06-18～06-30：14:30–18:00
+  // 2026-06-18～06-30：XY 午场 14:30–18:00
   return { startMinutes: 14 * 60 + 30, endMinutes: 18 * 60 }
 }
 

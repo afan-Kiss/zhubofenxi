@@ -389,7 +389,31 @@ async function main() {
   })
   if (down?.tone === 'negative') ok('分数下降生成红色公告')
   else fail('分数下降应生成 negative 公告')
+  if (down?.suggestion?.includes('品质分下降')) ok('分数下降公告附带改善建议')
+  else fail('分数下降应附带改善建议')
   if (down) await prisma.bossAnnouncement.delete({ where: { id: down.id } })
+
+  await createScoreChangeAnnouncements({
+    shop: { shopKey: 'shiyuju', shopName: '拾玉居和田玉' },
+    scoreDate: '2099-01-02',
+    previous: { ...prevSnapshot, id: 'verify-prev-2', scoreDate: '2099-01-01', qualityScore: 4.4 },
+    current: {
+      scoreDate: '2099-01-02',
+      qualityScore: 4.5,
+      logisticsScore: 4.6,
+      serviceScore: 4.7,
+      officialOverallScore: null,
+      raw: null,
+    },
+  })
+  const up = await prisma.bossAnnouncement.findFirst({
+    where: { dedupeKey: { startsWith: 'score:shiyuju:2099-01-02:qualityScore:' } },
+  })
+  if (up?.tone === 'positive') ok('分数上升生成绿色公告')
+  else fail('分数上升应生成 positive 公告')
+  if (up?.suggestion == null) ok('分数上升公告不写下降建议')
+  else fail(`分数上升不应附带下降建议：${up?.suggestion}`)
+  if (up) await prisma.bossAnnouncement.delete({ where: { id: up.id } })
 
   const preIncome = parseBossSellerPreIncome({
     data: { allAmount: '22618.67', sellerAccountAmount: '22618.67', alipayAmount: '0.00', wechatAmount: '0.00' },

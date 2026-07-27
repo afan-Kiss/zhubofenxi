@@ -51,7 +51,8 @@ export async function createScoreChangeAnnouncements(params: {
     const label = METRIC_LABELS[key] ?? key
     const tone = delta > 0 ? 'positive' : 'negative'
     const dedupeKey = `score:${params.shop.shopKey}:${params.scoreDate}:${key}:${current}`
-    const suggestion = SCORE_ADVICE[key] ?? null
+    // 仅下降时附带改善建议；上升公告不得写「xxx下降」文案
+    const suggestion = delta < 0 ? (SCORE_ADVICE[key] ?? null) : null
     await prisma.bossAnnouncement.upsert({
       where: { dedupeKey },
       create: {
@@ -72,6 +73,8 @@ export async function createScoreChangeAnnouncements(params: {
       },
       update: {
         content: `${label}由 ${previous} 变为 ${current}（${delta > 0 ? '+' : ''}${delta}）`,
+        suggestion,
+        tone,
         enabled: true,
       },
     })

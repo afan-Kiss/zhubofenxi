@@ -9,7 +9,6 @@ import {
 } from './anchor.service'
 import { applyManualAnchorOverrideToView } from './order-anchor-manual-override.service'
 import { formatDateKeyShanghai } from '../utils/business-timezone'
-import { getTimeMinutes } from '../utils/time'
 import {
   isInXiaoBaiOrderSlot,
   isXiaoBaiAttributionActive,
@@ -17,8 +16,23 @@ import {
   XIAOBAI_ANCHOR_CUTOFF_MS,
 } from './anchor-session-cutoff.util'
 import { resolveXiaoBaiSlotMinutesForDate } from './anchor-xiaobai-slot.util'
-import { resolveCanonicalShopName } from '../utils/shop-name-normalize.util'
 import { ANCHOR_NEW_SCHEDULE_START_DATE } from '../config/anchor-schedule.constants'
+import {
+  normalizeShopSessionKey,
+  resolveLiveSessionPeriod,
+  resolveShopSessionAnchorName,
+  resolveShopSessionFallbackForDate,
+  type ShopSessionKey,
+  type LegacyLiveSessionPeriod as LiveSessionPeriod,
+} from './shop-session-fallback.service'
+
+export type { ShopSessionKey, LiveSessionPeriod }
+export {
+  normalizeShopSessionKey,
+  resolveLiveSessionPeriod,
+  resolveShopSessionAnchorName,
+  resolveShopSessionFallbackForDate,
+}
 import {
   aggregateViewsMetrics,
   type BoardAnchorMetrics,
@@ -38,9 +52,6 @@ export {
   isXiaoBaiAttributionActive,
 } from './anchor-session-cutoff.util'
 
-export type LiveSessionPeriod = 'morning' | 'evening'
-export type ShopSessionKey = 'xiangyu' | 'hetian' | 'shiyu'
-
 const RAW_LIVE_ACCOUNT_KEYS = [
   'liveAccountName',
   'live_account_name',
@@ -59,31 +70,10 @@ export const ANCHOR_SESSION_DISPLAY_FROM_0613: Record<
   小红: { sessionLabel: '早场·和田雅玉', shopName: '和田雅玉' },
   飞云: { sessionLabel: '晚场·拾玉居和田玉', shopName: '拾玉居和田玉' },
   小艺: { sessionLabel: '晚场·和田雅玉', shopName: '和田雅玉' },
-  小白: { sessionLabel: '午场·XY祥钰珠宝 14:30-18:00', shopName: 'XY祥钰珠宝' },
+  小白: { sessionLabel: '午场·XY祥钰珠宝', shopName: 'XY祥钰珠宝' },
   /** 2026-07-17 起接手和田雅玉（接替小红/小艺） */
   橙橙: { sessionLabel: '和田雅玉', shopName: '和田雅玉' },
   小小: { sessionLabel: '早场·XY祥钰珠宝', shopName: 'XY祥钰珠宝' },
-}
-
-/** 和田雅玉新主播上场日：此前仍按小红/小艺固定场次 */
-const HETIAN_CHENGCHENG_START_DATE = '2026-07-17'
-
-/** 6.13–6.30：按直播号早晚场固定归属（7.1 起见 NEW_SCHEDULE 映射） */
-const SHOP_SESSION_ANCHOR_MAP: Record<
-  LiveSessionPeriod,
-  Partial<Record<ShopSessionKey, string>>
-> = {
-  morning: { xiangyu: '子杰', hetian: '小红' },
-  evening: { shiyu: '飞云', hetian: '小艺' },
-}
-
-/** 7.1 起新排班：子杰早场拾玉；XY 早场小小；午场仍由小白专用规则优先 */
-const SHOP_SESSION_ANCHOR_MAP_FROM_0701: Record<
-  LiveSessionPeriod,
-  Partial<Record<ShopSessionKey, string>>
-> = {
-  morning: { xiangyu: '小小', shiyu: '子杰', hetian: '小红' },
-  evening: { shiyu: '飞云', hetian: '小艺' },
 }
 
 export function isShopSessionAnchorCutoffReached(dateMs: number): boolean {
@@ -109,9 +99,14 @@ export function isXiaoBaiOrderAttribution(
   orderCreateMs: number,
 ): boolean {
   if (!isXiaoBaiAttributionActive(orderCreateMs)) return false
+  if (!isInXiaoBaiOrderSlot(new Date(orderCreateMs))) return false
   const liveAccountName =
     (view.liveAccountName ?? '').trim() || pickLiveAccountFromRaw(view.raw)
-  return normalizeShopSessionKey(liveAccountName) === 'xiangyu'
+  const key = normalizeShopSessionKey(liveAccountName)
+  const dateKey = formatDateKeyShanghai(new Date(orderCreateMs))
+  // 7.1 起仅 XY祥钰珠宝；6 月保留祥钰系（含普通祥钰）兼容
+  if (dateKey >= ANCHOR_NEW_SCHEDULE_START_DATE) return key === 'xyxiangyu'
+  return key === 'xyxiangyu' || key === 'xiangyu'
 }
 
 export function isXiaoBaiSessionStart(sessionStartMs: number): boolean {
@@ -340,44 +335,6 @@ export async function resolveDailyReportAnchorsForDateAsync(
   return [...byName.values()].filter((a) => !isOfflineOnlyAnchor({ systemKey: a.systemKey }))
 }
 
-/** 早场 00:00–17:59，晚场 18:00–23:59（与历史默认时间段一致） */
-export function resolveLiveSessionPeriod(date: Date): LiveSessionPeriod | null {
-  const minutes = getTimeMinutes(date)
-  if (minutes >= 0 && minutes < 18 * 60) return 'morning'
-  if (minutes >= 18 * 60 && minutes <= 23 * 60 + 59) return 'evening'
-  return null
-}
-
-export function normalizeShopSessionKey(liveAccountName: string): ShopSessionKey | null {
-  const n = (liveAccountName ?? '').trim()
-  if (!n) return null
-  const canonical = resolveCanonicalShopName(n)
-  if (canonical === 'XY祥钰珠宝' || canonical === '祥钰珠宝') return 'xiangyu'
-  if (canonical === '拾玉居和田玉') return 'shiyu'
-  if (canonical === '和田雅玉') return 'hetian'
-  // 兜底：未进 canonical 表但标签含关键店铺关键字
-  if (n.includes('祥钰')) return 'xiangyu'
-  if (n.includes('拾玉居')) return 'shiyu'
-  if (n.includes('和田雅玉')) return 'hetian'
-  return null
-}
-
-export function resolveShopSessionAnchorName(
-  shopKey: ShopSessionKey | null,
-  period: LiveSessionPeriod | null,
-  dateKey?: string | null,
-): string | null {
-  if (!shopKey || !period) return null
-  if (shopKey === 'hetian' && dateKey && dateKey >= HETIAN_CHENGCHENG_START_DATE) {
-    return '橙橙'
-  }
-  const map =
-    dateKey && dateKey >= ANCHOR_NEW_SCHEDULE_START_DATE
-      ? SHOP_SESSION_ANCHOR_MAP_FROM_0701
-      : SHOP_SESSION_ANCHOR_MAP
-  return map[period][shopKey] ?? null
-}
-
 function pickLiveAccountFromRaw(raw: Record<string, unknown> | undefined): string {
   if (!raw) return ''
   for (const k of RAW_LIVE_ACCOUNT_KEYS) {
@@ -425,16 +382,14 @@ export function resolveShopSessionAnchorFromLiveAccount(
 ): { anchorId: string; anchorName: string } | null {
   void config
   const shopKey = normalizeShopSessionKey(liveAccountName)
-  const period = resolveLiveSessionPeriod(at)
-  const dateKey = formatDateKeyShanghai(at)
-  const anchorName = resolveShopSessionAnchorName(shopKey, period, dateKey)
-  if (!anchorName) return null
-  // 活跃配置 + 软删生命周期：离职当天仍可命中，次日起禁止；禁止回落 extra-*
-  const found = findAnchorForAttributionByName(anchorName)
+  const hit = resolveShopSessionFallbackForDate(shopKey, at.getTime())
+  if (!hit) return null
+  const found = findAnchorForAttributionByName(hit.anchorName)
   if (!found) return null
   if (isOfflineOnlyAnchor(found)) return null
   if (isManualAttributionMode(found.attributionMode)) return null
   if (isOffboardDateMissing(found)) return null
+  const dateKey = formatDateKeyShanghai(at)
   if (!isAnchorEffectiveOnDate(found, dateKey)) return null
   return { anchorId: found.id, anchorName: found.name }
 }

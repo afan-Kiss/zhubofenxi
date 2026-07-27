@@ -72,7 +72,11 @@ export async function createScoreChangeAnnouncements(params: {
         enabled: true,
       },
       update: {
+        title: `${params.shop.shopName}${label}${delta > 0 ? '上升' : '下降'}`,
         content: `${label}由 ${previous} 变为 ${current}（${delta > 0 ? '+' : ''}${delta}）`,
+        previousScore: previous,
+        currentScore: current,
+        deltaScore: delta,
         suggestion,
         tone,
         enabled: true,

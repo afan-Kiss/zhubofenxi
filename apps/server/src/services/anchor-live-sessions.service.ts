@@ -186,7 +186,7 @@ function liveSessionMatchesAnchor(
     if (target.anchorName === '小白') {
       if (!isXiaoBaiLiveSession(session)) return false
       const liveName = pickSessionLiveAccountName(session)
-      return normalizeShopSessionKey(liveName) === 'xiangyu'
+      return normalizeShopSessionKey(liveName) === 'xyxiangyu'
     }
     return sessionMatchesShopSessionRule(session, target)
   }

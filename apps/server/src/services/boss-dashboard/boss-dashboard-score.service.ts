@@ -150,7 +150,9 @@ export async function syncBossShopScoreForShop(params: {
 
   clearBossShopScoreStale(params.shop.shopKey)
 
+  const primaryScoreDate = parsed.scoreDate ?? todayKey
   const errors: string[] = []
+  const warnings: string[] = []
   const trendLabels = [
     BOSS_SCORE_TREND_LABELS.quality,
     BOSS_SCORE_TREND_LABELS.logistics,
@@ -167,9 +169,12 @@ export async function syncBossShopScoreForShop(params: {
         field,
         points: trend.points,
       })
-      const latest = trend.points[trend.points.length - 1]
-      if (latest && parsed[field] == null) {
-        parsed = { ...parsed, [field]: latest.score, scoreDate: latest.date }
+      // 仅允许用与主接口同一 scoreDate 的趋势点补缺失分项；禁止改写主日期
+      if (parsed[field] == null) {
+        const sameDay = trend.points.find((pt) => pt.date === primaryScoreDate)
+        if (sameDay) {
+          parsed = { ...parsed, [field]: sameDay.score }
+        }
       }
     } else if (trend.error) {
       const labelName =
@@ -178,11 +183,13 @@ export async function syncBossShopScoreForShop(params: {
           : label === BOSS_SCORE_TREND_LABELS.logistics
             ? '物流'
             : '服务'
-      errors.push(`${labelName}趋势：${trend.error}`)
+      warnings.push(`${labelName}趋势：${trend.error}`)
     }
   }
 
-  const finalDate = parsed.scoreDate ?? todayKey
+  // 主接口日期是快照事实日期；趋势补值不得改写
+  parsed = { ...parsed, scoreDate: primaryScoreDate }
+  const finalDate = primaryScoreDate
   const hasAnyScore =
     parsed.qualityScore != null ||
     parsed.logisticsScore != null ||
@@ -190,7 +197,12 @@ export async function syncBossShopScoreForShop(params: {
     parsed.officialOverallScore != null
 
   if (!hasAnyScore) {
-    return { skipped: false, saved: false, scoreDate: finalDate, reason: errors.join('；') || '无有效分项' }
+    return {
+      skipped: false,
+      saved: false,
+      scoreDate: finalDate,
+      reason: [...errors, ...warnings].join('；') || '无有效分项',
+    }
   }
 
   const duplicate = await prisma.bossShopScoreSnapshot.findUnique({
@@ -207,8 +219,16 @@ export async function syncBossShopScoreForShop(params: {
   const allComplete =
     merged.qualityScore != null &&
     merged.logisticsScore != null &&
-    merged.serviceScore != null
-  const partial = !allComplete || errors.length > 0
+    merged.serviceScore != null &&
+    merged.officialOverallScore != null
+  // 趋势失败但主接口四项齐全 → 仍算完整；仅缺字段才 partial
+  const partial = !allComplete
+  if (warnings.length) {
+    logInfo(
+      '老板同步',
+      `${params.shop.shopName} 店铺分趋势告警：${warnings.join('；')}（主快照仍按完整性判定）`,
+    )
+  }
 
   if (
     duplicate &&

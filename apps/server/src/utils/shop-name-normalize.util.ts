@@ -14,7 +14,12 @@ export function shopNamesMatch(a: string, b: string): boolean {
   const la = normalizeShopLabel(a).toLowerCase()
   const lb = normalizeShopLabel(b).toLowerCase()
   if (!la || !lb) return false
-  return la === lb || la.includes(lb) || lb.includes(la)
+  if (la === lb) return true
+  // 禁止 XY祥钰珠宝 ↔ 祥钰珠宝 因 includes 交叉命中
+  const aIsXy = /xy\s*祥钰/i.test(la) || /xy祥钰/i.test(la)
+  const bIsXy = /xy\s*祥钰/i.test(lb) || /xy祥钰/i.test(lb)
+  if (aIsXy !== bIsXy) return false
+  return la.includes(lb) || lb.includes(la)
 }
 
 export function orderLiveRoomMatchesSchedule(

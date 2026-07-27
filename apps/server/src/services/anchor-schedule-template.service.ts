@@ -69,6 +69,18 @@ export const NEW_SCHEDULE_TEMPLATE_SEEDS_20260701: ScheduleTemplateSeed[] = [
     note: '午场·XY祥钰珠宝',
   },
   {
+    /** 与 Anchor.effectiveFrom=2026-07-16 对齐；此前 XY 早场无固定主播 */
+    anchorName: '小小',
+    shopName: 'XY祥钰珠宝',
+    liveRoomName: 'XY祥钰珠宝',
+    startTime: '09:30',
+    endTime: '14:00',
+    effectiveFrom: '2026-07-16',
+    effectiveTo: null,
+    sortOrder: 25,
+    note: '早场·XY祥钰珠宝',
+  },
+  {
     anchorName: '小艺',
     shopName: '和田雅玉',
     liveRoomName: '和田雅玉',

@@ -30,6 +30,7 @@ import {
   clipLiveSessionToScheduleOverlap,
   listSessionScheduleMatchCandidates,
   matchLiveSessionToScheduleSegments,
+  resolveSessionEndMs,
   type LiveSessionScheduleMatchResult,
   type LiveSessionScheduleSegment,
 } from './daily-report-live-schedule-match.service'
@@ -692,6 +693,60 @@ export function sumUniqueDailyReportLiveDurationMinutes(
     sum += Math.max(0, session.durationMinutes)
   }
   return sum
+}
+
+/** 日报提示用：时分-时分 */
+function formatLiveClockHm(iso: string): string {
+  const timePart = String(iso || '').slice(11, 16)
+  return /^\d{2}:\d{2}$/.test(timePart) ? timePart : '—'
+}
+
+/** 开播时长大白话：不足 1 分用秒，否则用分 */
+function formatBriefLiveOpenDuration(session: DailyReportLiveSession): string {
+  const startMs = parseLiveSessionTimeMs(session.startTime)
+  const endMs = resolveSessionEndMs(session)
+  if (startMs != null && endMs != null && endMs > startMs) {
+    const seconds = Math.max(1, Math.round((endMs - startMs) / 1000))
+    if (seconds < 60) return `${seconds}秒`
+    return `${Math.max(1, Math.round(seconds / 60))}分`
+  }
+  if (session.durationMinutes > 0) return `${session.durationMinutes}分`
+  return '不足1分'
+}
+
+/**
+ * 未匹配排班场次提示（日报图片大白话）
+ * 例：09:03-09:03 XY祥钰珠宝开播仅3秒，又重新开播
+ */
+export function buildLiveSessionAttributionNote(
+  assignment: Pick<
+    DailyReportLiveSessionAssignment,
+    'unassignedSessions' | 'assignedSessions'
+  >,
+): string | null {
+  const unassigned = assignment.unassignedSessions
+  if (unassigned.length === 0) return null
+
+  const notes = unassigned.map((session) => {
+    const shop =
+      session.sourceShopName?.trim() ||
+      session.liveAccountName?.trim() ||
+      session.liveName?.trim() ||
+      '该直播号'
+    const startClock = formatLiveClockHm(session.startTime)
+    const endClock = formatLiveClockHm(session.endTime)
+    const durationText = formatBriefLiveOpenDuration(session)
+    const startMs = parseLiveSessionTimeMs(session.startTime)
+    const hasLaterReopen = assignment.assignedSessions.some((later) => {
+      if (later.sourceShopCode !== session.sourceShopCode) return false
+      const laterStartMs = parseLiveSessionTimeMs(later.startTime)
+      return startMs != null && laterStartMs != null && laterStartMs > startMs
+    })
+    const base = `${startClock}-${endClock} ${shop}开播仅${durationText}`
+    return hasLaterReopen ? `${base}，又重新开播` : `${base}，未对上排班`
+  })
+
+  return notes.join('；')
 }
 
 /** 主播业绩/订单明细：按店真实场次 + 排班重叠归属某主播（仅排班匹配，不用订单支付时间） */

@@ -353,7 +353,7 @@ export const OperationsDailyReport: React.FC<Props> = ({ dateKey, onLoadingChang
                 <p className="mt-1 text-[11px] leading-snug text-slate-500">
                   每小时成交 = 全店有效成交 ÷ 全部直播时长
                   {(s.unassignedLiveSessionCount ?? 0) > 0
-                    ? '（含未匹配排班的场次）'
+                    ? '（含短暂开播后又重开的场次）'
                     : ''}
                 </p>
               }

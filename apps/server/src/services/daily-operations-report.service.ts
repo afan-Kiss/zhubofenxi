@@ -14,6 +14,7 @@ import {
   type LiveRoomNewFollowerRow,
 } from './anchor-live-sessions.service'
 import {
+  buildLiveSessionAttributionNote,
   getAssignedSessionsForAnchor,
   loadAndAssignDailyReportLiveSessions,
   sumUniqueDailyReportLiveDurationMinutes,
@@ -583,10 +584,9 @@ export async function buildDailyOperationsReport(params: {
       `有 ${unassignedInvalidOrderCount} 单无效/刷单未归属主播，全店汇总已计入、主播表为已归属口径。`,
     )
   }
-  if (liveAssignment.unassignedLiveSessionCount > 0) {
-    statisticsIntegrityWarnings.push(
-      `有 ${liveAssignment.unassignedLiveSessionCount} 场真实直播未匹配到排班，已计入总时长但不计入主播个人时长。`,
-    )
+  const liveSessionNote = buildLiveSessionAttributionNote(liveAssignment)
+  if (liveSessionNote) {
+    statisticsIntegrityWarnings.push(liveSessionNote)
   }
 
   const reportDataQuality = {

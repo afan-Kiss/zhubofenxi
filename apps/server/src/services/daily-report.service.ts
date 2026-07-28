@@ -21,6 +21,7 @@ import {
   type LiveRoomNewFollowerRow,
 } from './anchor-live-sessions.service'
 import {
+  buildLiveSessionAttributionNote,
   getAssignedSessionsForAnchor,
   mapOriginalSessionsWithAssignedRange,
   resolveDailyReportLiveSessionAssignments,
@@ -836,10 +837,7 @@ export async function buildDailyReport(params: {
   const totalLiveDurationMinutes = sumUniqueDailyReportLiveDurationMinutes(
     liveAssignment.allSessions,
   )
-  const liveSessionAttributionNote =
-    liveAssignment.unassignedLiveSessionCount > 0
-      ? `有 ${liveAssignment.unassignedLiveSessionCount} 场真实直播未匹配到排班，已计入总时长但不计入主播个人时长。`
-      : null
+  const liveSessionAttributionNote = buildLiveSessionAttributionNote(liveAssignment)
   const liveRoomNewFollowers = enrichLiveRoomNewFollowersWithAnchorNames(
     await sumNewFollowersByLiveAccountForRange({
       preset: 'custom',

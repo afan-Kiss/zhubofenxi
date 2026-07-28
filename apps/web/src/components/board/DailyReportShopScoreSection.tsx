@@ -204,10 +204,7 @@ export function DailyReportShopScoreSection({
   return (
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
       <div className="border-b border-slate-100 px-4 py-2.5">
-        <h3 className="text-sm font-semibold text-slate-800">店铺体验分</h3>
-        <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
-          平台体验分展示 · 仅供店铺状态参考
-        </p>
+        <h3 className="text-sm font-semibold text-slate-800">店铺分</h3>
       </div>
 
       <div className="grid grid-cols-4 gap-0 divide-x divide-slate-100">

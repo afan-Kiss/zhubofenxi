@@ -277,7 +277,7 @@ function buildStandaloneHtml(): string {
     <div class="axis">${axis}</div>
     ${shopRows}
   </div>
-  <div class="cards-h"><h3>场次数据卡片</h3><span>共 5 场 · 两列布局</span></div>
+  <div class="cards-h"><h3>场次数据</h3></div>
   <div class="cards">${cards}</div>
   <p class="note">本地布局预览 · 未部署服务器 · 祥钰珠宝因无场次数据未显示</p>
 </div>

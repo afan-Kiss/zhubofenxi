@@ -42,14 +42,14 @@ function MetricCell({
       }`
   if (emphasize) {
     return (
-      <div className="min-w-0 rounded-lg border border-sky-100 bg-sky-50/80 px-1.5 py-1.5">
+      <div className="min-w-0 overflow-hidden rounded-lg border border-sky-100 bg-sky-50/80 px-1.5 py-1.5">
         <div className="text-[10px] font-medium leading-4 text-sky-700/80">{label}</div>
         <div className={valueClass}>{value}</div>
       </div>
     )
   }
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 overflow-hidden">
       <div className="text-[10px] leading-4 text-slate-400">{label}</div>
       <div className={valueClass}>{value}</div>
     </div>
@@ -87,11 +87,12 @@ function CoverClickRateValue({
   }
   const statusLabel = dailyReportImageStatusLabel(session.status)
   const statusClass = STATUS_TEXT_CLASS[session.status]
+  // 状态文案紧贴 % 右侧；窄格时在卡格内换行，禁止溢出到相邻格子
   return (
-    <span className="inline-flex flex-wrap items-baseline gap-x-1 gap-y-0.5">
+    <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1 gap-y-0.5">
       <span className="text-slate-900">{formatRatePercent(session.coverClickRate)}</span>
       {hideStatus ? null : (
-        <span className={`text-[11px] font-semibold ${statusClass}`}>{statusLabel}</span>
+        <span className={`text-[10px] font-semibold leading-none ${statusClass}`}>{statusLabel}</span>
       )}
     </span>
   )
@@ -228,11 +229,8 @@ export function DailyReportSessionCardGrid({
 
   return (
     <div>
-      <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h3 className="text-sm font-semibold text-slate-800">场次数据卡片</h3>
-        <span className="text-[11px] text-slate-400">
-          共 {sessions.length} 张卡片 · 两列布局
-        </span>
+      <div className="mb-2">
+        <h3 className="text-sm font-semibold text-slate-800">场次数据</h3>
       </div>
       <div className="grid grid-cols-2 gap-3">
         {sessions.map((session) => (

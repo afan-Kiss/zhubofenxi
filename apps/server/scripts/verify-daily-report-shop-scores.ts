@@ -240,8 +240,9 @@ console.log('\n=== 文案静态检查 ===')
     '../../web/src/components/board/DailyReportShopScoreSection.tsx',
   )
   const section = fs.readFileSync(sectionPath, 'utf-8')
-  assert(section.includes('店铺体验分'), '标题保留')
-  assert(section.includes('仅供店铺状态参考'), '口语化说明')
+  assert(section.includes('店铺分'), '标题为店铺分')
+  assert(!section.includes('平台体验分展示'), '无平台体验分副标题')
+  assert(!section.includes('仅供店铺状态参考'), '无店铺状态参考副标题')
   assert(!section.includes('快照'), '无「快照」字样')
   assert(section.includes('上升') && section.includes('下降') && section.includes('持平'), '含上升下降持平')
 

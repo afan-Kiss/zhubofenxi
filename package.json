@@ -52,6 +52,7 @@
     "verify:board-page-scope-isolation": "tsx apps/server/scripts/verify-board-page-scope-isolation.ts",
     "verify:effective-schedule-identity": "tsx apps/server/scripts/verify-effective-schedule-identity.ts",
     "verify:offline-deal-module-boundary": "tsx apps/server/scripts/verify-offline-deal-module-boundary.ts",
+    "verify:offline-deal-entry-date-default": "tsx apps/server/scripts/verify-offline-deal-entry-date-default.ts",
     "benchmark:board-load": "tsx apps/server/scripts/benchmark-board-load.ts",
     "verify:canonical-attribution-batch-equivalence": "tsx apps/server/scripts/verify-canonical-attribution-batch-equivalence.ts",
     "backfill:normalized-order-columns": "tsx apps/server/scripts/backfill-normalized-order-columns.ts",

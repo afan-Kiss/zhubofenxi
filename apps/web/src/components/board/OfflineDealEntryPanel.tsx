@@ -1,5 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { apiRequest } from '../../lib/api'
+import {
+  defaultOfflineDealAtInput,
+  offlineDealAtToIso,
+} from '../../lib/offline-deal-entry-time'
 
 type AnchorOption = {
   id: string
@@ -10,36 +14,30 @@ type AnchorOption = {
 
 type Flash = { type: 'success' | 'error'; text: string }
 
-function todayShanghaiInput(): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).formatToParts(new Date())
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '00'
-  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`
-}
-
 /** 仅按钮；展开后显示录入表单。用于放在日期栏「自定义」右侧。 */
 export const OfflineDealEntryPanel: React.FC<{
+  /** 页面当前单日范围（今日/昨日）YYYY-MM-DD；多日可不传 */
+  defaultDealDate?: string | null
   defaultAnchorName?: string
   onCreated?: () => void
-}> = ({ onCreated }) => {
+}> = ({ defaultDealDate, onCreated }) => {
   const [open, setOpen] = useState(false)
   const [yifan, setYifan] = useState<AnchorOption | null>(null)
   const [loadingOptions, setLoadingOptions] = useState(false)
   const [saving, setSaving] = useState(false)
   const [flash, setFlash] = useState<Flash | null>(null)
   const [amount, setAmount] = useState('')
-  const [dealAt, setDealAt] = useState(todayShanghaiInput)
+  const [dealAt, setDealAt] = useState(() => defaultOfflineDealAtInput(defaultDealDate))
   const [customerLabel, setCustomerLabel] = useState('')
   const [externalKey, setExternalKey] = useState('')
   const [note, setNote] = useState('')
   const [status, setStatus] = useState<'confirmed' | 'draft'>('confirmed')
+
+  // 打开表单或切换今日/昨日时，成交时间跟页面日期对齐
+  useEffect(() => {
+    if (!open) return
+    setDealAt(defaultOfflineDealAtInput(defaultDealDate))
+  }, [open, defaultDealDate])
 
   const loadOptions = useCallback(async () => {
     setLoadingOptions(true)
@@ -77,11 +75,12 @@ export const OfflineDealEntryPanel: React.FC<{
       externalKey.trim() ||
       `ui-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     try {
+      const dealAtIso = offlineDealAtToIso(dealAt)
       const res = await apiRequest<{ message?: string }>('/api/offline-deals', {
         method: 'POST',
         body: JSON.stringify({
           amountYuan: Number(amount),
-          dealAt: new Date(dealAt).toISOString(),
+          dealAt: dealAtIso,
           anchorId: yifan.id,
           anchorName: yifan.name,
           customerLabel: customerLabel.trim() || undefined,
@@ -96,6 +95,7 @@ export const OfflineDealEntryPanel: React.FC<{
       setCustomerLabel('')
       setExternalKey('')
       setNote('')
+      setDealAt(defaultOfflineDealAtInput(defaultDealDate))
       onCreated?.()
     } catch (e) {
       setFlash({
@@ -124,7 +124,7 @@ export const OfflineDealEntryPanel: React.FC<{
       {open ? (
         <div className="absolute right-0 z-30 mt-2 w-[min(100vw-2rem,28rem)] rounded-xl border border-slate-200 bg-white p-3 shadow-lg sm:w-[28rem]">
           <p className="text-[11px] text-slate-500">
-            线下成交固定归属逸凡，自 2026-07-14 起计入总支付与线下 GMV。
+            线下成交固定归属逸凡，自 2026-07-14 起计入总支付与线下 GMV。成交时间默认跟上方日期（今日/昨日）一致。
           </p>
 
           {flash ? (

@@ -24,7 +24,7 @@
 | 项 | 口径 |
 |----|------|
 | 事实来源 | 表 `OfflineDeal`（非平台同步订单） |
-| 时间字段 | 按 `dealAt`（成交时间）落入统计周期 |
+| 时间字段 | 按 `dealAt`（成交时间）落入统计周期；前端「线下录入」默认成交日跟随页面单日（今日/昨日），提交按上海墙钟解析 |
 | 计入支付金额 / 总 GMV | `status=confirmed` 且 `amountCent>0` 且未软删 |
 | 不计入 | `draft` / `cancelled` / `voided` |
 | 主播归属 | **仅人工**；无直播场次 / 排班 / 时段匹配；canonical 类型 `offline_manual` |

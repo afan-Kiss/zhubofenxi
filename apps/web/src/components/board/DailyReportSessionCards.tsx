@@ -26,20 +26,25 @@ function MetricCell({
   value,
   emphasize,
   compact,
+  keepInline,
 }: {
   label: string
   value: React.ReactNode
   emphasize?: boolean
   /** 复合指标（单数+金额）允许换行，避免 truncate 截断 */
   compact?: boolean
+  /** 百分比+状态等同排，禁止换行/省略 */
+  keepInline?: boolean
 }) {
-  const valueClass = emphasize
-    ? `mt-0.5 text-[13px] font-bold tabular-nums leading-tight text-slate-900 ${
-        compact ? 'whitespace-normal break-words pb-0.5' : 'truncate'
-      }`
-    : `mt-0.5 text-[12px] font-semibold tabular-nums leading-tight text-slate-900 ${
-        compact ? 'whitespace-normal break-words' : 'truncate'
-      }`
+  const valueClass = keepInline
+    ? 'mt-0.5 overflow-visible whitespace-nowrap leading-tight text-slate-900'
+    : emphasize
+      ? `mt-0.5 text-[13px] font-bold tabular-nums leading-tight text-slate-900 ${
+          compact ? 'whitespace-normal break-words pb-0.5' : 'truncate'
+        }`
+      : `mt-0.5 text-[12px] font-semibold tabular-nums leading-tight text-slate-900 ${
+          compact ? 'whitespace-normal break-words' : 'truncate'
+        }`
   if (emphasize) {
     return (
       <div className="min-w-0 overflow-hidden rounded-lg border border-sky-100 bg-sky-50/80 px-1.5 py-1.5">
@@ -87,12 +92,16 @@ function CoverClickRateValue({
   }
   const statusLabel = dailyReportImageStatusLabel(session.status)
   const statusClass = STATUS_TEXT_CLASS[session.status]
-  // 状态文案紧贴 % 右侧；窄格时在卡格内换行，禁止溢出到相邻格子
+  // 必须与 % 同一行、紧挨右侧；禁止换到下一行
   return (
-    <span className="inline-flex max-w-full flex-wrap items-baseline gap-x-1 gap-y-0.5">
-      <span className="text-slate-900">{formatRatePercent(session.coverClickRate)}</span>
+    <span className="inline-flex flex-nowrap items-baseline whitespace-nowrap">
+      <span className="text-[12px] font-bold tabular-nums text-slate-900">
+        {formatRatePercent(session.coverClickRate)}
+      </span>
       {hideStatus ? null : (
-        <span className={`text-[10px] font-semibold leading-none ${statusClass}`}>{statusLabel}</span>
+        <span className={`ml-0.5 text-[10px] font-semibold leading-none ${statusClass}`}>
+          {statusLabel}
+        </span>
       )}
     </span>
   )
@@ -174,7 +183,7 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
           <MetricCell
             label="封面点击率"
             emphasize={!isOffline && !onLeave}
-            compact
+            keepInline
             value={<CoverClickRateValue session={session} hideStatus={softMissing} />}
           />
           <MetricCell

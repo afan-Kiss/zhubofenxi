@@ -30,7 +30,9 @@ import {
   classifyThrownHttpCause,
   emptyAfterSalesRequestCounters,
   finalizeAfterSalesRequestCounters,
-  getAfterSalesHttpRequestCount,
+  getAfterSalesRequestAttemptCount,
+  getAfterSalesNetworkRequestCount,
+  getAfterSalesLocallyThrottledCount,
   type AfterSalesRequestCounters,
 } from './after-sales-request-error'
 import { getAfterSalesHttpDeps } from './after-sales-http-deps'
@@ -795,20 +797,37 @@ export async function fetchAfterSalesWorkbenchByOrderNos(
     )
   }
 
-  let totalHttp = 0
+  let totalRequestAttempts = 0
+  let totalNetworkRequests = 0
+  let totalLocallyThrottled = 0
   try {
     for (const chunk of chunks) {
-      const { results, httpRequests } = await fetchAfterSalesWorkbenchByOrderNosWithMeta(
+      const {
+        results,
+        httpRequests,
+        requestAttempts,
+        networkRequests,
+        counters,
+      } = await fetchAfterSalesWorkbenchByOrderNosWithMeta(
         chunk,
         liveAccountId,
       )
-      totalHttp += httpRequests
+      totalRequestAttempts += counters?.requestAttempts ?? requestAttempts ?? 0
+      totalNetworkRequests +=
+        counters?.networkRequests ?? networkRequests ?? httpRequests ?? 0
+      totalLocallyThrottled += counters?.locallyThrottled ?? 0
       for (const [k, v] of results) out.set(k, v)
     }
     return out
   } catch (e) {
     const msg = e instanceof Error ? e.message : '售后工作台查询失败'
-    const httpN = getAfterSalesHttpRequestCount(e) + totalHttp
+    const requestAttempts =
+      totalRequestAttempts + getAfterSalesRequestAttemptCount(e)
+    const networkRequests =
+      totalNetworkRequests + getAfterSalesNetworkRequestCount(e)
+    const locallyThrottled =
+      totalLocallyThrottled + getAfterSalesLocallyThrottledCount(e)
+    const httpRequests = networkRequests
     for (const chunk of chunks) {
       for (const orderNo of chunk) {
         if (out.has(orderNo)) continue
@@ -817,7 +836,11 @@ export async function fetchAfterSalesWorkbenchByOrderNos(
           emptyWorkbenchResult(orderNo, accountId, {
             packageId: orderNo,
             fetchStatus: 'failed',
-            fetchError: `${msg} (httpRequests=${httpN})`.slice(0, 500),
+            fetchError:
+              `${msg} (requestAttempts=${requestAttempts} networkRequests=${networkRequests} locallyThrottled=${locallyThrottled} httpRequests=${httpRequests})`.slice(
+                0,
+                500,
+              ),
           }),
         )
       }

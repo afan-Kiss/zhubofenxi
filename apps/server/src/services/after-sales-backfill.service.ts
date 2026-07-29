@@ -33,9 +33,11 @@ import {
 } from '../utils/sync-cmd-log'
 import { openShopCircuit } from './shop-after-sales-runtime.service'
 import {
-  getAfterSalesHttpRequestCount,
+  getAfterSalesRequestAttemptCount,
   getAfterSalesNetworkRequestCount,
   getAfterSalesLocallyThrottledCount,
+  classifyAfterSalesBackfillError,
+  isFakePlatform429,
   AfterSalesRequestError,
 } from './after-sales-request-error'
 import type { OrderOwnershipVerdict } from './after-sales-order-ownership.service'
@@ -208,12 +210,111 @@ function emptyNoAfterSale(
   }
 }
 
-function isRateLimitError(msg: string): boolean {
-  return /429|冷却|cooldown|throttl|rate.?limit|访问频繁|风险控制/i.test(msg)
-}
-
 function isAuthError(msg: string): boolean {
   return /401|403|cookie_missing|cookie.*未配置|缺少 a1|登录失效|鉴权失败|签名失效/i.test(msg)
+}
+
+function resolveAuthCircuitErrorType(error: unknown): string {
+  if (error instanceof AfterSalesRequestError) {
+    if (error.causeCode === 'http_403' || error.httpStatus === 403) return 'http_403'
+    if (error.causeCode === 'sign_failed') return 'sign_generation_failed'
+  }
+  return 'http_401'
+}
+
+/**
+ * 统一处理需停止本店本批的请求错误。
+ * @returns true=已处理并应 continue；false=普通错误，交由逐单失败
+ */
+async function handleShopStoppingRequestError(params: {
+  error: unknown
+  liveAccountId: string
+  accountName: string
+  tasks: SelectedAfterSalesQueueTask[]
+  metrics: AfterSalesBatchMetrics
+  releaseTasks: typeof releaseClaimedTasksToRetryWait
+  openCircuit: typeof openShopCircuit
+  stage: 'order_list' | 'detail'
+}): Promise<boolean> {
+  const {
+    error,
+    liveAccountId,
+    accountName,
+    tasks,
+    metrics,
+    releaseTasks,
+    openCircuit,
+    stage,
+  } = params
+  const kind = classifyAfterSalesBackfillError(error)
+  const msg = error instanceof Error ? error.message : String(error)
+  const attempts = getAfterSalesRequestAttemptCount(error)
+  const network = getAfterSalesNetworkRequestCount(error)
+  const local = getAfterSalesLocallyThrottledCount(error)
+  const stageLabel = stage === 'order_list' ? '订单列表' : '详情'
+
+  if (isFakePlatform429(error)) {
+    logWarn(
+      '售后补查',
+      `伪平台429（未发网）降级为本地拦截 account=${accountName} stage=${stage} msg=${msg.slice(0, 120)}`,
+    )
+  }
+
+  if (kind === 'LOCAL_THROTTLED' || kind === 'LOCAL_CIRCUIT_OPEN') {
+    const reason = kind === 'LOCAL_THROTTLED' ? '本地冷却' : '本地熔断'
+    logWarn(
+      '售后补查',
+      `店铺本批暂停 account=${accountName} stage=${stageLabel} 原因=${reason}拦截 请求尝试=${attempts} 真实平台请求=${network} 本地拦截=${Math.max(local, 1)} 未开启平台429熔断 remaining=${tasks.length}`,
+    )
+    await releaseTasks({
+      tasks,
+      reason: kind,
+    })
+    metrics.retryWait += tasks.length
+    return true
+  }
+
+  if (kind === 'PLATFORM_429') {
+    metrics.rateLimited++
+    await openCircuit({
+      liveAccountId,
+      errorType: 'http_429',
+      message: msg.slice(0, 200),
+      probeBackoffMs: 60_000,
+    })
+    logWarn(
+      '售后补查',
+      `店铺熔断 account=${accountName} stage=${stageLabel} 原因=平台429 请求尝试=${attempts} 真实平台请求=${network} 本地拦截=${local} remaining=${tasks.length}`,
+    )
+    await releaseTasks({
+      tasks,
+      reason: msg.slice(0, 500),
+    })
+    metrics.retryWait += tasks.length
+    return true
+  }
+
+  if (kind === 'AUTH') {
+    metrics.authFailed++
+    await openCircuit({
+      liveAccountId,
+      errorType: resolveAuthCircuitErrorType(error),
+      message: msg.slice(0, 200),
+      probeBackoffMs: 60_000,
+    })
+    logWarn(
+      '售后补查',
+      `店铺熔断 account=${accountName} stage=${stageLabel} 原因=鉴权失败 请求尝试=${attempts} 真实平台请求=${network} remaining=${tasks.length}`,
+    )
+    await releaseTasks({
+      tasks,
+      reason: msg.slice(0, 500),
+    })
+    metrics.retryWait += tasks.length
+    return true
+  }
+
+  return false
 }
 
 async function doRunAfterSalesBackfillBatch(
@@ -411,7 +512,7 @@ async function doRunAfterSalesBackfillBatch(
         metrics.orderListRequests += attempts
         metrics.requestAttempts += attempts
         metrics.networkRequests += network
-        metrics.actualHttpRequests += network
+        metrics.actualHttpRequests = metrics.networkRequests
         metrics.locallyThrottled += local
         if (attempts > 1) {
           metrics.paginationRequests += attempts - 1
@@ -419,36 +520,31 @@ async function doRunAfterSalesBackfillBatch(
         probes = probe.results
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        const attempts = getAfterSalesHttpRequestCount(e)
+        const attempts = getAfterSalesRequestAttemptCount(e)
         const network = getAfterSalesNetworkRequestCount(e)
         const local = getAfterSalesLocallyThrottledCount(e)
         metrics.orderListRequests += attempts
         metrics.requestAttempts += attempts
         metrics.networkRequests += network
-        metrics.actualHttpRequests += network
-        metrics.locallyThrottled += local
-        if (e instanceof AfterSalesRequestError && (e.causeCode === 'local_throttled' || e.causeCode === 'local_circuit_open')) {
-          if (local === 0) metrics.locallyThrottled++
-        }
-        if (isRateLimitError(msg) || isAuthError(msg)) {
+        metrics.actualHttpRequests = metrics.networkRequests
+        metrics.locallyThrottled += local > 0 ? local : (
+          classifyAfterSalesBackfillError(e) === 'LOCAL_THROTTLED' ||
+          classifyAfterSalesBackfillError(e) === 'LOCAL_CIRCUIT_OPEN'
+            ? 1
+            : 0
+        )
+        const stopped = await handleShopStoppingRequestError({
+          error: e,
+          liveAccountId,
+          accountName,
+          tasks: matchedItems,
+          metrics,
+          releaseTasks: releaseFn,
+          openCircuit: openCircuitFn,
+          stage: 'order_list',
+        })
+        if (stopped) {
           shopStop = true
-          if (isRateLimitError(msg)) metrics.rateLimited++
-          if (isAuthError(msg)) metrics.authFailed++
-          await openCircuitFn({
-            liveAccountId,
-            errorType: isAuthError(msg) ? 'http_401' : 'http_429',
-            message: msg.slice(0, 200),
-            probeBackoffMs: 60_000,
-          })
-          logWarn(
-            '售后补查',
-            `店铺熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${matchedItems.length} 请求尝试=${attempts} 真实平台请求=${network} 本地拦截=${local || metrics.locallyThrottled}`,
-          )
-          await releaseFn({
-            tasks: matchedItems,
-            reason: msg.slice(0, 500),
-          })
-          metrics.retryWait += matchedItems.length
           continue
         }
         for (const item of matchedItems) {
@@ -510,7 +606,7 @@ async function doRunAfterSalesBackfillBatch(
         metrics.detailRequests += attempts
         metrics.requestAttempts += attempts
         metrics.networkRequests += network
-        metrics.actualHttpRequests += network
+        metrics.actualHttpRequests = metrics.networkRequests
         metrics.locallyThrottled += local
         if (attempts > 1) {
           metrics.paginationRequests += attempts - 1
@@ -565,42 +661,31 @@ async function doRunAfterSalesBackfillBatch(
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        const attempts = getAfterSalesHttpRequestCount(e)
+        const attempts = getAfterSalesRequestAttemptCount(e)
         const network = getAfterSalesNetworkRequestCount(e)
         const local = getAfterSalesLocallyThrottledCount(e)
         metrics.detailRequests += attempts
         metrics.requestAttempts += attempts
         metrics.networkRequests += network
-        metrics.actualHttpRequests += network
-        metrics.locallyThrottled += local
+        metrics.actualHttpRequests = metrics.networkRequests
+        const kind = classifyAfterSalesBackfillError(e)
+        metrics.locallyThrottled += local > 0 ? local : (
+          kind === 'LOCAL_THROTTLED' || kind === 'LOCAL_CIRCUIT_OPEN' ? 1 : 0
+        )
         if (attempts > 1) metrics.paginationRequests += attempts - 1
-        if (
-          e instanceof AfterSalesRequestError &&
-          (e.causeCode === 'local_throttled' || e.causeCode === 'local_circuit_open') &&
-          local === 0
-        ) {
-          metrics.locallyThrottled++
-        }
-        if (isRateLimitError(msg) || isAuthError(msg)) {
+        const remain = needDetail.map((o) => byOrder.get(o)!).filter(Boolean)
+        const stopped = await handleShopStoppingRequestError({
+          error: e,
+          liveAccountId,
+          accountName,
+          tasks: remain,
+          metrics,
+          releaseTasks: releaseFn,
+          openCircuit: openCircuitFn,
+          stage: 'detail',
+        })
+        if (stopped) {
           shopStop = true
-          if (isRateLimitError(msg)) metrics.rateLimited++
-          if (isAuthError(msg)) metrics.authFailed++
-          await openCircuitFn({
-            liveAccountId,
-            errorType: isAuthError(msg) ? 'http_401' : 'http_429',
-            message: msg.slice(0, 200),
-            probeBackoffMs: 60_000,
-          })
-          const remain = needDetail.map((o) => byOrder.get(o)!).filter(Boolean)
-          await releaseFn({
-            tasks: remain,
-            reason: msg.slice(0, 500),
-          })
-          metrics.retryWait += remain.length
-          logWarn(
-            '售后补查',
-            `详情熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${remain.length} 请求尝试=${attempts} 真实平台请求=${network} 本地拦截=${local}`,
-          )
           continue
         }
         for (const orderNo of needDetail) {
@@ -632,6 +717,8 @@ async function doRunAfterSalesBackfillBatch(
   reporter.finish(
     `claimed=${metrics.claimed} 无售后=${metrics.noAfterSale} 详情保存=${metrics.detailsSaved} 未知/重试=${metrics.retryWait} 请求尝试数=${metrics.requestAttempts} 真实平台请求数=${metrics.networkRequests} 本地拦截数=${metrics.locallyThrottled}（列表${metrics.orderListRequests}+详情${metrics.detailRequests}）`,
   )
+
+  metrics.actualHttpRequests = metrics.networkRequests
 
   logInfo(
     '售后补查',

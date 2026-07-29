@@ -90,37 +90,71 @@ async function sleep(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms))
 }
 
-async function addColumnWithRetry(
+/** 锁退避：初次失败→100ms→300ms→800ms→最终抛错（最多 4 次 ALTER） */
+export const AFTER_SALES_SCHEMA_LOCK_RETRY_DELAYS_MS = [100, 300, 800] as const
+
+export type AddColumnRetryHooks = {
+  sleep?: (ms: number) => Promise<void>
+  /** 测试用：覆盖 ALTER 执行 */
+  executeAlter?: () => Promise<void>
+}
+
+export async function addSqliteColumnWithRetry(
   client: typeof prisma,
   table: string,
   col: ColDef,
+  hooks?: AddColumnRetryHooks,
 ): Promise<'added' | 'exists'> {
-  const delays = [100, 300, 800]
+  const sleepFn = hooks?.sleep ?? sleep
+  const delays = AFTER_SALES_SCHEMA_LOCK_RETRY_DELAYS_MS
   let lastErr: unknown
-  for (let i = 0; i < delays.length; i++) {
+
+  for (let attempt = 0; attempt <= delays.length; attempt++) {
     try {
-      await client.$executeRawUnsafe(
-        `ALTER TABLE "${table}" ADD COLUMN "${col.name}" ${col.ddl}`,
-      )
+      if (hooks?.executeAlter) {
+        await hooks.executeAlter()
+      } else {
+        await client.$executeRawUnsafe(
+          `ALTER TABLE "${table}" ADD COLUMN "${col.name}" ${col.ddl}`,
+        )
+      }
       return 'added'
     } catch (err) {
       lastErr = err
       const msg = err instanceof Error ? err.message : String(err)
+
       if (/duplicate column name/i.test(msg)) {
         const cols = await listSqliteTableColumns(table, client)
         if (cols.has(col.name)) return 'exists'
-        return 'exists'
+        throw err instanceof Error ? err : new Error(msg)
       }
-      if (/database is locked|SQLITE_BUSY/i.test(msg) && i < delays.length - 1) {
-        await sleep(delays[i]!)
+
+      const locked = /database is locked|SQLITE_BUSY/i.test(msg)
+      if (locked) {
+        const cols = await listSqliteTableColumns(table, client)
+        if (cols.has(col.name)) return 'exists'
+        if (attempt >= delays.length) {
+          throw err instanceof Error ? err : new Error(msg)
+        }
+        await sleepFn(delays[attempt]!)
         continue
       }
+
       const cols = await listSqliteTableColumns(table, client)
       if (cols.has(col.name)) return 'exists'
       throw err instanceof Error ? err : new Error(msg)
     }
   }
+
   throw lastErr instanceof Error ? lastErr : new Error(String(lastErr))
+}
+
+async function addColumnWithRetry(
+  client: typeof prisma,
+  table: string,
+  col: ColDef,
+): Promise<'added' | 'exists'> {
+  return addSqliteColumnWithRetry(client, table, col)
 }
 
 async function ensureColumns(

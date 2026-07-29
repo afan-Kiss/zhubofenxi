@@ -295,11 +295,20 @@ async function runBackfillWithHttp(
   extra?: {
     cookies?: Record<string, string>
     completeStatuses?: Map<string, 'done' | 'retry_wait' | 'blocked' | 'failed'>
+    probe?: typeof import('../src/services/after-sales-order-list-probe.service').probeOrdersAfterSaleSignal
+    fetchDetail?: typeof import('../src/services/xhs-after-sales-workbench.service').fetchAfterSalesWorkbenchByOrderNosWithMeta
   },
-): Promise<{ metrics: AfterSalesBatchMetrics; httpCalls: AfterSalesHttpCallParams[]; released: string[]; saved: AfterSalesWorkbenchRefund[] }> {
+): Promise<{
+  metrics: AfterSalesBatchMetrics
+  httpCalls: AfterSalesHttpCallParams[]
+  released: string[]
+  saved: AfterSalesWorkbenchRefund[]
+  openCircuitCalls: Array<{ liveAccountId: string; errorType: string }>
+}> {
   const httpCalls: AfterSalesHttpCallParams[] = []
   const released: string[] = []
   const saved: AfterSalesWorkbenchRefund[] = []
+  const openCircuitCalls: Array<{ liveAccountId: string; errorType: string }> = []
   const cookies = extra?.cookies ?? {}
 
   setAfterSalesHttpDepsForTest({
@@ -325,7 +334,11 @@ async function runBackfillWithHttp(
       mismatches: [],
     }),
     resolveAccountName: async (id) => id,
-    openCircuit: async () => undefined,
+    probe: extra?.probe,
+    fetchDetail: extra?.fetchDetail,
+    openCircuit: async ({ liveAccountId, errorType }) => {
+      openCircuitCalls.push({ liveAccountId, errorType })
+    },
     releaseTasks: async ({ tasks: ts }) => {
       for (const t of ts) released.push(t.orderNo)
     },
@@ -338,7 +351,7 @@ async function runBackfillWithHttp(
   })
 
   const metrics = await runAfterSalesBackfillBatch()
-  return { metrics, httpCalls, released, saved }
+  return { metrics, httpCalls, released, saved, openCircuitCalls }
 }
 
 /** 场景1：10无售后 → 仅1次订单列表 */
@@ -392,27 +405,125 @@ async function testTwoHas(): Promise<void> {
   assert(saved.some((s) => (s.matchedRecordCount ?? 0) > 0 && s.successReturnCount === 0), 'processing saved')
 }
 
-/** 场景4：429 熔断 */
+/** 场景4：真实平台429 熔断 */
 async function testShop429(): Promise<void> {
   const shop = 'shopA'
   const nos = Array.from({ length: 5 }, (_, i) => orderNo(i))
   const tasks = nos.map((n, i) => task(shop, n, `t${i}`))
-  const { metrics, httpCalls, released } = await runBackfillWithHttp(tasks, async () => {
-    throw new AfterSalesRequestError({
-      message: 'HTTP 429',
-      requestAttempts: 1,
-      networkRequests: 1,
-      networkSent: true,
-      causeCode: 'http_429',
-    })
-  })
+  const { metrics, httpCalls, released, openCircuitCalls } = await runBackfillWithHttp(
+    tasks,
+    async () => {
+      throw new AfterSalesRequestError({
+        message: 'HTTP 429',
+        requestAttempts: 1,
+        networkRequests: 1,
+        networkSent: true,
+        causeCode: 'http_429',
+        httpStatus: 429,
+      })
+    },
+  )
   assert(httpCalls.length === 1, `仅1次 got=${httpCalls.length}`)
   assert(metrics.requestAttempts === 1, 'attempts 1')
   assert(metrics.networkRequests === 1, 'network 1')
   assert(metrics.actualHttpRequests === 1, 'actual===network 1')
   assert(metrics.locallyThrottled === 0, 'not local throttle')
   assert(released.length === 5, `release 5 got=${released.length}`)
-  assert(metrics.rateLimited >= 1, 'rateLimited')
+  assert(metrics.rateLimited === 1, `rateLimited=1 got=${metrics.rateLimited}`)
+  assert(openCircuitCalls.length === 1, `openCircuit=1 got=${openCircuitCalls.length}`)
+  assert(openCircuitCalls[0]?.errorType === 'http_429', 'errorType=http_429')
+}
+
+/** 本地冷却：不平台熔断、不rateLimited */
+async function testLocalThrottleNoCircuit(): Promise<void> {
+  const shop = 'shopA'
+  const nos = Array.from({ length: 4 }, (_, i) => orderNo(100 + i))
+  const tasks = nos.map((n, i) => task(shop, n, `lt${i}`))
+  const { metrics, released, openCircuitCalls, httpCalls } = await runBackfillWithHttp(
+    tasks,
+    async () => {
+      throw new Error('should not reach http')
+    },
+    {
+      probe: async () => {
+        throw new AfterSalesRequestError({
+          message: '冷却中（2s）',
+          requestAttempts: 1,
+          networkRequests: 0,
+          networkSent: false,
+          causeCode: 'local_throttled',
+          locallyThrottled: 1,
+        })
+      },
+    },
+  )
+  assert(httpCalls.length === 0, '未发起平台请求')
+  assert(metrics.requestAttempts === 1, 'attempts=1')
+  assert(metrics.networkRequests === 0, 'network=0')
+  assert(metrics.actualHttpRequests === 0, 'actual=0')
+  assert(metrics.locallyThrottled === 1, `local=1 got=${metrics.locallyThrottled}`)
+  assert(metrics.rateLimited === 0, 'rateLimited=0')
+  assert(openCircuitCalls.length === 0, 'openCircuit=0')
+  assert(released.length === 4, `retry_wait release 4 got=${released.length}`)
+  assert(metrics.retryWait === 4, 'retryWait=4')
+}
+
+/** 本地熔断：不平台熔断 */
+async function testLocalCircuitNoCircuit(): Promise<void> {
+  const shop = 'shopA'
+  const nos = Array.from({ length: 3 }, (_, i) => orderNo(200 + i))
+  const tasks = nos.map((n, i) => task(shop, n, `lc${i}`))
+  const { metrics, openCircuitCalls } = await runBackfillWithHttp(
+    tasks,
+    async () => {
+      throw new Error('should not reach http')
+    },
+    {
+      probe: async () => {
+        throw new AfterSalesRequestError({
+          message: '接口熔断中',
+          requestAttempts: 1,
+          networkRequests: 0,
+          networkSent: false,
+          causeCode: 'local_circuit_open',
+          locallyThrottled: 1,
+        })
+      },
+    },
+  )
+  assert(metrics.rateLimited === 0, 'rateLimited=0')
+  assert(metrics.locallyThrottled === 1, 'locallyThrottled=1')
+  assert(metrics.networkRequests === 0 && metrics.actualHttpRequests === 0, 'no network')
+  assert(openCircuitCalls.length === 0, 'openCircuit=0')
+}
+
+/** 伪429未发网：不得平台熔断 */
+async function testFake429NoCircuit(): Promise<void> {
+  const shop = 'shopA'
+  const nos = Array.from({ length: 2 }, (_, i) => orderNo(300 + i))
+  const tasks = nos.map((n, i) => task(shop, n, `f429${i}`))
+  const { metrics, openCircuitCalls } = await runBackfillWithHttp(
+    tasks,
+    async () => {
+      throw new Error('should not reach http')
+    },
+    {
+      probe: async () => {
+        throw new AfterSalesRequestError({
+          message: 'HTTP 429',
+          requestAttempts: 1,
+          networkRequests: 0,
+          networkSent: false,
+          causeCode: 'http_429',
+          httpStatus: 429,
+        })
+      },
+    },
+  )
+  assert(metrics.rateLimited === 0, 'fake429 rateLimited=0')
+  assert(openCircuitCalls.length === 0, 'fake429 openCircuit=0')
+  assert(metrics.locallyThrottled >= 1, 'treated as local')
+  assert(metrics.networkRequests === 0, 'no network')
 }
 
 /** 场景5：真实互斥 */
@@ -498,6 +609,9 @@ async function main(): Promise<void> {
   await testHarness('生产链路10无售后HTTP=1', testTenNone)
   await testHarness('生产链路2有售后HTTP=2', testTwoHas)
   await testHarness('生产链路429熔断', testShop429)
+  await testHarness('本地冷却不平台熔断', testLocalThrottleNoCircuit)
+  await testHarness('本地熔断不平台熔断', testLocalCircuitNoCircuit)
+  await testHarness('无发网伪429不熔断', testFake429NoCircuit)
   await testHarness('真实互斥锁', testRealMutex)
   await testHarness('生产liveAccountOrderKey', testCacheKey)
   await testHarness('同店限流并发', testShopRateConcurrency)

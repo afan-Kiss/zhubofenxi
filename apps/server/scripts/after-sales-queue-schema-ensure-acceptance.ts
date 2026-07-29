@@ -9,6 +9,8 @@ import { PrismaClient } from '@prisma/client'
 import {
   AFTER_SALES_QUEUE_ENSURE_COLUMNS,
   AFTER_SALES_CACHE_ENSURE_COLUMNS,
+  AFTER_SALES_SCHEMA_LOCK_RETRY_DELAYS_MS,
+  addSqliteColumnWithRetry,
   ensureAfterSalesQueueSchema,
   ensureAfterSalesSchemaOnce,
   listSqliteTableColumns,
@@ -180,6 +182,110 @@ async function main(): Promise<void> {
       assert(again[0]!.fetchStatus === 'success', 'status仍在')
     } finally {
       await client2.$disconnect()
+    }
+
+    // --- 锁退避 100/300/800 完整执行 ---
+    assert(
+      AFTER_SALES_SCHEMA_LOCK_RETRY_DELAYS_MS.join(',') === '100,300,800',
+      'delays=[100,300,800]',
+    )
+
+    {
+      const sleepCalls: number[] = []
+      let alters = 0
+      const mock = {
+        $queryRawUnsafe: async () => [] as Array<{ name: string }>,
+        $executeRawUnsafe: async () => 0,
+      }
+      const r = await addSqliteColumnWithRetry(
+        mock as unknown as typeof client,
+        'XhsAfterSalesWorkbenchQueue',
+        { name: 'priority', ddl: 'INTEGER NOT NULL DEFAULT 0' },
+        {
+          sleep: async (ms) => {
+            sleepCalls.push(ms)
+          },
+          executeAlter: async () => {
+            alters++
+            if (alters < 4) throw new Error('database is locked')
+          },
+        },
+      )
+      assert(r === 'added', '第4次成功')
+      assert(alters === 4, `执行次数=4 got=${alters}`)
+      assert(sleepCalls.join(',') === '100,300,800', `sleepCalls got=${sleepCalls.join(',')}`)
+    }
+
+    {
+      const sleepCalls: number[] = []
+      let alters = 0
+      const mock = {
+        $queryRawUnsafe: async () => [] as Array<{ name: string }>,
+        $executeRawUnsafe: async () => 0,
+      }
+      let threw = false
+      try {
+        await addSqliteColumnWithRetry(
+          mock as unknown as typeof client,
+          'XhsAfterSalesWorkbenchQueue',
+          { name: 'priority', ddl: 'INTEGER NOT NULL DEFAULT 0' },
+          {
+            sleep: async (ms) => {
+              sleepCalls.push(ms)
+            },
+            executeAlter: async () => {
+              alters++
+              throw new Error('database is locked')
+            },
+          },
+        )
+      } catch {
+        threw = true
+      }
+      assert(threw, '4次锁最终抛错')
+      assert(alters === 4, `失败执行次数=4 got=${alters}`)
+      assert(sleepCalls.join(',') === '100,300,800', `失败sleep got=${sleepCalls.join(',')}`)
+    }
+
+    {
+      const mock = {
+        $queryRawUnsafe: async () => [] as Array<{ name: string }>,
+        $executeRawUnsafe: async () => 0,
+      }
+      let threw = false
+      try {
+        await addSqliteColumnWithRetry(
+          mock as unknown as typeof client,
+          'XhsAfterSalesWorkbenchQueue',
+          { name: 'ghostCol', ddl: 'TEXT' },
+          {
+            executeAlter: async () => {
+              throw new Error('duplicate column name: ghostCol')
+            },
+          },
+        )
+      } catch {
+        threw = true
+      }
+      assert(threw, 'duplicate但字段不存在必须抛错')
+    }
+
+    {
+      const mock = {
+        $queryRawUnsafe: async () => [{ name: 'priority' }],
+        $executeRawUnsafe: async () => 0,
+      }
+      const r = await addSqliteColumnWithRetry(
+        mock as unknown as typeof client,
+        'XhsAfterSalesWorkbenchQueue',
+        { name: 'priority', ddl: 'INTEGER NOT NULL DEFAULT 0' },
+        {
+          executeAlter: async () => {
+            throw new Error('duplicate column name: priority')
+          },
+        },
+      )
+      assert(r === 'exists', 'duplicate且字段已存在→exists')
     }
 
     resetAfterSalesQueueSchemaEnsureForTest()

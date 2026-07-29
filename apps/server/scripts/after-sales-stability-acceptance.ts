@@ -19,7 +19,17 @@ import {
   type AfterSalesHttpCallParams,
   type AfterSalesHttpExecutionResult,
 } from '../src/services/after-sales-http-deps'
-import { AfterSalesRequestError } from '../src/services/after-sales-request-error'
+import {
+  AfterSalesRequestError,
+  getAfterSalesHttpRequestCount,
+  getAfterSalesRequestAttemptCount,
+  getAfterSalesNetworkRequestCount,
+  getAfterSalesLocallyThrottledCount,
+  addAfterSalesRequestCounters,
+  emptyAfterSalesRequestCounters,
+  classifyAfterSalesBackfillError,
+  isFakePlatform429,
+} from '../src/services/after-sales-request-error'
 import {
   resetAfterSalesBackfillLockForTest,
   runAfterSalesBackfillBatch,
@@ -633,6 +643,46 @@ async function testNetworkCounters(): Promise<void> {
   const e429 = err429 as AfterSalesRequestError
   assert(e429.requestAttempts === 1 && e429.networkRequests === 1, '429 network counted')
   assert(e429.httpRequests === 1 && e429.locallyThrottled === 0, '429 not local')
+
+  // 辅助函数语义
+  const helperErr = new AfterSalesRequestError({
+    message: 'x',
+    requestAttempts: 3,
+    networkRequests: 2,
+    locallyThrottled: 1,
+  })
+  assert(getAfterSalesRequestAttemptCount(helperErr) === 3, 'attempt helper=3')
+  assert(getAfterSalesNetworkRequestCount(helperErr) === 2, 'network helper=2')
+  assert(getAfterSalesHttpRequestCount(helperErr) === 2, 'http helper=network=2')
+  assert(helperErr.httpRequests === 2, 'error.httpRequests=2')
+  assert(getAfterSalesLocallyThrottledCount(helperErr) === 1, 'local helper=1')
+
+  // 分块累计口径
+  const chunk1 = emptyAfterSalesRequestCounters()
+  const after1 = addAfterSalesRequestCounters(chunk1, {
+    requestAttempts: 2,
+    networkRequests: 2,
+  })
+  const after2 = addAfterSalesRequestCounters(after1, {
+    requestAttempts: 1,
+    networkRequests: 0,
+    locallyThrottled: 1,
+  })
+  assert(after2.requestAttempts === 3, 'chunk attempts=3')
+  assert(after2.networkRequests === 2, 'chunk network=2')
+  assert(after2.actualHttpRequests === 2, 'chunk actual=2')
+  assert(after2.locallyThrottled === 1, 'chunk local=1')
+
+  // 伪429分类
+  const fake = new AfterSalesRequestError({
+    message: 'HTTP 429',
+    requestAttempts: 1,
+    networkRequests: 0,
+    networkSent: false,
+    causeCode: 'http_429',
+  })
+  assert(isFakePlatform429(fake), 'isFakePlatform429')
+  assert(classifyAfterSalesBackfillError(fake) === 'LOCAL_THROTTLED', 'fake→LOCAL')
 
   // Cookie 失败：attempts=0，执行器未调用
   let execCalls = 0

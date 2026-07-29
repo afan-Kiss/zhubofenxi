@@ -145,9 +145,9 @@ export class AfterSalesRequestError extends Error {
   }
 }
 
-/** @deprecated 名称易误解；请用 getAfterSalesRequestAttemptCount */
+/** @deprecated 兼容名：现严格等于 networkRequests（真实发网），勿再当 attempts */
 export function getAfterSalesHttpRequestCount(err: unknown): number {
-  return getAfterSalesRequestAttemptCount(err)
+  return getAfterSalesNetworkRequestCount(err)
 }
 
 export function getAfterSalesRequestAttemptCount(err: unknown): number {
@@ -165,16 +165,79 @@ export function getAfterSalesLocallyThrottledCount(err: unknown): number {
   return 0
 }
 
+export type AfterSalesBackfillErrorKind =
+  | 'LOCAL_THROTTLED'
+  | 'LOCAL_CIRCUIT_OPEN'
+  | 'PLATFORM_429'
+  | 'AUTH'
+  | 'NETWORK'
+  | 'OTHER'
+
+/**
+ * 回填错误分类：优先结构化 causeCode；仅非 AfterSalesRequestError 时才字符串兜底。
+ * causeCode=http_429 但未发网 → 降级 LOCAL_THROTTLED（不可能收到平台 429）。
+ */
+export function classifyAfterSalesBackfillError(error: unknown): AfterSalesBackfillErrorKind {
+  if (error instanceof AfterSalesRequestError) {
+    switch (error.causeCode) {
+      case 'local_throttled':
+        return 'LOCAL_THROTTLED'
+      case 'local_circuit_open':
+        return 'LOCAL_CIRCUIT_OPEN'
+      case 'http_429':
+        if (!error.networkSent || error.networkRequests <= 0) {
+          return 'LOCAL_THROTTLED'
+        }
+        return 'PLATFORM_429'
+      case 'http_401':
+      case 'http_403':
+      case 'sign_failed':
+        return 'AUTH'
+      case 'network_timeout':
+        return 'NETWORK'
+      default:
+        break
+    }
+    if (error.httpStatus === 429) {
+      if (!error.networkSent || error.networkRequests <= 0) return 'LOCAL_THROTTLED'
+      return 'PLATFORM_429'
+    }
+    if (error.httpStatus === 401 || error.httpStatus === 403) return 'AUTH'
+  }
+
+  const msg = error instanceof Error ? error.message : String(error ?? '')
+  // 本地控制优先于宽泛 429/冷却 匹配
+  if (/local_throttl|页面接口禁止|JSONL.*冷却|冷却中/i.test(msg)) return 'LOCAL_THROTTLED'
+  if (/local_circuit|接口熔断中|circuit_open/i.test(msg)) return 'LOCAL_CIRCUIT_OPEN'
+  if (/\bHTTP\s*429\b|status\s*=?\s*429|Too Many Requests/i.test(msg)) return 'PLATFORM_429'
+  if (/401|403|cookie_missing|cookie.*未配置|缺少 a1|登录失效|鉴权失败|签名失效/i.test(msg)) {
+    return 'AUTH'
+  }
+  if (/timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up/i.test(msg)) return 'NETWORK'
+  return 'OTHER'
+}
+
+/** 伪平台429（未发网）检测，供日志 warning */
+export function isFakePlatform429(error: unknown): boolean {
+  return (
+    error instanceof AfterSalesRequestError &&
+    error.causeCode === 'http_429' &&
+    (!error.networkSent || error.networkRequests <= 0)
+  )
+}
+
 export function classifyThrownHttpCause(
   msg: string,
   httpStatus?: number | null,
 ): AfterSalesRequestCauseCode {
-  if (httpStatus === 429 || /\b429\b/.test(msg)) return 'http_429'
+  if (httpStatus === 429 || /\bHTTP\s*429\b|status\s*=?\s*429|Too Many Requests/i.test(msg)) {
+    return 'http_429'
+  }
   if (httpStatus === 401 || /\b401\b/.test(msg)) return 'http_401'
   if (httpStatus === 403 || /\b403\b/.test(msg)) return 'http_403'
-  if (/冷却中|local_throttle|页面接口禁止/i.test(msg)) return 'local_throttled'
-  if (/接口熔断中|circuit_open/i.test(msg)) return 'local_circuit_open'
-  if (/冷却|cooldown|访问频繁|风险控制/i.test(msg)) return 'http_429'
+  if (/冷却中|local_throttle|页面接口禁止|JSONL.*冷却/i.test(msg)) return 'local_throttled'
+  if (/接口熔断中|circuit_open|local_circuit/i.test(msg)) return 'local_circuit_open'
+  if (/访问频繁|风险控制/i.test(msg)) return 'http_429'
   if (/cookie.*未配置|cookie_missing|缺少 a1/i.test(msg)) return 'http_401'
   if (/(cookie.*过期|cookie.*失效|登录失效|鉴权失败|签名失效)/i.test(msg)) return 'http_401'
   if (/timeout|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up/i.test(msg)) {

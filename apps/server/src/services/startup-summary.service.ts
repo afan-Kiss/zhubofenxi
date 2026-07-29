@@ -12,8 +12,6 @@ import {
 
 } from './business-sync-scheduler.service'
 
-import { BUYER_RANKING_DAILY_TIME } from './scheduler.service'
-
 import { buildLogSwitchStatusLines, logInfo } from '../utils/server-log'
 
 import { formatDateTime } from '../utils/time'
@@ -110,7 +108,7 @@ export async function printStartupSummary(): Promise<void> {
 
     `自动同步范围：最近 ${BUSINESS_SYNC_LOOKBACK_DAYS} 天订单 / 售后 / 官方品退`,
 
-    `买家排行：每日 ${BUYER_RANKING_DAILY_TIME} 自动重建`,
+    `买家排行：按需手动/页面重建（已取消每日定时）`,
 
     `当前数据范围：${rangeStart} ~ ${rangeEnd}`,
 

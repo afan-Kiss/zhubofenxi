@@ -140,8 +140,8 @@ function printStructureTable(): void {
       allowed: '是',
     },
     {
-      feature: '买家排行定时',
-      entry: 'scheduleBuyerRankingCache 03:00',
+      feature: '买家排行',
+      entry: '手动/页面触发 scheduleBuyerRankingCacheRebuild（已无日更 cron）',
       readsDb: '是',
       platformApi: '否',
       apis: '无',
@@ -233,14 +233,10 @@ function checkSchedulerStatic(): void {
   console.log('\n=== 静态：scheduler ===')
   const src = read('server/src/services/scheduler.service.ts')
 
-  const buyerBlock = src.slice(
-    src.indexOf('function scheduleBuyerRankingCache'),
-    src.indexOf('function scheduleBuyerRankingCache') + 1200,
-  )
-  if (!buyerBlock.includes('runRollingDataHealthClose')) {
-    ok('买家排行 cron 未调用 runRollingDataHealthClose')
+  if (!src.includes('function scheduleBuyerRankingCache') && !src.includes('BUYER_RANKING_DAILY_TIME')) {
+    ok('买家排行每日 03:00 cron 已移除')
   } else {
-    fail('买家排行 cron 仍调用 runRollingDataHealthClose')
+    fail('买家排行每日 cron 仍残留')
   }
 
   if (src.includes('function scheduleRollingDataHealthClose')) {

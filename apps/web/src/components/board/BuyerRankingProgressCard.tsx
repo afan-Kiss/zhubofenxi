@@ -32,7 +32,7 @@ function descriptionForVariant(variant: BuyerRankingProgressVariant): string {
     case 'stuck':
       return '本次更新耗时较久，可以重新生成买家排行。'
     case 'empty':
-      return '买家排行基于历史订单累计分析，不随经营看板日期切换。可以手动生成，也会每日 03:00 自动更新。'
+      return '买家排行基于历史订单累计分析，不随经营看板日期切换。可以手动生成。'
     case 'failed':
       return '请检查订单和售后数据是否已同步，或稍后重试。'
     default:

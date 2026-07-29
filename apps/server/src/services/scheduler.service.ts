@@ -18,17 +18,15 @@ const GLOBAL = globalThis as {
   __liveBusinessPeriodicSyncTimeout?: ReturnType<typeof setTimeout>
 }
 
-let buyerRankingCronTask: cron.ScheduledTask | null = null
 let rollingDataHealthCloseCronTask: cron.ScheduledTask | null = null
 let workbenchQueueCronTask: cron.ScheduledTask | null = null
 let schedulerInitialized = false
 let periodicSyncRunning = false
 
-/** 买家全量画像每日更新时间（与经营 API 同步独立，仅本地缓存重建） */
-export const BUYER_RANKING_DAILY_TIME = '03:00'
+/** 滚动健康等定时任务时区（买家排行日更 cron 已移除） */
 export const BUYER_RANKING_TIMEZONE = 'Asia/Shanghai'
 
-/** 滚动 30 天数据健康结账：独立于买家排行 cron */
+/** 滚动 30 天数据健康结账 */
 export const ROLLING_DATA_HEALTH_CLOSE_DAILY_TIME = '03:10'
 export const ROLLING_DATA_HEALTH_CLOSE_STARTUP_STALE_MS = 30 * 60 * 60 * 1000
 
@@ -195,42 +193,6 @@ export async function rescheduleFromSettings(): Promise<void> {
   )
 }
 
-function scheduleBuyerRankingCache(): void {
-  if (buyerRankingCronTask) {
-    buyerRankingCronTask.stop()
-    buyerRankingCronTask = null
-  }
-  const [h, m] = BUYER_RANKING_DAILY_TIME.split(':').map(Number)
-  const expr = `${m} ${h} * * *`
-  buyerRankingCronTask = cron.schedule(
-    expr,
-    () => {
-      void (async () => {
-        logInfo('买家排行', '开始定时全量画像重建')
-        try {
-          const { rebuildBuyerRankingCache } = await import('./buyer-ranking-cache.service')
-          const r = await rebuildBuyerRankingCache('scheduler')
-          logInfo(
-            '买家排行',
-            `定时重建完成：${r.buyerCount} 位买家，${r.orderCount} 单`,
-          )
-        } catch (err) {
-          logError(
-            '买家排行',
-            `定时重建失败：${err instanceof Error ? err.message : String(err)}`,
-            err,
-          )
-        }
-      })()
-    },
-    { timezone: BUYER_RANKING_TIMEZONE },
-  )
-  logInfo(
-    '定时任务',
-    `买家排行自动重建已开启：每日 ${BUYER_RANKING_DAILY_TIME}（${BUYER_RANKING_TIMEZONE}）`,
-  )
-}
-
 function scheduleRollingDataHealthClose(): void {
   if (rollingDataHealthCloseCronTask) {
     rollingDataHealthCloseCronTask.stop()
@@ -333,7 +295,6 @@ export async function initScheduler(): Promise<void> {
   await ensureDefaultSettings()
   registerApiSyncRescheduleHook(rescheduleFromSettings)
   scheduleBusinessPeriodicSync()
-  scheduleBuyerRankingCache()
   scheduleRollingDataHealthClose()
   scheduleRollingDataHealthCloseStartupCatchup()
   scheduleWorkbenchQueueProcessor()

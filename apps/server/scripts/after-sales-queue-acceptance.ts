@@ -15,8 +15,14 @@ function assert(cond: boolean, msg: string): void {
 
 function testCooldownClassification(): void {
   const c = classifyWorkbenchQueueError('冷却中（298s）')
-  assert(c.disposition === 'retry_wait', '冷却应进入 retry_wait')
-  assert(c.errorType === 'platform_cooling', '冷却 errorType')
+  assert(c.disposition === 'retry_wait', '自限流应进入 retry_wait')
+  assert(c.errorType === 'local_throttle', '自建冷却中文案应为 local_throttle')
+  const jsonl = classifyWorkbenchQueueError('冷却中（JSONL 恢复，242s）')
+  assert(jsonl.errorType === 'local_throttle', 'JSONL 恢复应为 local_throttle')
+  const plat = classifyWorkbenchQueueError('触发平台限流 rate limit')
+  assert(plat.errorType === 'platform_cooling', '平台限流文案应为 platform_cooling')
+  const r429 = classifyWorkbenchQueueError('too many', 429)
+  assert(r429.errorType === 'http_429', '429 应为 http_429')
   const f = classifyWorkbenchQueueError('签名生成失败')
   assert(f.disposition === 'retry_wait', '签名临时失败应 retry_wait')
   const p = classifyWorkbenchQueueError('无效订单号（需 P 开头官方订单号）')

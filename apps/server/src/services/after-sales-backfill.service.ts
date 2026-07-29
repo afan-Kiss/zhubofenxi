@@ -1,10 +1,12 @@
 /**
  * 售后工作台补查：老板视角任务日志（补什么 / 为什么 / 影响）
+ * 同店打包 keywords 批量拉取，逐单写缓存/完结队列。
  */
 import { prisma } from '../lib/prisma'
 import {
   completeAfterSalesQueueTask,
   selectAfterSalesQueueTasks,
+  type SelectedAfterSalesQueueTask,
 } from './after-sales-queue.service'
 import {
   DEFAULT_AFTER_SALES_QUEUE_LIMITS,
@@ -12,14 +14,17 @@ import {
 } from './after-sales-queue.types'
 import {
   fetchAfterSalesWorkbenchByOrderNo,
+  fetchAfterSalesWorkbenchByOrderNos,
   pickBuyerUserIdFromRawJson,
   saveWorkbenchCache,
+  type AfterSalesWorkbenchRefund,
 } from './xhs-after-sales-workbench.service'
 import {
   TaskProgressReporter,
   taskFail,
   taskStart,
 } from '../utils/task-log'
+import { logInfo } from '../utils/server-log'
 import {
   logAfterSaleSyncComplete,
   logAfterSaleSyncStart,
@@ -34,6 +39,74 @@ async function resolveAccountName(liveAccountId: string): Promise<string> {
   return row?.displayName?.trim() || liveAccountId
 }
 
+async function loadFallbackBuyerUserId(
+  liveAccountId: string,
+  orderNo: string,
+): Promise<string | undefined> {
+  const rawOrder = await prisma.xhsRawOrder.findFirst({
+    where: {
+      liveAccountId,
+      OR: [{ packageId: orderNo }, { orderId: orderNo }],
+    },
+    select: { rawJson: true, buyerId: true },
+  })
+  return pickBuyerUserIdFromRawJson(
+    rawOrder?.rawJson as Record<string, unknown> | undefined,
+    rawOrder?.buyerId,
+  )
+}
+
+async function finalizeOneTask(params: {
+  item: SelectedAfterSalesQueueTask
+  result: AfterSalesWorkbenchRefund
+  accountName: string
+  reporter: TaskProgressReporter
+  counters: {
+    success: number
+    failed: number
+    retryWait: number
+    blocked: number
+  }
+  stat: {
+    success: number
+    failed: number
+    retryWait: number
+    blocked: number
+    empty: number
+  }
+}): Promise<void> {
+  const { item, result, accountName, reporter, counters, stat } = params
+  if (result.fetchStatus !== 'failed') {
+    await saveWorkbenchCache(result, item.liveAccountId)
+  }
+  const finalStatus = await completeAfterSalesQueueTask({
+    queueId: item.id,
+    liveAccountId: item.liveAccountId,
+    orderNo: item.orderNo,
+    result,
+    claimToken: item.claimToken,
+    workerId: item.workerId,
+  })
+  if (finalStatus === 'done') {
+    counters.success++
+    if (result.fetchStatus === 'empty') stat.empty++
+    else stat.success++
+    reporter.tick(true, `当前账号=${accountName}，接口=售后工作台批量`)
+  } else if (finalStatus === 'retry_wait') {
+    counters.retryWait++
+    stat.retryWait++
+    reporter.tick(false, `当前账号=${accountName}，冷却等待，接口=售后工作台批量`)
+  } else if (finalStatus === 'blocked') {
+    counters.blocked++
+    stat.blocked++
+    reporter.tick(false, `当前账号=${accountName}，店铺阻塞，接口=售后工作台批量`)
+  } else {
+    counters.failed++
+    stat.failed++
+    reporter.tick(false, `当前账号=${accountName}，接口=售后工作台批量`)
+  }
+}
+
 export async function runAfterSalesBackfillBatch(
   limits: AfterSalesQueueRateLimits = DEFAULT_AFTER_SALES_QUEUE_LIMITS,
 ): Promise<{
@@ -43,9 +116,16 @@ export async function runAfterSalesBackfillBatch(
   retryWait: number
   blocked: number
 }> {
-  // 本地队列维护：即使全店 cooling / 无候选，也必须先恢复超时 running
+  // 总闸：与经营订单同步同源；关闭时零 HTTP（仍可恢复超时 running）
+  const { getApiSyncSettings } = await import('./system-setting.service')
+  const settings = await getApiSyncSettings()
   const { recoverStuckAfterSalesRunningTasks } = await import('./after-sales-queue.service')
   await recoverStuckAfterSalesRunningTasks()
+
+  if (!settings.apiSyncEnabled) {
+    logInfo('售后补查', '售后补查已暂停（apiSyncEnabled=false），本次不拉取平台。')
+    return { processed: 0, success: 0, failed: 0, retryWait: 0, blocked: 0 }
+  }
 
   const pending = await selectAfterSalesQueueTasks(limits)
 
@@ -54,16 +134,14 @@ export async function runAfterSalesBackfillBatch(
   }
 
   const started = Date.now()
+  const shopCount = new Set(pending.map((p) => p.liveAccountId)).size
   taskStart(
     '售后补查',
-    `本次调度 ${pending.length} 笔售后详情（全局≤${limits.globalPerMinute}/分，每店≤${limits.perShopPerMinute}/分），用于完善退款/品退统计，不会改动支付金额。`,
+    `本次调度 ${pending.length} 笔售后详情（约 ${shopCount} 店批量 keywords，每店≤${limits.perShopPerMinute} 单/请求，最多 ${limits.maxShopsPerBatch} 店），用于完善退款/品退统计，不会改动支付金额。`,
   )
 
   const reporter = new TaskProgressReporter('售后补查', pending.length, 5, 15_000)
-  let success = 0
-  let failed = 0
-  let retryWait = 0
-  let blocked = 0
+  const counters = { success: 0, failed: 0, retryWait: 0, blocked: 0 }
   let currentAccount = ''
 
   const accountStats = new Map<
@@ -80,13 +158,19 @@ export async function runAfterSalesBackfillBatch(
     }
   >()
 
+  const byShop = new Map<string, SelectedAfterSalesQueueTask[]>()
   for (const item of pending) {
-    const accountName = await resolveAccountName(item.liveAccountId)
+    const list = byShop.get(item.liveAccountId) ?? []
+    list.push(item)
+    byShop.set(item.liveAccountId, list)
+  }
+
+  for (const [liveAccountId, items] of byShop) {
+    const accountName = await resolveAccountName(liveAccountId)
     currentAccount = accountName
-    const statKey = item.liveAccountId || 'legacy'
-    const stat = accountStats.get(statKey) ?? {
+    const stat = accountStats.get(liveAccountId) ?? {
       accountName,
-      liveAccountId: item.liveAccountId,
+      liveAccountId,
       processed: 0,
       success: 0,
       failed: 0,
@@ -94,64 +178,115 @@ export async function runAfterSalesBackfillBatch(
       blocked: 0,
       empty: 0,
     }
-    stat.processed++
+    stat.processed += items.length
+
+    const orderNos = items.map((i) => i.orderNo)
+    let results: Map<string, AfterSalesWorkbenchRefund>
     try {
-      const rawOrder = await prisma.xhsRawOrder.findFirst({
-        where: {
-          liveAccountId: item.liveAccountId,
-          OR: [{ packageId: item.orderNo }, { orderId: item.orderNo }],
-        },
-        select: { rawJson: true, buyerId: true },
-      })
-      const fallbackBuyerUserId = pickBuyerUserIdFromRawJson(
-        rawOrder?.rawJson as Record<string, unknown> | undefined,
-        rawOrder?.buyerId,
-      )
-      const result = await fetchAfterSalesWorkbenchByOrderNo(item.orderNo, item.liveAccountId, {
-        fallbackBuyerUserId,
-      })
-      if (result.fetchStatus !== 'failed') {
-        await saveWorkbenchCache(result, item.liveAccountId)
-      }
-      const finalStatus = await completeAfterSalesQueueTask({
-        queueId: item.id,
-        liveAccountId: item.liveAccountId,
-        orderNo: item.orderNo,
-        result,
-        claimToken: item.claimToken,
-        workerId: item.workerId,
-      })
-      if (finalStatus === 'done') {
-        success++
-        if (result.fetchStatus === 'empty') stat.empty++
-        else stat.success++
-        reporter.tick(true, `当前账号=${accountName}，接口=售后工作台详情`)
-      } else if (finalStatus === 'retry_wait') {
-        retryWait++
-        stat.retryWait++
-        reporter.tick(false, `当前账号=${accountName}，冷却等待，接口=售后工作台详情`)
-      } else if (finalStatus === 'blocked') {
-        blocked++
-        stat.blocked++
-        reporter.tick(false, `当前账号=${accountName}，店铺阻塞，接口=售后工作台详情`)
-      } else {
-        failed++
-        stat.failed++
-        reporter.tick(false, `当前账号=${accountName}，接口=售后工作台详情`)
-      }
+      results = await fetchAfterSalesWorkbenchByOrderNos(orderNos, liveAccountId)
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      await completeAfterSalesQueueTask({
-        queueId: item.id,
-        liveAccountId: item.liveAccountId,
-        orderNo: item.orderNo,
-        result: { fetchStatus: 'failed', fetchError: msg.slice(0, 500) },
-      })
-      failed++
-      stat.failed++
-      reporter.tick(false, `当前账号=${accountName}，接口=售后工作台详情`)
+      for (const item of items) {
+        await finalizeOneTask({
+          item,
+          result: {
+            orderNo: item.orderNo,
+            packageId: item.orderNo,
+            officialRefundAmountCent: 0,
+            freightRefundAmountCent: 0,
+            expectedRefundAmountCent: 0,
+            appliedAmountCent: 0,
+            appliedShipFeeAmountCent: 0,
+            payAmountCent: 0,
+            settlementAmountCent: 0,
+            refundIncludesFreight: false,
+            hasFreightOnlyRefund: false,
+            buyerUserId: null,
+            afterSaleReason: null,
+            afterSaleStatus: null,
+            successReturnCount: 0,
+            returnsIds: [],
+            fetchedAt: null,
+            liveAccountId,
+            fetchStatus: 'failed',
+            fetchError: msg.slice(0, 500),
+          },
+          accountName,
+          reporter,
+          counters,
+          stat,
+        })
+      }
+      accountStats.set(liveAccountId, stat)
+      continue
     }
-    accountStats.set(statKey, stat)
+
+    // HTTP 整批失败：同一错误写回所有单
+    const firstFailed = [...results.values()].find((r) => r.fetchStatus === 'failed')
+    const allFailed =
+      results.size > 0 && [...results.values()].every((r) => r.fetchStatus === 'failed')
+    if (allFailed && firstFailed) {
+      for (const item of items) {
+        await finalizeOneTask({
+          item,
+          result: results.get(item.orderNo) ?? firstFailed,
+          accountName,
+          reporter,
+          counters,
+          stat,
+        })
+      }
+      accountStats.set(liveAccountId, stat)
+      continue
+    }
+
+    for (const item of items) {
+      let result = results.get(item.orderNo)
+      if (!result) {
+        result = {
+          orderNo: item.orderNo,
+          packageId: item.orderNo,
+          officialRefundAmountCent: 0,
+          freightRefundAmountCent: 0,
+          expectedRefundAmountCent: 0,
+          appliedAmountCent: 0,
+          appliedShipFeeAmountCent: 0,
+          payAmountCent: 0,
+          settlementAmountCent: 0,
+          refundIncludesFreight: false,
+          hasFreightOnlyRefund: false,
+          buyerUserId: null,
+          afterSaleReason: null,
+          afterSaleStatus: null,
+          successReturnCount: 0,
+          returnsIds: [],
+          fetchedAt: null,
+          liveAccountId,
+          fetchStatus: 'empty',
+          fetchError: null,
+        }
+      }
+
+      // 批量未命中：单笔 + 买家 ID 兜底，避免假 success+0
+      if (result.fetchStatus === 'empty') {
+        const fallbackBuyerUserId = await loadFallbackBuyerUserId(liveAccountId, item.orderNo)
+        if (fallbackBuyerUserId) {
+          result = await fetchAfterSalesWorkbenchByOrderNo(item.orderNo, liveAccountId, {
+            fallbackBuyerUserId,
+          })
+        }
+      }
+
+      await finalizeOneTask({
+        item,
+        result,
+        accountName,
+        reporter,
+        counters,
+        stat,
+      })
+    }
+    accountStats.set(liveAccountId, stat)
   }
 
   const accountList = [...accountStats.values()]
@@ -177,10 +312,16 @@ export async function runAfterSalesBackfillBatch(
   const lastAccount = currentAccount || '—'
 
   reporter.finish(
-    `${pending.length} 笔补查结束，成功 ${success}，冷却等待 ${retryWait}，阻塞 ${blocked}，永久失败 ${failed}，用时 ${durationSec} 秒。最后处理账号=${lastAccount}`,
+    `${pending.length} 笔补查结束，成功 ${counters.success}，冷却等待 ${counters.retryWait}，阻塞 ${counters.blocked}，永久失败 ${counters.failed}，用时 ${durationSec} 秒。最后处理账号=${lastAccount}`,
   )
 
-  return { processed: pending.length, success, failed, retryWait, blocked }
+  return {
+    processed: pending.length,
+    success: counters.success,
+    failed: counters.failed,
+    retryWait: counters.retryWait,
+    blocked: counters.blocked,
+  }
 }
 
 export async function logAfterSalesBackfillFailure(

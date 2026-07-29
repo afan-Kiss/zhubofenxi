@@ -73,8 +73,15 @@ export function classifyWorkbenchQueueError(
 ): { errorType: AfterSalesQueueErrorType; disposition: AfterSalesQueueDisposition } {
   const msg = (errorMessage ?? '').trim()
 
-  if (/冷却|cooldown|熔断|throttl|rate.?limit/i.test(msg) || httpStatus === 429) {
-    return { errorType: httpStatus === 429 ? 'http_429' : 'platform_cooling', disposition: 'retry_wait' }
+  // 自建审计闸门「冷却中（Xs）/JSONL 恢复」：仅 retry，不升整店 platform_cooling 熔断
+  if (/冷却中（|JSONL 恢复/i.test(msg)) {
+    return { errorType: 'local_throttle', disposition: 'retry_wait' }
+  }
+  if (httpStatus === 429) {
+    return { errorType: 'http_429', disposition: 'retry_wait' }
+  }
+  if (/冷却|cooldown|熔断|throttl|rate.?limit/i.test(msg)) {
+    return { errorType: 'platform_cooling', disposition: 'retry_wait' }
   }
   if (httpStatus === 502) return { errorType: 'http_502', disposition: 'retry_wait' }
   if (httpStatus === 503) return { errorType: 'http_503', disposition: 'retry_wait' }
@@ -611,8 +618,9 @@ export async function selectAfterSalesQueueTasks(
   if (shopIds.length === 0) return []
 
   const circuits = await loadShopCircuits(shopIds)
-  const perShopCap = limits.perShopPerMinute
-  const globalCap = limits.globalPerMinute
+  const perShopCap = Math.max(1, limits.perShopPerMinute)
+  const globalCap = Math.max(1, limits.globalPerMinute)
+  const maxShops = Math.max(1, limits.maxShopsPerBatch ?? 8)
   const shopStats: ShopSelectStats[] = []
 
   // 每店独立拉候选，再轮询合并，避免单店饿死其他店
@@ -663,9 +671,10 @@ export async function selectAfterSalesQueueTasks(
     temporaryAttemptCount: number
   }> = []
   const perShopPicked = new Map<string, number>()
+  const shopsWithPick = new Set<string>()
   const orderCtxByKey = new Map<string, OrderAfterSaleContext>()
 
-  // 轮询
+  // 轮询：每店最多 perShopCap 单；全局限订单数 + 店铺数（每店 1 HTTP）
   let progress = true
   while (selectedMeta.length < globalCap && progress) {
     progress = false
@@ -674,6 +683,7 @@ export async function selectAfterSalesQueueTasks(
       if (batchStopShops.has(sid)) continue
       const picked = perShopPicked.get(sid) ?? 0
       if (picked >= perShopCap) continue
+      if (!shopsWithPick.has(sid) && shopsWithPick.size >= maxShops) continue
       const q = shopQueues.get(sid)
       if (!q?.length) continue
       const row = q.shift()!
@@ -713,6 +723,7 @@ export async function selectAfterSalesQueueTasks(
         temporaryAttemptCount: row.temporaryAttemptCount,
       })
       perShopPicked.set(sid, picked + 1)
+      shopsWithPick.add(sid)
     }
   }
 
@@ -766,6 +777,11 @@ async function applyShopOutcomePersistent(
     return
   }
   if (disposition === 'retry_wait') {
+    // local_throttle：本批停该店，短退避，不 openShopCircuit
+    if (errorType === 'local_throttle') {
+      batchStopShops.add(shopKey(liveAccountId))
+      return
+    }
     if (errorType === 'platform_cooling' || errorType === 'http_429') {
       batchStopShops.add(shopKey(liveAccountId))
       await openShopCircuit({

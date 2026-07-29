@@ -75,6 +75,8 @@ const COOLDOWN_MS_BY_API: Record<string, number> = {
   boss_shop_score: BUSINESS_SYNC_INTERVAL_MS - 10 * 60 * 1000,
   boss_score_rule: BUSINESS_SYNC_INTERVAL_MS - 10 * 60 * 1000,
   lucky_gift: 2 * 1000,
+  /** 售后工作台：按 keywords hash 隔离；短冷却，依赖全局串行 ≥1s */
+  after_sales_workbench: 2_000,
 }
 
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000
@@ -103,10 +105,23 @@ export function buildXhsRequestHash(input: {
   apiName: string
   query?: Record<string, string>
   body?: unknown
+  /** GET 完整 URL（含 keywords），避免同 api 共锁 */
+  url?: string
 }): string {
+  let query = input.query ?? {}
+  if (input.url && Object.keys(query).length === 0) {
+    try {
+      const u = new URL(input.url)
+      const keywords = u.searchParams.get('keywords')
+      if (keywords != null) query = { ...query, keywords }
+      else query = { ...query, path: u.pathname, search: u.search }
+    } catch {
+      query = { ...query, url: input.url }
+    }
+  }
   return crypto
     .createHash('sha256')
-    .update(JSON.stringify({ apiName: input.apiName, query: input.query ?? {}, body: input.body ?? null }))
+    .update(JSON.stringify({ apiName: input.apiName, query, body: input.body ?? null }))
     .digest('hex')
     .slice(0, 16)
 }
@@ -366,6 +381,7 @@ export async function requestXhsJsonWithSyncAudit<T>(params: {
     buildXhsRequestHash({
       apiName: params.apiName,
       body: params.options.body,
+      url: params.options.url,
     })
   const result = await runXhsRequestWithAuditAndThrottle<T>({
     shopId: params.shopId,

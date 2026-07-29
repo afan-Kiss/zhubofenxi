@@ -56,6 +56,68 @@ function isAfterSalesBackfillMutexRunning(): boolean {
   return g.__afterSalesBackfillRunning === true
 }
 
+/** 售后进度「本轮」状态：用进程内快照，避免历史 done/累计分母导致新入队时百分比回退 */
+type AfterSalesWaveProgressState = {
+  startDone: number
+  lastPercent: number
+}
+
+function getAfterSalesWaveStateBag(): { current: AfterSalesWaveProgressState | null } {
+  const g = globalThis as {
+    __afterSalesWaveProgress?: { current: AfterSalesWaveProgressState | null }
+  }
+  if (!g.__afterSalesWaveProgress) g.__afterSalesWaveProgress = { current: null }
+  return g.__afterSalesWaveProgress
+}
+
+/** 测试用：清空本轮进度快照 */
+export function resetAfterSalesWaveProgressForTests(): void {
+  getAfterSalesWaveStateBag().current = null
+}
+
+/**
+ * 本轮进度 = 本轮已查 / (本轮已查 + 还剩)；展示百分比只增不减。
+ * 新单入队会拉低「瞬时比例」，但不允许进度条回退。
+ */
+export function resolveAfterSalesWaveProgress(input: {
+  done: number
+  open: number
+  prev: AfterSalesWaveProgressState | null
+}): {
+  next: AfterSalesWaveProgressState | null
+  percent: number | null
+  waveDone: number
+  waveTotal: number | null
+  countLabel: string | null
+} {
+  const done = Math.max(0, Math.floor(Number(input.done) || 0))
+  const open = Math.max(0, Math.floor(Number(input.open) || 0))
+  if (open <= 0) {
+    return {
+      next: null,
+      percent: null,
+      waveDone: 0,
+      waveTotal: null,
+      countLabel: null,
+    }
+  }
+
+  const prev = input.prev
+  const startDone = prev != null && done >= prev.startDone ? prev.startDone : done
+  const waveDone = Math.max(0, done - startDone)
+  const waveTotal = waveDone + open
+  const raw = waveTotal > 0 ? clampPercent((waveDone / waveTotal) * 100) : 0
+  const percent = Math.max(prev?.lastPercent ?? 0, raw)
+
+  return {
+    next: { startDone, lastPercent: percent },
+    percent,
+    waveDone,
+    waveTotal,
+    countLabel: `本轮已查 ${waveDone} · 还剩 ${open}`,
+  }
+}
+
 function buildBusinessSyncTask(
   enabled: boolean,
   biz: Awaited<ReturnType<typeof getBusinessSyncStatus>>['businessSync'],
@@ -147,10 +209,15 @@ function buildAfterSalesTasks(
   const retryWait = ops.totals.retry_wait ?? 0
   const done = ops.totals.done ?? 0
   const open = pending + running + retryWait
-  const total = open + done
   const batchRunning = isAfterSalesBackfillMutexRunning() || running > 0
-  const percent =
-    total > 0 ? clampPercent((done / total) * 100) : enabled ? 100 : null
+
+  const waveBox = getAfterSalesWaveStateBag()
+  const wave = resolveAfterSalesWaveProgress({
+    done,
+    open,
+    prev: waveBox.current,
+  })
+  waveBox.current = wave.next
 
   let status: RuntimeTaskStatus
   let statusText: string
@@ -168,7 +235,7 @@ function buildAfterSalesTasks(
     statusText = batchRunning
       ? `正在补查售后：本批按店铺批量处理（每店最多 10 单）`
       : `排队等待补查：还有 ${open} 单`
-    detailText = `已完成 ${done} 单 · 待处理 ${pending} · 进行中 ${running} · 稍后重试 ${retryWait}`
+    detailText = `本轮已查 ${wave.waveDone} 单 · 待处理 ${pending} · 进行中 ${running} · 稍后重试 ${retryWait}`
   } else {
     status = 'done'
     statusText = '售后补查暂无积压'
@@ -183,15 +250,15 @@ function buildAfterSalesTasks(
       status,
       statusText,
       detailText,
-      percent:
+      percent: status === 'done' ? 100 : wave.percent,
+      doneCount: open > 0 ? wave.waveDone : done > 0 ? done : null,
+      totalCount: open > 0 ? wave.waveTotal : null,
+      countLabel:
         status === 'done'
-          ? 100
-          : total > 0
-            ? percent
-            : null,
-      doneCount: done,
-      totalCount: total > 0 ? total : null,
-      countLabel: total > 0 ? `${done}/${total}` : null,
+          ? done > 0
+            ? `历史已完成 ${done}`
+            : null
+          : wave.countLabel,
     },
   ]
 
@@ -205,8 +272,6 @@ function buildAfterSalesTasks(
 
   for (const s of shops) {
     const sOpen = s.pending + s.running + s.retry_wait
-    const sTotal = sOpen + s.done
-    const sPercent = sTotal > 0 ? clampPercent((s.done / sTotal) * 100) : null
     const name = s.platformName || s.liveAccountId
     let shopStatus: RuntimeTaskStatus = 'waiting'
     let shopText = `${name}：待处理 ${sOpen} 单`
@@ -223,6 +288,7 @@ function buildAfterSalesTasks(
           ? `${name}：正在查售后`
           : `${name}：排队中，待处理 ${sOpen} 单`
     }
+    // 分店只展示积压数量，不画历史累计百分比（避免新入队时条往回缩）
     tasks.push({
       id: `after_sales_shop:${s.liveAccountId}`,
       kind: 'after_sales_shop',
@@ -234,10 +300,10 @@ function buildAfterSalesTasks(
         : s.etaMinutes != null && s.etaMinutes > 0
           ? `按当前速度大约还要 ${s.etaMinutes} 分钟`
           : null,
-      percent: sPercent,
-      doneCount: s.done,
-      totalCount: sTotal > 0 ? sTotal : null,
-      countLabel: sTotal > 0 ? `${s.done}/${sTotal}` : null,
+      percent: null,
+      doneCount: null,
+      totalCount: sOpen,
+      countLabel: `还剩 ${sOpen}`,
     })
   }
 

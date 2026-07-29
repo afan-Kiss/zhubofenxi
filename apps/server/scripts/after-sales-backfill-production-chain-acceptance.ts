@@ -12,6 +12,7 @@ import {
   resetAfterSalesHttpDepsForTest,
   setAfterSalesHttpDepsForTest,
   type AfterSalesHttpCallParams,
+  type AfterSalesHttpExecutionResult,
 } from '../src/services/after-sales-http-deps'
 import {
   buildWorkbenchPageUrl,
@@ -74,6 +75,10 @@ function processingDetail(no: string): Record<string, unknown> {
     reason: '质量问题',
     user_id: 'buyer-uid-001',
   }
+}
+
+function okPayload(payload: unknown): AfterSalesHttpExecutionResult {
+  return { payload, networkSent: true, decision: 'network_success' }
 }
 
 function cleanup(): void {
@@ -141,7 +146,7 @@ async function testTwelveOrders(): Promise<void> {
     httpExecutor: async (p) => {
       calls.push(p)
       const kws = new URL(p.url).searchParams.get('keywords')!.split(',')
-      return {
+      return okPayload({
         data: {
           total_count: 0,
           after_sales: kws.map((n) => ({
@@ -154,7 +159,7 @@ async function testTwelveOrders(): Promise<void> {
             user_id: 'u1',
           })),
         },
-      }
+      })
     },
   })
   const map = await fetchAfterSalesWorkbenchByOrderNos(nos, 'shopA')
@@ -190,11 +195,15 @@ async function testPagination(): Promise<void> {
           return_type: 2,
         }
       }).filter(Boolean)
-      return { data: { total_count: 45, after_sales: rows } }
+      return okPayload({ data: { total_count: 45, after_sales: rows } })
     },
   })
-  const { results, httpRequests } = await fetchAfterSalesWorkbenchByOrderNosWithMeta(nos, 'shopA')
-  assert(httpRequests === 3, `45条应3页 got=${httpRequests}`)
+  const { results, httpRequests, networkRequests, requestAttempts, counters } =
+    await fetchAfterSalesWorkbenchByOrderNosWithMeta(nos, 'shopA')
+  assert(requestAttempts === 3, `45条应3页 attempts got=${requestAttempts}`)
+  assert(networkRequests === 3, `network=3 got=${networkRequests}`)
+  assert(httpRequests === networkRequests, 'http===network')
+  assert(counters.actualHttpRequests === counters.networkRequests, 'counters actual')
   assert(pageHits === 3, 'pageHits=3')
   assert(results.size === 2, '2 orders')
 
@@ -213,7 +222,7 @@ async function testPagination(): Promise<void> {
         refunded: true,
         refund_fee: 1,
       }))
-      return { data: { total_count: 205, after_sales: rows } }
+      return okPayload({ data: { total_count: 205, after_sales: rows } })
     },
   })
   let threw: unknown
@@ -224,7 +233,9 @@ async function testPagination(): Promise<void> {
   }
   assert(threw instanceof AfterSalesRequestError, 'PAGINATION_INCOMPLETE')
   assert(String((threw as Error).message).includes('PAGINATION_INCOMPLETE'), 'msg')
-  assert((threw as AfterSalesRequestError).httpRequests === 10, 'http=10')
+  assert((threw as AfterSalesRequestError).requestAttempts === 10, 'attempts=10')
+  assert((threw as AfterSalesRequestError).networkRequests === 10, 'network=10')
+  assert((threw as AfterSalesRequestError).httpRequests === 10, 'http=network=10')
   assert(pageHits === 10, 'pages=10')
 }
 
@@ -237,7 +248,7 @@ async function test429HttpCount(): Promise<void> {
     httpExecutor: async (p) => {
       const page = Number(new URL(p.url).searchParams.get('page') || '1')
       if (page === 1) {
-        return {
+        return okPayload({
           data: {
             total_count: 25,
             after_sales: Array.from({ length: 20 }, (_, i) => ({
@@ -248,7 +259,7 @@ async function test429HttpCount(): Promise<void> {
               refund_fee: 1,
             })),
           },
-        }
+        })
       }
       throw new Error('HTTP 429 Too Many Requests')
     },
@@ -260,7 +271,9 @@ async function test429HttpCount(): Promise<void> {
     err = e
   }
   assert(err instanceof AfterSalesRequestError, 'AfterSalesRequestError')
-  assert((err as AfterSalesRequestError).httpRequests === 2, 'httpRequests=2')
+  assert((err as AfterSalesRequestError).requestAttempts === 2, 'attempts=2')
+  assert((err as AfterSalesRequestError).networkRequests === 2, 'network=2')
+  assert((err as AfterSalesRequestError).httpRequests === 2, 'http=network=2')
 }
 
 function makeProbePayload(orderNos: string[], hasAt: Set<number>): unknown {
@@ -297,11 +310,13 @@ async function runBackfillWithHttp(
     waitShopSlot: async () => undefined,
     httpExecutor: async (p) => {
       httpCalls.push(p)
-      return http(p)
+      const payload = await http(p)
+      return okPayload(payload)
     },
   })
 
   setAfterSalesBackfillDepsForTest({
+    ensureSchema: async () => ({ added: [], alreadyPresent: [] }),
     getApiSyncEnabled: async () => true,
     recoverStuck: async () => undefined,
     selectTasks: async () => tasks,
@@ -341,7 +356,9 @@ async function testTenNone(): Promise<void> {
   const detailCalls = httpCalls.filter((c) => c.url.includes('/after-sales/returns/v3'))
   assert(listCalls.length === 1, `list=1 got=${listCalls.length}`)
   assert(detailCalls.length === 0, 'detail=0')
-  assert(metrics.actualHttpRequests === 1, `http=1 got=${metrics.actualHttpRequests}`)
+  assert(metrics.networkRequests === 1, `network=1 got=${metrics.networkRequests}`)
+  assert(metrics.actualHttpRequests === metrics.networkRequests, 'actual===network')
+  assert(metrics.requestAttempts === 1, 'attempts=1')
   assert(metrics.noAfterSale === 10, `noAfterSale=10 got=${metrics.noAfterSale}`)
 }
 
@@ -369,7 +386,9 @@ async function testTwoHas(): Promise<void> {
   const listCalls = httpCalls.filter((c) => c.url.includes('/fulfillment/order/page'))
   const detailCalls = httpCalls.filter((c) => c.url.includes('/after-sales/returns/v3'))
   assert(listCalls.length === 1 && detailCalls.length === 1, 'http 1+1')
-  assert(metrics.actualHttpRequests === 2, `http=2 got=${metrics.actualHttpRequests}`)
+  assert(metrics.networkRequests === 2, `network=2 got=${metrics.networkRequests}`)
+  assert(metrics.actualHttpRequests === metrics.networkRequests, 'actual===network')
+  assert(metrics.requestAttempts === 2, 'attempts=2')
   assert(saved.some((s) => (s.matchedRecordCount ?? 0) > 0 && s.successReturnCount === 0), 'processing saved')
 }
 
@@ -379,10 +398,19 @@ async function testShop429(): Promise<void> {
   const nos = Array.from({ length: 5 }, (_, i) => orderNo(i))
   const tasks = nos.map((n, i) => task(shop, n, `t${i}`))
   const { metrics, httpCalls, released } = await runBackfillWithHttp(tasks, async () => {
-    throw new Error('HTTP 429')
+    throw new AfterSalesRequestError({
+      message: 'HTTP 429',
+      requestAttempts: 1,
+      networkRequests: 1,
+      networkSent: true,
+      causeCode: 'http_429',
+    })
   })
   assert(httpCalls.length === 1, `仅1次 got=${httpCalls.length}`)
-  assert(metrics.actualHttpRequests === 1, 'http count 1')
+  assert(metrics.requestAttempts === 1, 'attempts 1')
+  assert(metrics.networkRequests === 1, 'network 1')
+  assert(metrics.actualHttpRequests === 1, 'actual===network 1')
+  assert(metrics.locallyThrottled === 0, 'not local throttle')
   assert(released.length === 5, `release 5 got=${released.length}`)
   assert(metrics.rateLimited >= 1, 'rateLimited')
 }
@@ -395,6 +423,7 @@ async function testRealMutex(): Promise<void> {
   })
   let firstEntered = false
   setAfterSalesBackfillDepsForTest({
+    ensureSchema: async () => ({ added: [], alreadyPresent: [] }),
     getApiSyncEnabled: async () => true,
     recoverStuck: async () => undefined,
     selectTasks: async () => [],
@@ -414,6 +443,7 @@ async function testRealMutex(): Promise<void> {
   await p1
   // 第三次可进入
   setAfterSalesBackfillDepsForTest({
+    ensureSchema: async () => ({ added: [], alreadyPresent: [] }),
     getApiSyncEnabled: async () => true,
     recoverStuck: async () => undefined,
     selectTasks: async () => [],

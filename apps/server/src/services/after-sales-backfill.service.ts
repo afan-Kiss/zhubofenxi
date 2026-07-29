@@ -32,7 +32,12 @@ import {
   logAfterSaleSyncStart,
 } from '../utils/sync-cmd-log'
 import { openShopCircuit } from './shop-after-sales-runtime.service'
-import { getAfterSalesHttpRequestCount } from './after-sales-request-error'
+import {
+  getAfterSalesHttpRequestCount,
+  getAfterSalesNetworkRequestCount,
+  getAfterSalesLocallyThrottledCount,
+  AfterSalesRequestError,
+} from './after-sales-request-error'
 import type { OrderOwnershipVerdict } from './after-sales-order-ownership.service'
 
 const GLOBAL = globalThis as {
@@ -58,6 +63,8 @@ export type AfterSalesBackfillTestDeps = {
   resolveAccountName?: (liveAccountId: string) => Promise<string>
   /** 进入 doRun 后立刻回调（用于互斥锁真实并发测试） */
   onEntered?: () => void | Promise<void>
+  /** 覆盖 schema 确保（用于失败阻断测试） */
+  ensureSchema?: () => Promise<{ added: string[]; alreadyPresent: string[] }>
 }
 
 let backfillTestDeps: AfterSalesBackfillTestDeps | null = null
@@ -77,7 +84,16 @@ export interface AfterSalesBatchMetrics {
   orderListRequests: number
   detailRequests: number
   paginationRequests: number
+  /** 兼容字段：严格等于 networkRequests（真实发网） */
   actualHttpRequests: number
+  /** 请求执行器尝试次数（含本地冷却/熔断拦截） */
+  requestAttempts: number
+  /** 真实发往平台的网络请求次数 */
+  networkRequests: number
+  locallyThrottled: number
+  schemaEnsureFailed: boolean
+  schemaEnsureError?: string
+  skippedReason?: string
   noAfterSale: number
   hasAfterSaleSignal: number
   detailsSaved: number
@@ -104,6 +120,10 @@ function emptyMetrics(partial?: Partial<AfterSalesBatchMetrics>): AfterSalesBatc
     detailRequests: 0,
     paginationRequests: 0,
     actualHttpRequests: 0,
+    requestAttempts: 0,
+    networkRequests: 0,
+    locallyThrottled: 0,
+    schemaEnsureFailed: false,
     noAfterSale: 0,
     hasAfterSaleSignal: 0,
     detailsSaved: 0,
@@ -193,7 +213,7 @@ function isRateLimitError(msg: string): boolean {
 }
 
 function isAuthError(msg: string): boolean {
-  return /401|403|cookie|登录|鉴权|签名失效|失效/i.test(msg)
+  return /401|403|cookie_missing|cookie.*未配置|缺少 a1|登录失效|鉴权失败|签名失效/i.test(msg)
 }
 
 async function doRunAfterSalesBackfillBatch(
@@ -202,17 +222,31 @@ async function doRunAfterSalesBackfillBatch(
   const deps = backfillTestDeps
   if (deps?.onEntered) await deps.onEntered()
 
-  // 历史 SQLite 缺列会导致主流程无法启动
+  // 历史 SQLite 缺列：失败必须阻断，不得领取任务/访问平台
   try {
-    const { ensureAfterSalesQueueSchema } = await import(
-      './after-sales-queue-schema-ensure.service'
-    )
-    await ensureAfterSalesQueueSchema()
+    if (deps?.ensureSchema) {
+      await deps.ensureSchema()
+    } else {
+      const { ensureAfterSalesSchemaOnce, getAfterSalesSchemaState } = await import(
+        './after-sales-queue-schema-ensure.service'
+      )
+      const state = getAfterSalesSchemaState()
+      if (state.status === 'failed') {
+        // Once 失败后已清空，允许再次尝试
+      }
+      await ensureAfterSalesSchemaOnce()
+    }
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
     logWarn(
       '售后补查',
-      `队列表 schema 确保失败：${err instanceof Error ? err.message : String(err)}`,
+      `售后补查暂停：队列表结构升级失败，未领取任务，未请求平台。${message}`,
     )
+    return emptyMetrics({
+      schemaEnsureFailed: true,
+      schemaEnsureError: message.slice(0, 500),
+      skippedReason: 'SCHEMA_ENSURE_FAILED',
+    })
   }
 
   const metrics = emptyMetrics()
@@ -284,8 +318,12 @@ async function doRunAfterSalesBackfillBatch(
       m.success++
       if (resultTag === 'NO_AFTER_SALE') m.noAfterSale++
       else if (resultTag === 'AFTER_SALE_DETAIL_SAVED') m.detailsSaved++
-      else if (resultTag === 'AFTER_SALE_PROCESSING_SAVED') {
-        m.processingDetailsSaved++
+      else if (
+        resultTag === 'AFTER_SALE_PROCESSING_SAVED' ||
+        resultTag === 'AFTER_SALE_TERMINAL_SAVED' ||
+        resultTag === 'AFTER_SALE_UNKNOWN_SAVED'
+      ) {
+        if (resultTag === 'AFTER_SALE_PROCESSING_SAVED') m.processingDetailsSaved++
         m.detailsSaved++
       }
     } else if (finalStatus === 'retry_wait') {
@@ -363,17 +401,35 @@ async function doRunAfterSalesBackfillBatch(
           liveAccountId,
           orderNos: matched,
         })
-        metrics.orderListRequests += probe.httpRequests
-        metrics.actualHttpRequests += probe.httpRequests
-        if (probe.httpRequests > 1) {
-          metrics.paginationRequests += probe.httpRequests - 1
+        const attempts = probe.requestAttempts ?? probe.counters?.requestAttempts ?? 0
+        const network =
+          probe.networkRequests ??
+          probe.counters?.networkRequests ??
+          probe.httpRequests ??
+          0
+        const local = probe.counters?.locallyThrottled ?? 0
+        metrics.orderListRequests += attempts
+        metrics.requestAttempts += attempts
+        metrics.networkRequests += network
+        metrics.actualHttpRequests += network
+        metrics.locallyThrottled += local
+        if (attempts > 1) {
+          metrics.paginationRequests += attempts - 1
         }
         probes = probe.results
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        const httpN = getAfterSalesHttpRequestCount(e)
-        metrics.orderListRequests += httpN
-        metrics.actualHttpRequests += httpN
+        const attempts = getAfterSalesHttpRequestCount(e)
+        const network = getAfterSalesNetworkRequestCount(e)
+        const local = getAfterSalesLocallyThrottledCount(e)
+        metrics.orderListRequests += attempts
+        metrics.requestAttempts += attempts
+        metrics.networkRequests += network
+        metrics.actualHttpRequests += network
+        metrics.locallyThrottled += local
+        if (e instanceof AfterSalesRequestError && (e.causeCode === 'local_throttled' || e.causeCode === 'local_circuit_open')) {
+          if (local === 0) metrics.locallyThrottled++
+        }
         if (isRateLimitError(msg) || isAuthError(msg)) {
           shopStop = true
           if (isRateLimitError(msg)) metrics.rateLimited++
@@ -386,7 +442,7 @@ async function doRunAfterSalesBackfillBatch(
           })
           logWarn(
             '售后补查',
-            `店铺熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${matchedItems.length} http=${httpN}`,
+            `店铺熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${matchedItems.length} 请求尝试=${attempts} 真实平台请求=${network} 本地拦截=${local || metrics.locallyThrottled}`,
           )
           await releaseFn({
             tasks: matchedItems,
@@ -440,14 +496,24 @@ async function doRunAfterSalesBackfillBatch(
       if (needDetail.length === 0) continue
 
       try {
-        const { results: detailMap, httpRequests } = await fetchDetailFn(
-          needDetail,
-          liveAccountId,
-        )
-        metrics.detailRequests += httpRequests
-        metrics.actualHttpRequests += httpRequests
-        if (httpRequests > 1) {
-          metrics.paginationRequests += httpRequests - 1
+        const {
+          results: detailMap,
+          httpRequests,
+          requestAttempts: detailAttempts,
+          networkRequests: detailNetwork,
+          counters: detailCounters,
+        } = await fetchDetailFn(needDetail, liveAccountId)
+        const attempts = detailCounters?.requestAttempts ?? detailAttempts ?? 0
+        const network =
+          detailCounters?.networkRequests ?? detailNetwork ?? httpRequests ?? 0
+        const local = detailCounters?.locallyThrottled ?? 0
+        metrics.detailRequests += attempts
+        metrics.requestAttempts += attempts
+        metrics.networkRequests += network
+        metrics.actualHttpRequests += network
+        metrics.locallyThrottled += local
+        if (attempts > 1) {
+          metrics.paginationRequests += attempts - 1
         }
 
         for (const orderNo of needDetail) {
@@ -475,10 +541,23 @@ async function doRunAfterSalesBackfillBatch(
             reporter.tick(false, `当前账号=${accountName}，详情未返回`)
             continue
           }
+          const terminal =
+            (result.rejectedRecordCount ?? 0) +
+              (result.canceledRecordCount ?? 0) +
+              (result.closedRecordCount ?? 0) >
+            0
+          const unknownOnly =
+            (result.unknownRecordCount ?? 0) > 0 &&
+            (result.successReturnCount ?? 0) === 0 &&
+            (result.processingRecordCount ?? 0) === 0
           const tag =
             (result.successReturnCount ?? 0) > 0
               ? 'AFTER_SALE_DETAIL_SAVED'
-              : 'AFTER_SALE_PROCESSING_SAVED'
+              : unknownOnly
+                ? 'AFTER_SALE_UNKNOWN_SAVED'
+                : terminal
+                  ? 'AFTER_SALE_TERMINAL_SAVED'
+                  : 'AFTER_SALE_PROCESSING_SAVED'
           await finalizeTaskLocal({ item, result, metrics, resultTag: tag })
           reporter.tick(true, `当前账号=${accountName}，详情已保存`)
           shopMatched++
@@ -486,10 +565,22 @@ async function doRunAfterSalesBackfillBatch(
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
-        const httpN = getAfterSalesHttpRequestCount(e)
-        metrics.detailRequests += httpN
-        metrics.actualHttpRequests += httpN
-        if (httpN > 1) metrics.paginationRequests += httpN - 1
+        const attempts = getAfterSalesHttpRequestCount(e)
+        const network = getAfterSalesNetworkRequestCount(e)
+        const local = getAfterSalesLocallyThrottledCount(e)
+        metrics.detailRequests += attempts
+        metrics.requestAttempts += attempts
+        metrics.networkRequests += network
+        metrics.actualHttpRequests += network
+        metrics.locallyThrottled += local
+        if (attempts > 1) metrics.paginationRequests += attempts - 1
+        if (
+          e instanceof AfterSalesRequestError &&
+          (e.causeCode === 'local_throttled' || e.causeCode === 'local_circuit_open') &&
+          local === 0
+        ) {
+          metrics.locallyThrottled++
+        }
         if (isRateLimitError(msg) || isAuthError(msg)) {
           shopStop = true
           if (isRateLimitError(msg)) metrics.rateLimited++
@@ -508,7 +599,7 @@ async function doRunAfterSalesBackfillBatch(
           metrics.retryWait += remain.length
           logWarn(
             '售后补查',
-            `详情熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${remain.length} http=${httpN}`,
+            `详情熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${remain.length} 请求尝试=${attempts} 真实平台请求=${network} 本地拦截=${local}`,
           )
           continue
         }
@@ -539,12 +630,12 @@ async function doRunAfterSalesBackfillBatch(
   }
 
   reporter.finish(
-    `claimed=${metrics.claimed} 无售后=${metrics.noAfterSale} 详情保存=${metrics.detailsSaved} 未知/重试=${metrics.retryWait} HTTP=${metrics.actualHttpRequests}（列表${metrics.orderListRequests}+详情${metrics.detailRequests}）`,
+    `claimed=${metrics.claimed} 无售后=${metrics.noAfterSale} 详情保存=${metrics.detailsSaved} 未知/重试=${metrics.retryWait} 请求尝试数=${metrics.requestAttempts} 真实平台请求数=${metrics.networkRequests} 本地拦截数=${metrics.locallyThrottled}（列表${metrics.orderListRequests}+详情${metrics.detailRequests}）`,
   )
 
   logInfo(
     '售后补查',
-    `批次统计 noAfterSale=${metrics.noAfterSale} detailsSaved=${metrics.detailsSaved} processingSaved=${metrics.processingDetailsSaved} unknown=${metrics.unknown} http=${metrics.actualHttpRequests} ownershipMismatch=${metrics.ownershipMismatch}`,
+    `批次统计 noAfterSale=${metrics.noAfterSale} detailsSaved=${metrics.detailsSaved} processingSaved=${metrics.processingDetailsSaved} unknown=${metrics.unknown} requestAttempts=${metrics.requestAttempts} networkRequests=${metrics.networkRequests} actualHttpRequests=${metrics.actualHttpRequests} locallyThrottled=${metrics.locallyThrottled} ownershipMismatch=${metrics.ownershipMismatch}`,
   )
 
   return metrics

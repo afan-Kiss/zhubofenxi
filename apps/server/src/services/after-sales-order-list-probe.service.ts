@@ -12,7 +12,11 @@ import { getAfterSalesHttpDeps } from './after-sales-http-deps'
 import {
   AfterSalesRequestError,
   classifyThrownHttpCause,
+  emptyAfterSalesRequestCounters,
+  finalizeAfterSalesRequestCounters,
+  type AfterSalesRequestCounters,
 } from './after-sales-request-error'
+import { parseFiniteNonNegativeInt } from './after-sales-pagination.service'
 
 const ORDER_LIST_URL = 'https://ark.xiaohongshu.com/api/edith/fulfillment/order/page'
 const ORDER_LIST_REFERER = 'https://ark.xiaohongshu.com/app-order/order/query'
@@ -38,8 +42,7 @@ export function extractOrderListPackages(payload: unknown): {
   const packages = Array.isArray(list)
     ? list.filter((x): x is Record<string, unknown> => x != null && typeof x === 'object')
     : []
-  const totalRaw = data.total ?? data.totalCount ?? data.total_count
-  const total = typeof totalRaw === 'number' && Number.isFinite(totalRaw) ? totalRaw : null
+  const total = parseFiniteNonNegativeInt(data.total ?? data.totalCount ?? data.total_count)
   return { packages, total }
 }
 
@@ -121,20 +124,30 @@ function mapPackagesToOrders(
   return out
 }
 
-/**
- * 同店批量探测售后信号。超过 10 单抛 BATCH_ORDER_LIMIT_EXCEEDED。
- */
 export async function probeOrdersAfterSaleSignal(params: {
   liveAccountId: string
   orderNos: string[]
 }): Promise<{
   results: OrderProbeResult[]
+  counters: AfterSalesRequestCounters
+  /** @deprecated 等于 networkRequests */
   httpRequests: number
+  requestAttempts: number
+  networkRequests: number
   error?: string
 }> {
   const liveAccountId = String(params.liveAccountId ?? '').trim()
   const orderNos = [...new Set(params.orderNos.map((x) => String(x ?? '').trim()).filter(Boolean))]
-  if (orderNos.length === 0) return { results: [], httpRequests: 0 }
+  const zero = emptyAfterSalesRequestCounters()
+  if (orderNos.length === 0) {
+    return {
+      results: [],
+      counters: zero,
+      httpRequests: 0,
+      requestAttempts: 0,
+      networkRequests: 0,
+    }
+  }
   if (orderNos.length > AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS) {
     throw new Error(
       `BATCH_ORDER_LIMIT_EXCEEDED: max=${AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS} got=${orderNos.length}`,
@@ -146,7 +159,9 @@ export async function probeOrdersAfterSaleSignal(params: {
 
   const deps = getAfterSalesHttpDeps()
   const cookie = await deps.cookieProvider(liveAccountId)
-  let httpRequests = 0
+  let requestAttempts = 0
+  let networkRequests = 0
+  let locallyThrottled = 0
   const allPackages: Record<string, unknown>[] = []
   let pageNo = 1
   let total: number | null = null
@@ -155,10 +170,10 @@ export async function probeOrdersAfterSaleSignal(params: {
     for (;;) {
       await deps.waitShopSlot(liveAccountId)
       const body = buildOrderListBody(orderNos, pageNo)
-      httpRequests++
+      requestAttempts++
       let payload: unknown
       try {
-        payload = await deps.httpExecutor({
+        const exec = await deps.httpExecutor({
           url: ORDER_LIST_URL,
           cookie,
           liveAccountId,
@@ -168,18 +183,54 @@ export async function probeOrdersAfterSaleSignal(params: {
           urlKey: '/fulfillment/order/page',
           referer: ORDER_LIST_REFERER,
         })
+        if (exec.networkSent) networkRequests++
+        if (
+          exec.decision === 'local_throttled' ||
+          exec.decision === 'local_circuit_open'
+        ) {
+          locallyThrottled++
+        }
+        payload = exec.payload
       } catch (e) {
+        if (e instanceof AfterSalesRequestError) {
+          const net = networkRequests + e.networkRequests
+          let local = locallyThrottled + e.locallyThrottled
+          if (
+            e.locallyThrottled === 0 &&
+            (e.causeCode === 'local_throttled' || e.causeCode === 'local_circuit_open')
+          ) {
+            local += 1
+          }
+          const attempts = requestAttempts + Math.max(0, e.requestAttempts - 1)
+          throw new AfterSalesRequestError({
+            message: e.message,
+            requestAttempts: attempts,
+            networkRequests: net,
+            locallyThrottled: local,
+            httpRequests: net,
+            page: pageNo,
+            causeCode: e.causeCode,
+            networkSent: net > 0,
+            httpStatus: e.httpStatus,
+          })
+        }
+        networkRequests++
         const msg = e instanceof Error ? e.message : String(e)
         throw new AfterSalesRequestError({
           message: msg,
-          httpRequests,
+          requestAttempts,
+          networkRequests,
+          locallyThrottled,
+          httpRequests: networkRequests,
           page: pageNo,
           causeCode: classifyThrownHttpCause(msg),
+          networkSent: true,
         })
       }
       const extracted = extractOrderListPackages(payload)
       allPackages.push(...extracted.packages)
       if (total == null) total = extracted.total
+      else if (extracted.total != null) total = Math.max(total, extracted.total)
       const got = allPackages.length
       if (total != null && got < total && extracted.packages.length > 0 && pageNo < 5) {
         pageNo++
@@ -192,19 +243,30 @@ export async function probeOrdersAfterSaleSignal(params: {
     const msg = e instanceof Error ? e.message : String(e)
     throw new AfterSalesRequestError({
       message: msg,
-      httpRequests,
+      requestAttempts,
+      networkRequests,
+      locallyThrottled,
+      httpRequests: networkRequests,
       page: pageNo,
       causeCode: classifyThrownHttpCause(msg),
+      networkSent: networkRequests > 0,
     })
   }
 
+  const counters = finalizeAfterSalesRequestCounters({
+    requestAttempts,
+    networkRequests,
+    locallyThrottled,
+  })
   return {
     results: mapPackagesToOrders(orderNos, allPackages),
-    httpRequests,
+    counters,
+    httpRequests: counters.networkRequests,
+    requestAttempts: counters.requestAttempts,
+    networkRequests: counters.networkRequests,
   }
 }
 
-/** 纯函数：供单测映射 */
 export function mapOrderListProbeForTest(
   orderNos: string[],
   packages: Record<string, unknown>[],

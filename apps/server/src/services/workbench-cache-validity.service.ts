@@ -11,10 +11,17 @@ import {
   canSkipAfterSalesWorkbenchFetch,
   hasAfterSaleSignal,
 } from './after-sales-fetch-decision.service'
+import {
+  isProcessingWorkbenchStatusText,
+  isTerminalWorkbenchStatusText,
+  lifecycleSummaryNeedsShortTtl,
+} from './workbench-record-lifecycle.service'
 
 /** empty 缓存最长有效期 */
 export const WORKBENCH_EMPTY_CACHE_TTL_MS = 6 * 60 * 60 * 1000
 
+/** success：拒绝/取消/关闭等终端态 */
+export const WORKBENCH_SUCCESS_TTL_TERMINAL_MS = 24 * 60 * 60 * 1000
 /** success：售后仍进行中 */
 export const WORKBENCH_SUCCESS_TTL_IN_PROGRESS_MS = 1 * 60 * 60 * 1000
 /** success：售后已完成（近窗） */
@@ -29,7 +36,7 @@ export const WORKBENCH_RECENT_ORDER_WINDOW_MS = 45 * 24 * 60 * 60 * 1000
 export const TIME_SEARCH_CACHE_TTL_MS = 12 * 60 * 60 * 1000
 
 /** 售后算法 / 缓存语义版本：bump 后强制重建经营缓存 */
-export const AFTER_SALES_METRICS_VERSION = 'after-sales-cache-v4'
+export const AFTER_SALES_METRICS_VERSION = 'after-sales-cache-v5'
 
 const IN_PROGRESS_AFTER_SALE_RE =
   /待退货|待退款|待商家收货|退款中|售后处理中|处理中|待审核|待寄回|商家处理中|买家退货中/
@@ -77,6 +84,14 @@ export interface WorkbenchCacheSnapshot {
   classificationSource?: string | null
   returnsIds?: string | null
   refundIncludesFreight?: boolean | null
+  matchedRecordCount?: number | null
+  processingRecordCount?: number | null
+  completedRecordCount?: number | null
+  rejectedRecordCount?: number | null
+  canceledRecordCount?: number | null
+  closedRecordCount?: number | null
+  unknownRecordCount?: number | null
+  recordLifecycleSummary?: string | null
 }
 
 export interface QueueExternalHealth {
@@ -169,6 +184,9 @@ export function orderHasInProgressAfterSale(order: OrderAfterSaleContext): boole
   ]
     .filter(Boolean)
     .join(' ')
+  // 拒绝/取消/关闭优先：不得因金额为0被当成进行中
+  if (isTerminalWorkbenchStatusText(text)) return false
+  if (isProcessingWorkbenchStatusText(text)) return true
   return IN_PROGRESS_AFTER_SALE_RE.test(text)
 }
 
@@ -179,7 +197,10 @@ export function orderAgeMs(order: OrderAfterSaleContext, now: number): number | 
 }
 
 /**
- * success 缓存 TTL：进行中 1h / 已完成近窗 12h / 稳定 24h / 45 天外关账 7d
+ * success 缓存 TTL：
+ * PROCESSING/UNKNOWN → 1h
+ * REJECTED/CANCELED/CLOSED → 24h
+ * SUCCESS 完成态 → 12h/24h/7d
  */
 export function resolveWorkbenchCacheTtl(
   cache: WorkbenchCacheSnapshot,
@@ -190,7 +211,29 @@ export function resolveWorkbenchCacheTtl(
   if (status === 'empty') return WORKBENCH_EMPTY_CACHE_TTL_MS
   if (status !== 'success') return 0
 
-  if (orderHasInProgressAfterSale(order)) return WORKBENCH_SUCCESS_TTL_IN_PROGRESS_MS
+  const cacheStatus = cache.afterSaleStatus ?? ''
+  const orderStatus = order.afterSaleStatusText ?? ''
+  const summary = cache.recordLifecycleSummary
+  const unknownCount = cache.unknownRecordCount ?? 0
+  const processingCount = cache.processingRecordCount ?? 0
+
+  // PROCESSING / UNKNOWN 优先短 TTL（即使同单还有终端态）
+  if (
+    lifecycleSummaryNeedsShortTtl(summary) ||
+    unknownCount > 0 ||
+    processingCount > 0 ||
+    orderHasInProgressAfterSale(order) ||
+    isProcessingWorkbenchStatusText(cacheStatus)
+  ) {
+    return WORKBENCH_SUCCESS_TTL_IN_PROGRESS_MS
+  }
+
+  if (
+    isTerminalWorkbenchStatusText(cacheStatus) ||
+    isTerminalWorkbenchStatusText(orderStatus)
+  ) {
+    return WORKBENCH_SUCCESS_TTL_TERMINAL_MS
+  }
 
   const age = orderAgeMs(order, now)
   if (age != null && age > WORKBENCH_RECENT_ORDER_WINDOW_MS) {
@@ -238,7 +281,12 @@ export function isWorkbenchSuccessCacheStale(
 ): { stale: boolean; reason: string } {
   if (cache.fetchStatus !== 'success') return { stale: false, reason: 'not_success' }
 
-  if (orderHasInProgressAfterSale(order)) {
+  const cacheStatus = cache.afterSaleStatus ?? ''
+  if (
+    !isTerminalWorkbenchStatusText(cacheStatus) &&
+    !isTerminalWorkbenchStatusText(order.afterSaleStatusText) &&
+    orderHasInProgressAfterSale(order)
+  ) {
     const age = cacheAgeMs(cache, now)
     const ttl = WORKBENCH_SUCCESS_TTL_IN_PROGRESS_MS
     if (age == null || age > ttl) {
@@ -549,6 +597,14 @@ export function buildWorkbenchBusinessFingerprint(r: {
   appliedShipFeeAmountCent?: number | null
   expectedRefundAmountCent?: number | null
   successReturnCount?: number | null
+  matchedRecordCount?: number | null
+  processingRecordCount?: number | null
+  completedRecordCount?: number | null
+  rejectedRecordCount?: number | null
+  canceledRecordCount?: number | null
+  closedRecordCount?: number | null
+  unknownRecordCount?: number | null
+  recordLifecycleSummary?: string | null
   returnRefundCount?: number | null
   refundOnlyCount?: number | null
   hasReturnRefund?: boolean | null
@@ -573,6 +629,14 @@ export function buildWorkbenchBusinessFingerprint(r: {
     r.appliedShipFeeAmountCent ?? 0,
     r.expectedRefundAmountCent ?? 0,
     r.successReturnCount ?? 0,
+    r.matchedRecordCount ?? 0,
+    r.processingRecordCount ?? 0,
+    r.completedRecordCount ?? 0,
+    r.rejectedRecordCount ?? 0,
+    r.canceledRecordCount ?? 0,
+    r.closedRecordCount ?? 0,
+    r.unknownRecordCount ?? 0,
+    r.recordLifecycleSummary ?? '',
     r.returnRefundCount ?? 0,
     r.refundOnlyCount ?? 0,
     r.hasReturnRefund ? 1 : 0,

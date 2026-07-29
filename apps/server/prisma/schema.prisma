@@ -449,6 +449,15 @@ model XhsAfterSalesWorkbenchCache {
   successReturnCount       Int       @default(0)
   returnsIds               String?
   rawDetail                Json?
+  /// 匹配售后记录数（含处理中/拒绝/取消/关闭）
+  matchedRecordCount       Int       @default(0)
+  processingRecordCount    Int       @default(0)
+  completedRecordCount     Int       @default(0)
+  rejectedRecordCount      Int       @default(0)
+  canceledRecordCount      Int       @default(0)
+  closedRecordCount        Int       @default(0)
+  unknownRecordCount       Int       @default(0)
+  recordLifecycleSummary   String?
   /// 结构化售后类型（不依赖 rawDetail 全量进内存即可统计退货退款）
   hasReturnRefund          Boolean   @default(false)
   hasRefundOnly            Boolean   @default(false)

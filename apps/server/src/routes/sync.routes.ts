@@ -21,6 +21,7 @@ import {
   runXhsSyncJob,
 } from '../services/xhs-api-sync/xhs-sync-job.service'
 import { getBusinessSyncStatus } from '../services/business-sync-scheduler.service'
+import { getRuntimeProgressSnapshot } from '../services/runtime-progress.service'
 import { listSyncJobLogs } from '../services/sync-job-log.service'
 import { hasAnyEnabledApi } from '../services/xhs-api-sync/xhs-api-registry'
 import { XHS_API_NOT_CONFIGURED_MSG } from '../services/xhs-api-sync/xhs-api-types'
@@ -103,6 +104,16 @@ const auditCtx = (req: import('express').Request) => ({
   requestId: req.requestId,
   ip: getClientIp(req),
   userAgent: req.headers['user-agent'] ?? undefined,
+})
+
+/** 系统设置：后台任务进度（经营同步 / 售后补查 / 买家画像），供前端轮询 */
+syncRouter.get('/runtime-progress', async (_req, res) => {
+  try {
+    const snapshot = await getRuntimeProgressSnapshot()
+    sendOk(res, snapshot)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '获取后台任务进度失败', 500)
+  }
 })
 
 syncRouter.get('/status', async (_req, res) => {

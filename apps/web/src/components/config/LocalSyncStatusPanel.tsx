@@ -7,6 +7,7 @@ import {
 } from '../../lib/business-sync-ui'
 import { useBoardLiveQuery } from '../../providers/BoardLiveQueryProvider'
 import { apiRequest } from '../../lib/api'
+import { SystemRuntimeProgressPanel } from './SystemRuntimeProgressPanel'
 
 export const LocalSyncStatusPanel: React.FC = () => {
   const { syncMeta, displaySummary, totalRawOrders, reload, triggerBusinessSync, triggerSyncBusy } =
@@ -36,7 +37,7 @@ export const LocalSyncStatusPanel: React.FC = () => {
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+    <section className="min-w-0 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h3 className="text-sm font-semibold text-slate-900">自动同步状态</h3>
         <span
@@ -106,6 +107,10 @@ export const LocalSyncStatusPanel: React.FC = () => {
           totalRawOrders={totalRawOrders}
         />
         <p className="mt-2 text-xs text-slate-400">{BOARD_DATA_SOURCE_LABEL}</p>
+      </div>
+
+      <div className="mt-3">
+        <SystemRuntimeProgressPanel />
       </div>
     </section>
   )

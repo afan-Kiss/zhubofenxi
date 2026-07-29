@@ -234,13 +234,31 @@ function buildAfterSalesTasks(
     status = batchRunning ? 'running' : 'waiting'
     statusText = batchRunning
       ? `正在补查售后：本批按店铺批量处理（每店最多 10 单）`
-      : `排队等待补查：还有 ${open} 单`
-    detailText = `本轮已查 ${wave.waveDone} 单 · 待处理 ${pending} · 进行中 ${running} · 稍后重试 ${retryWait}`
+      : `排队等待补查：还有 ${open} 单（大约每分钟自动领一批）`
+    detailText = batchRunning
+      ? `本轮已查 ${wave.waveDone} 单 · 待处理 ${pending} · 进行中 ${running} · 稍后重试 ${retryWait}`
+      : `还剩 ${open} 单待领取；不是卡住，只是这会儿没有正在跑的批次`
   } else {
     status = 'done'
     statusText = '售后补查暂无积压'
     detailText = done > 0 ? `历史已完成 ${done} 单` : null
   }
+
+  // 排队空档且本轮还没开查：不画 0% 进度条，避免误以为任务坏了
+  const displayPercent =
+    status === 'done'
+      ? 100
+      : !batchRunning && (wave.waveDone ?? 0) <= 0
+        ? null
+        : wave.percent
+  const displayCountLabel =
+    status === 'done'
+      ? done > 0
+        ? `历史已完成 ${done}`
+        : null
+      : !batchRunning && (wave.waveDone ?? 0) <= 0
+        ? `还剩 ${open}`
+        : wave.countLabel
 
   const tasks: RuntimeTaskProgressItem[] = [
     {
@@ -250,15 +268,10 @@ function buildAfterSalesTasks(
       status,
       statusText,
       detailText,
-      percent: status === 'done' ? 100 : wave.percent,
+      percent: displayPercent,
       doneCount: open > 0 ? wave.waveDone : done > 0 ? done : null,
       totalCount: open > 0 ? wave.waveTotal : null,
-      countLabel:
-        status === 'done'
-          ? done > 0
-            ? `历史已完成 ${done}`
-            : null
-          : wave.countLabel,
+      countLabel: displayCountLabel,
     },
   ]
 
@@ -297,8 +310,8 @@ function buildAfterSalesTasks(
       statusText: shopText,
       detailText: s.recentError
         ? `最近提示：${String(s.recentError).slice(0, 120)}`
-        : s.etaMinutes != null && s.etaMinutes > 0
-          ? `按当前速度大约还要 ${s.etaMinutes} 分钟`
+        : s.running > 0 && s.etaMinutes != null && s.etaMinutes > 0
+          ? `按当前批次速度粗估还要 ${s.etaMinutes} 分钟`
           : null,
       percent: null,
       doneCount: null,

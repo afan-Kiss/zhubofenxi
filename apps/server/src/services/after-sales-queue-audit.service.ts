@@ -157,9 +157,13 @@ export async function getAfterSalesOpsSummary(): Promise<{
     }
     const rt = runtimeByShop.get(liveAccountId)
     const openLoad = pending + running + retry_wait
-    const cpm = Math.max(0, rt?.completedPerMinute ?? 0)
+    // completedPerMinute 字段实际是店内累计成功次数，不是真实吞吐；仅在有 running 时给粗估
     const etaMinutes =
-      openLoad > 0 && cpm > 0 ? Math.ceil(openLoad / Math.max(1, cpm)) : openLoad > 0 ? null : 0
+      openLoad > 0 && running > 0
+        ? Math.max(1, Math.ceil(openLoad / 10))
+        : openLoad > 0
+          ? null
+          : 0
     const recentError =
       rows
         .filter((r) => {
@@ -195,7 +199,7 @@ export async function getAfterSalesOpsSummary(): Promise<{
       circuitOpen: Boolean(rt?.circuitOpen),
       circuitReason: rt?.circuitReason ?? null,
       circuitNextProbeAt: rt?.circuitNextProbeAt?.toISOString() ?? null,
-      completedPerMinute: cpm,
+      completedPerMinute: Math.max(0, rt?.completedPerMinute ?? 0),
       etaMinutes,
     }
   })

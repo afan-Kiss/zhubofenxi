@@ -10,6 +10,7 @@ import {
 } from './after-sales-queue.service'
 import {
   DEFAULT_AFTER_SALES_QUEUE_LIMITS,
+  AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS,
   type AfterSalesQueueRateLimits,
 } from './after-sales-queue.types'
 import {
@@ -180,16 +181,77 @@ export async function runAfterSalesBackfillBatch(
     }
     stat.processed += items.length
 
-    const orderNos = items.map((i) => i.orderNo)
-    let results: Map<string, AfterSalesWorkbenchRefund>
-    try {
-      results = await fetchAfterSalesWorkbenchByOrderNos(orderNos, liveAccountId)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
-      for (const item of items) {
-        await finalizeOneTask({
-          item,
-          result: {
+    // 同店强制隔离：本批 items 必须全部属于该 liveAccountId；每次最多 10 单
+    const shopSafe = items.filter((i) => i.liveAccountId === liveAccountId)
+    const chunks: SelectedAfterSalesQueueTask[][] = []
+    for (let i = 0; i < shopSafe.length; i += AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS) {
+      chunks.push(shopSafe.slice(i, i + AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS))
+    }
+
+    for (const chunk of chunks) {
+      const orderNos = chunk.map((i) => i.orderNo)
+      let results: Map<string, AfterSalesWorkbenchRefund>
+      try {
+        // 订单号与店铺 cookie 必须一致，否则官方查不到
+        results = await fetchAfterSalesWorkbenchByOrderNos(orderNos, liveAccountId)
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        for (const item of chunk) {
+          await finalizeOneTask({
+            item,
+            result: {
+              orderNo: item.orderNo,
+              packageId: item.orderNo,
+              officialRefundAmountCent: 0,
+              freightRefundAmountCent: 0,
+              expectedRefundAmountCent: 0,
+              appliedAmountCent: 0,
+              appliedShipFeeAmountCent: 0,
+              payAmountCent: 0,
+              settlementAmountCent: 0,
+              refundIncludesFreight: false,
+              hasFreightOnlyRefund: false,
+              buyerUserId: null,
+              afterSaleReason: null,
+              afterSaleStatus: null,
+              successReturnCount: 0,
+              returnsIds: [],
+              fetchedAt: null,
+              liveAccountId,
+              fetchStatus: 'failed',
+              fetchError: msg.slice(0, 500),
+            },
+            accountName,
+            reporter,
+            counters,
+            stat,
+          })
+        }
+        continue
+      }
+
+      // HTTP 整批失败：同一错误写回所有单
+      const firstFailed = [...results.values()].find((r) => r.fetchStatus === 'failed')
+      const allFailed =
+        results.size > 0 && [...results.values()].every((r) => r.fetchStatus === 'failed')
+      if (allFailed && firstFailed) {
+        for (const item of chunk) {
+          await finalizeOneTask({
+            item,
+            result: results.get(item.orderNo) ?? firstFailed,
+            accountName,
+            reporter,
+            counters,
+            stat,
+          })
+        }
+        continue
+      }
+
+      for (const item of chunk) {
+        let result = results.get(item.orderNo)
+        if (!result) {
+          result = {
             orderNo: item.orderNo,
             packageId: item.orderNo,
             officialRefundAmountCent: 0,
@@ -208,83 +270,30 @@ export async function runAfterSalesBackfillBatch(
             returnsIds: [],
             fetchedAt: null,
             liveAccountId,
-            fetchStatus: 'failed',
-            fetchError: msg.slice(0, 500),
-          },
-          accountName,
-          reporter,
-          counters,
-          stat,
-        })
-      }
-      accountStats.set(liveAccountId, stat)
-      continue
-    }
+            fetchStatus: 'empty',
+            fetchError: null,
+          }
+        }
 
-    // HTTP 整批失败：同一错误写回所有单
-    const firstFailed = [...results.values()].find((r) => r.fetchStatus === 'failed')
-    const allFailed =
-      results.size > 0 && [...results.values()].every((r) => r.fetchStatus === 'failed')
-    if (allFailed && firstFailed) {
-      for (const item of items) {
+        // 批量未命中：单笔 + 买家 ID 兜底（仍用本店 cookie）
+        if (result.fetchStatus === 'empty') {
+          const fallbackBuyerUserId = await loadFallbackBuyerUserId(liveAccountId, item.orderNo)
+          if (fallbackBuyerUserId) {
+            result = await fetchAfterSalesWorkbenchByOrderNo(item.orderNo, liveAccountId, {
+              fallbackBuyerUserId,
+            })
+          }
+        }
+
         await finalizeOneTask({
           item,
-          result: results.get(item.orderNo) ?? firstFailed,
+          result,
           accountName,
           reporter,
           counters,
           stat,
         })
       }
-      accountStats.set(liveAccountId, stat)
-      continue
-    }
-
-    for (const item of items) {
-      let result = results.get(item.orderNo)
-      if (!result) {
-        result = {
-          orderNo: item.orderNo,
-          packageId: item.orderNo,
-          officialRefundAmountCent: 0,
-          freightRefundAmountCent: 0,
-          expectedRefundAmountCent: 0,
-          appliedAmountCent: 0,
-          appliedShipFeeAmountCent: 0,
-          payAmountCent: 0,
-          settlementAmountCent: 0,
-          refundIncludesFreight: false,
-          hasFreightOnlyRefund: false,
-          buyerUserId: null,
-          afterSaleReason: null,
-          afterSaleStatus: null,
-          successReturnCount: 0,
-          returnsIds: [],
-          fetchedAt: null,
-          liveAccountId,
-          fetchStatus: 'empty',
-          fetchError: null,
-        }
-      }
-
-      // 批量未命中：单笔 + 买家 ID 兜底，避免假 success+0
-      if (result.fetchStatus === 'empty') {
-        const fallbackBuyerUserId = await loadFallbackBuyerUserId(liveAccountId, item.orderNo)
-        if (fallbackBuyerUserId) {
-          result = await fetchAfterSalesWorkbenchByOrderNo(item.orderNo, liveAccountId, {
-            fallbackBuyerUserId,
-          })
-        }
-      }
-
-      await finalizeOneTask({
-        item,
-        result,
-        accountName,
-        reporter,
-        counters,
-        stat,
-      })
     }
     accountStats.set(liveAccountId, stat)
   }

@@ -63,7 +63,7 @@ function main(): void {
     'P1',
     'P1',
   ])
-  assert(capped.length === AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS, '硬上限 15')
+  assert(capped.length === AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS, '硬上限 10')
   assert(new Set(capped).size === capped.length, '去重')
 
   const h1 = buildXhsRequestHash({

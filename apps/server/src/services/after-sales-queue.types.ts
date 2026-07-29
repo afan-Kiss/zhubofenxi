@@ -39,15 +39,15 @@ export interface AfterSalesQueueRateLimits {
   maxShopsPerBatch: number
 }
 
-/** 批量 keywords：每店最多 15 单/请求，每轮最多 8 店 */
+/** 批量 keywords：每店每次 10 单/请求（订单号必须与该店 cookie 对应），每轮最多 8 店 */
 export const DEFAULT_AFTER_SALES_QUEUE_LIMITS: AfterSalesQueueRateLimits = {
-  globalPerMinute: 60,
-  perShopPerMinute: 15,
+  globalPerMinute: 40,
+  perShopPerMinute: 10,
   maxShopsPerBatch: 8,
 }
 
-/** 官方 returns/v3 number=20，keywords 硬上限留余量 */
-export const AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS = 15
+/** 官方 returns/v3 批量 keywords：每次固定最多 10 个订单号 */
+export const AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS = 10
 
 export const AFTER_SALES_RUNNING_TIMEOUT_MS = 10 * 60 * 1000
 

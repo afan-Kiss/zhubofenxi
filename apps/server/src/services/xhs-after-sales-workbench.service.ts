@@ -343,7 +343,8 @@ export function buildWorkbenchRefundFromList(
 }
 
 /**
- * 官方批量：keywords=单号1,单号2,... 一次拉多单。
+ * 官方批量：keywords=单号1,单号2,... 一次最多 10 单。
+ * 必须传入该批订单所属直播号（cookie/店铺），错店会导致查不到。
  * 未命中单返回 fetchStatus=empty（调用方决定是否单笔兜底），禁止当成 success+0。
  */
 export async function fetchAfterSalesWorkbenchByOrderNos(
@@ -355,6 +356,25 @@ export async function fetchAfterSalesWorkbenchByOrderNos(
   const out = new Map<string, AfterSalesWorkbenchRefund>()
 
   if (normalized.length === 0) return out
+
+  // 多单批量必须带对店铺；错店 cookie 官方查不到。单笔仍允许 legacy 兜底。
+  if (
+    normalized.length > 1 &&
+    (!liveAccountId?.trim() || accountId === 'legacy')
+  ) {
+    const msg = '批量售后查询必须指定订单所属直播号（liveAccountId），订单号须与店铺一致'
+    for (const orderNo of normalized) {
+      out.set(
+        orderNo,
+        emptyWorkbenchResult(orderNo, accountId, {
+          packageId: orderNo,
+          fetchStatus: 'failed',
+          fetchError: msg,
+        }),
+      )
+    }
+    return out
+  }
 
   let cookie: string
   try {

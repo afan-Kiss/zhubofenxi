@@ -229,7 +229,8 @@ syncRouter.get('/settings', async (_req, res) => {
   }
 })
 
-syncRouter.post('/settings', requireMaintenanceTools, async (req, res) => {
+/** 同步开关/策略：系统设置页可改；危险维护仍走 ENABLE_MAINTENANCE_TOOLS */
+syncRouter.post('/settings', async (req, res) => {
   try {
     const body = req.body ?? {}
     const patch: Partial<ApiSyncSettings> = {}

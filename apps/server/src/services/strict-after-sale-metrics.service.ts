@@ -89,6 +89,39 @@ function pickString(rec: Record<string, unknown>, keys: string[]): string {
   return ''
 }
 
+/**
+ * 售后行去重键：只用浅层标量字段。
+ * 禁止 JSON.stringify(整行)——平台深嵌套/大对象会触发 RangeError: Maximum call stack size exceeded。
+ */
+export function stableAfterSaleRecordDedupeKey(rec: Record<string, unknown>): string {
+  const rid = pickString(rec, ['returns_id', 'returnsId', 'return_id'])
+  if (rid) return `id:${rid}`
+  const pkg = pickString(rec, [
+    'delivery_package_id',
+    'package_id',
+    'packageId',
+    'order_id',
+    'orderId',
+  ])
+  const status = pickString(rec, [
+    'status_name',
+    'refund_status_name',
+    'statusName',
+    'status',
+  ])
+  const reason = pickString(rec, ['reason', 'reason_name_zh', 'reasonNameZh'])
+  const fee = String(rec.refund_fee ?? rec.refundFee ?? rec.refunded_amount ?? '')
+  const t = String(
+    rec.refund_ok_time ??
+      rec.refundOkTime ??
+      rec.update_at ??
+      rec.updateAt ??
+      rec.time ??
+      '',
+  )
+  return `combo:${pkg}|${status}|${reason}|${fee}|${t}`
+}
+
 const FLAT_REASON_KEYS = [
   'reason_name_zh',
   'reasonNameZh',
@@ -183,7 +216,7 @@ export function normalizeAfterSaleRecords(
 ): Record<string, unknown>[] {
   const byReturnId = new Map<string, { rec: Record<string, unknown>; timeMs: number }>()
   for (const rec of records) {
-    const rid = pickString(rec, ['returns_id', 'returnsId', 'return_id']) || JSON.stringify(rec)
+    const rid = stableAfterSaleRecordDedupeKey(rec)
     const timeMs = pickAfterSaleRecordTimeMs(rec)
     const cur = byReturnId.get(rid)
     if (!cur || timeMs >= cur.timeMs) {

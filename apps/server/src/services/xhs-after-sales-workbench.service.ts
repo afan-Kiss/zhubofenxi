@@ -18,6 +18,7 @@ import {
   extractAfterSaleReasonText,
   normalizeAfterSaleRecords,
   isSuccessfulAfterSale,
+  stableAfterSaleRecordDedupeKey,
 } from './strict-after-sale-metrics.service'
 import {
   pickReturnsV3BuyerUserId,
@@ -415,12 +416,7 @@ export function chunkWorkbenchOrderNos(orderNos: string[]): string[][] {
 const WORKBENCH_PAGE_HARD_LIMIT = 10
 
 function stableRowDedupeKey(row: Record<string, unknown>): string {
-  const rid = pickString(row, ['returns_id', 'returnsId'])
-  if (rid) return `id:${rid}`
-  const pkg = pickString(row, ['delivery_package_id', 'package_id', 'packageId'])
-  const status = pickString(row, ['status_name', 'refund_status_name'])
-  const reason = pickString(row, ['reason', 'reason_name_zh'])
-  return `combo:${pkg}|${status}|${reason}`
+  return stableAfterSaleRecordDedupeKey(row)
 }
 
 function pageFingerprint(rows: Record<string, unknown>[]): string {

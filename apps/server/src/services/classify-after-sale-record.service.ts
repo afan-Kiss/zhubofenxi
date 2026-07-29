@@ -7,6 +7,7 @@ import {
   resolveBusinessProductRefundAmountCent,
   resolveBusinessRefundAmountCent,
 } from './business-refund-caliber.service'
+import { stableAfterSaleRecordDedupeKey } from './strict-after-sale-metrics.service'
 import {
   isReturnsV3CanceledOrClosed,
   isReturnsV3FreightOnlyRefund,
@@ -170,7 +171,7 @@ export function aggregateClassifiedAfterSalesForOrder(
 } {
   const byReturnId = new Map<string, Record<string, unknown>>()
   for (const rec of records) {
-    const rid = String(rec.returns_id ?? rec.returnsId ?? rec.return_id ?? JSON.stringify(rec))
+    const rid = stableAfterSaleRecordDedupeKey(rec)
     if (!byReturnId.has(rid)) byReturnId.set(rid, rec)
   }
 

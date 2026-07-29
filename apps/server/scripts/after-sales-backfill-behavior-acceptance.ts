@@ -248,6 +248,10 @@ function testClassifyCodes(): void {
   )
   assert(classifyWorkbenchQueueError('HTTP 429').errorType === 'http_429', '测试11 429')
   assert(classifyWorkbenchQueueError('401 cookie').errorType === 'http_401', '测试12 401')
+  assert(
+    classifyWorkbenchQueueError('Maximum call stack size exceeded').disposition === 'retry_wait',
+    '测试13 栈溢出可重试',
+  )
   console.log('✓ 测试5/11/12 错误码分类')
 }
 

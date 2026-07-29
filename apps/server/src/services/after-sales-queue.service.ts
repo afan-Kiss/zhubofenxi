@@ -136,6 +136,10 @@ export function classifyWorkbenchQueueError(
   if (/数据结构|必要主键|不可重试/i.test(msg)) {
     return { errorType: 'permanent_invalid', disposition: 'failed' }
   }
+  // 深嵌套 stringify 等本地处理异常：可重试，不应永久 failed
+  if (/Maximum call stack size exceeded|call stack size/i.test(msg)) {
+    return { errorType: 'unknown', disposition: 'retry_wait' }
+  }
 
   if (msg) return { errorType: 'unknown', disposition: 'retry_wait' }
   return { errorType: 'unknown', disposition: 'failed' }

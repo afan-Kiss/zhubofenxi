@@ -20,6 +20,7 @@ import {
   getAnchorConfigSync,
   isAnchorAutoAttributableOnDate,
   isAnchorConfigCacheLoaded,
+  refreshAnchorConfigCache,
 } from './anchor.service'
 import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import {
@@ -798,6 +799,45 @@ export async function resolveCanonicalOrderAttribution(
     if (legacyFromTimeRule) return legacyFromTimeRule
   }
 
+  // 若下单落在「有真实直播但未匹配排班」的时段，说清楚是排班缺口而非算法丢单
+  const assignment = await loadAssignment(dateKey)
+  const unmatchedCovering = assignment.unassignedSessions.filter((session) => {
+    if (
+      !orderLiveRoomMatchesSchedule(
+        live.name,
+        session.sourceShopName,
+        session.liveAccountName,
+      )
+    ) {
+      return false
+    }
+    const bounds = parseDailyReportLiveSessionBounds(session)
+    if (!bounds) return false
+    return isTimeInHalfOpenRange(create.ms!, bounds.startMs, bounds.endMs)
+  })
+  if (unmatchedCovering.length) {
+    const s = unmatchedCovering[0]!
+    const bounds = parseDailyReportLiveSessionBounds(s)!
+    const startHm = new Date(bounds.startMs).toLocaleTimeString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+    const endHm = new Date(bounds.endMs).toLocaleTimeString('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+    return unassignedResult(
+      live,
+      create.text,
+      create.ms,
+      `下单落在未匹配排班的真实直播（${live.name} ${startHm}–${endHm}），当日无对应排班可归属`,
+    )
+  }
+
   return unassignedResult(
     live,
     create.text,
@@ -904,6 +944,10 @@ export async function remapViewsWithCanonicalAttribution(
 > {
   const { ensureManualAnchorOverrideCache } = await import('./order-anchor-manual-override.service')
   await ensureManualAnchorOverrideCache()
+  // 归属前必须有完整主播库；缺省二人配置会把小小/小白的排班命中全部滤掉
+  if (!isAnchorConfigCacheLoaded()) {
+    await refreshAnchorConfigCache()
+  }
   if (
     options?.preload !== false &&
     options?.startDate &&

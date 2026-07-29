@@ -387,10 +387,10 @@ export function isAnchorConfigCacheLoaded(): boolean {
 }
 
 function findCachedAnchorByName(name: string) {
+  // 未从 DB 加载时禁止回落到缺省「子杰/飞云」二人配置，否则小小/小白排班命中会被误滤成未归属
+  if (!configCache) return undefined
   const n = name.trim().toLowerCase()
-  return getAnchorConfigSync().anchors.find(
-    (a) => a.name.trim().toLowerCase() === n,
-  )
+  return configCache.anchors.find((a) => a.name.trim().toLowerCase() === n)
 }
 
 /** 归属解析：先活跃配置，再软删生命周期（同名优先活跃） */

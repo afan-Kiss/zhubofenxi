@@ -406,10 +406,15 @@ export async function repairScheduleTemplatesFrom20260701(options?: {
     : 0
 
   let deletedGeneratedDefaults = 0
+  // 只允许重生成「今天及以后」的虚排；历史日一旦被模板截断后重刷，会丢掉当时的午场（如 7/1–7/2 小艺/小白午场）
+  const regenerateFloor = todayShanghaiDateKey()
+  const effectiveRegenerateFrom =
+    regenerateFromDate > regenerateFloor ? regenerateFromDate : regenerateFloor
+
   if (!dryRun) {
     const deleted = await prisma.anchorDailySchedule.deleteMany({
       where: {
-        scheduleDate: { gte: regenerateFromDate },
+        scheduleDate: { gte: effectiveRegenerateFrom },
         source: 'generated_default',
         locked: false,
       },
@@ -421,14 +426,17 @@ export async function repairScheduleTemplatesFrom20260701(options?: {
   if (!dryRun) {
     const { generateDefaultSchedulesForDate } = await import('./anchor-daily-schedule.service')
     const dates = await prisma.anchorDailySchedule.findMany({
-      where: { scheduleDate: { gte: regenerateFromDate } },
+      where: { scheduleDate: { gte: effectiveRegenerateFrom } },
       select: { scheduleDate: true },
       distinct: ['scheduleDate'],
     })
-    const dateKeys = new Set<string>([NEW_SCHEDULE_START_DATE, '2026-07-02'])
+    const dateKeys = new Set<string>()
     for (const d of dates) dateKeys.add(d.scheduleDate)
+    // 仅预热「今天」缺省日；禁止再硬编码回刷 7/1、7/2 等历史日
+    dateKeys.add(regenerateFloor)
 
     for (const dateKey of [...dateKeys].sort()) {
+      if (dateKey < effectiveRegenerateFrom) continue
       const hasManual = await prisma.anchorDailySchedule.count({
         where: { scheduleDate: dateKey, source: 'manual' },
       })

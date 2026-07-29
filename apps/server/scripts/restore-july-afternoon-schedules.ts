@@ -23,15 +23,18 @@ type Slot = {
   note: string
 }
 
-/** 7/1–7/2：按 7/10 权威备份恢复午场（当时虚排是 小白·XY + 小艺·和田） */
+/**
+ * 7/1–7/2：从备份恢复午场。
+ * 备份虚排曾是 小白·XY，业务确认 XY 午场应归小红；和田午场仍归小艺。
+ */
 const FROM_BACKUP: Slot[] = [
   {
     date: '2026-07-01',
-    anchorName: '小白',
+    anchorName: '小红',
     shopName: 'XY祥钰珠宝',
     start: '14:00',
     end: '18:30',
-    note: '恢复：7/10备份午场·XY（模板重刷误删）',
+    note: '恢复：XY午场归小红（纠正备份虚排小白）',
   },
   {
     date: '2026-07-01',
@@ -43,11 +46,11 @@ const FROM_BACKUP: Slot[] = [
   },
   {
     date: '2026-07-02',
-    anchorName: '小白',
+    anchorName: '小红',
     shopName: 'XY祥钰珠宝',
     start: '14:00',
     end: '18:30',
-    note: '恢复：7/10备份午场·XY（模板重刷误删）',
+    note: '恢复：XY午场归小红（纠正备份虚排小白）',
   },
   {
     date: '2026-07-02',

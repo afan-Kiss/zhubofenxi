@@ -162,14 +162,23 @@ export async function getAfterSalesOpsSummary(): Promise<{
       openLoad > 0 && cpm > 0 ? Math.ceil(openLoad / Math.max(1, cpm)) : openLoad > 0 ? null : 0
     const recentError =
       rows
-        .filter((r) => r.lastError)
+        .filter((r) => {
+          const err = String(r.lastError ?? '').trim()
+          if (!err) return false
+          // 栈溢出已在新版本修复；历史 lastError 不再当「当前提示」刷屏
+          if (/call stack size/i.test(err) && /重试次数过多/.test(err) === false) {
+            return r.status === 'failed' || r.status === 'blocked'
+          }
+          return true
+        })
         .sort(
           (a, b) =>
             (b.statusChangedAt ?? b.createdAt).getTime() -
             (a.statusChangedAt ?? a.createdAt).getTime(),
         )[0]?.lastError ??
-      rt?.lastErrorMessage ??
-      null
+      (rt?.lastErrorMessage && !/call stack size/i.test(rt.lastErrorMessage)
+        ? rt.lastErrorMessage
+        : null)
 
     return {
       liveAccountId,

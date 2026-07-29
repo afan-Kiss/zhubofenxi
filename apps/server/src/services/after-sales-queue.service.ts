@@ -6,6 +6,8 @@ import { prisma } from '../lib/prisma'
 import type { AfterSalesWorkbenchRefund } from './xhs-after-sales-workbench.service'
 import {
   AFTER_SALES_RUNNING_TIMEOUT_MS,
+  AFTER_SALES_MAX_STACK_OVERFLOW_ATTEMPTS,
+  AFTER_SALES_MAX_TEMPORARY_ATTEMPTS,
   DEFAULT_AFTER_SALES_QUEUE_LIMITS,
   type AfterSalesQueueDisposition,
   type AfterSalesQueueErrorType,
@@ -923,24 +925,40 @@ export async function completeAfterSalesQueueTask(params: {
     return 'done'
   }
 
-  const { errorType, disposition } = classifyWorkbenchQueueError(result.fetchError, httpStatus)
-  await applyShopOutcomePersistent(liveAccountId, disposition, errorType, result.fetchError)
+  const { errorType, disposition: rawDisposition } = classifyWorkbenchQueueError(
+    result.fetchError,
+    httpStatus,
+  )
+  const tempCount = (current.temporaryAttemptCount ?? 0) + 1
+  const isStackOverflow = /Maximum call stack size exceeded|call stack size/i.test(
+    result.fetchError ?? '',
+  )
+  const hitAttemptCap =
+    rawDisposition === 'retry_wait' &&
+    ((isStackOverflow && tempCount >= AFTER_SALES_MAX_STACK_OVERFLOW_ATTEMPTS) ||
+      tempCount >= AFTER_SALES_MAX_TEMPORARY_ATTEMPTS)
+  const disposition = hitAttemptCap ? 'failed' : rawDisposition
+  const cappedErrorType = hitAttemptCap ? 'permanent_invalid' : errorType
+  const cappedErrorMessage = hitAttemptCap
+    ? `重试次数过多已停止（${tempCount}次）：${(result.fetchError ?? '').slice(0, 120)}`
+    : result.fetchError
+
+  await applyShopOutcomePersistent(liveAccountId, disposition, cappedErrorType, cappedErrorMessage)
 
   // probe 失败延长熔断
   const circuit = (await loadShopCircuits([liveAccountId])).get(shopKey(liveAccountId))
   if (circuit?.circuitOpen && disposition === 'blocked') {
-    await markShopProbeFailed(liveAccountId, errorType, result.fetchError)
+    await markShopProbeFailed(liveAccountId, cappedErrorType, cappedErrorMessage)
   }
 
   if (disposition === 'retry_wait') {
-    const tempCount = (current.temporaryAttemptCount ?? 0) + 1
-    const nextAt = computeNextAttemptAt(tempCount, result.fetchError)
+    const nextAt = computeNextAttemptAt(tempCount, cappedErrorMessage)
     await prisma.xhsAfterSalesWorkbenchQueue.update({
       where: { id: queueId },
       data: {
         status: 'retry_wait',
-        errorType,
-        lastError: result.fetchError,
+        errorType: cappedErrorType,
+        lastError: cappedErrorMessage,
         nextAttemptAt: nextAt,
         lastAttemptAt: now,
         temporaryAttemptCount: { increment: 1 },
@@ -953,8 +971,8 @@ export async function completeAfterSalesQueueTask(params: {
       orderNo: params.orderNo,
       fromStatus: current.status,
       toStatus: 'retry_wait',
-      reason: errorType,
-      errorType,
+      reason: cappedErrorType,
+      errorType: cappedErrorType,
       workerId: params.workerId,
       claimToken: params.claimToken,
     })
@@ -966,8 +984,8 @@ export async function completeAfterSalesQueueTask(params: {
       where: { id: queueId },
       data: {
         status: 'blocked',
-        errorType,
-        lastError: result.fetchError,
+        errorType: cappedErrorType,
+        lastError: cappedErrorMessage,
         nextAttemptAt: null,
         lastAttemptAt: now,
         temporaryAttemptCount: { increment: 1 },
@@ -980,14 +998,14 @@ export async function completeAfterSalesQueueTask(params: {
       orderNo: params.orderNo,
       fromStatus: current.status,
       toStatus: 'blocked',
-      reason: errorType,
-      errorType,
+      reason: cappedErrorType,
+      errorType: cappedErrorType,
       workerId: params.workerId,
       claimToken: params.claimToken,
     })
     logWarn(
       '售后补查',
-      `店铺阻塞：shop=${liveAccountId} order=${params.orderNo} errorType=${errorType}`,
+      `店铺阻塞：shop=${liveAccountId} order=${params.orderNo} errorType=${cappedErrorType}`,
     )
     return 'blocked'
   }
@@ -996,11 +1014,12 @@ export async function completeAfterSalesQueueTask(params: {
     where: { id: queueId },
     data: {
       status: 'failed',
-      errorType,
-      lastError: result.fetchError,
+      errorType: cappedErrorType,
+      lastError: cappedErrorMessage,
       nextAttemptAt: null,
       lastAttemptAt: now,
       permanentFailureCount: { increment: 1 },
+      temporaryAttemptCount: { increment: 1 },
       attempts: { increment: 1 },
       ...clearClaim,
     },
@@ -1010,8 +1029,8 @@ export async function completeAfterSalesQueueTask(params: {
     orderNo: params.orderNo,
     fromStatus: current.status,
     toStatus: 'failed',
-    reason: errorType,
-    errorType,
+    reason: hitAttemptCap ? 'attempt_cap' : cappedErrorType,
+    errorType: cappedErrorType,
     workerId: params.workerId,
     claimToken: params.claimToken,
   })

@@ -53,5 +53,11 @@ export const AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS = 10
 
 export const AFTER_SALES_RUNNING_TIMEOUT_MS = 10 * 60 * 1000
 
+/** 临时失败（含本地栈溢出）最多自动重试次数，避免同一单刷几百次 */
+export const AFTER_SALES_MAX_TEMPORARY_ATTEMPTS = 12
+
+/** 明确的 call stack 类错误更早停，避免占调度名额 */
+export const AFTER_SALES_MAX_STACK_OVERFLOW_ATTEMPTS = 5
+
 export const AFTER_SALES_SHOP_SIGN_BLOCK_THRESHOLD = 5
 export const AFTER_SALES_SHOP_AUTH_BLOCK_THRESHOLD = 3

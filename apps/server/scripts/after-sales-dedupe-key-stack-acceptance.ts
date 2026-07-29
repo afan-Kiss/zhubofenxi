@@ -8,7 +8,7 @@ import {
   normalizeAfterSaleRecords,
   stableAfterSaleRecordDedupeKey,
 } from '../src/services/strict-after-sale-metrics.service'
-import { aggregateWorkbenchRefund } from '../src/services/xhs-after-sales-workbench.service'
+import { aggregateWorkbenchRefund, sanitizeAfterSaleRawDetailForStorage } from '../src/services/xhs-after-sales-workbench.service'
 
 function assert(cond: unknown, msg: string): void {
   if (!cond) throw new Error(msg)
@@ -63,5 +63,16 @@ assert(typeof classified.productRefundAmountCent === 'number', 'classify 聚合�
 
 const cls = classifyWorkbenchQueueError('Maximum call stack size exceeded')
 assert(cls.disposition === 'retry_wait', `栈溢出应可重试，实际 ${cls.disposition}`)
+
+// 入库 rawDetail 必须可安全 stringify
+{
+  const sanitized = sanitizeAfterSaleRawDetailForStorage([deep])
+  assert(Array.isArray(sanitized) && sanitized!.length === 1, 'sanitize 应保留 1 条浅层记录')
+  assert(
+    !('extraDeep' in (sanitized![0] ?? {})),
+    'sanitize 不得保留深嵌套字段',
+  )
+  JSON.stringify(sanitized) // 不得抛
+}
 
 console.log('✓ after-sales-dedupe-key-stack-acceptance')

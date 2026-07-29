@@ -647,6 +647,88 @@ export function extractAfterSalesList(payload: unknown): Record<string, unknown>
   return list.map((item) => asRecord(item)).filter((x): x is Record<string, unknown> => x != null)
 }
 
+/** 入库用浅层字段：禁止把平台深嵌套整树写入 Prisma Json（会 JSON.stringify 炸栈） */
+const RAW_DETAIL_SCALAR_KEYS = [
+  'returns_id',
+  'returnsId',
+  'return_id',
+  'delivery_package_id',
+  'package_id',
+  'packageId',
+  'order_id',
+  'orderId',
+  'status_name',
+  'statusName',
+  'refund_status_name',
+  'refundStatusName',
+  'status_desc',
+  'statusDesc',
+  'status',
+  'reason',
+  'reason_name_zh',
+  'reasonNameZh',
+  'reason_code',
+  'reasonCode',
+  'refund_fee',
+  'refundFee',
+  'refunded_amount',
+  'pay_amount',
+  'payAmount',
+  'payment_amount',
+  'applied_ship_fee_amount',
+  'appliedShipFeeAmount',
+  'refund_ok_time',
+  'refundOkTime',
+  'refund_time',
+  'refundTime',
+  'update_at',
+  'updateAt',
+  'time',
+  'create_time',
+  'createTime',
+  'refunded',
+  'refund_status',
+  'refundStatus',
+  'return_type',
+  'returnType',
+  'return_type_name',
+  'returnTypeName',
+  'refund_only_delivery_status',
+  'refundOnlyDeliveryStatus',
+] as const
+
+function pickScalarFields(rec: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const k of RAW_DETAIL_SCALAR_KEYS) {
+    if (!(k in rec)) continue
+    const v = rec[k]
+    if (v == null) continue
+    if (typeof v === 'object') continue
+    out[k] = v
+  }
+  return out
+}
+
+/** 测试/入库共用：把售后 raw 压成可安全 JSON.stringify 的浅层数组 */
+export function sanitizeAfterSaleRawDetailForStorage(raw: unknown): Record<string, unknown>[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined
+  const out: Record<string, unknown>[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue
+    out.push(pickScalarFields(item as Record<string, unknown>))
+  }
+  return out.length > 0 ? out : undefined
+}
+
+function canJsonSerialize(value: unknown): boolean {
+  try {
+    JSON.stringify(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
 /** 从已拉取的 after_sales 列表按单号聚合（无 HTTP） */
 export function buildWorkbenchRefundFromList(
   afterSales: Record<string, unknown>[],
@@ -672,7 +754,7 @@ export function buildWorkbenchRefundFromList(
     fetchStatus: status,
     fetchError: null,
     fetchedAt: new Date(),
-    rawDetail: matched,
+    rawDetail: sanitizeAfterSaleRawDetailForStorage(matched),
   }
 }
 
@@ -1185,7 +1267,7 @@ export async function saveWorkbenchCache(
       classificationSource: true,
       returnsIds: true,
       refundIncludesFreight: true,
-      rawDetail: true,
+      // 故意不读历史 rawDetail：旧库可能有深嵌套，Prisma 反序列化也会炸栈
     },
   })
 
@@ -1199,6 +1281,12 @@ export async function saveWorkbenchCache(
     unknownRecordCount: Number(result.unknownRecordCount ?? 0),
     recordLifecycleSummary: result.recordLifecycleSummary ?? null,
   }
+
+  const sanitizedRaw = sanitizeAfterSaleRawDetailForStorage(result.rawDetail)
+  const rawDetailForDb =
+    sanitizedRaw && canJsonSerialize(sanitizedRaw)
+      ? (sanitizedRaw as unknown as object)
+      : undefined
 
   await prisma.xhsAfterSalesWorkbenchCache.upsert({
     where: {
@@ -1222,7 +1310,7 @@ export async function saveWorkbenchCache(
       afterSaleStatus: result.afterSaleStatus,
       successReturnCount: result.successReturnCount,
       returnsIds: result.returnsIds.join(',') || null,
-      rawDetail: result.rawDetail ? (result.rawDetail as object) : undefined,
+      rawDetail: rawDetailForDb,
       ...countCreate,
       hasReturnRefund: Boolean(result.hasReturnRefund),
       hasRefundOnly: Boolean(result.hasRefundOnly),
@@ -1249,7 +1337,7 @@ export async function saveWorkbenchCache(
       afterSaleStatus: result.afterSaleStatus,
       successReturnCount: result.successReturnCount,
       returnsIds: result.returnsIds.join(',') || null,
-      rawDetail: result.rawDetail ? (result.rawDetail as object) : undefined,
+      rawDetail: rawDetailForDb,
       ...countCreate,
       hasReturnRefund: Boolean(result.hasReturnRefund),
       hasRefundOnly: Boolean(result.hasRefundOnly),

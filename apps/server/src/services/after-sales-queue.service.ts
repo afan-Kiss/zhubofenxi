@@ -77,7 +77,18 @@ export function classifyWorkbenchQueueError(
   if (/冷却中（|JSONL 恢复/i.test(msg)) {
     return { errorType: 'local_throttle', disposition: 'retry_wait' }
   }
-  if (httpStatus === 429) {
+  if (/SHOP_MISMATCH|ORDER_OWNER_CONFLICT/i.test(msg)) {
+    // 仅阻塞该任务，禁止 openShopCircuit（否则错队一条会熔断整店）
+    return { errorType: 'ownership_integrity', disposition: 'blocked' }
+  }
+  if (
+    /ORDER_OWNER_NOT_FOUND|AFTER_SALE_SIGNAL_WITHOUT_DETAIL|ORDER_NOT_RETURNED|UNKNOWN_AFTER_SALE|UNKNOWN_ORDER/i.test(
+      msg,
+    )
+  ) {
+    return { errorType: 'unknown', disposition: 'retry_wait' }
+  }
+  if (httpStatus === 429 || /\b429\b/.test(msg)) {
     return { errorType: 'http_429', disposition: 'retry_wait' }
   }
   if (/冷却|cooldown|熔断|throttl|rate.?limit/i.test(msg)) {
@@ -577,6 +588,44 @@ export async function claimAfterSalesQueueTask(params: {
   return { claimed: Number(changed) === 1, claimToken: Number(changed) === 1 ? claimToken : null }
 }
 
+/**
+ * 店铺熔断时：把已 claim 但尚未真正完成 HTTP 的 running 任务退回 retry_wait，
+ * 不增加 temporaryAttemptCount / attempts（未实际请求平台）。
+ */
+export async function releaseClaimedTasksToRetryWait(params: {
+  tasks: Array<{ id: string; claimToken?: string | null; workerId?: string | null }>
+  reason: string
+  nextAttemptAt?: Date
+}): Promise<number> {
+  const nextAt = params.nextAttemptAt ?? new Date(Date.now() + 60_000)
+  let n = 0
+  for (const t of params.tasks) {
+    const row = await prisma.xhsAfterSalesWorkbenchQueue.findUnique({
+      where: { id: t.id },
+      select: { status: true, claimToken: true, workerId: true },
+    })
+    if (!row || row.status !== 'running') continue
+    if (t.claimToken && row.claimToken && t.claimToken !== row.claimToken) continue
+    if (t.workerId && row.workerId && t.workerId !== row.workerId) continue
+    await prisma.xhsAfterSalesWorkbenchQueue.update({
+      where: { id: t.id },
+      data: {
+        status: 'retry_wait',
+        errorType: 'unknown',
+        lastError: params.reason.slice(0, 500),
+        nextAttemptAt: nextAt,
+        runningSince: null,
+        workerId: null,
+        claimToken: null,
+        claimedAt: null,
+        statusChangedAt: new Date(),
+      },
+    })
+    n++
+  }
+  return n
+}
+
 async function loadDueCandidatesForShop(
   liveAccountId: string,
   take: number,
@@ -794,6 +843,8 @@ async function applyShopOutcomePersistent(
     return
   }
   if (disposition === 'blocked' || isAuthOrSignCircuitError(errorType)) {
+    // 归属数据问题：任务 blocked，不熔断店铺、不停止同店其余正常单
+    if (errorType === 'ownership_integrity') return
     batchStopShops.add(shopKey(liveAccountId))
     await openShopCircuit({ liveAccountId, errorType, message })
   }

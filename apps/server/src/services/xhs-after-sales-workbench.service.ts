@@ -72,6 +72,8 @@ export interface AfterSalesWorkbenchRefund {
   afterSaleStatus: string | null
   successReturnCount: number
   returnsIds: string[]
+  /** 匹配到的售后记录数（含处理中），与 successReturnCount 不同 */
+  matchedRecordCount?: number
   hasReturnRefund?: boolean
   hasRefundOnly?: boolean
   returnRefundCount?: number
@@ -270,7 +272,7 @@ function emptyWorkbenchResult(
   }
 }
 
-/** 规范化批量单号：去重、P 前缀、硬上限 */
+/** 规范化批量单号：去重、P 前缀；超过上限抛 BATCH_ORDER_LIMIT_EXCEEDED（禁止静默截断） */
 export function normalizeWorkbenchBatchOrderNos(orderNos: string[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
@@ -281,35 +283,108 @@ export function normalizeWorkbenchBatchOrderNos(orderNos: string[]): string[] {
     if (seen.has(key)) continue
     seen.add(key)
     out.push(t)
-    if (out.length >= AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS) break
+  }
+  if (out.length > AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS) {
+    throw new Error(
+      `BATCH_ORDER_LIMIT_EXCEEDED: max=${AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS} got=${out.length}`,
+    )
   }
   return out
+}
+
+/** 安全分块：每块最多 10 单，不丢单 */
+export function chunkWorkbenchOrderNos(orderNos: string[]): string[][] {
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  for (const raw of orderNos) {
+    const t = String(raw ?? '').trim()
+    if (!t || !/^P/i.test(t)) continue
+    const key = t.toUpperCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    normalized.push(t)
+  }
+  const chunks: string[][] = []
+  for (let i = 0; i < normalized.length; i += AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS) {
+    chunks.push(normalized.slice(i, i + AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS))
+  }
+  return chunks
 }
 
 async function fetchAfterSalesListByKeywords(
   keywords: string,
   cookie: string,
   liveAccountId?: string,
-): Promise<Record<string, unknown>[]> {
-  const url = buildWorkbenchQueryKeywords(keywords)
-  const payload = await enqueueXhsRequest(() =>
-    requestXhsJsonWithSyncAudit<unknown>({
-      shopId: liveAccountId,
-      apiName: 'after_sales_workbench',
-      method: 'GET',
-      urlKey: '/after-sales/workbench',
-      trigger: 'scheduled',
-      options: {
+): Promise<{ rows: Record<string, unknown>[]; httpRequests: number }> {
+  const { waitShopEndpointSlot } = await import('./after-sales-shop-rate.service')
+  if (liveAccountId) {
+    await waitShopEndpointSlot(liveAccountId, 'after_sales_workbench')
+  }
+
+  const all: Record<string, unknown>[] = []
+  const seenReturnIds = new Set<string>()
+  let page = 1
+  const pageSize = 20
+  let totalCount: number | null = null
+  let httpRequests = 0
+
+  for (;;) {
+    const u = new URL(WORKBENCH_URL)
+    u.searchParams.set('page', String(page))
+    u.searchParams.set('number', String(pageSize))
+    u.searchParams.set('keywords', keywords.trim())
+    u.searchParams.append('goods_source[]', '1')
+    u.searchParams.append('goods_source[]', '2')
+    u.searchParams.set('return_type_in', '3,4,1,2,5')
+    u.searchParams.set('sort', 'deadline_for_sort_v1')
+    u.searchParams.set('order', 'asc')
+    u.searchParams.set('status_in', '1,2,3,12,13,4,5,6,9,9001,14')
+    const url = u.toString()
+
+    httpRequests++
+    const payload = await enqueueXhsRequest(() =>
+      requestXhsJsonWithSyncAudit<unknown>({
+        shopId: liveAccountId,
+        apiName: 'after_sales_workbench',
         method: 'GET',
-        url,
-        cookie,
-        referer: WORKBENCH_REFERER,
-        needSign: true,
-        parseEnvelope: true,
-      },
-    }),
-  )
-  return extractAfterSalesList(payload)
+        urlKey: '/after-sales/workbench',
+        trigger: 'scheduled',
+        options: {
+          method: 'GET',
+          url,
+          cookie,
+          referer: WORKBENCH_REFERER,
+          needSign: true,
+          parseEnvelope: true,
+        },
+      }),
+    )
+
+    const root = asRecord(payload)
+    const data = root ? asRecord(root.data) ?? root : null
+    if (totalCount == null && data) {
+      const t = data.total_count ?? data.totalCount ?? data.total
+      if (typeof t === 'number' && Number.isFinite(t)) totalCount = t
+    }
+    const pageRows = extractAfterSalesList(payload)
+    for (const row of pageRows) {
+      const rid = pickString(row, ['returns_id', 'returnsId']) || JSON.stringify(row)
+      if (seenReturnIds.has(rid)) continue
+      seenReturnIds.add(rid)
+      all.push(row)
+    }
+
+    if (pageRows.length === 0) break
+    if (totalCount != null && all.length >= totalCount) break
+    if (pageRows.length < pageSize) break
+    if (page >= 10) break
+    page++
+    if (liveAccountId) {
+      await waitShopEndpointSlot(liveAccountId, 'after_sales_workbench')
+    }
+  }
+
+  return { rows: all, httpRequests }
 }
 
 export function extractAfterSalesList(payload: unknown): Record<string, unknown>[] {
@@ -330,11 +405,12 @@ export function buildWorkbenchRefundFromList(
   const trimmed = orderNo.trim()
   const matched = afterSales.filter((r) => recordMatchesOrderNo(r, trimmed))
   const agg = aggregateWorkbenchRefund(matched, trimmed)
-  const status: WorkbenchFetchStatus =
-    matched.length === 0 ? 'empty' : agg.successReturnCount > 0 ? 'success' : 'empty'
+  // 匹配到任意售后记录（含处理中）即视为详情存在；不得用 successReturnCount===0 当成 empty
+  const status: WorkbenchFetchStatus = matched.length === 0 ? 'empty' : 'success'
   return {
     ...agg,
     liveAccountId,
+    matchedRecordCount: matched.length,
     fetchStatus: status,
     fetchError: null,
     fetchedAt: new Date(),
@@ -347,15 +423,15 @@ export function buildWorkbenchRefundFromList(
  * 必须传入该批订单所属直播号（cookie/店铺），错店会导致查不到。
  * 未命中单返回 fetchStatus=empty（调用方决定是否单笔兜底），禁止当成 success+0。
  */
-export async function fetchAfterSalesWorkbenchByOrderNos(
+export async function fetchAfterSalesWorkbenchByOrderNosWithMeta(
   orderNos: string[],
   liveAccountId?: string,
-): Promise<Map<string, AfterSalesWorkbenchRefund>> {
+): Promise<{ results: Map<string, AfterSalesWorkbenchRefund>; httpRequests: number }> {
   const accountId = resolveLiveAccountId(liveAccountId)
   const normalized = normalizeWorkbenchBatchOrderNos(orderNos)
   const out = new Map<string, AfterSalesWorkbenchRefund>()
 
-  if (normalized.length === 0) return out
+  if (normalized.length === 0) return { results: out, httpRequests: 0 }
 
   // 多单批量必须带对店铺；错店 cookie 官方查不到。单笔仍允许 legacy 兜底。
   if (
@@ -373,7 +449,7 @@ export async function fetchAfterSalesWorkbenchByOrderNos(
         }),
       )
     }
-    return out
+    return { results: out, httpRequests: 0 }
   }
 
   let cookie: string
@@ -394,18 +470,55 @@ export async function fetchAfterSalesWorkbenchByOrderNos(
         }),
       )
     }
-    return out
+    return { results: out, httpRequests: 0 }
   }
 
   try {
     const keywords = normalized.join(',')
-    const afterSales = await fetchAfterSalesListByKeywords(keywords, cookie, accountId)
+    const { rows: afterSales, httpRequests } = await fetchAfterSalesListByKeywords(
+      keywords,
+      cookie,
+      accountId,
+    )
     for (const orderNo of normalized) {
       out.set(orderNo, buildWorkbenchRefundFromList(afterSales, orderNo, accountId))
     }
-    return out
+    return { results: out, httpRequests }
   } catch (e) {
     const msg = e instanceof Error ? e.message : '售后工作台查询失败'
+    for (const orderNo of normalized) {
+      out.set(
+        orderNo,
+        emptyWorkbenchResult(orderNo, accountId, {
+          packageId: orderNo,
+          fetchStatus: 'failed',
+          fetchError: msg.slice(0, 500),
+        }),
+      )
+    }
+    // 抛出以便上层熔断；同时带回已计次数困难——失败前可能已发过请求
+    throw e instanceof Error ? e : new Error(msg)
+  }
+}
+
+export async function fetchAfterSalesWorkbenchByOrderNos(
+  orderNos: string[],
+  liveAccountId?: string,
+): Promise<Map<string, AfterSalesWorkbenchRefund>> {
+  try {
+    const { results } = await fetchAfterSalesWorkbenchByOrderNosWithMeta(orderNos, liveAccountId)
+    return results
+  } catch (e) {
+    const accountId = resolveLiveAccountId(liveAccountId)
+    const normalized = (() => {
+      try {
+        return normalizeWorkbenchBatchOrderNos(orderNos)
+      } catch {
+        return orderNos.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 10)
+      }
+    })()
+    const msg = e instanceof Error ? e.message : '售后工作台查询失败'
+    const out = new Map<string, AfterSalesWorkbenchRefund>()
     for (const orderNo of normalized) {
       out.set(
         orderNo,
@@ -468,7 +581,7 @@ export async function fetchAfterSalesWorkbenchByOrderNo(
         cookie,
         accountId,
       )
-      const matched = byBuyer.filter((r) => recordMatchesOrderNo(r, trimmed))
+      const matched = byBuyer.rows.filter((r) => recordMatchesOrderNo(r, trimmed))
       result = buildWorkbenchRefundFromList(matched, trimmed, accountId)
     } catch (e) {
       const msg = e instanceof Error ? e.message : '售后工作台查询失败'
@@ -1180,6 +1293,7 @@ export async function processWorkbenchQueueBatch(limit = 10): Promise<{
   failed: number
   skipped: number
   errors: string[]
+  metrics?: import('./after-sales-backfill.service').AfterSalesBatchMetrics
 }> {
   const { runAfterSalesBackfillBatch } = await import('./after-sales-backfill.service')
   const { DEFAULT_AFTER_SALES_QUEUE_LIMITS } = await import('./after-sales-queue.types')
@@ -1191,14 +1305,15 @@ export async function processWorkbenchQueueBatch(limit = 10): Promise<{
   })
   return {
     processed: result.processed,
-    selected: result.processed,
-    succeeded: result.success,
-    emptied: 0,
+    selected: result.claimed,
+    succeeded: result.detailsSaved + result.processingDetailsSaved,
+    emptied: result.noAfterSale,
     retryWait: result.retryWait,
     blocked: result.blocked,
     failed: result.failed,
-    skipped: 0,
+    skipped: result.skippedBecauseRunning ? 1 : 0,
     errors: [],
+    metrics: result,
   }
 }
 

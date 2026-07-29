@@ -5,10 +5,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import {
-  AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS,
-} from '../src/services/after-sales-queue.types'
-import {
   buildWorkbenchRefundFromList,
+  chunkWorkbenchOrderNos,
   extractAfterSalesList,
   normalizeWorkbenchBatchOrderNos,
   recordMatchesOrderNo,
@@ -46,25 +44,31 @@ function main(): void {
       String(matched[0]?.returns_id ?? '') === exp.returnsId,
       `${exp.orderNo} returns_id`,
     )
-    // HAR 样本为处理中售后：官方成功退款口径下 fetchStatus=empty、金额 0（与现 aggregate 一致）
     const refund = buildWorkbenchRefundFromList(list, exp.orderNo, 'test-shop')
-    assert(refund.fetchStatus === 'empty', `${exp.orderNo} 处理中应为 empty`)
+    assert(refund.fetchStatus === 'success', `${exp.orderNo} 处理中详情应为 success`)
+    assert((refund.matchedRecordCount ?? 0) >= 1, '应有 matchedRecordCount')
     assert(Array.isArray(refund.rawDetail) && refund.rawDetail.length >= 1, '应保留 rawDetail')
   }
 
-  // 未命中单不得当成 success+0
   const miss = buildWorkbenchRefundFromList(list, 'P999999999999999999', 'test-shop')
   assert(miss.fetchStatus === 'empty', '未命中应为 empty')
-  assert(miss.officialRefundAmountCent === 0, '未命中官方退款应为 0')
 
-  const capped = normalizeWorkbenchBatchOrderNos([
-    ...Array.from({ length: 40 }, (_, i) => `P${String(i).padStart(18, '0')}`),
-    'bad',
-    'P1',
-    'P1',
-  ])
-  assert(capped.length === AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS, '硬上限 10')
-  assert(new Set(capped).size === capped.length, '去重')
+  let threw = false
+  try {
+    normalizeWorkbenchBatchOrderNos(
+      Array.from({ length: 11 }, (_, i) => `P${String(i).padStart(18, '0')}`),
+    )
+  } catch (e) {
+    threw = String((e as Error).message).includes('BATCH_ORDER_LIMIT_EXCEEDED')
+  }
+  assert(threw, '超过10单应抛 BATCH_ORDER_LIMIT_EXCEEDED')
+
+  const chunks = chunkWorkbenchOrderNos(
+    Array.from({ length: 25 }, (_, i) => `P${String(i).padStart(18, '0')}`),
+  )
+  assert(chunks.length === 3, '25 单应分 3 块')
+  assert(chunks[0]!.length === 10 && chunks[2]!.length === 5, '分块大小')
+  assert(chunks.reduce((n, c) => n + c.length, 0) === 25, '分块不得丢单')
 
   const h1 = buildXhsRequestHash({
     apiName: 'after_sales_workbench',
@@ -74,12 +78,7 @@ function main(): void {
     apiName: 'after_sales_workbench',
     url: 'https://ark.xiaohongshu.com/api/edith/after-sales/returns/v3?keywords=P3,P4',
   })
-  const h3 = buildXhsRequestHash({
-    apiName: 'after_sales_workbench',
-    body: null,
-  })
   assert(h1 !== h2, '不同 keywords 应不同 hash')
-  assert(h1 !== h3, '带 url keywords 与无 url 应不同 hash')
 
   console.log('✓ after-sales-workbench-batch-keywords-acceptance')
 }

@@ -25,6 +25,8 @@ export type AfterSalesQueueErrorType =
   | 'http_403'
   | 'permanent_not_found'
   | 'permanent_invalid'
+  /** 队列店铺与本地订单归属不一致/冲突：仅阻塞该任务，不熔断整店 Cookie */
+  | 'ownership_integrity'
   | 'running_timeout'
   | 'unknown'
 

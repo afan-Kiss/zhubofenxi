@@ -77,6 +77,8 @@ const COOLDOWN_MS_BY_API: Record<string, number> = {
   lucky_gift: 2 * 1000,
   /** 售后工作台：按 keywords hash 隔离；短冷却，依赖全局串行 ≥1s */
   after_sales_workbench: 2_000,
+  /** 售后回填订单列表探测 */
+  after_sales_order_list_probe: 2_000,
 }
 
 const DEFAULT_COOLDOWN_MS = 5 * 60 * 1000

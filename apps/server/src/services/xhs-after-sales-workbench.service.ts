@@ -1,8 +1,4 @@
 import { prisma } from '../lib/prisma'
-import { getDecryptedCookie } from './credential.service'
-import { getDecryptedCookieByAccountId } from './live-account.service'
-import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
-import { enqueueXhsRequest } from './xhs-api-sync/xhs-rate-limiter.service'
 import { parseMoneyToCent } from '../utils/money'
 import {
   buildLiveAccountOrderQueries,
@@ -20,7 +16,6 @@ import {
 import { deriveStructuredAfterSaleTypeFromRaw } from './resolve-return-refund-classification.service'
 import {
   extractAfterSaleReasonText,
-  isCanceledOrInvalidAfterSale,
   normalizeAfterSaleRecords,
   isSuccessfulAfterSale,
 } from './strict-after-sale-metrics.service'
@@ -30,6 +25,12 @@ import {
 } from './returns-v3-record.service'
 import { AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS } from './after-sales-queue.types'
 import { yuanApiAmountToCent } from './business-refund-caliber.service'
+import {
+  AfterSalesRequestError,
+  classifyThrownHttpCause,
+  getAfterSalesHttpRequestCount,
+} from './after-sales-request-error'
+import { getAfterSalesHttpDeps } from './after-sales-http-deps'
 import {
   buildWorkbenchBusinessFingerprint,
   extractOrderAfterSaleContextFromRaw,
@@ -74,6 +75,9 @@ export interface AfterSalesWorkbenchRefund {
   returnsIds: string[]
   /** 匹配到的售后记录数（含处理中），与 successReturnCount 不同 */
   matchedRecordCount?: number
+  /** 有效匹配（含处理中，排除纯取消/关闭） */
+  processingRecordCount?: number
+  completedRecordCount?: number
   hasReturnRefund?: boolean
   hasRefundOnly?: boolean
   returnRefundCount?: number
@@ -86,6 +90,26 @@ export interface AfterSalesWorkbenchRefund {
   fetchedAt: Date | null
   rawDetail?: unknown
 }
+
+/** 仅排除明确取消/关闭且未成功的记录；不排除进行中 */
+const WORKBENCH_CLOSED_KEYWORDS = [
+  '已取消',
+  '已关闭',
+  '已撤销',
+  '已拒绝',
+  '拒绝退款',
+  '用户取消',
+  '用户撤销',
+  '售后关闭',
+  '取消售后',
+  '审核拒绝',
+  '商家拒绝',
+  '平台拒绝',
+  '售后取消',
+  '买家取消售后',
+  '关闭售后',
+  '驳回',
+] as const
 
 /** 售后工作台金额单位为「元」，转为分 */
 export { yuanApiAmountToCent } from './business-refund-caliber.service'
@@ -123,8 +147,21 @@ export function isSuccessfulAfterSaleRecord(rec: Record<string, unknown>): boole
   return isSuccessfulAfterSale(rec)
 }
 
-function isExcludedAfterSaleRecord(rec: Record<string, unknown>): boolean {
-  return isCanceledOrInvalidAfterSale(rec) && !isSuccessfulAfterSale(rec)
+/** 明确取消/关闭且未成功：不参与结构化展示；不排除进行中 */
+export function isClosedCanceledWorkbenchRecord(rec: Record<string, unknown>): boolean {
+  if (isSuccessfulAfterSale(rec)) return false
+  const text = [
+    rec.refund_status_name,
+    rec.refundStatusName,
+    rec.status_name,
+    rec.statusName,
+    rec.status_desc,
+    rec.statusDesc,
+  ]
+    .filter(Boolean)
+    .join(' ')
+  if (!text) return false
+  return WORKBENCH_CLOSED_KEYWORDS.some((k) => text.includes(k))
 }
 
 export function aggregateWorkbenchRefund(
@@ -137,11 +174,14 @@ export function aggregateWorkbenchRefund(
   const matched = afterSales.filter((r) => recordMatchesOrderNo(r, orderNo))
   const normalized = normalizeAfterSaleRecords(matched)
 
+  const validRecords: Record<string, unknown>[] = []
   const successRecords: Record<string, unknown>[] = []
   for (const rec of normalized) {
-    if (isExcludedAfterSaleRecord(rec)) continue
+    if (isClosedCanceledWorkbenchRecord(rec)) continue
+    validRecords.push(rec)
     if (isSuccessfulAfterSaleRecord(rec)) successRecords.push(rec)
   }
+  const processingRecords = validRecords.filter((r) => !isSuccessfulAfterSaleRecord(r))
 
   let officialRefundAmountCent = 0
   let freightRefundAmountCent = 0
@@ -150,12 +190,9 @@ export function aggregateWorkbenchRefund(
   let appliedShipFeeAmountCent = 0
   let payAmountCent = 0
   let settlementAmountCent = 0
-  const returnsIds: string[] = []
-  const reasons: string[] = []
-  const statuses: string[] = []
-  let buyerUserId: string | null = null
   let hasFreightOnlyRefund = false
 
+  // 成功退款金额只来自 successRecords
   for (const rec of successRecords) {
     const split = splitReturnsV3RefundCent(rec)
     if (split.isFreightOnly) hasFreightOnlyRefund = true
@@ -172,14 +209,29 @@ export function aggregateWorkbenchRefund(
     const settle = yuanApiAmountToCent(rec.settlement_amount ?? rec.settlementAmount)
     if (pay > payAmountCent) payAmountCent = pay
     if (settle > settlementAmountCent) settlementAmountCent = settle
+  }
+
+  // 结构化元数据来自全部有效记录（含处理中）
+  const returnsIds: string[] = []
+  const reasons: string[] = []
+  const statuses: string[] = []
+  let buyerUserId: string | null = null
+  for (const rec of validRecords) {
     const rid = pickString(rec, ['returns_id', 'returnsId'])
-    if (rid) returnsIds.push(rid)
+    if (rid && !returnsIds.includes(rid)) returnsIds.push(rid)
     const uid = pickReturnsV3BuyerUserId(rec)
     if (uid) buyerUserId = uid
     const reason = extractAfterSaleReasonText(rec)
     if (reason) reasons.push(reason)
-    const st = pickString(rec, ['refund_status_name', 'status_name'])
+    const st = pickString(rec, ['refund_status_name', 'status_name', 'statusName'])
     if (st) statuses.push(st)
+    // 处理中也可展示申请金额上下文（不计入成功退款）
+    if (!isSuccessfulAfterSaleRecord(rec)) {
+      const pay = yuanApiAmountToCent(rec.pay_amount ?? rec.payAmount)
+      const settle = yuanApiAmountToCent(rec.settlement_amount ?? rec.settlementAmount)
+      if (pay > payAmountCent) payAmountCent = pay
+      if (settle > settlementAmountCent) settlementAmountCent = settle
+    }
   }
 
   let refundIncludesFreight = appliedShipFeeAmountCent > 0 && officialRefundAmountCent > 0
@@ -194,7 +246,7 @@ export function aggregateWorkbenchRefund(
 
   hasFreightOnlyRefund = officialRefundAmountCent === 0 && freightRefundAmountCent > 0
 
-  const structured = deriveStructuredAfterSaleTypeFromRaw(successRecords)
+  const structured = deriveStructuredAfterSaleTypeFromRaw(validRecords)
 
   return {
     orderNo,
@@ -212,6 +264,9 @@ export function aggregateWorkbenchRefund(
     afterSaleReason: reasons[0] ?? null,
     afterSaleStatus: statuses.join('；') || null,
     successReturnCount: successRecords.length,
+    matchedRecordCount: validRecords.length,
+    processingRecordCount: processingRecords.length,
+    completedRecordCount: successRecords.length,
     returnsIds,
     hasReturnRefund: structured.hasReturnRefund,
     hasRefundOnly: structured.hasRefundOnly,
@@ -223,18 +278,24 @@ export function aggregateWorkbenchRefund(
   }
 }
 
-function buildWorkbenchQueryKeywords(keywords: string): string {
+/** 严格对齐 HAR：page/number/keywords/sort/order/status_in=（空），不带 goods_source、return_type_in */
+export function buildWorkbenchPageUrl(params: {
+  keywords: string
+  page?: number
+  pageSize?: number
+}): string {
   const u = new URL(WORKBENCH_URL)
-  u.searchParams.set('page', '1')
-  u.searchParams.set('number', '20')
-  u.searchParams.set('keywords', keywords.trim())
-  u.searchParams.append('goods_source[]', '1')
-  u.searchParams.append('goods_source[]', '2')
-  u.searchParams.set('return_type_in', '3,4,1,2,5')
+  u.searchParams.set('page', String(params.page ?? 1))
+  u.searchParams.set('number', String(params.pageSize ?? 20))
+  u.searchParams.set('keywords', String(params.keywords ?? '').trim())
   u.searchParams.set('sort', 'deadline_for_sort_v1')
   u.searchParams.set('order', 'asc')
-  u.searchParams.set('status_in', '1,2,3,12,13,4,5,6,9,9001,14')
+  u.searchParams.set('status_in', '')
   return u.toString()
+}
+
+function buildWorkbenchQueryKeywords(keywords: string): string {
+  return buildWorkbenchPageUrl({ keywords, page: 1, pageSize: 20 })
 }
 
 function buildWorkbenchQuery(orderNo: string): string {
@@ -272,17 +333,25 @@ function emptyWorkbenchResult(
   }
 }
 
-/** 规范化批量单号：去重、P 前缀；超过上限抛 BATCH_ORDER_LIMIT_EXCEEDED（禁止静默截断） */
+/** 规范化批量单号：去重、校验 P 前缀；超过上限抛 BATCH_ORDER_LIMIT_EXCEEDED（禁止静默截断） */
 export function normalizeWorkbenchBatchOrderNos(orderNos: string[]): string[] {
   const seen = new Set<string>()
   const out: string[] = []
   for (const raw of orderNos) {
-    const t = String(raw ?? '').trim()
-    if (!t || !/^P/i.test(t)) continue
+    if (raw == null || String(raw).trim() === '') {
+      throw new Error('EMPTY_ORDER_NO')
+    }
+    const t = String(raw).trim()
+    if (!/^P/i.test(t)) {
+      throw new Error(`INVALID_ORDER_NO:${t}`)
+    }
     const key = t.toUpperCase()
     if (seen.has(key)) continue
     seen.add(key)
     out.push(t)
+  }
+  if (out.length === 0) {
+    throw new Error('EMPTY_ORDER_NO')
   }
   if (out.length > AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS) {
     throw new Error(
@@ -292,15 +361,34 @@ export function normalizeWorkbenchBatchOrderNos(orderNos: string[]): string[] {
   return out
 }
 
-/** 安全分块：每块最多 10 单，不丢单 */
-export function chunkWorkbenchOrderNos(orderNos: string[]): string[][] {
+/**
+ * 解析批量输入：合法单进入 chunks；非法单返回明确错误（不静默丢弃）。
+ * 重复单号去重后进入查询，duplicates 列出被折叠的原始下标。
+ */
+export function partitionWorkbenchOrderNos(orderNos: string[]): {
+  chunks: string[][]
+  invalid: Array<{ orderNo: string; error: string }>
+  duplicates: string[]
+} {
   const seen = new Set<string>()
   const normalized: string[] = []
+  const invalid: Array<{ orderNo: string; error: string }> = []
+  const duplicates: string[] = []
   for (const raw of orderNos) {
     const t = String(raw ?? '').trim()
-    if (!t || !/^P/i.test(t)) continue
+    if (!t) {
+      invalid.push({ orderNo: t, error: 'EMPTY_ORDER_NO' })
+      continue
+    }
+    if (!/^P/i.test(t)) {
+      invalid.push({ orderNo: t, error: 'INVALID_ORDER_NO' })
+      continue
+    }
     const key = t.toUpperCase()
-    if (seen.has(key)) continue
+    if (seen.has(key)) {
+      duplicates.push(t)
+      continue
+    }
     seen.add(key)
     normalized.push(t)
   }
@@ -308,7 +396,24 @@ export function chunkWorkbenchOrderNos(orderNos: string[]): string[][] {
   for (let i = 0; i < normalized.length; i += AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS) {
     chunks.push(normalized.slice(i, i + AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS))
   }
+  return { chunks, invalid, duplicates }
+}
+
+/** 安全分块：每块最多 10 单；非法单号抛错（不静默丢） */
+export function chunkWorkbenchOrderNos(orderNos: string[]): string[][] {
+  const { chunks, invalid } = partitionWorkbenchOrderNos(orderNos)
+  if (invalid.length > 0) {
+    throw new Error(`${invalid[0]!.error}:${invalid[0]!.orderNo || '(empty)'}`)
+  }
   return chunks
+}
+
+const WORKBENCH_PAGE_HARD_LIMIT = 10
+
+function pageFingerprint(rows: Record<string, unknown>[]): string {
+  return rows
+    .map((r) => pickString(r, ['returns_id', 'returnsId']) || JSON.stringify(r))
+    .join('|')
 }
 
 async function fetchAfterSalesListByKeywords(
@@ -316,9 +421,9 @@ async function fetchAfterSalesListByKeywords(
   cookie: string,
   liveAccountId?: string,
 ): Promise<{ rows: Record<string, unknown>[]; httpRequests: number }> {
-  const { waitShopEndpointSlot } = await import('./after-sales-shop-rate.service')
+  const deps = getAfterSalesHttpDeps()
   if (liveAccountId) {
-    await waitShopEndpointSlot(liveAccountId, 'after_sales_workbench')
+    await deps.waitShopSlot(liveAccountId)
   }
 
   const all: Record<string, unknown>[] = []
@@ -327,61 +432,103 @@ async function fetchAfterSalesListByKeywords(
   const pageSize = 20
   let totalCount: number | null = null
   let httpRequests = 0
+  let prevFingerprint: string | null = null
 
-  for (;;) {
-    const u = new URL(WORKBENCH_URL)
-    u.searchParams.set('page', String(page))
-    u.searchParams.set('number', String(pageSize))
-    u.searchParams.set('keywords', keywords.trim())
-    u.searchParams.append('goods_source[]', '1')
-    u.searchParams.append('goods_source[]', '2')
-    u.searchParams.set('return_type_in', '3,4,1,2,5')
-    u.searchParams.set('sort', 'deadline_for_sort_v1')
-    u.searchParams.set('order', 'asc')
-    u.searchParams.set('status_in', '1,2,3,12,13,4,5,6,9,9001,14')
-    const url = u.toString()
+  try {
+    for (;;) {
+      const url = buildWorkbenchPageUrl({ keywords, page, pageSize })
 
-    httpRequests++
-    const payload = await enqueueXhsRequest(() =>
-      requestXhsJsonWithSyncAudit<unknown>({
-        shopId: liveAccountId,
-        apiName: 'after_sales_workbench',
-        method: 'GET',
-        urlKey: '/after-sales/workbench',
-        trigger: 'scheduled',
-        options: {
-          method: 'GET',
+      httpRequests++
+      let payload: unknown
+      try {
+        payload = await deps.httpExecutor({
           url,
           cookie,
+          liveAccountId,
+          method: 'GET',
+          apiName: 'after_sales_workbench',
+          urlKey: '/after-sales/workbench',
           referer: WORKBENCH_REFERER,
-          needSign: true,
-          parseEnvelope: true,
-        },
-      }),
-    )
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        throw new AfterSalesRequestError({
+          message: msg,
+          httpRequests,
+          page,
+          causeCode: classifyThrownHttpCause(msg),
+          keywords,
+          totalCount,
+          fetchedCount: all.length,
+          lastPage: page,
+        })
+      }
 
-    const root = asRecord(payload)
-    const data = root ? asRecord(root.data) ?? root : null
-    if (totalCount == null && data) {
-      const t = data.total_count ?? data.totalCount ?? data.total
-      if (typeof t === 'number' && Number.isFinite(t)) totalCount = t
-    }
-    const pageRows = extractAfterSalesList(payload)
-    for (const row of pageRows) {
-      const rid = pickString(row, ['returns_id', 'returnsId']) || JSON.stringify(row)
-      if (seenReturnIds.has(rid)) continue
-      seenReturnIds.add(rid)
-      all.push(row)
-    }
+      const root = asRecord(payload)
+      const data = root ? asRecord(root.data) ?? root : null
+      if (totalCount == null && data) {
+        const t = data.total_count ?? data.totalCount ?? data.total
+        if (typeof t === 'number' && Number.isFinite(t)) totalCount = t
+      }
+      const pageRows = extractAfterSalesList(payload)
+      const fp = pageFingerprint(pageRows)
+      if (prevFingerprint != null && fp === prevFingerprint && pageRows.length > 0) {
+        throw new AfterSalesRequestError({
+          message: `PAGINATION_STALLED: page=${page} keywords=${keywords.slice(0, 80)}`,
+          httpRequests,
+          page,
+          causeCode: 'pagination_stalled',
+          keywords,
+          totalCount,
+          fetchedCount: all.length,
+          lastPage: page,
+        })
+      }
+      prevFingerprint = fp
 
-    if (pageRows.length === 0) break
-    if (totalCount != null && all.length >= totalCount) break
-    if (pageRows.length < pageSize) break
-    if (page >= 10) break
-    page++
-    if (liveAccountId) {
-      await waitShopEndpointSlot(liveAccountId, 'after_sales_workbench')
+      for (const row of pageRows) {
+        const rid = pickString(row, ['returns_id', 'returnsId']) || JSON.stringify(row)
+        if (seenReturnIds.has(rid)) continue
+        seenReturnIds.add(rid)
+        all.push(row)
+      }
+
+      if (pageRows.length === 0) break
+      if (totalCount != null && all.length >= totalCount) break
+      if (pageRows.length < pageSize) break
+      if (page >= WORKBENCH_PAGE_HARD_LIMIT) {
+        if (totalCount != null && all.length < totalCount) {
+          throw new AfterSalesRequestError({
+            message: `PAGINATION_INCOMPLETE: keywords=${keywords.slice(0, 80)} total=${totalCount} fetched=${all.length} lastPage=${page}`,
+            httpRequests,
+            page,
+            causeCode: 'pagination_incomplete',
+            keywords,
+            totalCount,
+            fetchedCount: all.length,
+            lastPage: page,
+          })
+        }
+        break
+      }
+      page++
+      if (liveAccountId) {
+        await deps.waitShopSlot(liveAccountId)
+      }
     }
+  } catch (e) {
+    if (e instanceof AfterSalesRequestError) throw e
+    const msg = e instanceof Error ? e.message : String(e)
+    throw new AfterSalesRequestError({
+      message: msg,
+      httpRequests,
+      page,
+      causeCode: classifyThrownHttpCause(msg),
+      keywords,
+      totalCount,
+      fetchedCount: all.length,
+      lastPage: page,
+    })
   }
 
   return { rows: all, httpRequests }
@@ -405,12 +552,13 @@ export function buildWorkbenchRefundFromList(
   const trimmed = orderNo.trim()
   const matched = afterSales.filter((r) => recordMatchesOrderNo(r, trimmed))
   const agg = aggregateWorkbenchRefund(matched, trimmed)
-  // 匹配到任意售后记录（含处理中）即视为详情存在；不得用 successReturnCount===0 当成 empty
-  const status: WorkbenchFetchStatus = matched.length === 0 ? 'empty' : 'success'
+  const validCount = agg.matchedRecordCount ?? 0
+  // 有效记录（含处理中）即 success；仅取消/关闭或完全无匹配 → empty
+  const status: WorkbenchFetchStatus = validCount > 0 ? 'success' : 'empty'
   return {
     ...agg,
     liveAccountId,
-    matchedRecordCount: matched.length,
+    matchedRecordCount: validCount,
     fetchStatus: status,
     fetchError: null,
     fetchedAt: new Date(),
@@ -419,21 +567,26 @@ export function buildWorkbenchRefundFromList(
 }
 
 /**
- * 官方批量：keywords=单号1,单号2,... 一次最多 10 单。
- * 必须传入该批订单所属直播号（cookie/店铺），错店会导致查不到。
- * 未命中单返回 fetchStatus=empty（调用方决定是否单笔兜底），禁止当成 success+0。
+ * 单批官方查询：keywords 最多 10 合法 P 单。
+ * 超过 10 单请用 fetchAfterSalesWorkbenchByOrderNos（自动分块）或 chunkWorkbenchOrderNos。
  */
 export async function fetchAfterSalesWorkbenchByOrderNosWithMeta(
   orderNos: string[],
   liveAccountId?: string,
 ): Promise<{ results: Map<string, AfterSalesWorkbenchRefund>; httpRequests: number }> {
   const accountId = resolveLiveAccountId(liveAccountId)
-  const normalized = normalizeWorkbenchBatchOrderNos(orderNos)
+  const deps = getAfterSalesHttpDeps()
   const out = new Map<string, AfterSalesWorkbenchRefund>()
 
-  if (normalized.length === 0) return { results: out, httpRequests: 0 }
+  let normalized: string[]
+  try {
+    normalized = normalizeWorkbenchBatchOrderNos(orderNos)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e)
+    // 底层单批：明确抛错，禁止静默 slice
+    throw new Error(msg)
+  }
 
-  // 多单批量必须带对店铺；错店 cookie 官方查不到。单笔仍允许 legacy 兜底。
   if (
     normalized.length > 1 &&
     (!liveAccountId?.trim() || accountId === 'legacy')
@@ -454,10 +607,7 @@ export async function fetchAfterSalesWorkbenchByOrderNosWithMeta(
 
   let cookie: string
   try {
-    cookie =
-      accountId !== 'legacy'
-        ? await getDecryptedCookieByAccountId(accountId)
-        : await getDecryptedCookie()
+    cookie = await deps.cookieProvider(accountId)
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Cookie 未配置'
     for (const orderNo of normalized) {
@@ -473,62 +623,69 @@ export async function fetchAfterSalesWorkbenchByOrderNosWithMeta(
     return { results: out, httpRequests: 0 }
   }
 
-  try {
-    const keywords = normalized.join(',')
-    const { rows: afterSales, httpRequests } = await fetchAfterSalesListByKeywords(
-      keywords,
-      cookie,
-      accountId,
-    )
-    for (const orderNo of normalized) {
-      out.set(orderNo, buildWorkbenchRefundFromList(afterSales, orderNo, accountId))
-    }
-    return { results: out, httpRequests }
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : '售后工作台查询失败'
-    for (const orderNo of normalized) {
-      out.set(
-        orderNo,
-        emptyWorkbenchResult(orderNo, accountId, {
-          packageId: orderNo,
-          fetchStatus: 'failed',
-          fetchError: msg.slice(0, 500),
-        }),
-      )
-    }
-    // 抛出以便上层熔断；同时带回已计次数困难——失败前可能已发过请求
-    throw e instanceof Error ? e : new Error(msg)
+  const keywords = normalized.join(',')
+  const { rows: afterSales, httpRequests } = await fetchAfterSalesListByKeywords(
+    keywords,
+    cookie,
+    accountId,
+  )
+  for (const orderNo of normalized) {
+    out.set(orderNo, buildWorkbenchRefundFromList(afterSales, orderNo, accountId))
   }
+  return { results: out, httpRequests }
 }
 
+/**
+ * 方案A：超过 10 单自动分块合并；非法单号写入明确失败结果，不静默丢失。
+ */
 export async function fetchAfterSalesWorkbenchByOrderNos(
   orderNos: string[],
   liveAccountId?: string,
 ): Promise<Map<string, AfterSalesWorkbenchRefund>> {
+  const accountId = resolveLiveAccountId(liveAccountId)
+  const out = new Map<string, AfterSalesWorkbenchRefund>()
+  const { chunks, invalid } = partitionWorkbenchOrderNos(orderNos)
+
+  for (const bad of invalid) {
+    const key = bad.orderNo || `(empty:${bad.error})`
+    out.set(
+      key,
+      emptyWorkbenchResult(bad.orderNo, accountId, {
+        packageId: bad.orderNo || null,
+        fetchStatus: 'failed',
+        fetchError: bad.error,
+      }),
+    )
+  }
+
+  let totalHttp = 0
   try {
-    const { results } = await fetchAfterSalesWorkbenchByOrderNosWithMeta(orderNos, liveAccountId)
-    return results
-  } catch (e) {
-    const accountId = resolveLiveAccountId(liveAccountId)
-    const normalized = (() => {
-      try {
-        return normalizeWorkbenchBatchOrderNos(orderNos)
-      } catch {
-        return orderNos.map((x) => String(x ?? '').trim()).filter(Boolean).slice(0, 10)
-      }
-    })()
-    const msg = e instanceof Error ? e.message : '售后工作台查询失败'
-    const out = new Map<string, AfterSalesWorkbenchRefund>()
-    for (const orderNo of normalized) {
-      out.set(
-        orderNo,
-        emptyWorkbenchResult(orderNo, accountId, {
-          packageId: orderNo,
-          fetchStatus: 'failed',
-          fetchError: msg.slice(0, 500),
-        }),
+    for (const chunk of chunks) {
+      const { results, httpRequests } = await fetchAfterSalesWorkbenchByOrderNosWithMeta(
+        chunk,
+        liveAccountId,
       )
+      totalHttp += httpRequests
+      for (const [k, v] of results) out.set(k, v)
     }
+    return out
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : '售后工作台查询失败'
+    const httpN = getAfterSalesHttpRequestCount(e) + totalHttp
+    for (const chunk of chunks) {
+      for (const orderNo of chunk) {
+        if (out.has(orderNo)) continue
+        out.set(
+          orderNo,
+          emptyWorkbenchResult(orderNo, accountId, {
+            packageId: orderNo,
+            fetchStatus: 'failed',
+            fetchError: `${msg} (httpRequests=${httpN})`.slice(0, 500),
+          }),
+        )
+      }
+    }
+    // 公共 API 返回逐单结果，不静默丢单；上层若需熔断请用 WithMeta
     return out
   }
 }
@@ -562,12 +719,10 @@ export async function fetchAfterSalesWorkbenchByOrderNo(
     opts?.fallbackBuyerUserId?.trim() &&
     opts.fallbackBuyerUserId.trim() !== trimmed
   ) {
+    const deps = getAfterSalesHttpDeps()
     let cookie: string
     try {
-      cookie =
-        accountId !== 'legacy'
-          ? await getDecryptedCookieByAccountId(accountId)
-          : await getDecryptedCookie()
+      cookie = await deps.cookieProvider(accountId)
     } catch (e) {
       return emptyWorkbenchResult(trimmed, accountId, {
         packageId: trimmed,

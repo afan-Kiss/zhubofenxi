@@ -1,10 +1,6 @@
 /**
  * 售后回填：订单列表批量探测（POST fulfillment/order/page + multi_search_field）
  */
-import { getDecryptedCookieByAccountId } from './live-account.service'
-import { requestXhsJsonWithSyncAudit } from './sync-request-audit.service'
-import { enqueueXhsRequest } from './xhs-api-sync/xhs-rate-limiter.service'
-import { waitShopEndpointSlot } from './after-sales-shop-rate.service'
 import {
   packageFromUnknown,
   resolveAfterSaleSignal,
@@ -12,6 +8,11 @@ import {
   type BatchOrderPackage,
 } from './after-sale-batch-signal.service'
 import { AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS } from './after-sales-queue.types'
+import { getAfterSalesHttpDeps } from './after-sales-http-deps'
+import {
+  AfterSalesRequestError,
+  classifyThrownHttpCause,
+} from './after-sales-request-error'
 
 const ORDER_LIST_URL = 'https://ark.xiaohongshu.com/api/edith/fulfillment/order/page'
 const ORDER_LIST_REFERER = 'https://ark.xiaohongshu.com/app-order/order/query'
@@ -42,7 +43,7 @@ export function extractOrderListPackages(payload: unknown): {
   return { packages, total }
 }
 
-function buildOrderListBody(orderNos: string[], pageNo: number): Record<string, unknown> {
+export function buildOrderListBody(orderNos: string[], pageNo: number): Record<string, unknown> {
   const now = Date.now()
   const start = now - 400 * 24 * 60 * 60 * 1000
   return {
@@ -143,43 +144,58 @@ export async function probeOrdersAfterSaleSignal(params: {
     throw new Error('ORDER_LIST_PROBE_REQUIRES_LIVE_ACCOUNT')
   }
 
-  const cookie = await getDecryptedCookieByAccountId(liveAccountId)
+  const deps = getAfterSalesHttpDeps()
+  const cookie = await deps.cookieProvider(liveAccountId)
   let httpRequests = 0
   const allPackages: Record<string, unknown>[] = []
   let pageNo = 1
   let total: number | null = null
 
-  for (;;) {
-    await waitShopEndpointSlot(liveAccountId, 'order_list_probe')
-    const body = buildOrderListBody(orderNos, pageNo)
-    httpRequests++
-    const payload = await enqueueXhsRequest(() =>
-      requestXhsJsonWithSyncAudit<unknown>({
-        shopId: liveAccountId,
-        apiName: API_NAME,
-        method: 'POST',
-        urlKey: '/fulfillment/order/page',
-        trigger: 'scheduled',
-        options: {
-          method: 'POST',
+  try {
+    for (;;) {
+      await deps.waitShopSlot(liveAccountId)
+      const body = buildOrderListBody(orderNos, pageNo)
+      httpRequests++
+      let payload: unknown
+      try {
+        payload = await deps.httpExecutor({
           url: ORDER_LIST_URL,
           cookie,
-          referer: ORDER_LIST_REFERER,
+          liveAccountId,
+          method: 'POST',
           body,
-          needSign: true,
-          parseEnvelope: true,
-        },
-      }),
-    )
-    const extracted = extractOrderListPackages(payload)
-    allPackages.push(...extracted.packages)
-    if (total == null) total = extracted.total
-    const got = allPackages.length
-    if (total != null && got < total && extracted.packages.length > 0 && pageNo < 5) {
-      pageNo++
-      continue
+          apiName: API_NAME,
+          urlKey: '/fulfillment/order/page',
+          referer: ORDER_LIST_REFERER,
+        })
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        throw new AfterSalesRequestError({
+          message: msg,
+          httpRequests,
+          page: pageNo,
+          causeCode: classifyThrownHttpCause(msg),
+        })
+      }
+      const extracted = extractOrderListPackages(payload)
+      allPackages.push(...extracted.packages)
+      if (total == null) total = extracted.total
+      const got = allPackages.length
+      if (total != null && got < total && extracted.packages.length > 0 && pageNo < 5) {
+        pageNo++
+        continue
+      }
+      break
     }
-    break
+  } catch (e) {
+    if (e instanceof AfterSalesRequestError) throw e
+    const msg = e instanceof Error ? e.message : String(e)
+    throw new AfterSalesRequestError({
+      message: msg,
+      httpRequests,
+      page: pageNo,
+      causeCode: classifyThrownHttpCause(msg),
+    })
   }
 
   return {

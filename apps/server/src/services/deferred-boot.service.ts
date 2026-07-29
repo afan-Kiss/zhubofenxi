@@ -22,6 +22,18 @@ export function startDeferredBootTasks(): void {
     }
 
     try {
+      const { ensureAfterSalesQueueSchemaOnBoot } = await import(
+        './after-sales-queue-schema-ensure.service'
+      )
+      await ensureAfterSalesQueueSchemaOnBoot()
+    } catch (err) {
+      logWarn(
+        '数据库',
+        `售后队列表补列失败：${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+
+    try {
       await initScheduler()
     } catch (err) {
       logWarn(

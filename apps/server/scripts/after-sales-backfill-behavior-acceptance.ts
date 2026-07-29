@@ -292,7 +292,7 @@ async function main(): Promise<void> {
 
   console.log('✓ after-sales-backfill-behavior-acceptance')
   console.log(
-    '说明：HTTP 次数为流程模拟（与生产回填分支一致）；完整平台 cookie 集成 mock 未接入。分页/429 熔断依赖运行时路径，已由代码路径与错误分类覆盖。',
+    '说明：本脚本覆盖信号/归属/错误码；真实 HTTP 次数见 after-sales-backfill-production-chain-acceptance.ts',
   )
 }
 

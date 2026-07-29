@@ -32,9 +32,40 @@ import {
   logAfterSaleSyncStart,
 } from '../utils/sync-cmd-log'
 import { openShopCircuit } from './shop-after-sales-runtime.service'
+import { getAfterSalesHttpRequestCount } from './after-sales-request-error'
+import type { OrderOwnershipVerdict } from './after-sales-order-ownership.service'
 
 const GLOBAL = globalThis as {
   __afterSalesBackfillRunning?: boolean
+}
+
+export type AfterSalesBackfillTestDeps = {
+  getApiSyncEnabled?: () => Promise<boolean>
+  recoverStuck?: () => Promise<void>
+  selectTasks?: (
+    limits: AfterSalesQueueRateLimits,
+  ) => Promise<SelectedAfterSalesQueueTask[]>
+  partitionOwnership?: (
+    orderNos: string[],
+    queueLiveAccountId: string,
+  ) => Promise<{ matched: string[]; mismatches: OrderOwnershipVerdict[] }>
+  probe?: typeof probeOrdersAfterSaleSignal
+  fetchDetail?: typeof fetchAfterSalesWorkbenchByOrderNosWithMeta
+  saveCache?: typeof saveWorkbenchCache
+  completeTask?: typeof completeAfterSalesQueueTask
+  releaseTasks?: typeof releaseClaimedTasksToRetryWait
+  openCircuit?: typeof openShopCircuit
+  resolveAccountName?: (liveAccountId: string) => Promise<string>
+  /** 进入 doRun 后立刻回调（用于互斥锁真实并发测试） */
+  onEntered?: () => void | Promise<void>
+}
+
+let backfillTestDeps: AfterSalesBackfillTestDeps | null = null
+
+export function setAfterSalesBackfillDepsForTest(
+  deps: AfterSalesBackfillTestDeps | null,
+): void {
+  backfillTestDeps = deps
 }
 
 export interface AfterSalesBatchMetrics {
@@ -165,59 +196,44 @@ function isAuthError(msg: string): boolean {
   return /401|403|cookie|登录|鉴权|签名失效|失效/i.test(msg)
 }
 
-async function finalizeTask(params: {
-  item: SelectedAfterSalesQueueTask
-  result: AfterSalesWorkbenchRefund
-  metrics: AfterSalesBatchMetrics
-  resultTag: string
-}): Promise<void> {
-  const { item, result, metrics, resultTag } = params
-  if (result.fetchStatus !== 'failed') {
-    await saveWorkbenchCache(result, item.liveAccountId)
-  }
-  const finalStatus = await completeAfterSalesQueueTask({
-    queueId: item.id,
-    liveAccountId: item.liveAccountId,
-    orderNo: item.orderNo,
-    result,
-    claimToken: item.claimToken,
-    workerId: item.workerId,
-  })
-  metrics.processed++
-  if (finalStatus === 'done') {
-    metrics.success++
-    if (resultTag === 'NO_AFTER_SALE') metrics.noAfterSale++
-    else if (resultTag === 'AFTER_SALE_DETAIL_SAVED') metrics.detailsSaved++
-    else if (resultTag === 'AFTER_SALE_PROCESSING_SAVED') {
-      metrics.processingDetailsSaved++
-      metrics.detailsSaved++
-    }
-  } else if (finalStatus === 'retry_wait') {
-    metrics.retryWait++
-    metrics.unknown++
-  } else if (finalStatus === 'blocked') {
-    metrics.blocked++
-    if (isAuthError(result.fetchError ?? '')) metrics.authFailed++
-  } else {
-    metrics.failed++
-  }
-}
-
 async function doRunAfterSalesBackfillBatch(
   limits: AfterSalesQueueRateLimits,
 ): Promise<AfterSalesBatchMetrics> {
-  const metrics = emptyMetrics()
-  const { getApiSyncSettings } = await import('./system-setting.service')
-  const settings = await getApiSyncSettings()
-  const { recoverStuckAfterSalesRunningTasks } = await import('./after-sales-queue.service')
-  await recoverStuckAfterSalesRunningTasks()
+  const deps = backfillTestDeps
+  if (deps?.onEntered) await deps.onEntered()
 
-  if (!settings.apiSyncEnabled) {
+  // 历史 SQLite 缺列会导致主流程无法启动
+  try {
+    const { ensureAfterSalesQueueSchema } = await import(
+      './after-sales-queue-schema-ensure.service'
+    )
+    await ensureAfterSalesQueueSchema()
+  } catch (err) {
+    logWarn(
+      '售后补查',
+      `队列表 schema 确保失败：${err instanceof Error ? err.message : String(err)}`,
+    )
+  }
+
+  const metrics = emptyMetrics()
+  const apiEnabled = deps?.getApiSyncEnabled
+    ? await deps.getApiSyncEnabled()
+    : (await (await import('./system-setting.service')).getApiSyncSettings()).apiSyncEnabled
+
+  if (deps?.recoverStuck) await deps.recoverStuck()
+  else {
+    const { recoverStuckAfterSalesRunningTasks } = await import('./after-sales-queue.service')
+    await recoverStuckAfterSalesRunningTasks()
+  }
+
+  if (!apiEnabled) {
     logInfo('售后补查', '售后补查已暂停（apiSyncEnabled=false），本次不拉取平台。')
     return metrics
   }
 
-  const pending = await selectAfterSalesQueueTasks(limits)
+  const pending = deps?.selectTasks
+    ? await deps.selectTasks(limits)
+    : await selectAfterSalesQueueTasks(limits)
   metrics.claimed = pending.length
   if (pending.length === 0) return metrics
 
@@ -235,13 +251,60 @@ async function doRunAfterSalesBackfillBatch(
     byShop.set(item.liveAccountId, list)
   }
 
+  const partitionOwnership = deps?.partitionOwnership ?? partitionOrdersByOwnership
+  const probeFn = deps?.probe ?? probeOrdersAfterSaleSignal
+  const fetchDetailFn = deps?.fetchDetail ?? fetchAfterSalesWorkbenchByOrderNosWithMeta
+  const saveCacheFn = deps?.saveCache ?? saveWorkbenchCache
+  const completeFn = deps?.completeTask ?? completeAfterSalesQueueTask
+  const releaseFn = deps?.releaseTasks ?? releaseClaimedTasksToRetryWait
+  const openCircuitFn = deps?.openCircuit ?? openShopCircuit
+  const nameFn = deps?.resolveAccountName ?? resolveAccountName
+
+  // 将 finalize 绑到可替换 complete/save
+  async function finalizeTaskLocal(params: {
+    item: SelectedAfterSalesQueueTask
+    result: AfterSalesWorkbenchRefund
+    metrics: AfterSalesBatchMetrics
+    resultTag: string
+  }): Promise<void> {
+    const { item, result, metrics: m, resultTag } = params
+    if (result.fetchStatus !== 'failed') {
+      await saveCacheFn(result, item.liveAccountId)
+    }
+    const finalStatus = await completeFn({
+      queueId: item.id,
+      liveAccountId: item.liveAccountId,
+      orderNo: item.orderNo,
+      result,
+      claimToken: item.claimToken,
+      workerId: item.workerId,
+    })
+    m.processed++
+    if (finalStatus === 'done') {
+      m.success++
+      if (resultTag === 'NO_AFTER_SALE') m.noAfterSale++
+      else if (resultTag === 'AFTER_SALE_DETAIL_SAVED') m.detailsSaved++
+      else if (resultTag === 'AFTER_SALE_PROCESSING_SAVED') {
+        m.processingDetailsSaved++
+        m.detailsSaved++
+      }
+    } else if (finalStatus === 'retry_wait') {
+      m.retryWait++
+      m.unknown++
+    } else if (finalStatus === 'blocked') {
+      m.blocked++
+      if (isAuthError(result.fetchError ?? '')) m.authFailed++
+    } else {
+      m.failed++
+    }
+  }
+
   let shopIndex = 0
   for (const [liveAccountId, items] of byShop) {
     shopIndex++
-    const accountName = await resolveAccountName(liveAccountId)
+    const accountName = await nameFn(liveAccountId)
     const shopSafe = items.filter((i) => i.liveAccountId === liveAccountId)
 
-    // 分块 10
     const chunks: SelectedAfterSalesQueueTask[][] = []
     for (let i = 0; i < shopSafe.length; i += AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS) {
       chunks.push(shopSafe.slice(i, i + AFTER_SALES_WORKBENCH_BATCH_MAX_ORDERS))
@@ -263,7 +326,7 @@ async function doRunAfterSalesBackfillBatch(
 
     for (const chunk of chunks) {
       if (shopStop) {
-        await releaseClaimedTasksToRetryWait({
+        await releaseFn({
           tasks: chunk,
           reason: 'SHOP_CIRCUIT_SKIP_REMAINING',
         })
@@ -274,8 +337,7 @@ async function doRunAfterSalesBackfillBatch(
       const orderNos = chunk.map((c) => c.orderNo)
       const byOrder = new Map(chunk.map((c) => [c.orderNo, c]))
 
-      // 1) 归属预检
-      const { matched, mismatches } = await partitionOrdersByOwnership(orderNos, liveAccountId)
+      const { matched, mismatches } = await partitionOwnership(orderNos, liveAccountId)
       metrics.ownershipMatched += matched.length
       for (const m of mismatches) {
         const item = byOrder.get(m.orderNo)
@@ -283,7 +345,7 @@ async function doRunAfterSalesBackfillBatch(
         if (m.kind === 'SHOP_MISMATCH') metrics.ownershipMismatch++
         else if (m.kind === 'ORDER_OWNER_NOT_FOUND') metrics.ownerNotFound++
         else if (m.kind === 'ORDER_OWNER_CONFLICT') metrics.ownerConflict++
-        await finalizeTask({
+        await finalizeTaskLocal({
           item,
           result: failedRefund(m.orderNo, liveAccountId, m.kind),
           metrics,
@@ -295,10 +357,9 @@ async function doRunAfterSalesBackfillBatch(
       if (matched.length === 0) continue
       const matchedItems = matched.map((o) => byOrder.get(o)!).filter(Boolean)
 
-      // 2) 订单列表批量探测
       let probes: OrderProbeResult[] = []
       try {
-        const probe = await probeOrdersAfterSaleSignal({
+        const probe = await probeFn({
           liveAccountId,
           orderNos: matched,
         })
@@ -310,11 +371,14 @@ async function doRunAfterSalesBackfillBatch(
         probes = probe.results
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
+        const httpN = getAfterSalesHttpRequestCount(e)
+        metrics.orderListRequests += httpN
+        metrics.actualHttpRequests += httpN
         if (isRateLimitError(msg) || isAuthError(msg)) {
           shopStop = true
           if (isRateLimitError(msg)) metrics.rateLimited++
           if (isAuthError(msg)) metrics.authFailed++
-          await openShopCircuit({
+          await openCircuitFn({
             liveAccountId,
             errorType: isAuthError(msg) ? 'http_401' : 'http_429',
             message: msg.slice(0, 200),
@@ -322,18 +386,17 @@ async function doRunAfterSalesBackfillBatch(
           })
           logWarn(
             '售后补查',
-            `店铺熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${matchedItems.length}`,
+            `店铺熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${matchedItems.length} http=${httpN}`,
           )
-          await releaseClaimedTasksToRetryWait({
+          await releaseFn({
             tasks: matchedItems,
             reason: msg.slice(0, 500),
           })
           metrics.retryWait += matchedItems.length
-          // 同店后续 chunk 也退回
           continue
         }
         for (const item of matchedItems) {
-          await finalizeTask({
+          await finalizeTaskLocal({
             item,
             result: failedRefund(item.orderNo, liveAccountId, msg),
             metrics,
@@ -349,7 +412,7 @@ async function doRunAfterSalesBackfillBatch(
         const item = byOrder.get(p.orderNo)
         if (!item) continue
         if (p.state === 'NO_AFTER_SALE') {
-          await finalizeTask({
+          await finalizeTaskLocal({
             item,
             result: emptyNoAfterSale(p.orderNo, liveAccountId),
             metrics,
@@ -361,7 +424,7 @@ async function doRunAfterSalesBackfillBatch(
           continue
         }
         if (p.state === 'UNKNOWN') {
-          await finalizeTask({
+          await finalizeTaskLocal({
             item,
             result: failedRefund(p.orderNo, liveAccountId, p.reason),
             metrics,
@@ -376,10 +439,11 @@ async function doRunAfterSalesBackfillBatch(
 
       if (needDetail.length === 0) continue
 
-      // 3) 仅有售后订单 → 一次详情（含分页，按实际 HTTP 计数）
       try {
-        const { results: detailMap, httpRequests } =
-          await fetchAfterSalesWorkbenchByOrderNosWithMeta(needDetail, liveAccountId)
+        const { results: detailMap, httpRequests } = await fetchDetailFn(
+          needDetail,
+          liveAccountId,
+        )
         metrics.detailRequests += httpRequests
         metrics.actualHttpRequests += httpRequests
         if (httpRequests > 1) {
@@ -390,7 +454,7 @@ async function doRunAfterSalesBackfillBatch(
           const item = byOrder.get(orderNo)!
           const result = detailMap.get(orderNo)
           if (!result || result.fetchStatus === 'failed') {
-            await finalizeTask({
+            await finalizeTaskLocal({
               item,
               result:
                 result ??
@@ -402,8 +466,7 @@ async function doRunAfterSalesBackfillBatch(
             continue
           }
           if (result.fetchStatus === 'empty' || (result.matchedRecordCount ?? 0) === 0) {
-            // 列表有售后信号但详情未命中 → 重试，禁止买家ID兜底
-            await finalizeTask({
+            await finalizeTaskLocal({
               item,
               result: failedRefund(orderNo, liveAccountId, 'AFTER_SALE_SIGNAL_WITHOUT_DETAIL'),
               metrics,
@@ -416,38 +479,42 @@ async function doRunAfterSalesBackfillBatch(
             (result.successReturnCount ?? 0) > 0
               ? 'AFTER_SALE_DETAIL_SAVED'
               : 'AFTER_SALE_PROCESSING_SAVED'
-          await finalizeTask({ item, result, metrics, resultTag: tag })
+          await finalizeTaskLocal({ item, result, metrics, resultTag: tag })
           reporter.tick(true, `当前账号=${accountName}，详情已保存`)
           shopMatched++
           shopSuccess++
         }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e)
+        const httpN = getAfterSalesHttpRequestCount(e)
+        metrics.detailRequests += httpN
+        metrics.actualHttpRequests += httpN
+        if (httpN > 1) metrics.paginationRequests += httpN - 1
         if (isRateLimitError(msg) || isAuthError(msg)) {
           shopStop = true
           if (isRateLimitError(msg)) metrics.rateLimited++
           if (isAuthError(msg)) metrics.authFailed++
-          await openShopCircuit({
+          await openCircuitFn({
             liveAccountId,
             errorType: isAuthError(msg) ? 'http_401' : 'http_429',
             message: msg.slice(0, 200),
             probeBackoffMs: 60_000,
           })
           const remain = needDetail.map((o) => byOrder.get(o)!).filter(Boolean)
-          await releaseClaimedTasksToRetryWait({
+          await releaseFn({
             tasks: remain,
             reason: msg.slice(0, 500),
           })
           metrics.retryWait += remain.length
           logWarn(
             '售后补查',
-            `详情熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${remain.length}`,
+            `详情熔断 account=${accountName} reason=${msg.slice(0, 120)} remaining=${remain.length} http=${httpN}`,
           )
           continue
         }
         for (const orderNo of needDetail) {
           const item = byOrder.get(orderNo)!
-          await finalizeTask({
+          await finalizeTaskLocal({
             item,
             result: failedRefund(orderNo, liveAccountId, msg),
             metrics,

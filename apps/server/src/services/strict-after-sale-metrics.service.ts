@@ -338,11 +338,13 @@ const PENDING_AFTER_SALE_STATUS_KEYWORDS = [
   '待退货',
   '待退款',
   '待商家',
+  '待商家收货',
   '待买家',
   '待平台',
   '待寄回',
   '待收货',
   '待用户',
+  '买家退货中',
 ] as const
 
 const CANCELLED_AFTER_SALE_STATUS_KEYWORDS = [
@@ -371,6 +373,9 @@ function afterSaleStatusIndicatesCancelled(text: string): boolean {
 /**
  * 实际签收订单售后准入：无售后 / 售后已取消关闭 / 成功商品退款 ≤ 20 元
  * 纯运费补偿、售后处理中、商品退款 > 20 元均不计入。
+ *
+ * 注意：isCanceledOrInvalidAfterSale 会把「处理中」也标成无效（用于不计入成功退款），
+ * 不能据此当成「售后已结束」放行进已签收。
  */
 export function orderQualifiesForActualSignedAfterSale(params: {
   afterSaleRecords: Record<string, unknown>[]
@@ -385,11 +390,15 @@ export function orderQualifiesForActualSignedAfterSale(params: {
 
   if (params.isFreightRefundOnly) return true
 
+  // 售后处理中优先拦截（含「售后处理中: 待商家收货」），避免被关闭无退款/无效记录短路误放行
+  if (afterSaleStatusIndicatesPending(statusText)) return false
+
   if (params.afterSaleClosedNoRefund && refundCent === 0) return true
 
   const records = normalizeAfterSaleRecords(params.afterSaleRecords)
 
   for (const rec of records) {
+    if (afterSaleStatusIndicatesPending(afterSaleStatusText(rec))) return false
     if (!isCanceledOrInvalidAfterSale(rec) && !isSuccessfulAfterSale(rec)) {
       return false
     }
@@ -398,7 +407,6 @@ export function orderQualifiesForActualSignedAfterSale(params: {
   const hasSuccessful = records.some((rec) => isSuccessfulAfterSale(rec))
 
   if (records.length === 0 && refundCent === 0) {
-    if (afterSaleStatusIndicatesPending(statusText)) return false
     if (afterSaleStatusIndicatesCancelled(statusText)) return true
     if (isCompletedAfterSaleStatusText(statusText)) {
       return isTrustworthyResolvedRefundSource(

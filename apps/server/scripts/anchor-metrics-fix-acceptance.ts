@@ -685,6 +685,29 @@ function testActualSignedAfterSaleQualify(issues: string[]) {
     !orderQualifiesForActualSignedAfterSale({
       afterSaleRecords: [],
       successfulProductRefundCent: 0,
+      afterSaleStatusText: '售后处理中: 待商家收货',
+    }),
+    '售后处理中: 待商家收货 不应计入',
+    issues,
+  )
+  assert(
+    !orderQualifiesForActualSignedAfterSale({
+      afterSaleRecords: [
+        {
+          reason_name_zh: '七天无理由',
+          refund_status_name: '售后处理中: 待商家收货',
+        },
+      ],
+      successfulProductRefundCent: 0,
+      afterSaleStatusText: '售后处理中: 待商家收货',
+    }),
+    '有处理中售后记录时即使退款0也不应计入已签收',
+    issues,
+  )
+  assert(
+    !orderQualifiesForActualSignedAfterSale({
+      afterSaleRecords: [],
+      successfulProductRefundCent: 0,
       afterSaleStatusText: '售后完成',
     }),
     '售后完成且未核实退款不应计入实际签收',
@@ -736,9 +759,10 @@ async function verifyMayLiveDb(issues: string[]) {
     // 子杰与合计允许更大容差：禁止支付时间兜底后，缺可靠下单时间的历史单会进未归属
     const nearLive = (a: number, b: number, tol = 200) => Math.abs(a - b) <= tol
     if (!near(xiaohong, 0)) issues.push(`live: 小红签收额=${xiaohong} 期望 0`)
-    if (!nearLive(zijie, 30550.9)) issues.push(`live: 子杰签收额=${zijie} 期望约 30550.90（±200）`)
+    // 2026-07：售后处理中不再误入已签收后，子杰/合计略低于旧黄金值
+    if (!nearLive(zijie, 30179.1)) issues.push(`live: 子杰签收额=${zijie} 期望约 30179.10（±200）`)
     if (!near(feiyun, 41782.7)) issues.push(`live: 飞云签收额=${feiyun} 期望 41782.70`)
-    if (!nearLive(total, 72333.6)) issues.push(`live: 主播合计=${total} 期望约 72333.60（±200）`)
+    if (!nearLive(total, 72116.6)) issues.push(`live: 主播合计=${total} 期望约 72116.60（±200）`)
 
     console.log('[live-db]', {
       子杰: zijie,

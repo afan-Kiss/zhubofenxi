@@ -1,5 +1,5 @@
 /**
- * 已签收下钻：官方「交易完成」状态 + 完成时间字段晋升 / 解析验收
+ * 已签收下钻：官方状态原文 + 完成时间字段晋升 / 解析验收
  */
 import assert from 'node:assert/strict'
 import { ensureOrderRawCompletionFields } from '../src/services/order-raw-completion.util'
@@ -11,11 +11,11 @@ function sampleCompletedPackage(): Record<string, unknown> {
     packageId: 'P799759259763371981',
     orderId: '799759259763371981',
     status: 7,
-    // 官方详情页「交易完成」；列表偶发只有 status=7
+    statusDesc: '已完成',
     orderedAt: '2026-07-16 21:07:39',
     paidAt: '2026-07-16 21:07:41',
     // 官方完成时间常用别名（未晋升前不在 finishTime）
-    orderFinishTime: '2026-07-19 11:08:04',
+    finishedAt: '2026-07-19 11:08:04',
     sellerReceiveAmount: 817,
     totalPayAmount: 817,
     skuList: [{ skuName: '俄白大宽胎58.2', soldPrice: 799 }],
@@ -25,8 +25,8 @@ function sampleCompletedPackage(): Record<string, unknown> {
 function main() {
   const raw = sampleCompletedPackage()
   const promoted = ensureOrderRawCompletionFields(raw)
-  assert.equal(promoted.statusDescPromoted, true)
-  assert.equal(String(raw.statusDesc), '交易完成')
+  assert.equal(promoted.statusDescPromoted, false, '已有官网 statusDesc 不覆盖')
+  assert.equal(String(raw.statusDesc), '已完成')
   assert.equal(promoted.finishTimePromoted, true)
   assert.equal(String(raw.finishTime), '2026-07-19 11:08:04')
 
@@ -36,8 +36,18 @@ function main() {
   assert.equal(signed.source, 'finishTime')
 
   const normalized = normalizeXhsOrderPackage({ ...sampleCompletedPackage() }, 0)
-  assert.equal(normalized.orderStatusText, '交易完成')
+  assert.equal(normalized.orderStatusText, '已完成')
   assert.equal(normalized.isSigned, true)
+
+  // 仅有数字 status、无文案时：不编造「交易完成」
+  const codeOnly: Record<string, unknown> = {
+    status: 7,
+    orderFinishTime: '2026-07-19 11:08:04',
+  }
+  const codePromoted = ensureOrderRawCompletionFields(codeOnly)
+  assert.equal(codePromoted.statusDescPromoted, false)
+  assert.equal(codeOnly.statusDesc, undefined)
+  assert.equal(codePromoted.finishTimePromoted, true)
 
   // 已有官方文案时不覆盖
   const withDesc: Record<string, unknown> = {

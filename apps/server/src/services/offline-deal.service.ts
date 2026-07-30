@@ -226,8 +226,9 @@ export function offlineDealToAnalyzedView(deal: {
     buyerId: deal.customerLabel?.trim() || `offline:${deal.dealKey}`,
     anchorId,
     anchorName,
-    liveAccountId: '',
-    liveAccountName: '',
+    // 线下无平台直播号：固定归到「线下成交」，避免下钻显示「未知直播号」
+    liveAccountId: '__offline__',
+    liveAccountName: '线下成交',
     attributionType: hasAnchor ? 'order_anchor_field' : 'unassigned',
     gmvCent: deal.amountCent,
     productAmountCent: deal.amountCent,

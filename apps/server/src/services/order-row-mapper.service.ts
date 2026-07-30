@@ -18,7 +18,7 @@ import {
   type LiveAccountRowMapperContext,
 } from './live-account.service'
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
-import { isStatusSignedFromTexts, isStatusSignedView } from './order-sign-status.service'
+import { resolveOfficialOrderStatusText } from './order-raw-completion.util'
 import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import { parseLiveSessionTimeMs } from '../utils/business-timezone'
 import { resolveSignedTimeFromRaw } from './signed-order-sort.service'
@@ -192,51 +192,39 @@ export interface BoardOrderRow {
 
 export type BoardDrillOrderRow = BoardOrderRow
 
+/**
+ * 看板明细订单状态：优先官网原文；线下成交单独标注，避免显示成「未知/已签收」混淆。
+ */
 function buildOrderStatusLabel(v: AnalyzedOrderView): string {
+  if (isOfflineDealView(v) || v.dealSource === 'offline' || v.sourceType === 'offline_deal') {
+    const offlineStatus = (v.orderStatusText || '').trim()
+    if (['已取消', '已作废', '草稿'].includes(offlineStatus)) return offlineStatus
+    return '线下成交'
+  }
   const raw = (v as AnalyzedOrderView & { raw?: Record<string, unknown> }).raw
-  const rawOfficial =
-    raw && typeof raw === 'object'
-      ? String(
-          raw.statusDesc ??
-            raw.status_desc ??
-            raw.orderStatusDesc ??
-            raw.statusName ??
-            '',
-        ).trim()
-      : ''
-  const text = (v.orderStatusText || rawOfficial || '').trim() || '进行中'
-  if (['已关闭', '已取消', '交易关闭'].some((k) => text.includes(k))) {
-    return '已关闭'
-  }
-  // 已签收口径：优先展示官方状态（交易完成 / 已完成 / 已签收），勿一律改成「已签收」
-  if (v.isEffectiveSigned || v.isActualSigned || isStatusSignedView(v) || isStatusSignedFromTexts(text, rawOfficial)) {
-    const prefer = [text, rawOfficial].find((t) =>
-      /交易完成|已完成|已签收|交易成功|已收货/.test(t),
-    )
-    if (prefer?.includes('交易完成')) return '交易完成'
-    if (prefer?.includes('已完成')) return '已完成'
-    if (prefer?.includes('交易成功')) return '交易成功'
-    if (prefer?.includes('已签收')) return '已签收'
-    if (prefer?.includes('已收货')) return '已收货'
-    if (prefer) return prefer
-    return '已签收'
-  }
-  if (v.afterSaleClosedNoRefund && (isStatusSignedView(v) || text.includes('已完成'))) {
-    return '已完成'
-  }
-  if (v.afterSaleCancelled && (isStatusSignedView(v) || text.includes('已完成'))) {
-    return '已完成'
-  }
-  if (v.isReturnRefund || v.isRealProductRefund) return '售后关闭'
-  if (
-    ['已发货', '待收货', '运输中', '派送中', '待签收'].some((k) => text.includes(k))
-  ) {
-    return '已发货未签收'
-  }
+  const fromRaw =
+    raw && typeof raw === 'object' ? resolveOfficialOrderStatusText(raw).trim() : ''
+  const fromView = (v.orderStatusText || '').trim()
+  // 优先 raw 原文；无文案时不编造内部口径词
+  const text = (fromRaw || fromView).trim()
+  if (!text || /^\d+$/.test(text)) return text || '—'
   return text
 }
 
 function buildAfterSaleStatusLabel(v: AnalyzedOrderView): string {
+  const raw = (v as AnalyzedOrderView & { raw?: Record<string, unknown> }).raw
+  const fromRaw =
+    raw && typeof raw === 'object'
+      ? String(
+          raw.afterSaleStatusDesc ??
+            raw.after_sale_status_desc ??
+            raw.afterSaleStatusText ??
+            '',
+        ).trim()
+      : ''
+  const fromView = (v.afterSaleStatusText || '').trim()
+  const official = fromRaw || fromView
+  if (official) return official
   if (v.afterSaleCancelled) return '售后已取消'
   const displayType =
     (v as AnalyzedOrderView & { afterSaleDisplayType?: string }).afterSaleDisplayType ?? '—'
@@ -357,10 +345,8 @@ export function mapViewToBoardOrderRow(
 
   const orderStatus = buildOrderStatusLabel(v)
   const afterSaleStatus = buildAfterSaleStatusLabel(v)
-  let statusText = afterSaleStatus !== '—' ? afterSaleStatus : orderStatus
-  if (v.isFreightRefundOnly && v.isEffectiveSigned) {
-    statusText = '已签收（运费补偿）'
-  }
+  // 状态列主文案=官网订单状态原文；售后单独字段，不再把订单状态改写成「已签收（运费补偿）」
+  const statusText = orderStatus
 
   const displayOrderNo = resolveDisplayOrderNoForView(v)
   const reasonFields = resolveAfterSaleReasonFields(v)
@@ -402,6 +388,15 @@ export function mapViewToBoardOrderRow(
   const signedTime = pickSignTimeResolved(raw)
   const orderTimeText = v.orderTimeText || '—'
   const orderTimeMs = parseLiveSessionTimeMs(orderTimeText)
+  // 线下成交无平台完成时间：用成交时间作为完成时间展示，避免「完成时间待同步」误导
+  const offlineSignFallback =
+    offline && !signedTime.signTime
+      ? resolveSignedTimeFromRaw({ finishTime: orderTimeText })
+      : null
+  const signTime = signedTime.signTime ?? offlineSignFallback?.displayText ?? null
+  const signTimeMs = signedTime.signTimeMs ?? offlineSignFallback?.timestampMs ?? null
+  const signTimeSource =
+    signedTime.signTimeSource ?? (offlineSignFallback?.displayText ? 'offline_dealAt' : null)
 
   return {
     orderNo: displayOrderNo,
@@ -415,9 +410,9 @@ export function mapViewToBoardOrderRow(
     productName: pickProductName(raw),
     orderTime: orderTimeText,
     orderTimeMs,
-    signTime: signedTime.signTime,
-    signTimeMs: signedTime.signTimeMs,
-    signTimeSource: signedTime.signTimeSource,
+    signTime,
+    signTimeMs,
+    signTimeSource,
     productTotalAmount,
     freightAmount,
     userPayableAmount,

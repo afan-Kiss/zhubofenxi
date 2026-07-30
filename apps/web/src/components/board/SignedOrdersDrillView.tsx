@@ -83,7 +83,7 @@ interface Props {
 }
 
 function formatSignTimeShort(signTime: string | null | undefined): string {
-  if (!signTime) return '完成时间待同步'
+  if (!signTime) return '尚未交易完成'
   // YYYY-MM-DD HH:mm:ss → MM-DD HH:mm
   const m = signTime.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
   if (m) return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`
@@ -91,17 +91,30 @@ function formatSignTimeShort(signTime: string | null | undefined): string {
 }
 
 function statusLabel(row: BoardDrillOrderRow): string {
-  const base =
-    row.cardStatusLabel?.trim() ||
-    orderStatusLabelForRow(row as never) ||
-    displayCell(row.orderStatus)
-  if (row.isQualityReturn) return `${base}·品退`
-  const freight = Number(row.freightAmount ?? 0)
-  const refund = Number(row.refundAmount ?? row.productRefundAmount ?? 0)
-  if (freight > 0 && refund > 0 && Math.abs(refund - freight) < 0.02) {
-    return base.includes('运费') ? base : `${base}·运费补偿`
+  // 只展示官网原文：订单状态 + 售后状态（若有），禁止内部改写
+  const official =
+    displayCell(row.orderStatus) !== '—'
+      ? String(row.orderStatus).trim()
+      : (row.cardStatusLabel?.trim() ||
+        orderStatusLabelForRow(row as never) ||
+        '—')
+  const afterSaleOfficial = String(
+    (row as { afterSaleStatusText?: string }).afterSaleStatusText ?? '',
+  ).trim()
+  // afterSaleStatus 可能是内部改写，仅当 afterSaleStatusText 缺失时回退，且排除内部口径词
+  const afterSaleFallback = String(row.afterSaleStatus ?? '').trim()
+  const afterSale =
+    afterSaleOfficial && afterSaleOfficial !== '—'
+      ? afterSaleOfficial
+      : afterSaleFallback &&
+          afterSaleFallback !== '—' &&
+          !['售后已取消', '售后关闭'].includes(afterSaleFallback)
+        ? afterSaleFallback
+        : ''
+  if (afterSale && !official.includes(afterSale)) {
+    return `${official} · ${afterSale}`
   }
-  return base
+  return official || '—'
 }
 
 function shopKey(row: BoardDrillOrderRow): string {
@@ -647,7 +660,10 @@ function SignedDesktopTable(props: {
                   onClick={() => onToggle(rowKey)}
                 >
                   <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-[#667069]">
-                    {row.signTime || '完成时间待同步'}
+                    {row.signTime ||
+                      (String(row.orderStatus || row.cardStatusLabel || '').includes('已签收')
+                        ? '尚未交易完成'
+                        : '完成时间待同步')}
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="font-mono text-[11px]">{boardRowDisplayOrderNo(row)}</div>
@@ -830,7 +846,13 @@ function SignedExpandDetail(props: {
         <p className="font-medium text-[#202722]">时间信息</p>
         <p>下单时间：{displayCell(row.orderTime)}</p>
         <p>支付时间：{displayCell(row.payTime)}</p>
-        <p>完成时间：{row.signTime || '完成时间待同步'}</p>
+        <p>
+          完成时间：
+          {row.signTime ||
+            (String(row.orderStatus || row.cardStatusLabel || '').includes('已签收')
+              ? '尚未交易完成'
+              : '完成时间待同步')}
+        </p>
       </div>
       <div className="space-y-1">
         <p className="font-medium text-[#202722]">归属信息</p>

@@ -552,7 +552,8 @@ function buildSignedFilteredSummary(rows: BoardDrillOrderRow[]): {
   for (const row of rows) {
     shopIds.add((row.liveAccountId || 'unknown').trim() || 'unknown')
     const identity = signedDrillAnchorIdentity(row.anchorId, row.anchorName)
-    anchorKeys.add(`${row.liveAccountId || ''}::${identity.key}`)
+    // 汇总「主播数」按姓名去重（与筛选项全部店铺展示一致），不按店×人重复计
+    anchorKeys.add(identity.key)
     signedAmount += Number(row.signedAmount ?? 0) || 0
     if (row.signTimeMs == null) missingSignTimeCount += 1
   }

@@ -185,7 +185,12 @@ export type SignedSortableRow = {
 function shopSortKey(row: SignedSortableRow): { missing: boolean; name: string; id: string } {
   const name = (row.liveAccountName ?? '').trim()
   const id = (row.liveAccountId ?? '').trim()
-  const missing = !name || name === '未知直播号' || name === '—'
+  const missing =
+    !name ||
+    name === '未知直播号' ||
+    name === '—' ||
+    name === '线下成交' ||
+    id === '__offline__'
   return { missing, name: missing ? '\uffff' : name, id }
 }
 

@@ -3,6 +3,7 @@
  * 不改变 isEffectiveSignedView / 日期范围 / 主播归属口径
  */
 import { formatDateTimeShanghai, parseLiveSessionTimeMs } from '../utils/business-timezone'
+import { normalizeAnchorName } from '../utils/anchor-name-normalize.util'
 
 export const SIGNED_ORDER_SORT_SHOP_ANCHOR_SIGN_DESC = 'shop_anchor_sign_desc' as const
 
@@ -20,6 +21,25 @@ export type ResolvedSignedTime = {
   displayText: string | null
   timestampMs: number | null
   source: string | null
+}
+
+/** 已签收下钻展示用主播身份：同名合并，避免同一人因不同 anchorId 重复出现 */
+export function signedDrillAnchorIdentity(
+  anchorId: string | null | undefined,
+  anchorName: string | null | undefined,
+): { key: string; id: string; name: string; unassigned: boolean } {
+  const name = (anchorName ?? '').trim() || '未归属'
+  const unassigned = !name || name === '未归属' || name === '—'
+  if (unassigned) {
+    return { key: '__unassigned__', id: '__unassigned__', name: '未归属', unassigned: true }
+  }
+  const idRaw = (anchorId ?? '').trim()
+  return {
+    key: normalizeAnchorName(name),
+    id: idRaw || name,
+    name,
+    unassigned: false,
+  }
 }
 
 const SIGN_TIME_RAW_KEYS = [
@@ -170,10 +190,13 @@ function shopSortKey(row: SignedSortableRow): { missing: boolean; name: string; 
 }
 
 function anchorSortKey(row: SignedSortableRow): { missing: boolean; name: string; id: string } {
-  const name = (row.anchorName ?? '').trim()
-  const id = (row.anchorId ?? '').trim()
-  const unassigned = !name || name === '未归属' || name === '—'
-  return { missing: unassigned, name: unassigned ? '\uffff' : name, id: id || name }
+  const identity = signedDrillAnchorIdentity(row.anchorId, row.anchorName)
+  return {
+    missing: identity.unassigned,
+    name: identity.unassigned ? '\uffff' : identity.name,
+    // 同名不因不同 id 拆开排序；id 仅作稳定次序
+    id: identity.key,
+  }
 }
 
 export function compareShop(a: SignedSortableRow, b: SignedSortableRow): number {
@@ -274,20 +297,26 @@ export function buildSignedGroupSummary(
     shop.orderCount += 1
     shop.signedAmount += Number.isFinite(amount) ? amount : 0
 
-    const anchorName = (row.anchorName || '未归属').trim() || '未归属'
-    const anchorId = (row.anchorId || anchorName).trim() || anchorName
-    const aKey = `${anchorId}::${anchorName}`
+    const identity = signedDrillAnchorIdentity(row.anchorId, row.anchorName)
+    const aKey = identity.key
     let anchor = shop.anchors.get(aKey)
     if (!anchor) {
       anchor = {
-        anchorId,
-        anchorName,
+        anchorId: identity.id,
+        anchorName: identity.name,
         orderCount: 0,
         signedAmount: 0,
         latestSignTimeMs: null,
         latestSignTime: null,
       }
       shop.anchors.set(aKey, anchor)
+    } else if (
+      identity.id &&
+      identity.id !== identity.name &&
+      (!anchor.anchorId || anchor.anchorId === anchor.anchorName)
+    ) {
+      // 优先保留真实主播 id（而非仅用姓名回退）
+      anchor.anchorId = identity.id
     }
     anchor.orderCount += 1
     anchor.signedAmount += Number.isFinite(amount) ? amount : 0

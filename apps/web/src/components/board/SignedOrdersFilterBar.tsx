@@ -22,6 +22,48 @@ interface Props {
   disabled?: boolean
 }
 
+function normalizeNameKey(name: string): string {
+  return name
+    .trim()
+    .normalize('NFKC')
+    .replace(/\u3000/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+}
+
+/** 全部店铺时按主播名合并；选中店铺时也按名合并（防同店多 id） */
+function mergeAnchorsForSelect(
+  anchors: SignedFilterAnchor[],
+  shopId: string,
+): SignedFilterAnchor[] {
+  const scoped = shopId
+    ? anchors.filter((a) => a.liveAccountId === shopId)
+    : anchors
+  const map = new Map<string, SignedFilterAnchor>()
+  for (const a of scoped) {
+    const displayName = (a.name || '').trim() || '未归属'
+    const unassigned =
+      a.id === '__unassigned__' || displayName === '未归属' || displayName === '—'
+    const key = unassigned ? '__unassigned__' : normalizeNameKey(displayName)
+    const existing = map.get(key)
+    if (!existing) {
+      map.set(key, {
+        id: unassigned ? '__unassigned__' : displayName,
+        name: unassigned ? '未归属' : displayName,
+        liveAccountId: shopId || '',
+        count: a.count,
+      })
+    } else {
+      existing.count += a.count
+    }
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.id === '__unassigned__' && b.id !== '__unassigned__') return 1
+    if (b.id === '__unassigned__' && a.id !== '__unassigned__') return -1
+    return a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
+  })
+}
+
 export const SignedOrdersFilterBar: React.FC<Props> = ({
   shops,
   anchors,
@@ -35,9 +77,7 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
   hasActiveFilters,
   disabled,
 }) => {
-  const visibleAnchors = shopId
-    ? anchors.filter((a) => a.liveAccountId === shopId)
-    : anchors
+  const visibleAnchors = mergeAnchorsForSelect(anchors, shopId)
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-[#E3E7E2] bg-[#FBFCFA] p-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -46,7 +86,11 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
         <select
           value={shopId}
           disabled={disabled}
-          onChange={(e) => onShopChange(e.target.value)}
+          onChange={(e) => {
+            onShopChange(e.target.value)
+            // 换店后清空主播，避免跨店残留筛选项
+            onAnchorChange('')
+          }}
           className="h-9 rounded-lg border border-[#E3E7E2] bg-white px-2 text-xs text-[#202722] outline-none focus:border-[#477A5D]"
         >
           <option value="">全部店铺</option>
@@ -68,7 +112,7 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
         >
           <option value="">全部主播</option>
           {visibleAnchors.map((a) => (
-            <option key={`${a.liveAccountId}-${a.id}`} value={a.id}>
+            <option key={a.id} value={a.id}>
               {a.name}（{a.count}）
             </option>
           ))}
@@ -90,9 +134,9 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
       <div className="flex flex-wrap items-end gap-2 sm:ml-auto">
         <span
           className="inline-flex h-9 items-center rounded-lg border border-[#E3E7E2] bg-[#EDF5F0] px-2.5 text-[11px] text-[#477A5D]"
-          title="本页固定按店铺→主播→签收时间排序，不可切换"
+          title="本页固定按店铺→主播→完成时间排序，不可切换"
         >
-          店铺 ↑　主播 ↑　签收时间 ↓
+          店铺 ↑　主播 ↑　完成时间 ↓
         </span>
         <button
           type="button"

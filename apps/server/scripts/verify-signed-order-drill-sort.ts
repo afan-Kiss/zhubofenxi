@@ -271,6 +271,48 @@ console.log('\n=== groupSummary 金额 ===')
   assert(g.shops[0]!.anchors[0]!.latestSignTime?.includes('07-26') || g.shops[0]!.anchors.find((a) => a.anchorName === '乙')?.latestSignTime != null, '最近签收时间')
 }
 
+console.log('\n=== groupSummary 同名主播合并 ===')
+{
+  const rows: Row[] = [
+    {
+      liveAccountName: '店A',
+      liveAccountId: 's1',
+      anchorName: '小白',
+      anchorId: 'id-a',
+      signedAmount: 10,
+      signTimeMs: 3,
+      signTime: '2026-07-25 12:00:00',
+      displayOrderNo: '1',
+    },
+    {
+      liveAccountName: '店A',
+      liveAccountId: 's1',
+      anchorName: '小白',
+      anchorId: 'id-b',
+      signedAmount: 20,
+      signTimeMs: 2,
+      signTime: '2026-07-24 12:00:00',
+      displayOrderNo: '2',
+    },
+    {
+      liveAccountName: '店B',
+      liveAccountId: 's2',
+      anchorName: '小白',
+      anchorId: 'id-c',
+      signedAmount: 5,
+      signTimeMs: 1,
+      signTime: '2026-07-23 12:00:00',
+      displayOrderNo: '3',
+    },
+  ]
+  const g = buildSignedGroupSummary(rows)
+  assert(g.shops.length === 2, '两店')
+  const shopA = g.shops.find((s) => s.liveAccountId === 's1')!
+  assert(shopA.anchorCount === 1, '同店同名不同 id 合并为 1 主播')
+  assert(shopA.anchors[0]!.orderCount === 2, '同店小白 2 单')
+  assert(Math.abs(shopA.signedAmount - 30) < 0.001, '同店小白金额合并')
+}
+
 console.log('\n=== 分页边界 + 口径不变（本月） ===')
 async function verifyIntegration(): Promise<void> {
   const range = resolveDateRange('thisMonth')

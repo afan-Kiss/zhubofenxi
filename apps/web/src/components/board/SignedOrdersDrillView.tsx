@@ -108,10 +108,20 @@ function shopKey(row: BoardDrillOrderRow): string {
   return (row.liveAccountId || 'unknown').trim() || 'unknown'
 }
 
+function normalizeAnchorKey(name: string): string {
+  return name
+    .trim()
+    .normalize('NFKC')
+    .replace(/\u3000/g, '')
+    .replace(/\s+/g, '')
+    .toLowerCase()
+}
+
 function anchorKey(row: BoardDrillOrderRow): string {
   const name = (row.anchorName || '未归属').trim() || '未归属'
-  const id = (row.anchorId || name).trim() || name
-  return `${shopKey(row)}::${id}::${name}`
+  const unassigned = !name || name === '未归属' || name === '—'
+  const id = unassigned ? '__unassigned__' : normalizeAnchorKey(name)
+  return `${shopKey(row)}::${id}`
 }
 
 export const SignedOrdersDrillView: React.FC<Props> = ({
@@ -280,7 +290,10 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
     for (const shop of data?.groupSummary?.shops ?? []) {
       shops.set(shop.liveAccountId, shop)
       for (const a of shop.anchors) {
-        anchors.set(`${shop.liveAccountId}::${a.anchorId}::${a.anchorName}`, {
+        const name = (a.anchorName || '未归属').trim() || '未归属'
+        const unassigned = !name || name === '未归属' || name === '—'
+        const id = unassigned ? '__unassigned__' : normalizeAnchorKey(name)
+        anchors.set(`${shop.liveAccountId}::${id}`, {
           ...a,
           shopId: shop.liveAccountId,
         })

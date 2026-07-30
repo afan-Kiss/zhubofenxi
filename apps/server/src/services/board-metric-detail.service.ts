@@ -48,9 +48,11 @@ import {
   SIGNED_ORDER_SORT_SHOP_ANCHOR_SIGN_DESC,
   buildSignedGroupSummary,
   normalizeSignedOrderSort,
+  signedDrillAnchorIdentity,
   sortSignedOrderRows,
   type SignedGroupSummary,
 } from './signed-order-sort.service'
+import { normalizeAnchorName } from '../utils/anchor-name-normalize.util'
 
 export type BoardDataSource = 'local_db' | 'live_api'
 
@@ -466,16 +468,16 @@ function applySignedListFilters(
   const listAnchorId = filters.listAnchorId?.trim()
   if (listAnchorId) {
     if (listAnchorId === '__unassigned__' || listAnchorId === '未归属') {
-      out = out.filter((r) => {
-        const n = (r.anchorName || '').trim()
-        return !n || n === '未归属' || n === '—'
-      })
+      out = out.filter((r) => signedDrillAnchorIdentity(r.anchorId, r.anchorName).unassigned)
     } else {
-      out = out.filter(
-        (r) =>
-          (r.anchorId || '').trim() === listAnchorId ||
-          (r.anchorName || '').trim() === listAnchorId,
-      )
+      const wantKey = normalizeAnchorName(listAnchorId)
+      out = out.filter((r) => {
+        const got = signedDrillAnchorIdentity(r.anchorId, r.anchorName)
+        if (got.unassigned) return false
+        // 同名合并后筛选项以姓名为 value；同时兼容历史传真实 anchorId
+        if (got.key === wantKey) return true
+        return (r.anchorId || '').trim() === listAnchorId
+      })
     }
   }
   const keyword = filters.keyword?.trim().toLowerCase()
@@ -495,7 +497,11 @@ function buildSignedFilterOptions(rows: BoardDrillOrderRow[]): {
   anchors: Array<{ id: string; name: string; liveAccountId: string; count: number }>
 } {
   const shopMap = new Map<string, { id: string; name: string; count: number }>()
-  const anchorMap = new Map<string, { id: string; name: string; liveAccountId: string; count: number }>()
+  // 店内按主播名合并，避免同一人多个 anchorId 在下拉里重复
+  const anchorMap = new Map<
+    string,
+    { id: string; name: string; liveAccountId: string; count: number }
+  >()
 
   for (const row of rows) {
     const shopId = (row.liveAccountId || 'unknown').trim() || 'unknown'
@@ -504,18 +510,15 @@ function buildSignedFilterOptions(rows: BoardDrillOrderRow[]): {
     if (shop) shop.count += 1
     else shopMap.set(shopId, { id: shopId, name: shopName, count: 1 })
 
-    const anchorName = (row.anchorName || '未归属').trim() || '未归属'
-    const isUnassigned = !anchorName || anchorName === '未归属' || anchorName === '—'
-    const anchorId = isUnassigned
-      ? '__unassigned__'
-      : (row.anchorId || '').trim() || anchorName
-    const aKey = `${shopId}::${anchorId}`
+    const identity = signedDrillAnchorIdentity(row.anchorId, row.anchorName)
+    const aKey = `${shopId}::${identity.key}`
     const anchor = anchorMap.get(aKey)
     if (anchor) anchor.count += 1
     else {
       anchorMap.set(aKey, {
-        id: anchorId,
-        name: isUnassigned ? '未归属' : anchorName,
+        // 筛选项 value 用展示名（或未归属哨兵），保证跨店/跨 id 同名能一次筛全
+        id: identity.unassigned ? '__unassigned__' : identity.name,
+        name: identity.name,
         liveAccountId: shopId,
         count: 1,
       })
@@ -548,9 +551,8 @@ function buildSignedFilteredSummary(rows: BoardDrillOrderRow[]): {
   let missingSignTimeCount = 0
   for (const row of rows) {
     shopIds.add((row.liveAccountId || 'unknown').trim() || 'unknown')
-    const anchorName = (row.anchorName || '未归属').trim() || '未归属'
-    const anchorId = (row.anchorId || anchorName).trim() || anchorName
-    anchorKeys.add(`${row.liveAccountId || ''}::${anchorId}::${anchorName}`)
+    const identity = signedDrillAnchorIdentity(row.anchorId, row.anchorName)
+    anchorKeys.add(`${row.liveAccountId || ''}::${identity.key}`)
     signedAmount += Number(row.signedAmount ?? 0) || 0
     if (row.signTimeMs == null) missingSignTimeCount += 1
   }

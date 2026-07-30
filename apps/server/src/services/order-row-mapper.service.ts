@@ -18,7 +18,7 @@ import {
   type LiveAccountRowMapperContext,
 } from './live-account.service'
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
-import { isStatusSignedView } from './order-sign-status.service'
+import { isStatusSignedFromTexts, isStatusSignedView } from './order-sign-status.service'
 import { isOfflineDealView } from '../utils/offline-deal-view.util'
 import { parseLiveSessionTimeMs } from '../utils/business-timezone'
 import { resolveSignedTimeFromRaw } from './signed-order-sort.service'
@@ -193,11 +193,32 @@ export interface BoardOrderRow {
 export type BoardDrillOrderRow = BoardOrderRow
 
 function buildOrderStatusLabel(v: AnalyzedOrderView): string {
-  const text = v.orderStatusText || '进行中'
+  const raw = (v as AnalyzedOrderView & { raw?: Record<string, unknown> }).raw
+  const rawOfficial =
+    raw && typeof raw === 'object'
+      ? String(
+          raw.statusDesc ??
+            raw.status_desc ??
+            raw.orderStatusDesc ??
+            raw.statusName ??
+            '',
+        ).trim()
+      : ''
+  const text = (v.orderStatusText || rawOfficial || '').trim() || '进行中'
   if (['已关闭', '已取消', '交易关闭'].some((k) => text.includes(k))) {
     return '已关闭'
   }
-  if (v.isEffectiveSigned || v.isActualSigned || isStatusSignedView(v)) {
+  // 已签收口径：优先展示官方状态（交易完成 / 已完成 / 已签收），勿一律改成「已签收」
+  if (v.isEffectiveSigned || v.isActualSigned || isStatusSignedView(v) || isStatusSignedFromTexts(text, rawOfficial)) {
+    const prefer = [text, rawOfficial].find((t) =>
+      /交易完成|已完成|已签收|交易成功|已收货/.test(t),
+    )
+    if (prefer?.includes('交易完成')) return '交易完成'
+    if (prefer?.includes('已完成')) return '已完成'
+    if (prefer?.includes('交易成功')) return '交易成功'
+    if (prefer?.includes('已签收')) return '已签收'
+    if (prefer?.includes('已收货')) return '已收货'
+    if (prefer) return prefer
     return '已签收'
   }
   if (v.afterSaleClosedNoRefund && (isStatusSignedView(v) || text.includes('已完成'))) {

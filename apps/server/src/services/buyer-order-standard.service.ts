@@ -13,6 +13,7 @@ import { isUnverifiedCompletedAfterSaleOrder } from './order-product-refund.serv
 import { isCompletedAfterSaleStatusText } from './completed-after-sale-status.service'
 import { extractAfterSaleNosFromSources } from './buyer-aftersale-event.util'
 import { isOfflineDealView } from '../utils/offline-deal-view.util'
+import { resolveSignedTimeFromRaw } from './signed-order-sort.service'
 
 export type BuyerAfterSaleType =
   | 'none'
@@ -199,6 +200,9 @@ function pickPayTime(raw: Record<string, unknown> | undefined): string | null {
 
 function pickSignTime(raw: Record<string, unknown> | undefined): string | null {
   if (!raw) return null
+  // 与已签收下钻共用完成/签收时间解析（含 finishTime 别名与嵌套）
+  const resolved = resolveSignedTimeFromRaw(raw)
+  if (resolved.displayText) return resolved.displayText
   const t =
     raw.signedAt ?? raw.signTime ?? raw.receiveTime ?? raw.finishTime ?? raw.completedAt
   return formatTimeValue(t)

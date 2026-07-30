@@ -216,6 +216,7 @@ npm run accept:gmv:fast
 | 支付 GMV | 支付日落入统计日的已支付金额（分汇总） |
 | 当前有效成交 | `sumValidRevenueFromViews`：支付日订单截至当前售后状态的有效成交池；P 单去重 |
 | 实际签收 | `actualSignedAmount` / `signedOrderCount`：订单状态已签收/已完成，且**无售后处理中**；成功商品退款 ≤ ¥20（运费补偿）可保留，更大商品退款不计入；**禁止**写入 `validAmountYuan` |
+| 已签收下钻展示 | 状态优先原样展示官方文案（`交易完成` / `已完成` / `已签收` 等），禁止一律改成「已签收」；完成时间取 `finishTime`/`signedAt`/`orderFinishTime` 等官方字段（定时同步入库时晋升到稳定键）。验收：`npx tsx apps/server/scripts/signed-completion-fields-acceptance.ts` |
 | 退货率 | 退款成功 P 单唯一数 ÷ 支付 P 单唯一数；分母 0 → `null`；禁止用有效成交订单作分母 |
 | 月报买家数 | 全日期范围有效成交买家身份去重；禁止各商品 `buyerCount` 相加 |
 

@@ -28,7 +28,36 @@ const SIGN_TIME_RAW_KEYS = [
   'receiveTime',
   'finishTime',
   'completedAt',
+  'finishedAt',
+  'orderFinishTime',
+  'finish_time',
+  'completed_time',
+  'completeTime',
+  'orderCompleteTime',
+  'confirmReceiveTime',
+  'confirm_receive_time',
+  'confirmReceiveAt',
 ] as const
+
+const NESTED_RAW_CONTAINERS = [
+  'package',
+  'order',
+  'orderInfo',
+  'packageInfo',
+  'orderDetail',
+  'data',
+] as const
+
+function collectRawTimeSources(raw: Record<string, unknown>): Record<string, unknown>[] {
+  const out: Record<string, unknown>[] = [raw]
+  for (const key of NESTED_RAW_CONTAINERS) {
+    const nested = raw[key]
+    if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+      out.push(nested as Record<string, unknown>)
+    }
+  }
+  return out
+}
 
 function parseNumericEpoch(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -85,15 +114,17 @@ export function resolveSignedTime(value: unknown, sourceHint?: string | null): R
   }
 }
 
-/** 从订单 raw 取签收时间候选并规范化 */
+/** 从订单 raw 取签收/完成时间候选并规范化（含嵌套 package/order） */
 export function resolveSignedTimeFromRaw(
   raw: Record<string, unknown> | undefined,
 ): ResolvedSignedTime {
   if (!raw) return { displayText: null, timestampMs: null, source: null }
-  for (const key of SIGN_TIME_RAW_KEYS) {
-    if (!(key in raw) || raw[key] == null) continue
-    const resolved = resolveSignedTime(raw[key], key)
-    if (resolved.timestampMs != null || resolved.displayText) return resolved
+  for (const source of collectRawTimeSources(raw)) {
+    for (const key of SIGN_TIME_RAW_KEYS) {
+      if (!(key in source) || source[key] == null) continue
+      const resolved = resolveSignedTime(source[key], key)
+      if (resolved.timestampMs != null || resolved.displayText) return resolved
+    }
   }
   return { displayText: null, timestampMs: null, source: null }
 }

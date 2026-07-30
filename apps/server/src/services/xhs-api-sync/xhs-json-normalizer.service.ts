@@ -19,6 +19,10 @@ import {
 } from '../buyer-identity.service'
 import type { DateRangeResolved } from '../../utils/date-range'
 import { orderPayTimeInRange } from '../../utils/order-stat-time.util'
+import {
+  ensureOrderRawCompletionFields,
+  resolveOfficialOrderStatusText,
+} from '../order-raw-completion.util'
 
 /** DB 预筛缓冲：orderTime 存 orderedAt，统计口径用 paymentTime，需留余量避免漏单 */
 export const RAW_ORDER_RANGE_DB_BUFFER_MS = 30 * 24 * 60 * 60 * 1000
@@ -344,6 +348,7 @@ export function normalizeXhsOrderPackage(
   hints?: NormalizeXhsOrderHints,
 ): NormalizedOrder {
   const errors: string[] = []
+  ensureOrderRawCompletionFields(pkg)
   const packageIdFromRaw = pickOrderIdentifierString(pkg, [
     'packageId',
     'package_id',
@@ -395,7 +400,9 @@ export function normalizeXhsOrderPackage(
   }
 
   const orderStatusText =
-    pickString(pkg, ['statusDesc', 'status_desc']) || pickString(pkg, ['status'])
+    resolveOfficialOrderStatusText(pkg) ||
+    pickString(pkg, ['statusDesc', 'status_desc']) ||
+    pickString(pkg, ['status'])
   const afterSaleStatusTextRaw =
     pickString(pkg, ['afterSaleStatusDesc', 'after_sale_status_desc']) ||
     pickString(pkg, ['afterSaleStatus', 'after_sale_status'])

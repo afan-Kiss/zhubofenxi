@@ -83,7 +83,7 @@ interface Props {
 }
 
 function formatSignTimeShort(signTime: string | null | undefined): string {
-  if (!signTime) return '签收时间待同步'
+  if (!signTime) return '完成时间待同步'
   // YYYY-MM-DD HH:mm:ss → MM-DD HH:mm
   const m = signTime.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/)
   if (m) return `${m[2]}-${m[3]} ${m[4]}:${m[5]}`
@@ -299,7 +299,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
       ? `${data.dateRange.startDate} 至 ${data.dateRange.endDate}`
       : `${startDate} 至 ${endDate}`
 
-  const subtitle = `统计范围：${rangeText}　排序：店铺 → 主播 → 签收时间（新到旧）`
+  const subtitle = `统计范围：${rangeText}　排序：店铺 → 主播 → 完成时间（新到旧）`
 
   const allowManualAssign = data?.allowManualAnchorAssign !== false
 
@@ -344,7 +344,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
 
       {(filtered?.missingSignTimeCount ?? 0) > 0 ? (
         <div className="rounded-lg border border-[#E3E7E2] bg-[#FFF8E8] px-3 py-2 text-[11px] text-[#667069]">
-          有 {filtered!.missingSignTimeCount} 笔订单缺少明确签收时间，已排在对应主播最后
+          有 {filtered!.missingSignTimeCount} 笔订单缺少明确完成时间，已排在对应主播最后
         </div>
       ) : null}
 
@@ -564,7 +564,7 @@ function SignedDesktopTable(props: {
       <table className="min-w-full border-collapse text-left text-xs text-[#202722]">
         <thead className="sticky top-0 z-20 bg-[#EDF5F0] text-[11px] text-[#667069]">
           <tr>
-            <th className="whitespace-nowrap px-2 py-2.5 font-medium">签收时间</th>
+            <th className="whitespace-nowrap px-2 py-2.5 font-medium">完成时间</th>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">订单号</th>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">买家</th>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">商品</th>
@@ -593,28 +593,38 @@ function SignedDesktopTable(props: {
                 {showShop ? (
                   <tr className="bg-[#E8EEE9]">
                     <td colSpan={9} className="px-3 py-2 text-[13px]">
-                      <span className="font-semibold text-[#202722]">
-                        {row.liveAccountName || shopMeta?.liveAccountName || '未知直播号'}
-                      </span>
-                      <span className="ml-3 tabular-nums text-[#667069]">
-                        {shopMeta?.orderCount ?? '—'} 单　已签收{' '}
-                        {formatMoney(shopMeta?.signedAmount ?? 0)}　
-                        {shopMeta?.anchorCount ?? '—'} 位主播
-                      </span>
+                      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                        <span className="shrink-0 text-[11px] font-medium text-[#667069]">
+                          直播号
+                        </span>
+                        <span className="font-semibold text-[#202722]">
+                          {row.liveAccountName || shopMeta?.liveAccountName || '未知直播号'}
+                        </span>
+                        <span className="tabular-nums text-[#667069]">
+                          {shopMeta?.orderCount ?? '—'} 单 · 已签收{' '}
+                          {formatMoney(shopMeta?.signedAmount ?? 0)} ·{' '}
+                          {shopMeta?.anchorCount ?? '—'} 位主播
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 ) : null}
                 {showAnchor ? (
                   <tr className="bg-[#F2F5F2]">
                     <td colSpan={9} className="px-3 py-1.5 text-[12px]">
-                      <span className="font-medium text-[#202722]">
-                        {row.anchorName || '未归属'}
-                      </span>
-                      <span className="ml-3 tabular-nums text-[#667069]">
-                        {anchorMeta?.orderCount ?? '—'} 单　已签收{' '}
-                        {formatMoney(anchorMeta?.signedAmount ?? 0)}　最近签收{' '}
-                        {formatSignTimeShort(anchorMeta?.latestSignTime)}
-                      </span>
+                      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
+                        <span className="shrink-0 text-[11px] font-medium text-[#667069]">
+                          主播
+                        </span>
+                        <span className="font-medium text-[#202722]">
+                          {row.anchorName || '未归属'}
+                        </span>
+                        <span className="tabular-nums text-[#667069]">
+                          {anchorMeta?.orderCount ?? '—'} 单 · 已签收{' '}
+                          {formatMoney(anchorMeta?.signedAmount ?? 0)} · 最近完成{' '}
+                          {formatSignTimeShort(anchorMeta?.latestSignTime)}
+                        </span>
+                      </div>
                     </td>
                   </tr>
                 ) : null}
@@ -624,7 +634,7 @@ function SignedDesktopTable(props: {
                   onClick={() => onToggle(rowKey)}
                 >
                   <td className="whitespace-nowrap px-2 py-1.5 tabular-nums text-[#667069]">
-                    {row.signTime || '签收时间待同步'}
+                    {row.signTime || '完成时间待同步'}
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="font-mono text-[11px]">{boardRowDisplayOrderNo(row)}</div>
@@ -807,7 +817,7 @@ function SignedExpandDetail(props: {
         <p className="font-medium text-[#202722]">时间信息</p>
         <p>下单时间：{displayCell(row.orderTime)}</p>
         <p>支付时间：{displayCell(row.payTime)}</p>
-        <p>签收时间：{row.signTime || '签收时间待同步'}</p>
+        <p>完成时间：{row.signTime || '完成时间待同步'}</p>
       </div>
       <div className="space-y-1">
         <p className="font-medium text-[#202722]">归属信息</p>

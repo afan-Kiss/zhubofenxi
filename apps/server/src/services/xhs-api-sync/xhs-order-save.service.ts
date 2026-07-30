@@ -20,6 +20,7 @@ import {
   extractNormalizedOrderColumnsFromRaw,
   toPrismaNormalizedOrderColumns,
 } from '../normalized-order-columns.service'
+import { ensureOrderRawCompletionFields } from '../order-raw-completion.util'
 
 const DEFAULT_MAX_PAGES = SAFE_MAX_PAGES
 
@@ -70,6 +71,9 @@ async function saveOrderPackage(
   liveAccountId: string,
   liveAccountName: string,
 ): Promise<{ saved: boolean; created: boolean }> {
+  // 定时同步入库前：晋升官方完成时间 / 交易完成文案到稳定字段
+  ensureOrderRawCompletionFields(item)
+
   const packageId = pickId(item, ['packageId', 'package_id', 'packageNo', 'package_no'])
   const orderId = pickId(item, ['orderId', 'order_id', 'orderNo', 'order_no'])
   if (!packageId && !orderId) return { saved: false, created: false }

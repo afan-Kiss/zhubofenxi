@@ -20,8 +20,8 @@ import {
 import { resolveLowPriceBrushDebugFields } from './low-price-brush-order.service'
 import { resolveOfficialOrderStatusText } from './order-raw-completion.util'
 import { isOfflineDealView } from '../utils/offline-deal-view.util'
-import { parseLiveSessionTimeMs } from '../utils/business-timezone'
-import { resolveSignedTimeFromRaw } from './signed-order-sort.service'
+import { formatDateTimeShanghai, parseLiveSessionTimeMs } from '../utils/business-timezone'
+import { resolveSignedTime, resolveSignedTimeFromRaw } from './signed-order-sort.service'
 
 export function pickProductName(raw: Record<string, unknown> | undefined): string {
   if (!raw) return '—'
@@ -53,6 +53,21 @@ function pickSignTimeResolved(raw: Record<string, unknown> | undefined): {
     signTimeMs: resolved.timestampMs,
     signTimeSource: resolved.source,
   }
+}
+
+function pickPayTimeDisplay(
+  v: AnalyzedOrderView,
+  raw: Record<string, unknown> | undefined,
+): string | null {
+  const paymentTime = (v as AnalyzedOrderView & { paymentTime?: Date | null }).paymentTime
+  if (paymentTime instanceof Date && !Number.isNaN(paymentTime.getTime())) {
+    return formatDateTimeShanghai(paymentTime)
+  }
+  if (!raw) return null
+  const payRaw =
+    raw.paidAt ?? raw.paid_at ?? raw.payTime ?? raw.pay_time ?? raw.paymentTime ?? raw.payment_time
+  const resolved = resolveSignedTime(payRaw, 'payTime')
+  return resolved.displayText
 }
 
 function pickBuyerNickname(raw: Record<string, unknown> | undefined, buyerId: string): string {
@@ -97,6 +112,8 @@ export interface BoardOrderRow {
   buyerId: string
   productName: string
   orderTime: string
+  /** 支付时间（展示用） */
+  payTime?: string | null
   signTime: string | null
   signTimeMs?: number | null
   signTimeSource?: string | null
@@ -388,7 +405,8 @@ export function mapViewToBoardOrderRow(
   const signedTime = pickSignTimeResolved(raw)
   const orderTimeText = v.orderTimeText || '—'
   const orderTimeMs = parseLiveSessionTimeMs(orderTimeText)
-  // 线下成交无平台完成时间：用成交时间作为完成时间展示，避免「完成时间待同步」误导
+  const payTime = pickPayTimeDisplay(v, raw)
+  // 线下成交无平台完成时间：用成交时间作为订单完成时间展示
   const offlineSignFallback =
     offline && !signedTime.signTime
       ? resolveSignedTimeFromRaw({ finishTime: orderTimeText })
@@ -410,6 +428,7 @@ export function mapViewToBoardOrderRow(
     productName: pickProductName(raw),
     orderTime: orderTimeText,
     orderTimeMs,
+    payTime,
     signTime,
     signTimeMs,
     signTimeSource,

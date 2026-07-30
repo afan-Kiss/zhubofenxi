@@ -200,11 +200,17 @@ function pickPayTime(raw: Record<string, unknown> | undefined): string | null {
 
 function pickSignTime(raw: Record<string, unknown> | undefined): string | null {
   if (!raw) return null
-  // 与已签收下钻共用完成/签收时间解析（含 finishTime 别名与嵌套）
+  // 与已签收下钻共用订单完成时间解析（优先 finishTime/finishedAt）
   const resolved = resolveSignedTimeFromRaw(raw)
   if (resolved.displayText) return resolved.displayText
   const t =
-    raw.signedAt ?? raw.signTime ?? raw.receiveTime ?? raw.finishTime ?? raw.completedAt
+    raw.finishTime ??
+    raw.finishedAt ??
+    raw.orderFinishTime ??
+    raw.signedAt ??
+    raw.signTime ??
+    raw.receiveTime ??
+    raw.completedAt
   return formatTimeValue(t)
 }
 

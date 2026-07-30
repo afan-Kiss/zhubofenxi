@@ -325,7 +325,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
       ? `${data.dateRange.startDate} 至 ${data.dateRange.endDate}`
       : `${startDate} 至 ${endDate}`
 
-  const subtitle = `统计范围：${rangeText}　排序：店铺 → 主播 → 完成时间（新到旧）`
+  const subtitle = `统计范围：${rangeText}　排序：店铺 → 主播 → 订单完成时间（新到旧）`
 
   const allowManualAssign = data?.allowManualAnchorAssign !== false
 
@@ -370,7 +370,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
 
       {(filtered?.missingSignTimeCount ?? 0) > 0 ? (
         <div className="rounded-lg border border-[#E3E7E2] bg-[#FFF8E8] px-3 py-2 text-[11px] text-[#667069]">
-          有 {filtered!.missingSignTimeCount} 笔订单缺少明确完成时间，已排在对应主播最后
+          有 {filtered!.missingSignTimeCount} 笔订单缺少订单完成时间，已排在对应主播最后
         </div>
       ) : null}
 
@@ -590,7 +590,7 @@ function SignedDesktopTable(props: {
       <table className="min-w-full border-collapse text-left text-xs text-[#202722]">
         <thead className="sticky top-0 z-20 bg-[#EDF5F0] text-[11px] text-[#667069]">
           <tr>
-            <th className="whitespace-nowrap px-2 py-2.5 font-medium">完成时间</th>
+            <th className="whitespace-nowrap px-2 py-2.5 font-medium">订单完成时间</th>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">订单号</th>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">买家</th>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">商品</th>
@@ -647,7 +647,7 @@ function SignedDesktopTable(props: {
                         </span>
                         <span className="tabular-nums text-[#667069]">
                           {anchorMeta?.orderCount ?? '—'} 单 · 已签收{' '}
-                          {formatMoney(anchorMeta?.signedAmount ?? 0)} · 最近完成{' '}
+                          {formatMoney(anchorMeta?.signedAmount ?? 0)} · 最近订单完成{' '}
                           {formatSignTimeShort(anchorMeta?.latestSignTime)}
                         </span>
                       </div>
@@ -847,7 +847,7 @@ function SignedExpandDetail(props: {
         <p>下单时间：{displayCell(row.orderTime)}</p>
         <p>支付时间：{displayCell(row.payTime)}</p>
         <p>
-          完成时间：
+          订单完成时间：
           {row.signTime ||
             (String(row.orderStatus || row.cardStatusLabel || '').includes('已签收')
               ? '尚未交易完成'

@@ -43,17 +43,19 @@ export function signedDrillAnchorIdentity(
 }
 
 const SIGN_TIME_RAW_KEYS = [
-  'signedAt',
-  'signTime',
-  'receiveTime',
+  // 订单完成时间优先（千帆详情「完成时间」/ finishedAt）
   'finishTime',
-  'completedAt',
   'finishedAt',
   'orderFinishTime',
   'finish_time',
+  'completedAt',
   'completed_time',
   'completeTime',
   'orderCompleteTime',
+  // 其次才是签收/收货时间
+  'signedAt',
+  'signTime',
+  'receiveTime',
   'confirmReceiveTime',
   'confirm_receive_time',
   'confirmReceiveAt',

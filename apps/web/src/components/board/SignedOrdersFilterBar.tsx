@@ -134,9 +134,9 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
       <div className="flex flex-wrap items-end gap-2 sm:ml-auto">
         <span
           className="inline-flex h-9 items-center rounded-lg border border-[#E3E7E2] bg-[#EDF5F0] px-2.5 text-[11px] text-[#477A5D]"
-          title="本页固定按店铺→主播→完成时间排序，不可切换"
+          title="本页固定按店铺→主播→订单完成时间排序，不可切换"
         >
-          店铺 ↑　主播 ↑　完成时间 ↓
+          店铺 ↑　主播 ↑　订单完成 ↓
         </span>
         <button
           type="button"

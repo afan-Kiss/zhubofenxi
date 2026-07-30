@@ -23,6 +23,14 @@ function testCooldownClassification(): void {
   assert(plat.errorType === 'platform_cooling', '平台限流文案应为 platform_cooling')
   const r429 = classifyWorkbenchQueueError('too many', 429)
   assert(r429.errorType === 'http_429', '429 应为 http_429')
+  const h500 = classifyWorkbenchQueueError('小红书接口请求失败 HTTP 500')
+  assert(h500.errorType === 'http_500', 'HTTP 500 应为 http_500')
+  assert(h500.disposition === 'retry_wait', 'HTTP 500 应 retry_wait')
+  const dbBusy = classifyWorkbenchQueueError(
+    'Invalid `prisma.shopAfterSalesRuntime.upsert()` invocation: Socket timeout (the database failed to respond)',
+  )
+  assert(dbBusy.errorType === 'db_busy', 'Prisma Socket timeout 应为 db_busy')
+  assert(dbBusy.disposition === 'retry_wait', 'db_busy 应 retry_wait')
   const f = classifyWorkbenchQueueError('签名生成失败')
   assert(f.disposition === 'retry_wait', '签名临时失败应 retry_wait')
   const p = classifyWorkbenchQueueError('无效订单号（需 P 开头官方订单号）')

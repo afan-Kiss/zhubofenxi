@@ -1,5 +1,6 @@
 /**
  * 店铺售后熔断持久化：跨进程 / 跨批次有效
+ * 读路径只用 findUnique/findMany，避免每批对全店 upsert 抢 SQLite 写锁
  */
 import { prisma } from '../lib/prisma'
 import type { AfterSalesQueueErrorType } from './after-sales-queue.types'
@@ -28,24 +29,23 @@ export interface ShopCircuitSnapshot {
   allowProbe: boolean
 }
 
-async function ensureRow(liveAccountId: string, platformName = '') {
-  return prisma.shopAfterSalesRuntime.upsert({
-    where: { liveAccountId },
-    create: { liveAccountId, platformName, updatedAt: new Date() },
-    update: platformName ? { platformName } : {},
-  })
+type RuntimeRow = {
+  liveAccountId: string
+  circuitOpen: boolean
+  circuitReason: string | null
+  circuitOpenedAt: Date | null
+  circuitNextProbeAt: Date | null
+  cooldownUntil: Date | null
+  consecutiveAuthFail: number
+  consecutiveSignFail: number
 }
 
-export async function loadShopCircuit(
-  liveAccountId: string,
-): Promise<ShopCircuitSnapshot> {
-  const key = liveAccountId || 'legacy'
-  const row = await ensureRow(key)
+function snapshotFromRow(row: RuntimeRow): ShopCircuitSnapshot {
   const now = Date.now()
   const nextProbe = row.circuitNextProbeAt?.getTime() ?? 0
   const allowProbe = row.circuitOpen && nextProbe > 0 && nextProbe <= now
   return {
-    liveAccountId: key,
+    liveAccountId: row.liveAccountId,
     circuitOpen: Boolean(row.circuitOpen),
     circuitReason: row.circuitReason,
     circuitOpenedAt: row.circuitOpenedAt,
@@ -57,15 +57,60 @@ export async function loadShopCircuit(
   }
 }
 
+/** 仅写路径需要保证行存在；读路径勿调用 */
+async function ensureRow(liveAccountId: string, platformName = '') {
+  return prisma.shopAfterSalesRuntime.upsert({
+    where: { liveAccountId },
+    create: { liveAccountId, platformName, updatedAt: new Date() },
+    update: platformName ? { platformName } : {},
+  })
+}
+
+async function findOrCreateRow(liveAccountId: string): Promise<RuntimeRow> {
+  const key = liveAccountId || 'legacy'
+  const existing = await prisma.shopAfterSalesRuntime.findUnique({
+    where: { liveAccountId: key },
+  })
+  if (existing) return existing
+  try {
+    return await prisma.shopAfterSalesRuntime.create({
+      data: { liveAccountId: key, platformName: '', updatedAt: new Date() },
+    })
+  } catch {
+    const again = await prisma.shopAfterSalesRuntime.findUnique({
+      where: { liveAccountId: key },
+    })
+    if (again) return again
+    throw new Error(`shopAfterSalesRuntime create failed: ${key}`)
+  }
+}
+
+export async function loadShopCircuit(
+  liveAccountId: string,
+): Promise<ShopCircuitSnapshot> {
+  const row = await findOrCreateRow(liveAccountId || 'legacy')
+  return snapshotFromRow(row)
+}
+
 export async function loadShopCircuits(
   liveAccountIds: string[],
 ): Promise<Map<string, ShopCircuitSnapshot>> {
+  const keys = [...new Set(liveAccountIds.map((id) => id || 'legacy'))]
   const out = new Map<string, ShopCircuitSnapshot>()
-  await Promise.all(
-    [...new Set(liveAccountIds.map((id) => id || 'legacy'))].map(async (id) => {
-      out.set(id, await loadShopCircuit(id))
-    }),
-  )
+  if (keys.length === 0) return out
+
+  const rows = await prisma.shopAfterSalesRuntime.findMany({
+    where: { liveAccountId: { in: keys } },
+  })
+  const have = new Set(rows.map((r) => r.liveAccountId))
+  for (const row of rows) {
+    out.set(row.liveAccountId, snapshotFromRow(row))
+  }
+  // 缺行极少：仅补建缺失店铺，避免每批全量 upsert
+  for (const key of keys) {
+    if (have.has(key)) continue
+    out.set(key, await loadShopCircuit(key))
+  }
   return out
 }
 
@@ -121,7 +166,9 @@ export async function openShopCircuit(params: {
     SIGN_CIRCUIT_TYPES.has(params.errorType) ||
     row.consecutiveSignFail + 1 >= AFTER_SALES_SHOP_SIGN_BLOCK_THRESHOLD
   const cooling =
-    params.errorType === 'platform_cooling' || params.errorType === 'http_429'
+    params.errorType === 'platform_cooling' ||
+    params.errorType === 'http_429' ||
+    params.errorType === 'http_500'
 
   await prisma.shopAfterSalesRuntime.update({
     where: { liveAccountId: key },
@@ -178,3 +225,4 @@ export function isAuthOrSignCircuitError(errorType: string | null | undefined): 
   const t = String(errorType ?? '')
   return AUTH_CIRCUIT_TYPES.has(t) || SIGN_CIRCUIT_TYPES.has(t)
 }
+

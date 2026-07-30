@@ -12,10 +12,15 @@ export type AfterSalesQueueErrorType =
   | 'platform_cooling'
   | 'local_throttle'
   | 'http_429'
+  | 'http_500'
   | 'http_502'
   | 'http_503'
   | 'http_504'
   | 'network_timeout'
+  /** 本地 SQLite/Prisma 忙或超时：可重试，不计入永久失败 */
+  | 'db_busy'
+  /** 临时失败达到次数上限后的停机标记（可运维 reopen，勿当永久脏数据） */
+  | 'attempt_cap'
   | 'sign_python2_interpreter'
   | 'sign_generation_failed'
   | 'sign_env_missing'

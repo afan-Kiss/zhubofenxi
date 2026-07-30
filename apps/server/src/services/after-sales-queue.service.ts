@@ -74,6 +74,12 @@ export function classifyWorkbenchQueueError(
   httpStatus?: number | null,
 ): { errorType: AfterSalesQueueErrorType; disposition: AfterSalesQueueDisposition } {
   const msg = (errorMessage ?? '').trim()
+  const inferredStatus =
+    httpStatus ??
+    (() => {
+      const m = msg.match(/\bHTTP\s+(\d{3})\b/i)
+      return m ? Number(m[1]) : null
+    })()
 
   // 自建审计闸门「冷却中（Xs）/JSONL 恢复」：仅 retry，不升整店 platform_cooling 熔断
   if (/冷却中（|JSONL 恢复/i.test(msg)) {
@@ -90,15 +96,26 @@ export function classifyWorkbenchQueueError(
   ) {
     return { errorType: 'unknown', disposition: 'retry_wait' }
   }
-  if (httpStatus === 429 || /\b429\b/.test(msg)) {
+  if (inferredStatus === 429 || /\b429\b/.test(msg)) {
     return { errorType: 'http_429', disposition: 'retry_wait' }
   }
   if (/冷却|cooldown|熔断|throttl|rate.?limit/i.test(msg)) {
     return { errorType: 'platform_cooling', disposition: 'retry_wait' }
   }
-  if (httpStatus === 502) return { errorType: 'http_502', disposition: 'retry_wait' }
-  if (httpStatus === 503) return { errorType: 'http_503', disposition: 'retry_wait' }
-  if (httpStatus === 504) return { errorType: 'http_504', disposition: 'retry_wait' }
+  // 本地库争用：Prisma upsert Socket timeout / SQLite busy —— 不当成网络永久失败
+  if (
+    /shopAfterSalesRuntime|prisma\.|SQLITE_BUSY|database is locked|database failed to respond|Socket timeout/i.test(
+      msg,
+    )
+  ) {
+    return { errorType: 'db_busy', disposition: 'retry_wait' }
+  }
+  if (inferredStatus === 500 || /\bHTTP\s+500\b/i.test(msg)) {
+    return { errorType: 'http_500', disposition: 'retry_wait' }
+  }
+  if (inferredStatus === 502) return { errorType: 'http_502', disposition: 'retry_wait' }
+  if (inferredStatus === 503) return { errorType: 'http_503', disposition: 'retry_wait' }
+  if (inferredStatus === 504) return { errorType: 'http_504', disposition: 'retry_wait' }
   if (/timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up/i.test(msg)) {
     return { errorType: 'network_timeout', disposition: 'retry_wait' }
   }
@@ -125,10 +142,10 @@ export function classifyWorkbenchQueueError(
   if (/cookie.*过期|失效|expired/i.test(msg) && !/401|403/.test(msg)) {
     return { errorType: 'cookie_expired', disposition: 'blocked' }
   }
-  if (httpStatus === 401 || /\b401\b/.test(msg)) {
+  if (inferredStatus === 401 || /\b401\b/.test(msg)) {
     return { errorType: 'http_401', disposition: 'blocked' }
   }
-  if (httpStatus === 403 || /\b403\b/.test(msg)) {
+  if (inferredStatus === 403 || /\b403\b/.test(msg)) {
     return { errorType: 'http_403', disposition: 'blocked' }
   }
 
@@ -158,6 +175,13 @@ export function computeNextAttemptAt(
     return new Date(now + platformSec * 1000 + jitterMs)
   }
   const n = Math.max(1, temporaryAttemptCount)
+  const msg = errorMessage ?? ''
+  // 平台 5xx / 本地库忙：拉长退避，避免打爆接口或继续抢写锁
+  if (/HTTP\s+50[0-4]\b|http_50[0-4]|db_busy|shopAfterSalesRuntime|Socket timeout|SQLITE_BUSY/i.test(msg)) {
+    const minutes = n <= 1 ? 15 : n === 2 ? 30 : 60
+    const jitterMs = Math.floor(Math.random() * 30_000)
+    return new Date(now + minutes * 60_000 + jitterMs)
+  }
   const minutes = n <= 1 ? 5 : n === 2 ? 10 : n === 3 ? 20 : 60
   const jitterMs = Math.floor(Math.random() * 30_000)
   return new Date(now + minutes * 60_000 + jitterMs)
@@ -832,18 +856,23 @@ async function applyShopOutcomePersistent(
     return
   }
   if (disposition === 'retry_wait') {
-    // local_throttle：本批停该店，短退避，不 openShopCircuit
-    if (errorType === 'local_throttle') {
+    // local_throttle / db_busy：本批停该店，短退避，不 openShopCircuit
+    if (errorType === 'local_throttle' || errorType === 'db_busy') {
       batchStopShops.add(shopKey(liveAccountId))
       return
     }
-    if (errorType === 'platform_cooling' || errorType === 'http_429') {
+    if (
+      errorType === 'platform_cooling' ||
+      errorType === 'http_429' ||
+      errorType === 'http_500'
+    ) {
       batchStopShops.add(shopKey(liveAccountId))
       await openShopCircuit({
         liveAccountId,
         errorType,
         message,
-        probeBackoffMs: 60_000,
+        // 5xx 短熔断，避免同店连续打平台
+        probeBackoffMs: errorType === 'http_500' ? 5 * 60_000 : 60_000,
       })
     }
     return
@@ -933,22 +962,28 @@ export async function completeAfterSalesQueueTask(params: {
   const isStackOverflow = /Maximum call stack size exceeded|call stack size/i.test(
     result.fetchError ?? '',
   )
+  // db_busy / local_throttle：本地忙，不计入永久停机上限，避免 Prisma 超时把整店打成 failed
+  const burnAttemptCap =
+    errorType !== 'db_busy' && errorType !== 'local_throttle'
   const hitAttemptCap =
+    burnAttemptCap &&
     rawDisposition === 'retry_wait' &&
     ((isStackOverflow && tempCount >= AFTER_SALES_MAX_STACK_OVERFLOW_ATTEMPTS) ||
       tempCount >= AFTER_SALES_MAX_TEMPORARY_ATTEMPTS)
   const disposition = hitAttemptCap ? 'failed' : rawDisposition
-  const cappedErrorType = hitAttemptCap ? 'permanent_invalid' : errorType
+  const cappedErrorType = hitAttemptCap ? 'attempt_cap' : errorType
   const cappedErrorMessage = hitAttemptCap
     ? `重试次数过多已停止（${tempCount}次）：${(result.fetchError ?? '').slice(0, 120)}`
     : result.fetchError
 
   await applyShopOutcomePersistent(liveAccountId, disposition, cappedErrorType, cappedErrorMessage)
 
-  // probe 失败延长熔断
-  const circuit = (await loadShopCircuits([liveAccountId])).get(shopKey(liveAccountId))
-  if (circuit?.circuitOpen && disposition === 'blocked') {
-    await markShopProbeFailed(liveAccountId, cappedErrorType, cappedErrorMessage)
+  // probe 失败延长熔断（只读，勿再 upsert）
+  if (disposition === 'blocked') {
+    const circuit = (await loadShopCircuits([liveAccountId])).get(shopKey(liveAccountId))
+    if (circuit?.circuitOpen) {
+      await markShopProbeFailed(liveAccountId, cappedErrorType, cappedErrorMessage)
+    }
   }
 
   if (disposition === 'retry_wait') {

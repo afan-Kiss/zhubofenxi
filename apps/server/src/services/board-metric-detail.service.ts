@@ -439,7 +439,7 @@ function compareSignTimeThenOrderDesc(a: BoardDrillOrderRow, b: BoardDrillOrderR
 function sortRows(
   rows: BoardDrillOrderRow[],
   sort: string,
-  opts?: { preferSignTime?: boolean },
+  opts?: { preferSignTime?: boolean; preferSignedAmount?: boolean },
 ): BoardDrillOrderRow[] {
   if (sort === SIGNED_ORDER_SORT_SHOP_ANCHOR_SIGN_DESC) {
     return sortSignedOrderRows(rows)
@@ -457,7 +457,19 @@ function sortRows(
       return b.orderTime.localeCompare(a.orderTime)
     })
   } else if (sort === 'amount_desc') {
-    list.sort((a, b) => b.payAmount - a.payAmount)
+    // 已签收下钻：按已签收金额高→低；其它明细仍按支付金额
+    const amountOf = (row: BoardDrillOrderRow) => {
+      if (opts?.preferSignedAmount) {
+        const signed = Number(row.signedAmount ?? 0) || 0
+        if (signed > 0) return signed
+      }
+      return Number(row.payAmount ?? row.paymentBaseAmount ?? 0) || 0
+    }
+    list.sort((a, b) => {
+      const d = amountOf(b) - amountOf(a)
+      if (d !== 0) return d
+      return compareSignTimeThenOrderDesc(a, b)
+    })
   } else if (sort === 'refund_desc') {
     list.sort((a, b) => b.productRefundAmount - a.productRefundAmount)
   } else if (opts?.preferSignTime) {
@@ -514,46 +526,59 @@ function applySignedListFilters(
 }
 
 function buildSignedFilterOptions(rows: BoardDrillOrderRow[]): {
-  shops: Array<{ id: string; name: string; count: number }>
-  anchors: Array<{ id: string; name: string; liveAccountId: string; count: number }>
+  shops: Array<{ id: string; name: string; count: number; amount: number }>
+  anchors: Array<{
+    id: string
+    name: string
+    liveAccountId: string
+    count: number
+    amount: number
+  }>
 } {
-  const shopMap = new Map<string, { id: string; name: string; count: number }>()
+  const shopMap = new Map<string, { id: string; name: string; count: number; amount: number }>()
   // 店内按主播名合并，避免同一人多个 anchorId 在下拉里重复
   const anchorMap = new Map<
     string,
-    { id: string; name: string; liveAccountId: string; count: number }
+    { id: string; name: string; liveAccountId: string; count: number; amount: number }
   >()
 
   for (const row of rows) {
     const shopId = (row.liveAccountId || 'unknown').trim() || 'unknown'
     const shopName = (row.liveAccountName || '未知直播号').trim() || '未知直播号'
+    const amt = Number(row.signedAmount ?? 0) || 0
     const shop = shopMap.get(shopId)
-    if (shop) shop.count += 1
-    else shopMap.set(shopId, { id: shopId, name: shopName, count: 1 })
+    if (shop) {
+      shop.count += 1
+      shop.amount += amt
+    } else shopMap.set(shopId, { id: shopId, name: shopName, count: 1, amount: amt })
 
     const identity = signedDrillAnchorIdentity(row.anchorId, row.anchorName)
     const aKey = `${shopId}::${identity.key}`
     const anchor = anchorMap.get(aKey)
-    if (anchor) anchor.count += 1
-    else {
+    if (anchor) {
+      anchor.count += 1
+      anchor.amount += amt
+    } else {
       anchorMap.set(aKey, {
         // 筛选项 value 用展示名（或未归属哨兵），保证跨店/跨 id 同名能一次筛全
         id: identity.unassigned ? '__unassigned__' : identity.name,
         name: identity.name,
         liveAccountId: shopId,
         count: 1,
+        amount: amt,
       })
     }
   }
 
-  const shops = [...shopMap.values()].sort((a, b) =>
-    a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }),
-  )
+  // 下拉选项按已签收金额高→低，便于对照列表排序
+  const shops = [...shopMap.values()].sort((a, b) => {
+    if (b.amount !== a.amount) return b.amount - a.amount
+    return a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
+  })
   const anchors = [...anchorMap.values()].sort((a, b) => {
-    const byShop = a.liveAccountId.localeCompare(b.liveAccountId)
-    if (byShop !== 0) return byShop
     if (a.id === '__unassigned__' && b.id !== '__unassigned__') return 1
     if (b.id === '__unassigned__' && a.id !== '__unassigned__') return -1
+    if (b.amount !== a.amount) return b.amount - a.amount
     return a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
   })
   return { shops, anchors }
@@ -769,6 +794,7 @@ export async function buildBoardMetricDetail(params: {
 
   const allRows = sortRows(filteredRows, sortMode, {
     preferSignTime: signedDrill && sortMode === 'time_desc',
+    preferSignedAmount: signedDrill && sortMode === 'amount_desc',
   })
 
   const page = Math.max(1, Math.floor(params.page ?? 1))

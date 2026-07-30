@@ -204,7 +204,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
           endDate,
           page: String(page),
           pageSize: String(pageSize),
-          sort: 'time_desc',
+          sort: 'amount_desc',
         })
         if (preset) qs.set('preset', preset)
         if (tab) qs.set('tab', tab)
@@ -269,7 +269,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
       ? `${data.dateRange.startDate} 至 ${data.dateRange.endDate}`
       : `${startDate} 至 ${endDate}`
 
-  const subtitle = `统计范围：${rangeText}　按订单完成时间排列（新到旧）`
+  const subtitle = `统计范围：${rangeText}　按已签收金额从高到低`
 
   const allowManualAssign = data?.allowManualAnchorAssign !== false
 
@@ -312,11 +312,6 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
         </p>
       ) : null}
 
-      {(filtered?.missingSignTimeCount ?? 0) > 0 ? (
-        <div className="rounded-lg border border-[#E3E7E2] bg-[#FFF8E8] px-3 py-2 text-[11px] text-[#667069]">
-          有 {filtered!.missingSignTimeCount} 笔订单缺少订单完成时间，已排在列表最后
-        </div>
-      ) : null}
 
       <SignedOrdersFilterBar
         shops={data?.filterOptions?.shops ?? []}

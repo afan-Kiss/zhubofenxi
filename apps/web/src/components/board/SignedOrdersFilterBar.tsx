@@ -1,11 +1,12 @@
 import React from 'react'
 
-export type SignedFilterShop = { id: string; name: string; count: number }
+export type SignedFilterShop = { id: string; name: string; count: number; amount?: number }
 export type SignedFilterAnchor = {
   id: string
   name: string
   liveAccountId: string
   count: number
+  amount?: number
 }
 
 interface Props {
@@ -31,7 +32,7 @@ function normalizeNameKey(name: string): string {
     .toLowerCase()
 }
 
-/** 全部店铺时按主播名合并；选中店铺时也按名合并（防同店多 id）。下拉只展示名称，不带单数。 */
+/** 全部店铺时按主播名合并；选中店铺时也按名合并（防同店多 id）。下拉只展示名称，不带单数/金额。 */
 function mergeAnchorsForSelect(
   anchors: SignedFilterAnchor[],
   shopId: string,
@@ -52,14 +53,18 @@ function mergeAnchorsForSelect(
         name: unassigned ? '未归属' : displayName,
         liveAccountId: shopId || '',
         count: a.count,
+        amount: Number(a.amount ?? 0) || 0,
       })
     } else {
       existing.count += a.count
+      existing.amount = (Number(existing.amount ?? 0) || 0) + (Number(a.amount ?? 0) || 0)
     }
   }
   return [...map.values()].sort((a, b) => {
     if (a.id === '__unassigned__' && b.id !== '__unassigned__') return 1
     if (b.id === '__unassigned__' && a.id !== '__unassigned__') return -1
+    const amountDiff = (Number(b.amount ?? 0) || 0) - (Number(a.amount ?? 0) || 0)
+    if (amountDiff !== 0) return amountDiff
     return a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
   })
 }
@@ -78,9 +83,11 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
   disabled,
 }) => {
   const visibleAnchors = mergeAnchorsForSelect(anchors, shopId)
-  const shopOptions = [...shops].sort((a, b) =>
-    a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }),
-  )
+  const shopOptions = [...shops].sort((a, b) => {
+    const amountDiff = (Number(b.amount ?? 0) || 0) - (Number(a.amount ?? 0) || 0)
+    if (amountDiff !== 0) return amountDiff
+    return a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' })
+  })
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-[#E3E7E2] bg-[#FBFCFA] p-3 sm:flex-row sm:flex-wrap sm:items-center">

@@ -70,8 +70,8 @@ console.log('\n=== resolveSignedTime ===')
 console.log('\n=== normalizeSignedOrderSort ===')
 {
   assert(
-    normalizeSignedOrderSort('weird') === 'time_desc',
-    '未知 sort 回退 time_desc',
+    normalizeSignedOrderSort('weird') === 'amount_desc',
+    '未知 sort 回退 amount_desc',
   )
   assert(normalizeSignedOrderSort('anchor_asc') === 'anchor_asc', '白名单保留 anchor_asc')
 }
@@ -378,8 +378,8 @@ async function verifyIntegration(): Promise<void> {
       pageSize: 5,
     })
     assert(
-      (fallback as { sort?: string }).sort === SIGNED_ORDER_SORT_SHOP_ANCHOR_SIGN_DESC,
-      '未知 sort 服务端回退',
+      (fallback as { sort?: string }).sort === 'amount_desc',
+      '未知 sort 服务端回退 amount_desc',
     )
 
     console.log(

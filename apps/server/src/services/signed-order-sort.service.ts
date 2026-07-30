@@ -1,6 +1,6 @@
 /**
  * 已签收明细：签收/完成时间解析；可选店铺→主播→完成时间三级排序（兼容旧 sort）
- * 当前默认：按订单完成时间扁平排序（time_desc）
+ * 当前默认：按已签收金额扁平排序（amount_desc）
  * 不改变 isEffectiveSignedView / 日期范围 / 主播归属口径
  */
 import { formatDateTimeShanghai, parseLiveSessionTimeMs } from '../utils/business-timezone'
@@ -157,8 +157,8 @@ export function normalizeSignedOrderSort(sort: string | null | undefined): Signe
   if ((SIGNED_ORDER_SORT_WHITELIST as readonly string[]).includes(s)) {
     return s as SignedOrderSortMode
   }
-  // 默认扁平按订单完成时间，不再按店铺→主播分组排序
-  return 'time_desc'
+  // 默认扁平按已签收金额高→低
+  return 'amount_desc'
 }
 
 function zhCmp(a: string, b: string): number {

@@ -1,6 +1,6 @@
 /**
- * 订单列表/详情同步入库前：补齐官方完成时间与状态文案到稳定字段。
- * 不改口径，只做字段晋升，便于已签收下钻展示「交易完成」与完成时间。
+ * 订单列表/详情同步入库前：补齐官方完成时间到稳定字段。
+ * 状态文案只晋升官网已有非数字 statusDesc，禁止用状态码编造「交易完成/已签收」。
  */
 
 const FINISH_TIME_ALIAS_KEYS = [
@@ -29,6 +29,8 @@ const STATUS_TEXT_KEYS = [
   'status_name',
   'tradeStatusDesc',
   'trade_status_desc',
+  'packageStatusDesc',
+  'sellerStatusDesc',
 ] as const
 
 const NESTED_CONTAINERS = [
@@ -39,15 +41,6 @@ const NESTED_CONTAINERS = [
   'orderDetail',
   'data',
 ] as const
-
-/** 千帆包裹常见状态码 → 官方文案（仅在无 statusDesc 时回填） */
-const PACKAGE_STATUS_CODE_LABEL: Record<string, string> = {
-  '6': '已发货',
-  '7': '交易完成',
-  '71': '交易完成',
-  '8': '已关闭',
-  '9': '已取消',
-}
 
 function isNonEmpty(value: unknown): boolean {
   return value != null && String(value).trim() !== ''
@@ -76,6 +69,9 @@ function pickFirst(
   return null
 }
 
+/**
+ * 只取官网已有状态文案；数字状态码不编造中文。
+ */
 function resolveOfficialStatusText(item: Record<string, unknown>): string | null {
   const sources = collectSources(item)
   const text = pickFirst(sources, STATUS_TEXT_KEYS)
@@ -83,17 +79,16 @@ function resolveOfficialStatusText(item: Record<string, unknown>): string | null
     const s = String(text).trim()
     if (s && !/^\d+$/.test(s)) return s
   }
+  // status / orderStatus 若本身已是中文文案（非纯数字）也原样返回
   const codeRaw = pickFirst(sources, ['status', 'orderStatus', 'packageStatus', 'tradeStatus'])
   if (codeRaw == null) return null
   const code = String(codeRaw).trim()
-  if (PACKAGE_STATUS_CODE_LABEL[code]) return PACKAGE_STATUS_CODE_LABEL[code]
   if (code && !/^\d+$/.test(code)) return code
   return null
 }
 
 /**
- * 就地补齐 finishTime / statusDesc，供后续 normalize 与下钻解析复用。
- * 返回是否有字段被写入（便于测试）。
+ * 就地补齐 finishTime；statusDesc 仅在缺失时用其它官方文案键补齐，绝不按状态码造词。
  */
 export function ensureOrderRawCompletionFields(item: Record<string, unknown>): {
   finishTimePromoted: boolean

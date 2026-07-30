@@ -31,7 +31,7 @@ function normalizeNameKey(name: string): string {
     .toLowerCase()
 }
 
-/** 全部店铺时按主播名合并；选中店铺时也按名合并（防同店多 id） */
+/** 全部店铺时按主播名合并；选中店铺时也按名合并（防同店多 id）。下拉只展示名称，不带单数。 */
 function mergeAnchorsForSelect(
   anchors: SignedFilterAnchor[],
   shopId: string,
@@ -78,6 +78,9 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
   disabled,
 }) => {
   const visibleAnchors = mergeAnchorsForSelect(anchors, shopId)
+  const shopOptions = [...shops].sort((a, b) =>
+    a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }),
+  )
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-[#E3E7E2] bg-[#FBFCFA] p-3 sm:flex-row sm:flex-wrap sm:items-center">
@@ -88,15 +91,14 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
           disabled={disabled}
           onChange={(e) => {
             onShopChange(e.target.value)
-            // 换店后清空主播，避免跨店残留筛选项
             onAnchorChange('')
           }}
           className="h-9 rounded-lg border border-[#E3E7E2] bg-white px-2 text-xs text-[#202722] outline-none focus:border-[#477A5D]"
         >
           <option value="">全部店铺</option>
-          {shops.map((s) => (
+          {shopOptions.map((s) => (
             <option key={s.id} value={s.id}>
-              {s.name}（{s.count}）
+              {s.name}
             </option>
           ))}
         </select>
@@ -113,7 +115,7 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
           <option value="">全部主播</option>
           {visibleAnchors.map((a) => (
             <option key={a.id} value={a.id}>
-              {a.name}（{a.count}）
+              {a.name}
             </option>
           ))}
         </select>
@@ -132,12 +134,6 @@ export const SignedOrdersFilterBar: React.FC<Props> = ({
       </label>
 
       <div className="flex flex-wrap items-end gap-2 sm:ml-auto">
-        <span
-          className="inline-flex h-9 items-center rounded-lg border border-[#E3E7E2] bg-[#EDF5F0] px-2.5 text-[11px] text-[#477A5D]"
-          title="本页固定按店铺→主播→订单完成时间排序，不可切换"
-        >
-          店铺 ↑　主播 ↑　订单完成 ↓
-        </span>
         <button
           type="button"
           disabled={disabled || !hasActiveFilters}

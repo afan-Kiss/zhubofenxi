@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { apiRequest } from '../../lib/api'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { Pagination } from '../ui/Pagination'
@@ -28,23 +28,6 @@ type SignedSummary = {
   missingSignTimeCount: number
 }
 
-type GroupSummary = {
-  shops: Array<{
-    liveAccountId: string
-    liveAccountName: string
-    orderCount: number
-    signedAmount: number
-    anchorCount: number
-    anchors: Array<{
-      anchorId: string
-      anchorName: string
-      orderCount: number
-      signedAmount: number
-      latestSignTime: string | null
-    }>
-  }>
-}
-
 type SignedDetailData = {
   title: string
   formulaText?: string
@@ -61,7 +44,6 @@ type SignedDetailData = {
   filterOptions?: { shops: SignedFilterShop[]; anchors: SignedFilterAnchor[] }
   filteredSummary?: SignedSummary
   allSummary?: SignedSummary
-  groupSummary?: GroupSummary
   blacklistedBuyerIds?: string[]
   allowManualAnchorAssign?: boolean
 }
@@ -115,26 +97,6 @@ function statusLabel(row: BoardDrillOrderRow): string {
     return `${official} · ${afterSale}`
   }
   return official || '—'
-}
-
-function shopKey(row: BoardDrillOrderRow): string {
-  return (row.liveAccountId || 'unknown').trim() || 'unknown'
-}
-
-function normalizeAnchorKey(name: string): string {
-  return name
-    .trim()
-    .normalize('NFKC')
-    .replace(/\u3000/g, '')
-    .replace(/\s+/g, '')
-    .toLowerCase()
-}
-
-function anchorKey(row: BoardDrillOrderRow): string {
-  const name = (row.anchorName || '未归属').trim() || '未归属'
-  const unassigned = !name || name === '未归属' || name === '—'
-  const id = unassigned ? '__unassigned__' : normalizeAnchorKey(name)
-  return `${shopKey(row)}::${id}`
 }
 
 export const SignedOrdersDrillView: React.FC<Props> = ({
@@ -242,7 +204,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
           endDate,
           page: String(page),
           pageSize: String(pageSize),
-          sort: 'shop_anchor_sign_desc',
+          sort: 'time_desc',
         })
         if (preset) qs.set('preset', preset)
         if (tab) qs.set('tab', tab)
@@ -297,24 +259,6 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
     (filtered.orderCount !== all.orderCount ||
       Math.abs(filtered.signedAmount - all.signedAmount) > 0.009)
 
-  const groupIndex = useMemo(() => {
-    const shops = new Map<string, GroupSummary['shops'][number]>()
-    const anchors = new Map<string, GroupSummary['shops'][number]['anchors'][number] & { shopId: string }>()
-    for (const shop of data?.groupSummary?.shops ?? []) {
-      shops.set(shop.liveAccountId, shop)
-      for (const a of shop.anchors) {
-        const name = (a.anchorName || '未归属').trim() || '未归属'
-        const unassigned = !name || name === '未归属' || name === '—'
-        const id = unassigned ? '__unassigned__' : normalizeAnchorKey(name)
-        anchors.set(`${shop.liveAccountId}::${id}`, {
-          ...a,
-          shopId: shop.liveAccountId,
-        })
-      }
-    }
-    return { shops, anchors }
-  }, [data?.groupSummary])
-
   const title =
     preset === 'thisMonth' || (!preset && startDate?.slice(8) === '01')
       ? '本月已签收明细'
@@ -325,7 +269,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
       ? `${data.dateRange.startDate} 至 ${data.dateRange.endDate}`
       : `${startDate} 至 ${endDate}`
 
-  const subtitle = `统计范围：${rangeText}　排序：店铺 → 主播 → 订单完成时间（新到旧）`
+  const subtitle = `统计范围：${rangeText}　按订单完成时间排列（新到旧）`
 
   const allowManualAssign = data?.allowManualAnchorAssign !== false
 
@@ -370,7 +314,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
 
       {(filtered?.missingSignTimeCount ?? 0) > 0 ? (
         <div className="rounded-lg border border-[#E3E7E2] bg-[#FFF8E8] px-3 py-2 text-[11px] text-[#667069]">
-          有 {filtered!.missingSignTimeCount} 笔订单缺少订单完成时间，已排在对应主播最后
+          有 {filtered!.missingSignTimeCount} 笔订单缺少订单完成时间，已排在列表最后
         </div>
       ) : null}
 
@@ -424,7 +368,6 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
             <div className="hidden md:block">
               <SignedDesktopTable
                 rows={data.rows}
-                groupIndex={groupIndex}
                 formatMoney={formatMoney}
                 expandedKey={expandedKey}
                 onToggle={(key) => setExpandedKey((cur) => (cur === key ? null : key))}
@@ -433,15 +376,10 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
                 anchorOptions={anchorOptions}
                 assigningOrderNo={assigningOrderNo}
                 onAssign={(orderNo, name, current) => {
-                  void handleManualAssign(orderNo, name, current).then(() => {
-                    // 成功提示在 hook 内；补充移动分组文案
-                  })
+                  void handleManualAssign(orderNo, name, current)
                 }}
                 onClearManualOverride={(orderNo) => {
                   void handleClearManualOverride(orderNo)
-                }}
-                onAssignMovedHint={() => {
-                  /* handled via assignSuccess override below */
                 }}
               />
             </div>
@@ -480,11 +418,7 @@ export const SignedOrdersDrillView: React.FC<Props> = ({
       ) : null}
       {allowManualAssign && assignError ? <p className="text-xs text-red-600">{assignError}</p> : null}
       {allowManualAssign && assignSuccess ? (
-        <p className="text-xs text-[#477A5D]">
-          {assignSuccess.includes('已')
-            ? '主播已修改，订单已移动到新的主播分组。'
-            : assignSuccess}
-        </p>
+        <p className="text-xs text-[#477A5D]">{assignSuccess}</p>
       ) : null}
 
       {data ? (
@@ -551,10 +485,6 @@ function SignedTableSkeleton() {
 
 function SignedDesktopTable(props: {
   rows: BoardDrillOrderRow[]
-  groupIndex: {
-    shops: Map<string, GroupSummary['shops'][number]>
-    anchors: Map<string, GroupSummary['shops'][number]['anchors'][number] & { shopId: string }>
-  }
   formatMoney: (n: number) => string
   expandedKey: string | null
   onToggle: (key: string) => void
@@ -564,11 +494,9 @@ function SignedDesktopTable(props: {
   assigningOrderNo: string | null
   onAssign: (orderNo: string, anchorName: string, current?: string) => void
   onClearManualOverride: (orderNo: string) => void
-  onAssignMovedHint: () => void
 }) {
   const {
     rows,
-    groupIndex,
     formatMoney,
     expandedKey,
     onToggle,
@@ -580,9 +508,6 @@ function SignedDesktopTable(props: {
     onClearManualOverride,
   } = props
 
-  let lastShop = ''
-  let lastAnchor = ''
-
   return (
     <div
       className={`overflow-auto rounded-xl border border-[#E3E7E2] bg-[#FBFCFA] ${loading ? 'opacity-70' : ''}`}
@@ -591,6 +516,8 @@ function SignedDesktopTable(props: {
         <thead className="sticky top-0 z-20 bg-[#EDF5F0] text-[11px] text-[#667069]">
           <tr>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">订单完成时间</th>
+            <th className="whitespace-nowrap px-2 py-2.5 font-medium">直播号</th>
+            <th className="whitespace-nowrap px-2 py-2.5 font-medium">主播</th>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">订单号</th>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">买家</th>
             <th className="whitespace-nowrap px-2 py-2.5 font-medium">商品</th>
@@ -603,57 +530,11 @@ function SignedDesktopTable(props: {
         </thead>
         <tbody>
           {rows.map((row, idx) => {
-            const sk = shopKey(row)
-            const ak = anchorKey(row)
-            const showShop = sk !== lastShop
-            const showAnchor = showShop || ak !== lastAnchor
-            lastShop = sk
-            lastAnchor = ak
             const rowKey = `${boardRowDisplayOrderNo(row)}-${idx}`
-            const shopMeta = groupIndex.shops.get(sk)
-            const anchorMeta = groupIndex.anchors.get(ak)
             const expanded = expandedKey === rowKey
 
             return (
               <React.Fragment key={rowKey}>
-                {showShop ? (
-                  <tr className="bg-[#E8EEE9]">
-                    <td colSpan={9} className="px-3 py-2 text-[13px]">
-                      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                        <span className="shrink-0 text-[11px] font-medium text-[#667069]">
-                          直播号
-                        </span>
-                        <span className="font-semibold text-[#202722]">
-                          {row.liveAccountName || shopMeta?.liveAccountName || '未知直播号'}
-                        </span>
-                        <span className="tabular-nums text-[#667069]">
-                          {shopMeta?.orderCount ?? '—'} 单 · 已签收{' '}
-                          {formatMoney(shopMeta?.signedAmount ?? 0)} ·{' '}
-                          {shopMeta?.anchorCount ?? '—'} 位主播
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : null}
-                {showAnchor ? (
-                  <tr className="bg-[#F2F5F2]">
-                    <td colSpan={9} className="px-3 py-1.5 text-[12px]">
-                      <div className="flex min-w-0 flex-wrap items-baseline gap-x-3 gap-y-0.5">
-                        <span className="shrink-0 text-[11px] font-medium text-[#667069]">
-                          主播
-                        </span>
-                        <span className="font-medium text-[#202722]">
-                          {row.anchorName || '未归属'}
-                        </span>
-                        <span className="tabular-nums text-[#667069]">
-                          {anchorMeta?.orderCount ?? '—'} 单 · 已签收{' '}
-                          {formatMoney(anchorMeta?.signedAmount ?? 0)} · 最近订单完成{' '}
-                          {formatSignTimeShort(anchorMeta?.latestSignTime)}
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                ) : null}
                 <tr
                   className="cursor-pointer border-t border-[#E3E7E2]/80 hover:bg-[#F2F5F2]"
                   style={{ height: 52 }}
@@ -665,6 +546,15 @@ function SignedDesktopTable(props: {
                         ? '尚未交易完成'
                         : '完成时间待同步')}
                   </td>
+                  <td
+                    className="max-w-[110px] truncate px-2 py-1.5"
+                    title={row.liveAccountName || ''}
+                  >
+                    {row.liveAccountName || '—'}
+                  </td>
+                  <td className="max-w-[80px] truncate px-2 py-1.5" title={row.anchorName || ''}>
+                    {row.anchorName || '未归属'}
+                  </td>
                   <td className="px-2 py-1.5">
                     <div className="font-mono text-[11px]">{boardRowDisplayOrderNo(row)}</div>
                   </td>
@@ -672,7 +562,7 @@ function SignedDesktopTable(props: {
                     {displayCell(row.buyerNickname)}
                   </td>
                   <td
-                    className="max-w-[240px] truncate px-2 py-1.5"
+                    className="max-w-[200px] truncate px-2 py-1.5"
                     title={row.productName || ''}
                   >
                     {displayCell(row.productName)}
@@ -717,7 +607,7 @@ function SignedDesktopTable(props: {
                 </tr>
                 {expanded ? (
                   <tr className="bg-[#FBFCFA]">
-                    <td colSpan={9} className="px-3 py-3">
+                    <td colSpan={11} className="px-3 py-3">
                       <SignedExpandDetail
                         row={row}
                         allowManualAssign={allowManualAssign}

@@ -70,8 +70,8 @@ console.log('\n=== resolveSignedTime ===')
 console.log('\n=== normalizeSignedOrderSort ===')
 {
   assert(
-    normalizeSignedOrderSort('weird') === SIGNED_ORDER_SORT_SHOP_ANCHOR_SIGN_DESC,
-    '未知 sort 回退 shop_anchor_sign_desc',
+    normalizeSignedOrderSort('weird') === 'time_desc',
+    '未知 sort 回退 time_desc',
   )
   assert(normalizeSignedOrderSort('anchor_asc') === 'anchor_asc', '白名单保留 anchor_asc')
 }

@@ -152,7 +152,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
           (metric === 'signedCount' || metric === 'signRate') &&
           tab !== 'unsigned'
         ) {
-          qs.set('sort', 'shop_anchor_sign_desc')
+          qs.set('sort', 'time_desc')
         }
         if (overviewStableSnapshot) qs.set('overviewStableSnapshot', 'true')
         const res = await apiRequest<MetricDetailData>(`/api/board/metric-detail?${qs}`, {

@@ -422,7 +422,25 @@ function buildPageSummary(views: AnalyzedOrderView[]): Record<string, unknown> {
   }
 }
 
-function sortRows(rows: BoardDrillOrderRow[], sort: string): BoardDrillOrderRow[] {
+function compareSignTimeThenOrderDesc(a: BoardDrillOrderRow, b: BoardDrillOrderRow): number {
+  const as = a.signTimeMs
+  const bs = b.signTimeMs
+  const aOk = as != null && Number.isFinite(as)
+  const bOk = bs != null && Number.isFinite(bs)
+  if (aOk && bOk && as !== bs) return (bs as number) - (as as number)
+  if (!aOk && bOk) return 1
+  if (aOk && !bOk) return -1
+  const ao = a.orderTimeMs
+  const bo = b.orderTimeMs
+  if (ao != null && bo != null && ao !== bo) return bo - ao
+  return String(b.orderTime || '').localeCompare(String(a.orderTime || ''))
+}
+
+function sortRows(
+  rows: BoardDrillOrderRow[],
+  sort: string,
+  opts?: { preferSignTime?: boolean },
+): BoardDrillOrderRow[] {
   if (sort === SIGNED_ORDER_SORT_SHOP_ANCHOR_SIGN_DESC) {
     return sortSignedOrderRows(rows)
   }
@@ -442,6 +460,9 @@ function sortRows(rows: BoardDrillOrderRow[], sort: string): BoardDrillOrderRow[
     list.sort((a, b) => b.payAmount - a.payAmount)
   } else if (sort === 'refund_desc') {
     list.sort((a, b) => b.productRefundAmount - a.productRefundAmount)
+  } else if (opts?.preferSignTime) {
+    // 已签收下钻 time_desc：按订单完成时间（新→旧），缺完成时间排后
+    list.sort(compareSignTimeThenOrderDesc)
   } else {
     list.sort((a, b) => b.orderTime.localeCompare(a.orderTime))
   }
@@ -746,7 +767,9 @@ export async function buildBoardMetricDetail(params: {
       })
     : mappedRows
 
-  const allRows = sortRows(filteredRows, sortMode)
+  const allRows = sortRows(filteredRows, sortMode, {
+    preferSignTime: signedDrill && sortMode === 'time_desc',
+  })
 
   const page = Math.max(1, Math.floor(params.page ?? 1))
   const pageSize = Math.min(100, Math.max(1, Math.floor(params.pageSize ?? (signedDrill ? 50 : 20))))

@@ -257,12 +257,27 @@ function parseShanghaiTextMs(text: string): number | null {
 export function parseViewOrderCreateTimeMs(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
 ): { ms: number | null; text: string } {
-  const orderedAt = view.orderedAt
+  const orderedAt = view.orderedAt as unknown
   if (orderedAt instanceof Date && Number.isFinite(orderedAt.getTime())) {
     return {
       ms: orderedAt.getTime(),
       text: orderedAt.toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }),
     }
+  }
+  // 缓存/JSON 往返后常见为 ISO 字符串或毫秒数，不得因此判成「缺少下单时间」
+  if (typeof orderedAt === 'number' && Number.isFinite(orderedAt)) {
+    const ms = orderedAt < 1e12 ? orderedAt * 1000 : orderedAt
+    if (ms > 0) {
+      return {
+        ms,
+        text: new Date(ms).toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' }),
+      }
+    }
+  }
+  if (typeof orderedAt === 'string' && orderedAt.trim()) {
+    const text = orderedAt.trim()
+    const ms = parseShanghaiTextMs(text)
+    if (ms != null) return { ms, text }
   }
   const raw = view.raw
   if (raw && typeof raw === 'object') {
@@ -967,6 +982,7 @@ export async function remapViewsWithCanonicalAttribution(
       anchorName: resolved.canonicalAnchorName,
       scheduleAttributionExplain: resolved.attributionExplain,
       scheduleAttributionSource: resolved.attributionType,
+      attributionExplain: resolved.attributionExplain,
       scheduleConfirmed:
         resolved.attributionType === 'confirmed_schedule' ||
         resolved.attributionType === 'manual_schedule',

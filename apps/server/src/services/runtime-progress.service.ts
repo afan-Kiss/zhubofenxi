@@ -208,8 +208,16 @@ function buildAfterSalesTasks(
   const running = ops.totals.running ?? 0
   const retryWait = ops.totals.retry_wait ?? 0
   const done = ops.totals.done ?? 0
+  const failed = ops.totals.failed ?? 0
+  const blocked = ops.totals.blocked ?? 0
   const open = pending + running + retryWait
+  const incomplete = failed + blocked
   const batchRunning = isAfterSalesBackfillMutexRunning() || running > 0
+  const lastSuccessAt = ops.byShop
+    .map((s) => s.lastSuccessAt)
+    .filter((v): v is string => Boolean(v))
+    .sort()
+    .at(-1) ?? null
 
   const waveBox = getAfterSalesWaveStateBag()
   const wave = resolveAfterSalesWaveProgress({
@@ -224,41 +232,59 @@ function buildAfterSalesTasks(
   let detailText: string | null
 
   if (!enabled) {
-    status = open > 0 ? 'paused' : 'idle'
+    status = open > 0 || incomplete > 0 ? 'paused' : 'idle'
     statusText =
       open > 0
         ? `自动同步已关闭，售后补查暂停；还剩 ${open} 单待处理`
-        : '自动同步已关闭，售后补查暂停'
+        : incomplete > 0
+          ? `自动同步已关闭；另有失败 ${failed} 单、受阻 ${blocked} 单`
+          : '自动同步已关闭，售后补查暂停'
     detailText = '打开自动同步后，会按每店最多 10 单批量继续查'
   } else if (batchRunning || open > 0) {
     status = batchRunning ? 'running' : 'waiting'
     statusText = batchRunning
       ? `正在补查售后：本批按店铺批量处理（每店最多 10 单）`
       : `排队等待补查：还有 ${open} 单（大约每分钟自动领一批）`
-    detailText = batchRunning
+    const runningDetail = batchRunning
       ? `本轮已查 ${wave.waveDone} 单 · 待处理 ${pending} · 进行中 ${running} · 稍后重试 ${retryWait}`
       : `还剩 ${open} 单待领取；不是卡住，只是这会儿没有正在跑的批次`
+    detailText =
+      incomplete > 0
+        ? `${runningDetail}；另有失败 ${failed} 单、受阻 ${blocked} 单`
+        : runningDetail
+  } else if (incomplete > 0) {
+    // 无积压但仍有失败/受阻：不可标「已完成」满格，否则与看板完整性告警矛盾
+    status = failed > 0 ? 'failed' : 'paused'
+    statusText =
+      failed > 0 && blocked > 0
+        ? `售后补查有 ${failed} 单失败、${blocked} 单受阻，退款与签收可能不完整`
+        : failed > 0
+          ? `售后补查有 ${failed} 单失败，退款与签收可能不完整`
+          : `售后补查有 ${blocked} 单受阻（Cookie/签名），退款与签收可能不完整`
+    detailText =
+      done > 0
+        ? `历史已完成 ${done} 单；失败/受阻不会算作已清完`
+        : '失败/受阻不会算作已清完'
   } else {
-    status = 'done'
-    statusText = '售后补查暂无积压'
-    detailText = done > 0 ? `历史已完成 ${done} 单` : null
+    // 与经营同步 / 买家画像一致：空闲不画满格进度条
+    status = 'idle'
+    statusText = '售后补查当前空闲'
+    detailText = lastSuccessAt
+      ? `最近成功：${formatTime(lastSuccessAt)}${done > 0 ? ` · 历史已完成 ${done} 单` : ''}`
+      : done > 0
+        ? `历史已完成 ${done} 单`
+        : null
   }
 
-  // 排队空档且本轮还没开查：不画 0% 进度条，避免误以为任务坏了
-  const displayPercent =
-    status === 'done'
-      ? 100
-      : !batchRunning && (wave.waveDone ?? 0) <= 0
-        ? null
-        : wave.percent
-  const displayCountLabel =
-    status === 'done'
-      ? done > 0
-        ? `历史已完成 ${done}`
-        : null
-      : !batchRunning && (wave.waveDone ?? 0) <= 0
-        ? `还剩 ${open}`
-        : wave.countLabel
+  // 仅批次进行中画进度条；空闲/失败不画满格，避免误以为 100% 已全部正常
+  const showWaveBar =
+    status === 'running' || (status === 'waiting' && (wave.waveDone ?? 0) > 0)
+  const displayPercent = showWaveBar ? wave.percent : null
+  const displayCountLabel = showWaveBar
+    ? wave.countLabel
+    : open > 0
+      ? `还剩 ${open}`
+      : null
 
   const tasks: RuntimeTaskProgressItem[] = [
     {
@@ -269,7 +295,7 @@ function buildAfterSalesTasks(
       statusText,
       detailText,
       percent: displayPercent,
-      doneCount: open > 0 ? wave.waveDone : done > 0 ? done : null,
+      doneCount: open > 0 ? wave.waveDone : null,
       totalCount: open > 0 ? wave.waveTotal : null,
       countLabel: displayCountLabel,
     },
@@ -372,23 +398,27 @@ function buildHeadline(
   enabled: boolean,
   tasks: RuntimeTaskProgressItem[],
 ): string {
-  const running = tasks.filter((t) => t.status === 'running')
+  const mainTasks = tasks.filter((t) => t.kind !== 'after_sales_shop')
+  const running = mainTasks.filter((t) => t.status === 'running')
   if (running.length > 0) {
-    const titles = running
-      .filter((t) => t.kind !== 'after_sales_shop')
-      .map((t) => t.title)
+    const titles = running.map((t) => t.title)
     const uniq = [...new Set(titles)]
     const prefix = enabled ? '正在跑' : '自动同步已关，但仍在跑'
     return `${prefix}：${uniq.join('、')}`
   }
+  const abnormal = mainTasks.filter((t) => t.status === 'failed' || t.status === 'paused')
+  if (abnormal.length > 0 && enabled) {
+    const titles = [...new Set(abnormal.map((t) => t.title))]
+    return `后台暂无进行中的同步，但${titles.join('、')}仍有异常，看板退款/签收可能不完整`
+  }
   if (!enabled) {
     const after = tasks.find((t) => t.id === 'after_sales')
-    const openLabel =
-      after?.totalCount != null && after.doneCount != null
-        ? Math.max(0, after.totalCount - after.doneCount)
+    const openLeft =
+      after?.totalCount != null
+        ? Math.max(0, after.totalCount - (after.doneCount ?? 0))
         : null
-    return openLabel && openLabel > 0
-      ? `自动同步已关闭：订单和售后都不会自动拉平台；售后还剩 ${openLabel} 单排队`
+    return openLeft && openLeft > 0
+      ? `自动同步已关闭：订单和售后都不会自动拉平台；售后还剩 ${openLeft} 单排队`
       : '自动同步已关闭：后台不会自动去小红书拉订单或售后'
   }
   return '后台现在比较空闲，没有正在跑的同步任务'

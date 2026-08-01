@@ -203,15 +203,6 @@ const MORE_SUMMARY_CARDS: SummaryCardDef[] = [
 ]
 
 
-function afterSalesRangeStatusLabel(
-  status: 'partial' | 'pending' | 'blocked' | 'failed',
-): string {
-  if (status === 'pending') return '进行中'
-  if (status === 'partial') return '部分完成'
-  if (status === 'failed') return '存在失败'
-  return '受阻'
-}
-
 function afterSalesRefundBadge(
   status: 'complete' | 'partial' | 'pending' | 'blocked' | 'failed' | undefined,
 ): string | null {
@@ -438,9 +429,7 @@ export const OverviewTab: React.FC = () => {
                   : 'mt-1 text-xs text-sky-800'
               }
             >
-              当前范围售后补查
-              {afterSalesRangeStatusLabel(data.afterSalesCompleteness.status)}
-              ：{data.afterSalesCompleteness.note}
+              {data.afterSalesCompleteness.note}
             </p>
           ) : null}
           {data?.globalAfterSalesCompleteness?.globalPendingCount &&

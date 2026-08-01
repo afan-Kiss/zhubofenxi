@@ -719,9 +719,13 @@ export async function executeBoardLocalQuery(params: {
 
   let afterSalesCompleteness: Awaited<ReturnType<typeof resolveAfterSalesCompleteness>>
   if (boardCache.afterSalesCompletenessSummary && (isDiskSnapshot || updatingInBackground)) {
+    const summary = boardCache.afterSalesCompletenessSummary as {
+      scope?: 'global' | 'range'
+    }
     afterSalesCompleteness = {
       ...boardCache.afterSalesCompletenessSummary,
-      scope: 'range',
+      // 保留摘要自身 scope，避免全局失败文案被前端再套「当前范围」
+      scope: summary.scope === 'global' ? 'global' : 'range',
     } as Awaited<ReturnType<typeof resolveAfterSalesCompleteness>>
   } else if (relevantViews.length === 0 && isDiskSnapshot) {
     // 快照无 views：勿误报「无支付订单」，用全局摘要填充
@@ -731,11 +735,13 @@ export async function executeBoardLocalQuery(params: {
     const global = await resolveGlobalAfterSalesCompleteness()
     afterSalesCompleteness = {
       ...global,
-      scope: 'range',
+      scope: 'global',
       note:
-        global.globalPendingCount > 0
-          ? `当前展示快照数据；全局另有 ${global.globalPendingCount} 笔售后待处理。`
-          : '当前展示快照数据。',
+        global.status === 'failed' || global.status === 'blocked'
+          ? global.note
+          : global.globalPendingCount > 0
+            ? `当前展示快照数据；全局另有 ${global.globalPendingCount} 笔售后待处理。`
+            : '当前展示快照数据。',
     }
   } else {
     afterSalesCompleteness = await resolveAfterSalesCompleteness({

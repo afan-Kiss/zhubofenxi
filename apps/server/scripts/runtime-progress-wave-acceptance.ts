@@ -44,10 +44,10 @@ resetAfterSalesWaveProgressForTests()
   assert((d.percent ?? 0) >= 40, `继续消化后应 ≥40%，实际 ${d.percent}`)
   assert(d.percent === 69, `期望 69%（90/130），实际 ${d.percent}`)
 
-  // 5) 清空积压 → 重置本轮
+  // 5) 清空积压 → 重置本轮（空闲时调用方也不再画满格 100%）
   const e = step(630, 0, d.next)
   assert(e.next === null, '积压清空后应重置本轮状态')
-  assert(e.percent === null, '清空后 percent 由调用方设为 done=100')
+  assert(e.percent === null, '清空后 percent 应为 null（空闲不画进度条）')
 }
 
 // 6) 新一轮从头计

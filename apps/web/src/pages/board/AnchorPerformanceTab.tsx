@@ -684,15 +684,7 @@ export const AnchorPerformanceTab: React.FC = () => {
                   : 'mt-1 text-xs text-sky-800'
               }
             >
-              当前范围售后补查
-              {data.afterSalesCompleteness.status === 'pending'
-                ? '进行中'
-                : data.afterSalesCompleteness.status === 'partial'
-                  ? '部分完成'
-                  : data.afterSalesCompleteness.status === 'failed'
-                    ? '有失败'
-                    : '受阻'}
-              ：{data.afterSalesCompleteness.note}
+              {data.afterSalesCompleteness.note}
               {data.afterSalesCompleteness.affectedOrderCount
                 ? `（受影响 ${data.afterSalesCompleteness.affectedOrderCount} 单）`
                 : ''}

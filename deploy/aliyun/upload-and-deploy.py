@@ -289,7 +289,7 @@ def main() -> None:
             if forced_local_db is not None:
                 sftp_put(client, forced_local_db, FORCED_LOCAL_DB_REMOTE)
 
-        run(
+        code = run(
             client,
             f"""
 set -e
@@ -622,6 +622,12 @@ fi
 chmod +x "$DEPLOY_DIR"/deploy/aliyun/*.sh "$DEPLOY_DIR"/scripts/install-xhs-signer.sh 2>/dev/null || true
 """,
         )
+        if code != 0:
+            print(
+                f"[deploy][FAIL] 远端打包替换失败（exit={code}），已中止，避免在残缺目录上继续 deploy.sh",
+                file=sys.stderr,
+            )
+            sys.exit(code)
 
         code = run(
             client,

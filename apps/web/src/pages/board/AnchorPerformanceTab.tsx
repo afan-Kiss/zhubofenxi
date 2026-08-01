@@ -416,9 +416,13 @@ export const AnchorPerformanceTab: React.FC = () => {
     }
   }, [anchorFilter, allAnchors])
   const blacklistedBuyerIds = data?.blacklistedBuyerIds ?? []
+  // 主播花名册占位行 orderCount=0 时不能当成「有业绩」——否则本月首日 0 单会挡住「暂无订单」空态
   const hasPerformanceData =
     boardSummaryHasOrderData(filteredPerformanceSummary as Record<string, unknown>) ||
-    (anchorFilter === '全部' && (data?.anchorLeaderboard?.length ?? 0) > 0)
+    (anchorFilter === '全部' &&
+      (data?.anchorLeaderboard ?? []).some(
+        (row) => Number(row.orderCount ?? row.paidOrderCount ?? 0) > 0,
+      ))
   const cards = filteredPerformanceSummary ?? {}
   /** 总/线上/线下/未归属：必须用后端汇总，禁止对可见主播行求和（否则会丢线下 GMV） */
   const boardGmvSplit = useMemo(() => {

@@ -198,17 +198,25 @@ export function deriveBoardSyncUiMode(input: {
 }): BoardSyncUiMode {
   if (input.isLoadingRange) return 'loading_range'
   const biz = input.businessSync
-  if (!biz) return input.hasDisplayData ? 'synced_idle' : 'empty_idle'
+  const hasAnyOrdersInDb = (input.totalRawOrders ?? 0) > 0
+  if (!biz) {
+    if (input.hasDisplayData) return 'synced_idle'
+    return hasAnyOrdersInDb ? 'synced_idle' : 'empty_idle'
+  }
 
   const syncing = isBusinessSyncActive(biz.status)
   if (biz.status === 'success' && !biz.currentTask && !input.activeSyncJob) {
-    return input.hasDisplayData ? 'synced_idle' : 'empty_idle'
+    if (input.hasDisplayData) return 'synced_idle'
+    // 库里已有订单、仅当前范围 0 单：走范围空态，勿显示「整库暂无业务数据」
+    return hasAnyOrdersInDb ? 'synced_idle' : 'empty_idle'
   }
   if (syncing && !input.hasDisplayData) return 'first_sync'
   if (syncing && input.hasDisplayData) return 'syncing_with_data'
   if (!input.hasDisplayData && biz.status === 'failed' && !biz.lastSuccessAt) return 'empty_failed'
-  if (!input.hasDisplayData && (input.totalRawOrders ?? 0) === 0 && !syncing) return 'empty_idle'
-  if (!input.hasDisplayData && !syncing) return 'empty_idle'
+  if (!input.hasDisplayData && !hasAnyOrdersInDb && !syncing) return 'empty_idle'
+  if (!input.hasDisplayData && !syncing) {
+    return hasAnyOrdersInDb ? 'synced_idle' : 'empty_idle'
+  }
   return 'synced_idle'
 }
 

@@ -132,7 +132,11 @@ function listSameShopScheduleRows(
     .sort((a, b) => a.startAt.localeCompare(b.startAt))
 }
 
-/** 排班匹配/归属窗口：可向前后扩展容差，但同店相邻班次边界不跨段 */
+/**
+ * 排班匹配/归属窗口：可向前后扩展容差，但同店相邻班次边界不跨段。
+ * 「相邻」含精确衔接，以及间隔落在容差内的近邻（如 14:00→14:05）：
+ * 否则前后各 +30 分钟会互相侵入，日报时间轴出现重叠。
+ */
 export function resolveGraceAttributionWindowMs(
   scheduleRow: EffectiveScheduleRow,
   scheduleRows: EffectiveScheduleRow[],
@@ -141,16 +145,29 @@ export function resolveGraceAttributionWindowMs(
   const scheduleEndMs = new Date(scheduleRow.endAt).getTime()
   const sameShop = listSameShopScheduleRows(scheduleRows, scheduleRow.shopName)
 
-  const hasPrevAdjacent = sameShop.some(
-    (row) =>
-      row.rowId !== scheduleRow.rowId &&
-      new Date(row.endAt).getTime() === scheduleStartMs,
-  )
-  const hasNextAdjacent = sameShop.some(
-    (row) =>
-      row.rowId !== scheduleRow.rowId &&
-      new Date(row.startAt).getTime() === scheduleEndMs,
-  )
+  const prevNeighbor = sameShop
+    .filter(
+      (row) =>
+        row.rowId !== scheduleRow.rowId && new Date(row.endAt).getTime() <= scheduleStartMs,
+    )
+    .sort((a, b) => new Date(b.endAt).getTime() - new Date(a.endAt).getTime())[0]
+
+  const nextNeighbor = sameShop
+    .filter(
+      (row) =>
+        row.rowId !== scheduleRow.rowId && new Date(row.startAt).getTime() >= scheduleEndMs,
+    )
+    .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime())[0]
+
+  const gapFromPrevMs = prevNeighbor
+    ? scheduleStartMs - new Date(prevNeighbor.endAt).getTime()
+    : null
+  const gapToNextMs = nextNeighbor
+    ? new Date(nextNeighbor.startAt).getTime() - scheduleEndMs
+    : null
+
+  const hasPrevAdjacent = gapFromPrevMs != null && gapFromPrevMs <= GRACE_BEFORE_MS
+  const hasNextAdjacent = gapToNextMs != null && gapToNextMs <= GRACE_AFTER_MS
 
   const matchStartMs = hasPrevAdjacent ? scheduleStartMs : scheduleStartMs - GRACE_BEFORE_MS
   const matchEndMs = hasNextAdjacent ? scheduleEndMs : scheduleEndMs + GRACE_AFTER_MS

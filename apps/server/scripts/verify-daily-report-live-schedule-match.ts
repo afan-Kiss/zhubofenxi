@@ -7,8 +7,10 @@ import type { EffectiveScheduleRow } from '../src/services/anchor-daily-schedule
 import type { AnchorLiveSessionBrief } from '../src/services/anchor-live-sessions.service'
 import {
   buildDailyReportLiveScheduleFields,
+  computeGraceAwareScheduleOverlapMinutes,
   computeScheduleOverlapMinutes,
   matchLiveSessionToBestScheduleRow,
+  matchLiveSessionToScheduleSegments,
   pickBestScheduleRowByOverlapForTest,
 } from '../src/services/daily-report-live-schedule-match.service'
 
@@ -184,7 +186,7 @@ const unmatched = buildDailyReportLiveScheduleFields({
   scheduleRows: SCHEDULES,
 })
 assert.equal(unmatched.scheduleMatched, false, 'unmatched schedule')
-assert.equal(unmatched.liveTimeRange, '—', 'unmatched anchor row has no forced live time')
+assert.equal(unmatched.liveTimeRange, '08:00–09:00', 'live time still from real session')
 const rawUnmatched = matchLiveSessionToBestScheduleRow(
   session('未知店铺', `${DATE}T08:00:00+08:00`, `${DATE}T09:00:00+08:00`),
   SCHEDULES,
@@ -192,5 +194,87 @@ const rawUnmatched = matchLiveSessionToBestScheduleRow(
 assert.equal(rawUnmatched.scheduleRow, null, 'session without shop match')
 assert.equal(rawUnmatched.matchReason, '未匹配排班')
 console.log('PASS unmatched session not forced to schedule')
+
+/** 复现 2026-08-04：同店 14:00→14:05 近邻换班，容差不得互相侵入 */
+const NEAR_GAP_DATE = '2026-08-04'
+const NEAR_GAP_SCHEDULES: EffectiveScheduleRow[] = [
+  scheduleRow({
+    rowId: 'xiaoxiao-morning',
+    anchorName: '小小',
+    shopName: '和田雅玉',
+    startTime: '09:30',
+    endTime: '14:00',
+    startAt: `${NEAR_GAP_DATE}T09:30:00+08:00`,
+    endAt: `${NEAR_GAP_DATE}T14:00:00+08:00`,
+  }),
+  scheduleRow({
+    rowId: 'xiaobai-afternoon',
+    anchorName: '小白',
+    shopName: '和田雅玉',
+    startTime: '14:05',
+    endTime: '18:35',
+    startAt: `${NEAR_GAP_DATE}T14:05:00+08:00`,
+    endAt: `${NEAR_GAP_DATE}T18:35:00+08:00`,
+  }),
+]
+const morningLive = session(
+  '和田雅玉',
+  `${NEAR_GAP_DATE}T09:25:37+08:00`,
+  `${NEAR_GAP_DATE}T13:56:45+08:00`,
+)
+const afternoonLive = session(
+  '和田雅玉',
+  `${NEAR_GAP_DATE}T14:04:28+08:00`,
+  `${NEAR_GAP_DATE}T18:30:15+08:00`,
+)
+const morningSegs = matchLiveSessionToScheduleSegments(morningLive, NEAR_GAP_SCHEDULES)
+const afternoonSegs = matchLiveSessionToScheduleSegments(afternoonLive, NEAR_GAP_SCHEDULES)
+assert.deepEqual(
+  morningSegs.map((s) => s.anchorName),
+  ['小小'],
+  'near-gap morning live must only assign 小小',
+)
+assert.deepEqual(
+  afternoonSegs.map((s) => s.anchorName),
+  ['小白'],
+  'near-gap afternoon live must only assign 小白',
+)
+assert.equal(
+  computeGraceAwareScheduleOverlapMinutes(
+    Date.parse(`${NEAR_GAP_DATE}T09:25:37+08:00`),
+    Date.parse(`${NEAR_GAP_DATE}T13:56:45+08:00`),
+    NEAR_GAP_SCHEDULES[1]!,
+    NEAR_GAP_SCHEDULES,
+  ),
+  0,
+  'near-gap: 小白 must not eat morning live via before-grace',
+)
+assert.equal(
+  computeGraceAwareScheduleOverlapMinutes(
+    Date.parse(`${NEAR_GAP_DATE}T14:04:28+08:00`),
+    Date.parse(`${NEAR_GAP_DATE}T18:30:15+08:00`),
+    NEAR_GAP_SCHEDULES[0]!,
+    NEAR_GAP_SCHEDULES,
+  ),
+  0,
+  'near-gap: 小小 must not eat afternoon live via after-grace',
+)
+const xiaoxiaoBuilt = buildDailyReportLiveScheduleFields({
+  anchorName: '小小',
+  allSessions: [morningLive],
+  scheduleRows: NEAR_GAP_SCHEDULES,
+})
+const xiaobaiBuilt = buildDailyReportLiveScheduleFields({
+  anchorName: '小白',
+  allSessions: [afternoonLive],
+  scheduleRows: NEAR_GAP_SCHEDULES,
+})
+assert.equal(xiaoxiaoBuilt.liveTimeRange, '09:25:37–13:56:45')
+assert.equal(xiaobaiBuilt.liveTimeRange, '14:04:28–18:30:15')
+assert.ok(
+  (xiaoxiaoBuilt.liveEndTime ?? '') < (xiaobaiBuilt.liveStartTime ?? ''),
+  'near-gap daily report live ranges must not overlap',
+)
+console.log('PASS near-gap 14:00→14:05 小小/小白 no grace intrusion')
 
 console.log('verify-daily-report-live-schedule-match OK')

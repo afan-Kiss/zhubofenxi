@@ -13,6 +13,7 @@ import {
   getActualSignAmountCent,
   isAwaitingSignCompletionView,
   isEffectiveSignedOrder,
+  isEffectiveSignedView,
   orderQualifiesForActualSignedAfterSale,
 } from '../src/services/strict-after-sale-metrics.service'
 import type { AnalyzedOrderView } from '../src/types/analysis'
@@ -90,6 +91,18 @@ function stubView(partial: Partial<AnalyzedOrderView>): AnalyzedOrderView {
 
 assert.equal(isAwaitingSignCompletionView(stubView({})), true, '已签收·无售后 → awaiting')
 assert.equal(
+  isEffectiveSignedView(
+    stubView({
+      orderStatusText: '已签收',
+      isEffectiveSigned: true,
+      statusSigned: true,
+      actualSignAmountCent: 50000,
+    }),
+  ),
+  false,
+  'stale isEffectiveSigned on 已签收 must not count as signed',
+)
+assert.equal(
   isAwaitingSignCompletionView(
     stubView({
       orderStatusText: '已完成',
@@ -105,6 +118,19 @@ assert.equal(
   isAwaitingSignCompletionView(stubView({ orderStatusText: '运输中' })),
   false,
   '运输中 not awaiting',
+)
+
+assert.equal(
+  isAwaitingSignCompletionView(
+    stubView({
+      orderStatusText: '已签收',
+      isEffectiveSigned: true, // 旧缓存误标
+      statusSigned: true,
+      actualSignAmountCent: 50000,
+    }),
+  ),
+  true,
+  'stale isEffectiveSigned on 已签收 must still go to awaiting',
 )
 
 console.log('verify-signed-completed-vs-awaiting OK')

@@ -17,9 +17,10 @@ import {
   isNoAfterSaleText,
   viewHasAfterSaleStatusSignal,
 } from './after-sale-status-signal.service'
+import { BUSINESS_METRICS_CACHE_VERSION } from './business-cache-fingerprint'
 /** 全站经营指标统一计算（看板 / 排行 / 钻取 / 导出共用） */
 
-export const BUSINESS_METRICS_VERSION = 'v13-signed-completed-only-awaiting-2026-08-10'
+export const BUSINESS_METRICS_VERSION = BUSINESS_METRICS_CACHE_VERSION
 
 
 

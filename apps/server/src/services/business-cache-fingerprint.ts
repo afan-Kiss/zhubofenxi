@@ -14,10 +14,17 @@ export const CANONICAL_ATTRIBUTION_VERSION =
 /** 业绩榜/走势分组：正式主播按配置 id 合并，避免同名裂成两条（如小白） */
 export const LEADERBOARD_GROUP_VERSION = 'leaderboard-group-v2-formal-id-2026-07-19'
 
+/**
+ * 与 business-metrics.service BUSINESS_METRICS_VERSION 对齐：
+ * 已签收金额仅交易完成 + 正在路上/待签收完成拆分。改口径时两边一起 bump。
+ */
+export const BUSINESS_METRICS_CACHE_VERSION = 'v13-signed-completed-only-awaiting-2026-08-10'
+
 export const BUSINESS_CACHE_FINGERPRINT = [
   CANONICAL_ATTRIBUTION_VERSION,
   LEADERBOARD_GROUP_VERSION,
   OFFLINE_GMV_METRICS_VERSION,
   ANCHOR_MASTER_DATA_VERSION,
   AFTER_SALES_METRICS_VERSION,
+  BUSINESS_METRICS_CACHE_VERSION,
 ].join('+')

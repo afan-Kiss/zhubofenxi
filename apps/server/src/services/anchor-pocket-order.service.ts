@@ -5,7 +5,7 @@ import {
   LOW_PRICE_BRUSH_THRESHOLD_CENT,
   resolvePaymentBaseCentForBrushCheck,
 } from './low-price-brush-order.service'
-import { isStatusSignedView } from './order-sign-status.service'
+import { isStatusCompletedView, isStatusCourierSignedOnlyView } from './order-sign-status.service'
 import type { AfterSalesWorkbenchRefund } from './xhs-after-sales-workbench.service'
 import {
   isAfterSalesResultPending,
@@ -47,10 +47,17 @@ export function isClosedOrCanceledOrderView(v: AnalyzedOrderView): boolean {
   return /已取消|已关闭|交易关闭/.test(text)
 }
 
+/** 未完成交易且快递也未签收 → 待收货（平台「已签收/已收货」不算待收货） */
 export function isPendingReceiveOrderView(v: AnalyzedOrderView): boolean {
   if (!v.includedInGmv) return false
   if (isClosedOrCanceledOrderView(v)) return false
-  return !isStatusSignedView(v)
+  if (isStatusCompletedView(v) || isStatusCourierSignedOnlyView(v)) return false
+  return true
+}
+
+/** 已完成交易，或快递已签收待交易完成 → 可计入口袋（扣已完成退款） */
+function isPocketCountableSignedView(v: AnalyzedOrderView): boolean {
+  return isStatusCompletedView(v) || isStatusCourierSignedOnlyView(v)
 }
 
 export function isRefundProcessingOrderView(
@@ -183,7 +190,7 @@ export function classifyAnchorPocketOrder(params: {
     }
   }
 
-  if (isStatusSignedView(view)) {
+  if (isPocketCountableSignedView(view)) {
     const actualPocketAmountCent = Math.min(
       paidCent,
       Math.max(0, paidCent - refundFinishedAmountCent),

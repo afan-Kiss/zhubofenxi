@@ -174,6 +174,8 @@ function buildSummaryFromViews(views: AnalyzedOrderView[]): Record<string, unkno
     effectiveGmv: m.validSalesAmount,
     validSalesAmount: m.validSalesAmount,
     actualSignedAmount: m.actualSignedAmount,
+    awaitingSignCompletionAmount: m.awaitingSignCompletionAmount,
+    awaitingSignCompletionOrderCount: m.awaitingSignCompletionOrderCount,
     orderCount: m.orderCount,
     paidOrderCount: m.orderCount,
     periodOrderCount: m.periodOrderCount,

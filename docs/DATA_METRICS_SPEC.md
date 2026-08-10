@@ -215,7 +215,8 @@ npm run accept:gmv:fast
 |------|------|
 | 支付 GMV | 支付日落入统计日的已支付金额（分汇总） |
 | 当前有效成交 | `sumValidRevenueFromViews`：支付日订单截至当前售后状态的有效成交池；P 单去重 |
-| 实际签收 | `actualSignedAmount` / `signedOrderCount`：订单状态已签收/已完成，且**无售后处理中**；成功商品退款 ≤ ¥20（运费补偿）可保留，更大商品退款不计入；**禁止**写入 `validAmountYuan` |
+| 实际签收 | `actualSignedAmount` / `signedOrderCount`：订单状态为**已完成 / 交易完成 / 交易成功**（不含平台「已签收/已收货」），且**无售后处理中**；成功商品退款 ≤ **¥29** 可保留，更大商品退款不计入；**禁止**写入 `validAmountYuan` |
+| 正在路上/待签收完成 | `awaitingSignCompletionAmount`：平台状态为**已签收 / 已收货**且尚未交易完成，售后准入同签收池；金额为支付基数。主播业绩单独卡片下钻 |
 | 已签收下钻展示 | 状态优先原样展示官方文案（`交易完成` / `已完成` / `已签收` 等），禁止一律改成「已签收」；完成时间取 `finishTime`/`signedAt`/`orderFinishTime` 等官方字段（定时同步入库时晋升到稳定键）。列表为扁平订单行（含直播号/主播列，无店铺/主播汇总分组行），默认按已签收金额高→低；店铺/主播下拉无筛选显示「全部」，有筛选显示所选名称（不带单数、不分名次）。验收：`npx tsx apps/server/scripts/signed-completion-fields-acceptance.ts` |
 | 退货率 | 退款成功 P 单唯一数 ÷ 支付 P 单唯一数；分母 0 → `null`；禁止用有效成交订单作分母 |
 | 月报买家数 | 全日期范围有效成交买家身份去重；禁止各商品 `buyerCount` 相加 |

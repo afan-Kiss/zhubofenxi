@@ -12,14 +12,14 @@ import { aggregateRefundAmountCentByOrderNo } from './order-refund-metrics.servi
 import { dedupeOrderCountByOrderNo } from './order-master-match.service'
 import { dedupeViewsByMetricOrderNo, dedupeCoreMetricViewsByOrderNoBestValue, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { sumValidRevenueFromViews } from './valid-revenue-order.service'
-import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
+import { isEffectiveSignedView, isAwaitingSignCompletionView, getAwaitingSignCompletionAmountCent } from './strict-after-sale-metrics.service'
 import {
   isNoAfterSaleText,
   viewHasAfterSaleStatusSignal,
 } from './after-sale-status-signal.service'
 /** 全站经营指标统一计算（看板 / 排行 / 钻取 / 导出共用） */
 
-export const BUSINESS_METRICS_VERSION = 'v12-offline-quality-isolation-2026-07-17'
+export const BUSINESS_METRICS_VERSION = 'v13-signed-completed-only-awaiting-2026-08-10'
 
 
 
@@ -32,6 +32,9 @@ export interface BusinessMetrics {
   validSalesAmount: number
 
   actualSignedAmount: number
+
+  /** 正在路上/待签收完成金额：平台已签收/已收货、尚未交易完成 */
+  awaitingSignCompletionAmount: number
 
   refundAmount: number
 
@@ -46,6 +49,9 @@ export interface BusinessMetrics {
   periodOrderCount: number
 
   signedOrderCount: number
+
+  /** 正在路上/待签收完成单数（与 awaitingSignCompletionAmount 同池，P 单去重） */
+  awaitingSignCompletionOrderCount: number
 
   /** 退款订单数：本期已支付且真实退款金额>0（按 P 订单号去重） */
   refundOrderCount: number
@@ -165,7 +171,11 @@ export function calculateBusinessMetrics(
 
   let actualSignedCent = 0
 
+  let awaitingSignCompletionCent = 0
+
   let freightRefundCent = 0
+
+  const awaitingSignCompletionOrderNos: string[] = []
 
   for (const v of dedupedViews) {
 
@@ -175,6 +185,12 @@ export function calculateBusinessMetrics(
 
     if (isEffectiveSignedView(v)) {
       actualSignedCent += v.actualSignAmountCent ?? v.actualSignedAmountCent ?? 0
+    }
+
+    if (isAwaitingSignCompletionView(v)) {
+      awaitingSignCompletionCent += getAwaitingSignCompletionAmountCent(v)
+      const no = resolveMetricOrderNo(v)
+      if (no) awaitingSignCompletionOrderNos.push(no)
     }
 
     freightRefundCent += v.freightRefundAmountCent
@@ -204,6 +220,8 @@ export function calculateBusinessMetrics(
 
     actualSignedAmount: centToYuan(actualSignedCent),
 
+    awaitingSignCompletionAmount: centToYuan(awaitingSignCompletionCent),
+
     refundAmount: centToYuan(refundCent),
 
     freightRefundAmount: centToYuan(freightRefundCent),
@@ -213,6 +231,8 @@ export function calculateBusinessMetrics(
     periodOrderCount: dedupeOrderCountByOrderNo(periodOrderNos),
 
     signedOrderCount: metricSets.signedOrderCount,
+
+    awaitingSignCompletionOrderCount: dedupeOrderCountByOrderNo(awaitingSignCompletionOrderNos),
 
     refundOrderCount: metricSets.refundOrderCount,
     afterSaleRecordCount: metricSets.afterSaleRecordCount,
@@ -253,6 +273,8 @@ export type BoardMetricValueKey =
 
   | 'actualSignedAmount'
 
+  | 'awaitingSignCompletionAmount'
+
   | 'returnAmount'
 
   | 'freightRefundAmount'
@@ -292,6 +314,10 @@ export function pickMetricValue(metrics: BusinessMetrics, key: BoardMetricValueK
     case 'actualSignedAmount':
 
       return metrics.actualSignedAmount
+
+    case 'awaitingSignCompletionAmount':
+
+      return metrics.awaitingSignCompletionAmount
 
     case 'returnAmount':
 

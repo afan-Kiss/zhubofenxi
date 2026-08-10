@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CalendarDays, ChevronDown, Package, PackageCheck, Percent, RotateCcw, TrendingUp, Undo2, Wallet, AlertTriangle, type LucideIcon } from 'lucide-react'
+import { CalendarDays, ChevronDown, Package, PackageCheck, Percent, RotateCcw, TrendingUp, Truck, Undo2, Wallet, AlertTriangle, type LucideIcon } from 'lucide-react'
 import { useAmountDisplay } from '../../providers/AmountDisplayProvider'
 import { RangeBar } from '../../components/board/RangeBar'
 import { BoardStatRangeNote } from '../../components/board/BoardStatRangeNote'
@@ -66,6 +66,7 @@ interface AnchorSummaryCardDef {
   valueKey:
     | 'totalGmv'
     | 'actualSignedAmount'
+    | 'awaitingSignCompletionAmount'
     | 'orderCount'
     | 'signedOrderCount'
     | 'returnCount'
@@ -94,10 +95,21 @@ const ANCHOR_SUMMARY_CARDS: AnchorSummaryCardDef[] = [
     drawerKey: 'actualSignedAmount',
     type: 'money',
     tone: 'green',
-    helper: '已签收/已完成且符合签收规则的订单金额',
+    helper: '已完成/交易完成，且退款≤¥29或无售后',
     hint: '点击查看明细',
     icon: Wallet,
     valueKey: 'actualSignedAmount',
+  },
+  {
+    label: '正在路上/待签收完成',
+    metricExplainKey: 'awaitingSignCompletionAmount',
+    drawerKey: 'awaitingSignCompletionAmount',
+    type: 'money',
+    tone: 'blue',
+    helper: '平台已签收·无售后，尚未交易完成',
+    hint: '点击查看明细',
+    icon: Truck,
+    valueKey: 'awaitingSignCompletionAmount',
   },
   {
     label: '支付单数',
@@ -203,6 +215,8 @@ function anchorSummaryMetricValue(
       return Number(cards.validSalesAmount ?? cards.effectiveGmv ?? 0)
     case 'actualSignedAmount':
       return Number(cards.actualSignedAmount ?? 0)
+    case 'awaitingSignCompletionAmount':
+      return Number(cards.awaitingSignCompletionAmount ?? 0)
     case 'orderCount':
       return Number(cards.orderCount ?? cards.paidOrderCount ?? 0)
     case 'signedCount':
@@ -227,6 +241,9 @@ function anchorSummaryMetricValue(
 function anchorCardRawValue(cards: Record<string, unknown>, key: AnchorSummaryCardDef['valueKey']): number {
   if (key === 'totalGmv') return Number(cards.totalGmv ?? cards.gmv ?? 0)
   if (key === 'actualSignedAmount') return Number(cards.actualSignedAmount ?? 0)
+  if (key === 'awaitingSignCompletionAmount') {
+    return Number(cards.awaitingSignCompletionAmount ?? 0)
+  }
   if (key === 'orderCount') return Number(cards.orderCount ?? cards.paidOrderCount ?? 0)
   if (key === 'signedOrderCount') {
     return Number(cards.signedOrderCount ?? cards.actualSignedCount ?? cards.signedCount ?? 0)

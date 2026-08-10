@@ -13,7 +13,7 @@ import {
   isQualityRefundOrder,
   type BoardMetricValueKey,
 } from './business-metrics.service'
-import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
+import { isEffectiveSignedView, isAwaitingSignCompletionView } from './strict-after-sale-metrics.service'
 import {
   countUnmatchedOfficialQualityCases,
   getQualityBadCasesSync,
@@ -60,6 +60,7 @@ export type BoardMetricKey =
   | 'gmv'
   | 'effectiveGmv'
   | 'actualSignedAmount'
+  | 'awaitingSignCompletionAmount'
   | 'signedCount'
   | 'signRate'
   | 'returnAmount'
@@ -94,22 +95,30 @@ const METRIC_DEFS: Record<
   actualSignedAmount: {
     title: '已签收金额',
     formula:
-      '已签收金额 = 已签收/已完成，且没有影响成交的售后退款订单金额合计',
+      '已签收金额 = 订单状态为已完成/交易完成/交易成功，且售后准入通过（无售后 / 关闭无退款 / 商品退款≤¥29）的订单金额合计',
     description:
-      '只统计真正留下来的订单；纯运费补偿不影响，小额商品退款按现有签收规则处理。',
+      '不含平台「已签收/已收货」尚未交易完成的订单（见「正在路上/待签收完成」）。',
     valueKey: 'actualSignedAmount',
+  },
+  awaitingSignCompletionAmount: {
+    title: '正在路上/待签收完成',
+    formula:
+      '正在路上/待签收完成 = 平台状态为已签收/已收货、尚未交易完成，且无影响成交售后的订单支付金额合计',
+    description:
+      '明细为「已签收 · 无售后」类订单；待物流完成交易后才会进入已签收金额。',
+    valueKey: 'awaitingSignCompletionAmount',
   },
   signedCount: {
     title: '签收单数',
-    formula: '签收单数 = 有效实际签收订单数（已签收，且无售后/取消/小额退款）',
+    formula: '签收单数 = 与已签收金额同一订单池，按 P 单号去重',
     description:
-      '已签收/已完成，且无售后、售后已取消，或商品退款不超过 ¥20.00 的订单，按 P 单号去重。',
+      '已完成/交易完成/交易成功，且无售后、售后已取消，或商品退款不超过 ¥29.00 的订单。',
     valueKey: 'signedCount',
   },
   signRate: {
     title: '签收率',
     formula: '签收率 = 有效签收订单数 ÷ 支付订单数',
-    description: '',
+    description: '分母为支付订单数；分子与已签收金额同一订单池。',
     valueKey: 'signRate',
   },
   returnAmount: {
@@ -192,6 +201,8 @@ function matchMetricViews(views: AnalyzedOrderView[], metric: BoardMetricKey, ta
       if (tab === 'unsigned') return paidViews.filter((v) => !isEffectiveSignedView(v))
       return paidViews.filter((v) => isEffectiveSignedView(v))
     }
+    case 'awaitingSignCompletionAmount':
+      return views.filter((v) => isAwaitingSignCompletionView(v))
     case 'returnAmount':
     case 'returnCount':
     case 'returnRate':
@@ -356,6 +367,7 @@ const METRICS_ORDER_DEDUPE: BoardMetricKey[] = [
   'gmv',
   'orderCount',
   'actualSignedAmount',
+  'awaitingSignCompletionAmount',
   'signedCount',
   'signRate',
   'effectiveGmv',
@@ -373,6 +385,7 @@ function usesCoreMetricBestValueDedupe(metric: BoardMetricKey): boolean {
     metric === 'gmv' ||
     metric === 'orderCount' ||
     metric === 'actualSignedAmount' ||
+    metric === 'awaitingSignCompletionAmount' ||
     metric === 'signedCount' ||
     metric === 'signRate'
   )
@@ -402,6 +415,8 @@ function buildPageSummary(views: AnalyzedOrderView[]): Record<string, unknown> {
     effectiveGmv: m.validSalesAmount,
     validSalesAmount: m.validSalesAmount,
     actualSignedAmount: m.actualSignedAmount,
+    awaitingSignCompletionAmount: m.awaitingSignCompletionAmount,
+    awaitingSignCompletionOrderCount: m.awaitingSignCompletionOrderCount,
     orderCount: m.orderCount,
     periodOrderCount: m.periodOrderCount,
     signRate: m.signRate,
@@ -846,6 +861,9 @@ export async function buildBoardMetricDetail(params: {
         : totals.signedOrderCount
     }
     if (params.metric === 'actualSignedAmount') return totals.signedOrderCount
+    if (params.metric === 'awaitingSignCompletionAmount') {
+      return totals.awaitingSignCompletionOrderCount
+    }
     if (params.metric === 'gmv' || params.metric === 'orderCount') {
       return totals.orderCount
     }

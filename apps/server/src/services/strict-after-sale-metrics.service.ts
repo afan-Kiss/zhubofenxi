@@ -7,13 +7,16 @@ import { matchPlatformReturnReason } from '../utils/quality-return'
 import {
   resolveBusinessProductRefundAmountCent,
   resolveBusinessRefundAmountCent,
-  FREIGHT_COMPENSATION_MAX_CENT,
 } from './business-refund-caliber.service'
 import {
   pickReturnsV3BuyerUserId,
   splitReturnsV3RefundCent,
 } from './returns-v3-record.service'
-import { isStatusSignedOrder, isStatusSignedView } from './order-sign-status.service'
+import {
+  isStatusCompletedOrder,
+  isStatusCompletedView,
+  isStatusCourierSignedOnlyView,
+} from './order-sign-status.service'
 import { resolveSuccessfulProductRefundCentForSign } from './sign-amount-refund.service'
 import { isCompletedAfterSaleStatusText } from './completed-after-sale-status.service'
 import { isTrustworthyResolvedRefundSource } from './after-sales-fetch-decision.service'
@@ -361,8 +364,11 @@ export function getActualSignAmountCent(params: {
   return Math.max(0, params.paymentBaseCent - params.successfulRefundAmountCent)
 }
 
-/** 实际签收允许的最大商品退款（分），超过则不计入实际签收；与运费补偿上限一致 */
-export { FREIGHT_COMPENSATION_MAX_CENT as ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT } from './business-refund-caliber.service'
+/**
+ * 已签收金额允许的最大商品退款（分）：≤ ¥29 仍可计入「已完成」签收池。
+ * 运费补偿归类仍用 FREIGHT_COMPENSATION_MAX_CENT（¥20），互不影响。
+ */
+export const ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT = 2900
 
 const PENDING_AFTER_SALE_STATUS_KEYWORDS = [
   '售后中',
@@ -404,8 +410,8 @@ function afterSaleStatusIndicatesCancelled(text: string): boolean {
 }
 
 /**
- * 实际签收订单售后准入：无售后 / 售后已取消关闭 / 成功商品退款 ≤ 20 元
- * 纯运费补偿、售后处理中、商品退款 > 20 元均不计入。
+ * 实际签收订单售后准入：无售后 / 售后已取消关闭 / 成功商品退款 ≤ ¥29
+ * 纯运费补偿、售后处理中、商品退款 > ¥29 均不计入。
  *
  * 注意：isCanceledOrInvalidAfterSale 会把「处理中」也标成无效（用于不计入成功退款），
  * 不能据此当成「售后已结束」放行进已签收。
@@ -455,11 +461,11 @@ export function orderQualifiesForActualSignedAfterSale(params: {
     return true
   }
 
-  if (refundCent > FREIGHT_COMPENSATION_MAX_CENT) {
+  if (refundCent > ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT) {
     return false
   }
 
-  if (refundCent > 0 && refundCent <= FREIGHT_COMPENSATION_MAX_CENT) {
+  if (refundCent > 0 && refundCent <= ACTUAL_SIGNED_MAX_PRODUCT_REFUND_CENT) {
     return true
   }
 
@@ -494,10 +500,34 @@ export function isEffectiveSignedView(v: AnalyzedOrderView): boolean {
   })
   return isEffectiveSignedOrder({
     includedInGmv: v.includedInGmv,
-    statusSigned: v.statusSigned === true || isStatusSignedView(v),
+    statusSigned: v.statusSigned === true || isStatusCompletedView(v),
     actualSignAmountCent: v.actualSignAmountCent ?? v.actualSignedAmountCent ?? 0,
     qualifiesAfterSale,
   })
+}
+
+/**
+ * 正在路上/待签收完成：平台「已签收/已收货」且尚未交易完成，且售后准入同已签收金额
+ * （无售后 / 关闭无退款 / 退款≤¥29）。金额取支付基数。
+ */
+export function isAwaitingSignCompletionView(v: AnalyzedOrderView): boolean {
+  if (!v.includedInGmv) return false
+  if (isEffectiveSignedView(v)) return false
+  if (!isStatusCourierSignedOnlyView(v)) return false
+  const refundCent = v.successfulRefundAmountCent ?? v.productRefundAmountCent ?? 0
+  return orderQualifiesForActualSignedAfterSale({
+    afterSaleRecords: [],
+    successfulProductRefundCent: refundCent,
+    afterSaleClosedNoRefund: v.afterSaleClosedNoRefund,
+    isFreightRefundOnly: v.isFreightRefundOnly,
+    afterSaleStatusText: v.afterSaleStatusText ?? v.afterSaleStatusLabel,
+    resolvedRefundSource: v.buyerProductRefundSource,
+  })
+}
+
+export function getAwaitingSignCompletionAmountCent(v: AnalyzedOrderView): number {
+  if (!isAwaitingSignCompletionView(v)) return 0
+  return Math.max(0, v.paymentBaseCent ?? 0)
 }
 
 export function isStrictQualityRefundView(v: AnalyzedOrderView): boolean {
@@ -526,7 +556,7 @@ export function computeStrictOrderViewFields(params: {
   resolvedRefundSource?: string | null
 }): StrictOrderViewFields {
   const strictAgg = aggregateStrictAfterSaleForOrder(params.afterSaleRecords)
-  const statusSigned = isStatusSignedOrder(params.order)
+  const statusSigned = isStatusCompletedOrder(params.order)
   const orderRaw = params.order.raw as Record<string, unknown> | undefined
   const refundCent = resolveSuccessfulProductRefundCentForSign({
     afterSaleRecords: params.afterSaleRecords,

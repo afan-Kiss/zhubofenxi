@@ -229,6 +229,7 @@ export function aggregateSummaryFromAnchorRows(
   let totalGmv = 0
   let validSalesAmount = 0
   let actualSignedAmount = 0
+  let awaitingSignCompletionAmount = 0
   let paidOrderCount = 0
   let returnCount = 0
   let returnAmount = 0
@@ -237,11 +238,13 @@ export function aggregateSummaryFromAnchorRows(
   let unknownRefundTypeCount = 0
   let qualityReturnCount = 0
   let signedOrderCount = 0
+  let awaitingSignCompletionOrderCount = 0
   let incompleteType = false
   for (const row of rows) {
     totalGmv += anchorRowGmv(row)
     validSalesAmount += anchorRowValidSales(row)
     actualSignedAmount += anchorRowActualSignedAmount(row)
+    awaitingSignCompletionAmount += Number(row.awaitingSignCompletionAmount ?? 0)
     paidOrderCount += anchorRowPaidCount(row)
     returnCount += anchorRowReturnCount(row)
     returnAmount += anchorRowRefundAmount(row)
@@ -251,6 +254,7 @@ export function aggregateSummaryFromAnchorRows(
     if (anchorRowReturnRefundTypeIncomplete(row)) incompleteType = true
     qualityReturnCount += anchorRowNum(row, 'qualityReturnCount')
     signedOrderCount += anchorRowSignedCount(row)
+    awaitingSignCompletionOrderCount += Number(row.awaitingSignCompletionOrderCount ?? 0)
   }
   const refundRate = paidOrderCount > 0 ? returnCount / paidOrderCount : null
   const signRate = paidOrderCount > 0 ? signedOrderCount / paidOrderCount : null
@@ -268,6 +272,8 @@ export function aggregateSummaryFromAnchorRows(
     validSalesAmount,
     effectiveGmv: validSalesAmount,
     actualSignedAmount,
+    awaitingSignCompletionAmount,
+    awaitingSignCompletionOrderCount,
     orderCount: paidOrderCount,
     paidOrderCount,
     returnRate: refundRate,

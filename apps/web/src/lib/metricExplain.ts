@@ -8,6 +8,8 @@ export type BoardMetricExplainKey =
 
   | 'actualSignedAmount'
 
+  | 'awaitingSignCompletionAmount'
+
   | 'returnAmount'
 
   | 'orderCount'
@@ -48,7 +50,10 @@ export const METRIC_EXPLAIN: Record<BoardMetricExplainKey, string> = {
     '内部口径：已完成/已签收且无在途售后、未成功退款的订单成交金额（仅接口兼容，用户入口请用已签收金额）。',
 
   actualSignedAmount:
-    '已签收金额：只统计买家已经签收/完成，且没有影响成交的售后退款订单金额。这个数更接近真正留下来的成交。',
+    '已签收金额：只统计订单状态为已完成/交易完成/交易成功，且无售后或商品退款不超过 ¥29 的订单金额。平台「已签收」尚未交易完成的订单不计入，见「正在路上/待签收完成」。',
+
+  awaitingSignCompletionAmount:
+    '正在路上/待签收完成：平台状态为已签收/已收货、尚未交易完成，且多为无售后的订单支付金额。点开可看明细；交易完成后再计入已签收金额。',
 
   returnAmount:
 
@@ -58,7 +63,7 @@ export const METRIC_EXPLAIN: Record<BoardMetricExplainKey, string> = {
 
   signedOrderCount:
 
-    '签收单数：统计所选日期范围内实际签收的订单数。签收率 = 签收单数 ÷ 支付单数。',
+    '签收单数：与已签收金额同一订单池（已完成/交易完成，退款≤¥29或无售后），按 P 订单号去重。签收率 = 签收单数 ÷ 支付单数。',
 
   returnCount: '退款单数：统计所选日期范围内发生退款/售后的订单数。退款率 = 退款单数 ÷ 支付单数。',
 

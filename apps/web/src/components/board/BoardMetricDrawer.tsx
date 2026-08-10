@@ -12,6 +12,7 @@ export type BoardMetricKey =
   | 'gmv'
   | 'effectiveGmv'
   | 'actualSignedAmount'
+  | 'awaitingSignCompletionAmount'
   | 'signedCount'
   | 'signRate'
   | 'returnAmount'

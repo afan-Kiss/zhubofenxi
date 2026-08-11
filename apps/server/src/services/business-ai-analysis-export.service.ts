@@ -4,13 +4,24 @@
  */
 import { prisma } from '../lib/prisma'
 import type { AnalyzedOrderView } from '../types/analysis'
-import { formatDateKeyShanghai } from '../utils/business-timezone'
+import { formatDateKeyShanghai, formatDateTimeShanghai } from '../utils/business-timezone'
 import { eachDayInShanghaiRange } from '../utils/each-day-shanghai'
 import { getOrBuildBusinessBoardCache } from './business-cache.service'
 import { calculateBusinessMetrics } from './business-metrics.service'
 import { extractLiveSessionTraffic } from './live-session-traffic.util'
 import { resolveGoodReviewShopKey, GOOD_REVIEW_SHOPS } from '../config/good-review-shops.constants'
 import { getSetting } from './system-setting.service'
+import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.service'
+import { matchLiveSessionToScheduleSegments } from './daily-report-live-schedule-match.service'
+import { formatLiveDurationMinutes } from './anchor-live-sessions.service'
+import type { AnchorLiveSessionBrief } from './anchor-live-sessions.service'
+import {
+  shiftMonthSameDay,
+  unionMapKeys,
+  pickPrimaryCanonicalAnchorName,
+  readLiveReviewPartsStatus,
+  liveReviewPartsFullyComplete,
+} from './xhs-api-sync/xhs-live-review-enrich.util'
 
 function asRecord(v: unknown): Record<string, unknown> | null {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null
@@ -40,15 +51,6 @@ function rateObj(numerator: number, denominator: number) {
     denominator,
     rate: denominator > 0 ? numerator / denominator : null,
   }
-}
-
-function shiftMonthSameDay(dateKey: string, monthDelta: number): string {
-  const [y, m, d] = dateKey.split('-').map(Number)
-  const dt = new Date(Date.UTC(y!, m! - 1 + monthDelta, d!))
-  const yy = dt.getUTCFullYear()
-  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
-  const dd = String(dt.getUTCDate()).padStart(2, '0')
-  return `${yy}-${mm}-${dd}`
 }
 
 function addDays(dateKey: string, delta: number): string {
@@ -115,7 +117,8 @@ function extractSessionMetrics(s: SessionRow) {
   const cardImpressionCnt = num(unwrapField(raw, 'liveroomCardImpression'))
   const goodsClickUsers = num(unwrapField(raw, 'goodsClickUserNum'))
   const goodsClickCnt = num(unwrapField(raw, 'goodsClickCnt'))
-  const shopKey = resolveGoodReviewShopKey(s.liveAccountName ?? '') 
+  const shopKey = resolveGoodReviewShopKey(s.liveAccountName ?? '')
+  const partsStatus = readLiveReviewPartsStatus(raw)
 
   return {
     sessionId: s.liveId ?? s.id,
@@ -127,6 +130,9 @@ function extractSessionMetrics(s: SessionRow) {
     endTime: s.endTime?.toISOString() ?? null,
     durationHours: Number(sessionDurationHours(s).toFixed(3)),
     listAnchorName: s.anchorName,
+    canonicalAnchorName: null as string | null,
+    liveReviewPartsStatus: partsStatus,
+    liveReviewFullyComplete: liveReviewPartsFullyComplete(partsStatus),
     paymentGmv,
     refundAmount,
     dealOrders,
@@ -316,6 +322,50 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
     }),
   )
 
+  // 复用经营日报 canonical 排班/场次归属（禁止自造主播匹配）
+  {
+    const scheduleCache = new Map<string, Awaited<ReturnType<typeof getEffectiveScheduleTableForDate>>>()
+    for (let i = 0; i < sessionMetrics.length; i++) {
+      const s = sessionMetrics[i]!
+      const db = sessionsDb[i]!
+      if (!s.startTime) continue
+      const dateKey = formatDateKeyShanghai(new Date(s.startTime))
+      let table = scheduleCache.get(dateKey)
+      if (!table) {
+        table = await getEffectiveScheduleTableForDate(dateKey)
+        scheduleCache.set(dateKey, table)
+      }
+      const startIso = formatDateTimeShanghai(db.startTime ?? new Date(s.startTime))
+      const endIso = db.endTime
+        ? formatDateTimeShanghai(db.endTime)
+        : formatDateTimeShanghai(
+            new Date((db.startTime ?? new Date(s.startTime)).getTime() + Math.max(1, s.durationHours) * 3600000),
+          )
+      const durationMinutes = Math.max(1, Math.round(s.durationHours * 60))
+      const brief: AnchorLiveSessionBrief = {
+        liveId: s.sessionId,
+        liveName: s.title ?? s.shopName ?? '',
+        startTime: startIso,
+        endTime: endIso,
+        durationMinutes,
+        durationText: formatLiveDurationMinutes(durationMinutes),
+        sourceShopName: s.shopName ?? undefined,
+        viewSessionCount: null,
+        joinUserCount: null,
+        avgOnlineUserCount: null,
+        avgViewDurationSeconds: null,
+        newFollowerCount: null,
+        dealUserCount: null,
+        coverClickRate: null,
+        stay60sUserCount: null,
+        impressionCount: null,
+        viewPayRate: null,
+      }
+      const segments = matchLiveSessionToScheduleSegments(brief, table.rows)
+      s.canonicalAnchorName = pickPrimaryCanonicalAnchorName(segments)
+    }
+  }
+
   const sessionsIn = (start: string, end: string) =>
     sessionMetrics.filter((s) => {
       if (!s.startTime) return false
@@ -453,6 +503,7 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
         validRemainingGmv: '支付GMV - 已退款金额（近似留存，非财务结算）',
         orderAttribution: 'canonical attribution（下单时间匹配排班/场次）；未改写',
         sessionSource: 'XhsRawLiveSession.rawJson + live_review 补齐字段',
+        canonicalAnchorName: '经营日报 matchLiveSessionToScheduleSegments 主段主播；非自造匹配',
       },
       sourceTask: {
         scheduler: 'apps/server/src/services/scheduler.service.ts',
@@ -515,11 +566,16 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
         ),
       },
     },
-    anchors: [...periodThisMonthToDate.byAnchor.entries()].map(([name, views]) => {
+    anchors: unionMapKeys(
+      periodThisMonthToDate.byAnchor as Map<string, unknown>,
+      periodLastMonthSameDays.byAnchor as Map<string, unknown>,
+    ).map((name) => {
+      const views = periodThisMonthToDate.byAnchor.get(name) ?? []
+      const prevViews = periodLastMonthSameDays.byAnchor.get(name) ?? []
       const m = calculateBusinessMetrics(views)
       const pay = views.reduce((s, v) => s + (v.paymentBaseCent ?? 0), 0) / 100
-      const prevViews = periodLastMonthSameDays.byAnchor.get(name) ?? []
       const prevPay = prevViews.reduce((s, v) => s + (v.paymentBaseCent ?? 0), 0) / 100
+      const prevM = calculateBusinessMetrics(prevViews)
       return {
         anchorName: name,
         current: {
@@ -531,7 +587,10 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
         },
         previousSameDays: {
           paymentGmv: prevPay,
+          receivedGmv: prevM.actualSignedAmount,
+          refundAmount: prevM.refundAmount,
           orderCount: prevViews.length,
+          dealUsers: new Set(prevViews.map((v) => v.buyerKey).filter(Boolean)).size,
         },
         gmvDecomposition: gmvDecomposition(
           { paymentGmv: pay, orderCount: views.length },
@@ -539,12 +598,17 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
         ),
       }
     }),
-    shops: [...periodThisMonthToDate.byShop.entries()].map(([name, views]) => {
+    shops: unionMapKeys(
+      periodThisMonthToDate.byShop as Map<string, unknown>,
+      periodLastMonthSameDays.byShop as Map<string, unknown>,
+    ).map((name) => {
+      const views = periodThisMonthToDate.byShop.get(name) ?? []
+      const prevViews = periodLastMonthSameDays.byShop.get(name) ?? []
       const m = calculateBusinessMetrics(views)
       const pay = views.reduce((s, v) => s + (v.paymentBaseCent ?? 0), 0) / 100
-      const prevViews = periodLastMonthSameDays.byShop.get(name) ?? []
       const prevPay = prevViews.reduce((s, v) => s + (v.paymentBaseCent ?? 0), 0) / 100
       const shopSessions = curSessions.filter((s) => s.shopName === name)
+      const prevShopSessions = prevSessions.filter((s) => s.shopName === name)
       return {
         shopName: name,
         shopKey: resolveGoodReviewShopKey(name),
@@ -558,7 +622,7 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
         previousSameDays: {
           paymentGmv: prevPay,
           orderCount: prevViews.length,
-          sessions: sessionAgg(prevSessions.filter((s) => s.shopName === name)),
+          sessions: sessionAgg(prevShopSessions),
         },
         gmvDecomposition: gmvDecomposition(
           { paymentGmv: pay, orderCount: views.length },

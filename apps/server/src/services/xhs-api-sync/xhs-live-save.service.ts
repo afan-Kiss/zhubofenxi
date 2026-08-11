@@ -274,7 +274,8 @@ export async function syncLiveSessionListOnlyWithSave(
         maxSessions: 36,
       })
       warnings.push(
-        `回放详情补齐(${review.mode})：成功 ${review.enriched} / 跳过 ${review.skipped} / 失败 ${review.failed} / 尝试 ${review.attempted}`,
+        `回放详情补齐(${review.mode})：完整 ${review.enriched} / 部分 ${review.partial} / 跳过 ${review.skipped} / 失败 ${review.failed} / 尝试 ${review.attempted}` +
+          (review.remainingMissingCount != null ? ` / 历史剩余缺详情 ${review.remainingMissingCount}` : ''),
       )
       warnings.push(...review.warnings.slice(0, 8))
     } catch (err) {

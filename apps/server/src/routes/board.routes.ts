@@ -625,13 +625,7 @@ boardRouter.get('/month-compare/ai-export', async (req, res) => {
       '../services/business-ai-analysis-export.service'
     )
     const payload = await buildBusinessAiAnalysisExport({ asOfDate })
-    const dateKey = payload.meta.asOfDate
-    res.setHeader('Content-Type', 'application/json; charset=utf-8')
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="business-analysis-${dateKey}.json"`,
-    )
-    res.status(200).json(payload)
+    sendOk(res, payload)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '导出 AI 分析数据失败', 500)
   }

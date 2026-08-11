@@ -73,7 +73,7 @@ const ALL_NAV: Array<{
   },
   {
     to: '/operations-report',
-    label: '运营报表',
+    label: '上月对比',
     icon: FileText,
     dataTestId: 'tab-operations-report',
     permission: 'operations_report',

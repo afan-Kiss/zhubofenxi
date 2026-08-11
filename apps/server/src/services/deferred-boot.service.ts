@@ -73,15 +73,7 @@ export function startDeferredBootTasks(): void {
       )
     }
 
-    try {
-      const opsMod = await import('./operations-report-cache.service')
-      void opsMod.prewarmCommonOperationsReportsOnBoot()
-    } catch (err) {
-      logWarn(
-        '运营报表缓存',
-        `提前计算失败：${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
+    // 旧运营报表已改为「上月对比」占位：启动时不再预热运营报表缓存
 
     try {
       await ensureBuyerRankingCacheOnBoot()

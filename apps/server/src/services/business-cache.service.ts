@@ -812,18 +812,12 @@ export function getBusinessCacheHealthStats(): {
   }
 }
 
-function prewarmOperationsReportsAfterRebuild(reason: string): void {
-  void import('./operations-report-cache.service').then(async (m) => {
-    m.invalidateOperationsReportCache(reason)
-    try {
-      await m.prewarmOperationsReportCache(reason, { forceRebuild: true })
-    } catch (err) {
-      logWarn(
-        '运营报表缓存',
-        `同步后提前计算失败：${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
-  })
+/**
+ * 旧「运营报表」入口已改为「上月对比」占位，同步/结算后不再预热运营报表缓存。
+ * 相关服务代码保留，维护工具仍可手动触发。
+ */
+function skipOperationsReportPrewarmAfterRebuild(reason: string): void {
+  logInfo('经营缓存', `跳过运营报表预热（已停用自动计算）：${reason}`)
 }
 
 /** 数据同步 / 维护后：按范围重建（同步后仅 today~thisMonth，上月延后） */
@@ -832,7 +826,7 @@ export async function invalidateAndRebuildBusinessBoardCache(reason: string): Pr
     ? BUSINESS_CACHE_SYNC_REBUILD_PRESETS
     : BUSINESS_CACHE_PRESETS
   await enqueueBusinessCacheRebuild(reason, presets)
-  prewarmOperationsReportsAfterRebuild(reason)
+  skipOperationsReportPrewarmAfterRebuild(reason)
 }
 
 /** 排班保存等场景：仅清理近期预设并后台重建，避免 HTTP 超时 */
@@ -842,5 +836,5 @@ export function scheduleBusinessBoardCacheRebuild(reason: string): void {
   void enqueueBusinessCacheRebuild(reason, BUSINESS_CACHE_SYNC_REBUILD_PRESETS, {
     invalidateFirst: false,
   })
-  prewarmOperationsReportsAfterRebuild(reason)
+  skipOperationsReportPrewarmAfterRebuild(reason)
 }

@@ -17,7 +17,7 @@ export const PAGE_PERMISSION_LABELS: Record<PagePermissionKey, string> = {
   anchors: '主播业绩',
   buyers: '买家排行',
   lucky_gifts: '福袋发货',
-  operations_report: '运营报表',
+  operations_report: '上月对比',
   good_reviews: '好评中心',
   refund_analysis: '退款分析',
   boss_dashboard: '老板查看',

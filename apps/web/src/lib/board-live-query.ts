@@ -154,7 +154,11 @@ export interface OverviewMeta {
   stableVsLatest?: {
     stableValidSalesAmount: number
     latestValidSalesAmount: number
+    stableValue?: number
+    latestValue?: number
+    diff?: number
     diffAmount: number
+    needsManualReview?: boolean
     needsManualUpdate: boolean
     message: string | null
   } | null
@@ -230,6 +234,34 @@ export interface BoardLiveQueryData {
   globalAfterSalesCompleteness?: AfterSalesCompletenessView
   syncMeta?: BoardSyncMeta
   overviewMeta?: OverviewMeta
+  cacheStatus?: {
+    source?: 'memory' | 'snapshot' | 'rebuilt' | 'stale-fallback' | string
+    updatingInBackground?: boolean
+    dataGeneration?: unknown
+    cacheBuiltAt?: string
+    lastBuiltAt?: string
+    businessCacheFingerprint?: string
+    businessMetricsVersion?: string
+    fallbackReason?: string | null
+    stale?: boolean
+    isDiskSnapshot?: boolean
+    isStaleFallback?: boolean
+  }
+  reconciliation?: {
+    status: 'pass' | 'failed' | 'pending'
+    checkedAt: string
+    generation: string | null
+    mismatches: Array<{
+      metric: string
+      overviewValue: number | null
+      anchorValue: number | null
+      difference: number | null
+    }>
+  }
+  businessMetricsVersion?: string
+  businessCacheFingerprint?: string
+  dataGeneration?: unknown
+  cacheBuiltAt?: string
 }
 
 export interface BoardResolvedRange {

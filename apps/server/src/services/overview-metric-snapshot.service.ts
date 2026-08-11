@@ -10,7 +10,15 @@ export interface LastMonthStableContext {
   monthKey: string
   stableValidSalesAmount: number
   latestValidSalesAmount: number
+  /** 审计对照：稳定快照值 */
+  stableValue: number
+  /** 审计对照：当前重算事实值 */
+  latestValue: number
+  diff: number
   diffAmount: number
+  /** 差额 > 阈值时需人工核对（不改变页面展示） */
+  needsManualReview: boolean
+  /** @deprecated 兼容旧字段，等同 needsManualReview */
   needsManualUpdate: boolean
   stableCacheBuiltAt: string
   stableSourceSyncJobId: string | null
@@ -206,7 +214,7 @@ export async function resolveOverviewStableDrawerContext(params: {
 
   return {
     overviewStableWarning:
-      '当前经营总览展示上月稳定版；下方明细为最新重算明细，仅供核对。',
+      '页面金额为最新重算事实值；下方「稳定快照」仅作审计对照，不覆盖经营指标。',
     stableValueRaw,
     latestValueRaw,
     diffAmount,
@@ -242,6 +250,10 @@ function snapshotToSummaryPatch(
   }
 }
 
+/**
+ * 上月稳定快照仅作审计对照，禁止覆盖经营总览事实 summary。
+ * 页面永远展示 recalculatedSummary（当前 business cache 重算值）。
+ */
 export async function applyLastMonthStableSummary(params: {
   preset: string
   startDate: string
@@ -268,25 +280,24 @@ export async function applyLastMonthStableSummary(params: {
 
   const stableValid = snapshot.validSalesAmount
   const diffAmount = Math.round((latestValid - stableValid) * 100) / 100
-  const needsManualUpdate = Math.abs(diffAmount) > STABLE_AMOUNT_THRESHOLD_YUAN
+  const needsManualReview = Math.abs(diffAmount) > STABLE_AMOUNT_THRESHOLD_YUAN
 
   const stableContext: LastMonthStableContext = {
     monthKey,
     stableValidSalesAmount: stableValid,
     latestValidSalesAmount: latestValid,
+    stableValue: stableValid,
+    latestValue: latestValid,
+    diff: diffAmount,
     diffAmount,
-    needsManualUpdate,
+    needsManualReview,
+    needsManualUpdate: needsManualReview,
     stableCacheBuiltAt: snapshot.cacheBuiltAt.toISOString(),
     stableSourceSyncJobId: snapshot.sourceSyncJobId,
   }
 
-  if (needsManualUpdate) {
-    return {
-      summary: snapshotToSummaryPatch(snapshot),
-      stableContext,
-    }
-  }
-
+  // 禁止用 snapshot 替换 totalGmv / orderCount / actualSignedAmount 等页面指标
+  void snapshotToSummaryPatch
   return {
     summary: params.recalculatedSummary,
     stableContext,

@@ -692,6 +692,11 @@ export const AnchorPerformanceTab: React.FC = () => {
     <div className="space-y-4" data-testid="anchor-performance-page">
       <BoardLiveQueryAutoRefresh />
       <CookieHealthBanner cookieHealth={cookieHealth} />
+      {data?.reconciliation?.status === 'failed' ? (
+        <div className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+          经营数据对账异常，当前数据暂不建议作为最终经营依据。
+        </div>
+      ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">主播业绩</h2>

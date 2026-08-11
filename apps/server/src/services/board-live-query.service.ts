@@ -106,10 +106,32 @@ export interface BoardLiveQueryResult {
     source: 'memory' | 'snapshot' | 'rebuilt' | 'stale-fallback'
     updatingInBackground: boolean
     dataGeneration?: unknown
+    cacheBuiltAt?: string
     lastBuiltAt?: string
     buildDurationMs?: number
     attributionAlgorithmVersion?: string
+    businessCacheFingerprint?: string
+    businessMetricsVersion?: string
+    fallbackReason?: string | null
+    stale?: boolean
+    isDiskSnapshot?: boolean
+    isStaleFallback?: boolean
   }
+  reconciliation?: {
+    status: 'pass' | 'failed' | 'pending'
+    checkedAt: string
+    generation: string | null
+    mismatches: Array<{
+      metric: string
+      overviewValue: number | null
+      anchorValue: number | null
+      difference: number | null
+    }>
+  }
+  businessMetricsVersion?: string
+  businessCacheFingerprint?: string
+  dataGeneration?: unknown
+  cacheBuiltAt?: string
   dataDisplayStatus?:
     | 'ready'
     | 'syncing_with_cache'

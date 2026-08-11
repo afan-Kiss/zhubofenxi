@@ -1,6 +1,7 @@
 import type { BusinessBoardCacheEntry } from './business-cache.service'
 import type { BoardDataDisplayStatus } from './board-data-display-status.service'
 import type { LastMonthStableContext } from './overview-metric-snapshot.service'
+import { STABLE_AMOUNT_THRESHOLD_YUAN } from './overview-metric-snapshot.service'
 import { buildBusinessCacheKey } from './business-cache.service'
 import { resolveLatestOrderTimeInRange } from './data-freshness.service'
 
@@ -27,7 +28,11 @@ export interface OverviewMeta {
   stableVsLatest?: {
     stableValidSalesAmount: number
     latestValidSalesAmount: number
+    stableValue: number
+    latestValue: number
+    diff: number
     diffAmount: number
+    needsManualReview: boolean
     needsManualUpdate: boolean
     message: string | null
   } | null
@@ -114,15 +119,19 @@ export async function buildOverviewMeta(params: {
       validSalesAmount: ctx.stableValidSalesAmount,
       cacheBuiltAt: ctx.stableCacheBuiltAt,
       sourceSyncJobId: ctx.stableSourceSyncJobId,
-      label: `上月稳定版 · 生成于 ${builtLabel}`,
+      label: `上月审计快照 · 生成于 ${builtLabel}（不覆盖页面事实值）`,
     }
     stableVsLatest = {
       stableValidSalesAmount: ctx.stableValidSalesAmount,
       latestValidSalesAmount: ctx.latestValidSalesAmount,
+      stableValue: ctx.stableValue,
+      latestValue: ctx.latestValue,
+      diff: ctx.diff,
       diffAmount: ctx.diffAmount,
-      needsManualUpdate: ctx.needsManualUpdate,
-      message: ctx.needsManualUpdate
-        ? `检测到上月数据有变化：稳定版 ¥${ctx.stableValidSalesAmount.toFixed(2)}，最新重算 ¥${ctx.latestValidSalesAmount.toFixed(2)}，可手动更新稳定版。`
+      needsManualReview: ctx.needsManualReview,
+      needsManualUpdate: ctx.needsManualReview,
+      message: ctx.needsManualReview
+        ? `上月审计快照与最新重算差额超 ¥${STABLE_AMOUNT_THRESHOLD_YUAN}：快照 ¥${ctx.stableValue.toFixed(2)}，最新 ¥${ctx.latestValue.toFixed(2)}（diff ¥${ctx.diff.toFixed(2)}）。页面已展示最新重算，可手动更新审计快照。`
         : null,
     }
   }

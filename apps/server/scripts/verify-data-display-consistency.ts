@@ -197,10 +197,30 @@ async function checkRange(
     ]
     for (const c of checks) {
       if (Math.abs(c.cached - c.realtime) > 0.02) {
-        warn(
+        fail(
           `${params.label} 缓存 vs 实时 ${c.name} 不一致: cache=${c.cached} realtime=${c.realtime}`,
         )
       }
+    }
+
+    // 经营总览 vs 主播业绩全部事实池（含隐藏线下 + 未归属）
+    const overviewGmv = Number(summary.totalGmv ?? summary.gmv ?? 0)
+    const overviewOrders = Number(summary.orderCount ?? summary.paidOrderCount ?? 0)
+    let cardsGmv = 0
+    let cardsOrders = 0
+    for (const row of leaderboard) {
+      cardsGmv += Number(row.totalGmv ?? row.gmv ?? 0)
+      cardsOrders += Number(row.orderCount ?? row.paidOrderCount ?? 0)
+    }
+    if (Math.abs(overviewGmv - cardsGmv) > 0.01) {
+      fail(
+        `${params.label} 总览 totalGmv=${overviewGmv} 与主播全部合计=${cardsGmv.toFixed(2)} 不一致`,
+      )
+    }
+    if (overviewOrders !== cardsOrders) {
+      fail(
+        `${params.label} 总览 orderCount=${overviewOrders} 与主播全部合计=${cardsOrders} 不一致`,
+      )
     }
   }
 }

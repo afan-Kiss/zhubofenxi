@@ -382,7 +382,7 @@ export async function buildAndSetBusinessBoardCache(params: {
     const {
       mergedViews,
       offlineViews,
-      coreMetricViewsUnmapped: coreViews,
+      coreMetricViews,
       remappedViews: remappedCoreViews,
       anchorPerformanceViews: performanceViews,
       qualityRefundViews,
@@ -390,10 +390,10 @@ export async function buildAndSetBusinessBoardCache(params: {
       artifacts,
       liveSessions,
     } = bundle
-    // qualityRefundViews 与 remapped core 同池
+    // 总览与主播同一代 remapped + 核心过滤事实池（禁止再用 unmapped 单独算总览）
     void remappedCoreViews
 
-    const summary = buildSummaryFromViews(coreViews)
+    const summary = buildSummaryFromViews(coreMetricViews)
     const abnormalOrderCount = artifacts?.abnormalOrderCount ?? 0
     if (abnormalOrderCount > 0) {
       summary.abnormalOrderCount = abnormalOrderCount
@@ -449,7 +449,7 @@ export async function buildAndSetBusinessBoardCache(params: {
         `${presetLabel(params.preset)} 有品退订单，但缺少直播场次，主播品退归属可能偏低。`,
       )
     }
-    const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(coreViews)]
+    const blacklistedBuyerIds = [...buildBlacklistedBuyerIds(coreMetricViews)]
     const sourceDataMaxTime = await resolveSourceDataMaxTime()
     const sourceRawMaxUpdatedAt = await resolveSourceRawMaxUpdatedAt()
     const workbenchCacheMaxUpdatedAt = (await getLatestWorkbenchCacheUpdatedAt())?.toISOString() ?? null
@@ -649,6 +649,16 @@ export async function rebuildBusinessCacheForPresets(
       )
     })
   }
+
+  const { runBoardCrossPageReconciliationForPresets } = await import(
+    './board-cross-page-reconciliation.service'
+  )
+  await runBoardCrossPageReconciliationForPresets(uniquePresets).catch((err) => {
+    logWarn(
+      '跨页对账',
+      `rebuildBusinessCacheForPresets 对账失败：${err instanceof Error ? err.message : String(err)}`,
+    )
+  })
 
   return { rebuilt, totalMs }
 }

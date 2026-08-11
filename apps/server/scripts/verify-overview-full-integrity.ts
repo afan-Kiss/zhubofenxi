@@ -505,9 +505,14 @@ async function checkLastMonthStable(): Promise<void> {
 
   if (needsManualUpdate) {
     if (!meta?.stableVsLatest?.message) fail('lastMonth needsManualUpdate 但缺少提示文案')
-    else ok('lastMonth 稳定版差异提示已返回')
+    else ok('lastMonth 审计快照差异提示已返回')
     if (!detail.overviewStableWarning) warn('lastMonth 稳定差异场景 metric-detail 缺少 overviewStableWarning')
-    else ok('metric-detail 抽屉已标注稳定版/最新重算说明')
+    else ok('metric-detail 抽屉已标注审计快照/最新重算说明')
+    if (local.summary && '_stableSnapshot' in local.summary) {
+      fail('lastMonth 页面 summary 不得被稳定快照覆盖')
+    } else {
+      ok('lastMonth 页面展示最新重算事实值（快照仅审计）')
+    }
   } else {
     ok('lastMonth 当前展示与最新重算一致（或无稳定快照差异）')
   }

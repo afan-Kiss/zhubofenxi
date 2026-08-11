@@ -69,6 +69,11 @@ import {
 
 } from './staff-anchor-scope.service'
 import { filterViewsForCoreMetrics } from './metrics-exclusion.service'
+import { BUSINESS_METRICS_VERSION } from './business-metrics.service'
+import {
+  buildApiReconciliationPayload,
+  getBoardReconciliationResult,
+} from './board-cross-page-reconciliation.service'
 
 import {
   boardCachePreparingMessage,
@@ -509,6 +514,7 @@ export async function executeBoardLocalQuery(params: {
   }
 
   const summarySourceViews = hasAnchorFilter ? performanceViews : scopedAllViews
+  void summarySourceViews
   const displayOrderCount = resolveDisplayOrderCount(
     hasAnchorFilter,
     performanceViews,
@@ -564,7 +570,11 @@ export async function executeBoardLocalQuery(params: {
     hasAnchorFilter,
   )
     ? { ...boardCache.summary }
-    : buildSummaryFromViews(summarySourceViews)
+    : buildSummaryFromViews(
+        hasAnchorFilter
+          ? performanceViews
+          : await getAnchorPerformanceViews(scopedAllViews, rawByMatch),
+      )
 
   const stableApplied = await applyLastMonthStableSummary({
     preset: params.preset,
@@ -847,6 +857,9 @@ export async function executeBoardLocalQuery(params: {
     )
   }
 
+  const storedReconciliation = await getBoardReconciliationResult(params.preset)
+  const reconciliation = buildApiReconciliationPayload(storedReconciliation, boardCache)
+
   return {
     requestId,
     preset: params.preset,
@@ -902,10 +915,22 @@ export async function executeBoardLocalQuery(params: {
       source: cacheSource,
       updatingInBackground,
       dataGeneration: boardCache.dataGeneration ?? null,
+      cacheBuiltAt: boardCache.lastBuiltAt,
       lastBuiltAt: boardCache.lastBuiltAt,
       buildDurationMs: boardCache.buildDurationMs,
       attributionAlgorithmVersion: boardCache.attributionAlgorithmVersion,
+      businessCacheFingerprint: boardCache.attributionAlgorithmVersion || BUSINESS_CACHE_FINGERPRINT,
+      businessMetricsVersion: String(summary.metricsVersion ?? BUSINESS_METRICS_VERSION),
+      fallbackReason: boardCache.fallbackReason ?? null,
+      stale: Boolean(boardCache.stale),
+      isDiskSnapshot,
+      isStaleFallback: cacheSource === 'stale-fallback',
     },
+    reconciliation,
+    businessMetricsVersion: String(summary.metricsVersion ?? BUSINESS_METRICS_VERSION),
+    businessCacheFingerprint: boardCache.attributionAlgorithmVersion || BUSINESS_CACHE_FINGERPRINT,
+    dataGeneration: boardCache.dataGeneration ?? null,
+    cacheBuiltAt: boardCache.lastBuiltAt,
     ...(fullSyncMeta ? { syncMeta: fullSyncMeta } : {}),
     ...(overviewMeta ? { overviewMeta } : {}),
     ...(forcedAnchor ? { forcedAnchorName: forcedAnchor } : {}),

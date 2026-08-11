@@ -7,6 +7,7 @@ import {
   Percent,
   RotateCcw,
   TrendingUp,
+  Truck,
   Undo2,
   Wallet,
   type LucideIcon,
@@ -54,6 +55,8 @@ function summaryMetricValue(ds: Record<string, unknown>, metric: BoardMetricKey)
       return Number(ds.qualityReturnCount ?? 0)
     case 'actualSignedAmount':
       return Number(ds.actualSignedAmount ?? 0)
+    case 'awaitingSignCompletionAmount':
+      return Number(ds.awaitingSignCompletionAmount ?? 0)
     case 'signedCount':
       return Number(ds.signedOrderCount ?? ds.actualSignedCount ?? 0)
     case 'signRate':
@@ -89,6 +92,10 @@ const valuePickers = {
   returnRate: (ds: Record<string, unknown>) => Number(ds.returnRate ?? 0),
   qualityReturnCount: (ds: Record<string, unknown>) => Number(ds.qualityReturnCount ?? 0),
   actualSignedAmount: (ds: Record<string, unknown>) => Number(ds.actualSignedAmount ?? 0),
+  awaitingSignCompletionAmount: (ds: Record<string, unknown>) =>
+    Number(ds.awaitingSignCompletionAmount ?? 0),
+  awaitingSignCompletionOrderCount: (ds: Record<string, unknown>) =>
+    Number(ds.awaitingSignCompletionOrderCount ?? 0),
   signedOrderCount: (ds: Record<string, unknown>) =>
     Number(ds.signedOrderCount ?? ds.actualSignedCount ?? 0),
   signRate: (ds: Record<string, unknown>) => Number(ds.signRate ?? 0),
@@ -117,7 +124,7 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
     type: 'money',
     tone: 'green',
     hint: '点击查看明细',
-    helper: '已签收/已完成且符合签收规则的订单金额',
+    helper: '已完成/交易完成，且退款≤¥29或无有效售后',
     icon: Wallet,
   },
   {
@@ -157,6 +164,28 @@ const SUMMARY_CARDS: SummaryCardDef[] = [
 
 const MORE_SUMMARY_CARDS: SummaryCardDef[] = [
   {
+    label: '正在路上/待签收完成金额',
+    metricExplainKey: 'awaitingSignCompletionAmount',
+    drawerKey: 'awaitingSignCompletionAmount',
+    valueKey: 'awaitingSignCompletionAmount',
+    type: 'money',
+    tone: 'teal',
+    hint: '点击查看明细',
+    helper: '平台已签收/已收货、尚未交易完成的支付金额',
+    icon: Truck,
+  },
+  {
+    label: '正在路上/待签收完成单数',
+    metricExplainKey: 'awaitingSignCompletionAmount',
+    drawerKey: 'awaitingSignCompletionAmount',
+    valueKey: 'awaitingSignCompletionOrderCount',
+    type: 'count',
+    tone: 'teal',
+    hint: '点击查看明细',
+    helper: '与待签收完成金额同一订单池',
+    icon: PackageCheck,
+  },
+  {
     label: '签收单数',
     metricExplainKey: 'signedOrderCount',
     drawerKey: 'signedCount',
@@ -164,7 +193,7 @@ const MORE_SUMMARY_CARDS: SummaryCardDef[] = [
     type: 'count',
     tone: 'green',
     hint: '查看相关订单',
-    helper: '实际签收订单笔数',
+    helper: '已完成/交易完成，且退款≤¥29或无有效售后',
     icon: PackageCheck,
   },
   {
@@ -285,9 +314,12 @@ export const OverviewTab: React.FC = () => {
   const hasMetrics = boardSummaryHasOrderData(ds)
   const showMetrics = hasMetrics && boardDataVisible
   const qualityNote = qualityReturnCardNote(qualityFeedback)
-  const stableWarning = overviewMeta?.stableVsLatest?.needsManualUpdate
+  const stableWarning = overviewMeta?.stableVsLatest?.needsManualReview
     ? overviewMeta.stableVsLatest.message
-    : null
+    : overviewMeta?.stableVsLatest?.needsManualUpdate
+      ? overviewMeta.stableVsLatest.message
+      : null
+  const reconciliationFailed = data?.reconciliation?.status === 'failed'
 
   const isRealtimePreset = preset === 'today' || preset === 'yesterday'
   const isSyncingNow =
@@ -474,6 +506,11 @@ export const OverviewTab: React.FC = () => {
         cookieHealth={cookieHealth}
       />
 
+      {reconciliationFailed ? (
+        <div className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+          经营数据对账异常，当前数据暂不建议作为最终经营依据。
+        </div>
+      ) : null}
       {stableWarning ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           <p>{stableWarning}</p>
@@ -491,7 +528,7 @@ export const OverviewTab: React.FC = () => {
                 .finally(() => setStableUpdateBusy(false))
             }}
           >
-            {stableUpdateBusy ? '正在更新稳定版…' : '更新上月稳定版'}
+            {stableUpdateBusy ? '正在更新审计快照…' : '更新上月审计快照'}
           </button>
         </div>
       ) : null}
@@ -675,7 +712,11 @@ export const OverviewTab: React.FC = () => {
           blacklistedBuyerIds={blacklistedBuyerIds}
           cardValueRaw={summaryMetricValue(ds, metricDrawer)}
           overviewStableSnapshot={
-            preset === 'lastMonth' && Boolean(overviewMeta?.stableVsLatest?.needsManualUpdate)
+            preset === 'lastMonth' &&
+            Boolean(
+              overviewMeta?.stableVsLatest?.needsManualReview ||
+                overviewMeta?.stableVsLatest?.needsManualUpdate,
+            )
           }
           onOrderAnchorAssigned={() => void reload()}
         />

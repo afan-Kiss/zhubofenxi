@@ -555,6 +555,43 @@ export const BoardLiveQueryProvider: React.FC<{ children: React.ReactNode }> = (
   }, [loadLocal, queryKey, shouldLoadBoardData])
 
   useEffect(() => {
+    if (!shouldLoadBoardData || !queryMatched || !data) return
+    const cs = data.cacheStatus
+    const rebuilding =
+      Boolean(cs?.updatingInBackground) ||
+      cs?.source === 'snapshot' ||
+      cs?.isDiskSnapshot === true ||
+      cs?.source === 'stale-fallback'
+    if (!rebuilding) return
+
+    let cancelled = false
+    const timer = window.setInterval(() => {
+      if (cancelled || refreshInFlightRef.current) return
+      refreshInFlightRef.current = true
+      skipEtagOnceRef.current = true
+      void loadLocal()
+        .catch(() => undefined)
+        .finally(() => {
+          refreshInFlightRef.current = false
+        })
+    }, 2500)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [
+    shouldLoadBoardData,
+    queryMatched,
+    data?.cacheStatus?.updatingInBackground,
+    data?.cacheStatus?.source,
+    data?.cacheStatus?.isDiskSnapshot,
+    data?.cacheBuiltAt,
+    data?.dataGeneration,
+    loadLocal,
+  ])
+
+  useEffect(() => {
     const onInvalidate = () => {
       void loadLocal()
     }

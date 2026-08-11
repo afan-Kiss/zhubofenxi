@@ -21,6 +21,9 @@ import {
   pickPrimaryCanonicalAnchorName,
   readLiveReviewPartsStatus,
   liveReviewPartsFullyComplete,
+  countSessionsTouchingAnchor,
+  sumClippedLiveHoursForAnchor,
+  type CanonicalSegmentMetric,
 } from './xhs-api-sync/xhs-live-review-enrich.util'
 
 function asRecord(v: unknown): Record<string, unknown> | null {
@@ -131,6 +134,9 @@ function extractSessionMetrics(s: SessionRow) {
     durationHours: Number(sessionDurationHours(s).toFixed(3)),
     listAnchorName: s.anchorName,
     canonicalAnchorName: null as string | null,
+    canonicalSegments: [] as CanonicalSegmentMetric[],
+    /** 曝光/点击/成交等平台指标无法按 clipped 时段精确拆分；整场指标保留在 session */
+    trafficAllocationMethod: 'unsplittable_session_metric' as const,
     liveReviewPartsStatus: partsStatus,
     liveReviewFullyComplete: liveReviewPartsFullyComplete(partsStatus),
     paymentGmv,
@@ -362,7 +368,14 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
         viewPayRate: null,
       }
       const segments = matchLiveSessionToScheduleSegments(brief, table.rows)
-      s.canonicalAnchorName = pickPrimaryCanonicalAnchorName(segments)
+      s.canonicalSegments = segments.map((seg) => ({
+        anchorName: seg.anchorName,
+        clippedStartTime: seg.clippedStartTime,
+        clippedEndTime: seg.clippedEndTime,
+        clippedDurationMinutes: seg.clippedDurationMinutes,
+        overlapMinutes: seg.overlapMinutes,
+      }))
+      s.canonicalAnchorName = pickPrimaryCanonicalAnchorName(s.canonicalSegments)
     }
   }
 
@@ -372,6 +385,41 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
       const d = formatDateKeyShanghai(new Date(s.startTime))
       return d >= start && d <= end
     })
+
+  function rateObjLocal(numerator: number, denominator: number) {
+    return rateObj(numerator, denominator)
+  }
+
+  /** 主播直播聚合：时长按 clipped；流量类仅挂 primary 并标明不可精确拆分 */
+  function buildAnchorLiveAgg(
+    anchorName: string,
+    sessions: typeof sessionMetrics,
+    orderPaymentGmv: number,
+  ) {
+    const sessionCount = countSessionsTouchingAnchor(sessions, anchorName)
+    const totalLiveHours = Number(sumClippedLiveHoursForAnchor(sessions, anchorName).toFixed(3))
+    const primarySessions = sessions.filter((s) => s.canonicalAnchorName === anchorName)
+    const viewUv = primarySessions.reduce((a, s) => a + s.viewUv, 0)
+    const impressionCnt = primarySessions.reduce((a, s) => a + (s.impressionCnt || 0), 0)
+    const goodsClickUsers = primarySessions.reduce((a, s) => a + (s.goodsClickUsers || 0), 0)
+    const dealUsers = primarySessions.reduce((a, s) => a + s.dealUsers, 0)
+    return {
+      sessionCount,
+      totalLiveHours,
+      paymentGmv: orderPaymentGmv,
+      avgGmvPerSession: sessionCount > 0 ? orderPaymentGmv / sessionCount : null,
+      gmvPerHour: totalLiveHours > 0 ? orderPaymentGmv / totalLiveHours : null,
+      viewUv,
+      impressionCnt,
+      goodsClickUsers,
+      clickToDealRate: rateObjLocal(dealUsers, goodsClickUsers),
+      viewDealRate: rateObjLocal(dealUsers, viewUv),
+      durationAllocationMethod: 'clipped_segments' as const,
+      trafficAllocationMethod: 'primary_only_unsplittable' as const,
+      trafficAllocationNote:
+        '曝光/点击/成交等无法按场内 clipped 时段精确拆分；仅挂到 primary 主播，完整指标见 sessions',
+    }
+  }
 
   function sessionAgg(list: typeof sessionMetrics) {
     const paymentGmv = list.reduce((a, s) => a + s.paymentGmv, 0)
@@ -503,7 +551,11 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
         validRemainingGmv: '支付GMV - 已退款金额（近似留存，非财务结算）',
         orderAttribution: 'canonical attribution（下单时间匹配排班/场次）；未改写',
         sessionSource: 'XhsRawLiveSession.rawJson + live_review 补齐字段',
-        canonicalAnchorName: '经营日报 matchLiveSessionToScheduleSegments 主段主播；非自造匹配',
+        canonicalAnchorName:
+          '经营日报 matchLiveSessionToScheduleSegments；sessions.canonicalSegments 为完整切段',
+        durationAllocation: 'anchors.live.totalLiveHours 按 clippedDurationMinutes 加总',
+        trafficAllocation:
+          '曝光/点击/成交不可按时段拆分：sessions 保留整场；anchors.live 仅 primary_only_unsplittable',
       },
       sourceTask: {
         scheduler: 'apps/server/src/services/scheduler.service.ts',
@@ -566,10 +618,20 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
         ),
       },
     },
-    anchors: unionMapKeys(
-      periodThisMonthToDate.byAnchor as Map<string, unknown>,
-      periodLastMonthSameDays.byAnchor as Map<string, unknown>,
-    ).map((name) => {
+    anchors: (() => {
+      const liveOnly = new Map<string, unknown>()
+      for (const s of [...curSessions, ...prevSessions]) {
+        for (const seg of s.canonicalSegments ?? []) {
+          const n = seg.anchorName.trim()
+          if (n) liveOnly.set(n, true)
+        }
+      }
+      return unionMapKeys(
+        periodThisMonthToDate.byAnchor as Map<string, unknown>,
+        periodLastMonthSameDays.byAnchor as Map<string, unknown>,
+        liveOnly,
+      )
+    })().map((name) => {
       const views = periodThisMonthToDate.byAnchor.get(name) ?? []
       const prevViews = periodLastMonthSameDays.byAnchor.get(name) ?? []
       const m = calculateBusinessMetrics(views)
@@ -584,6 +646,7 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
           refundAmount: m.refundAmount,
           orderCount: views.length,
           dealUsers: new Set(views.map((v) => v.buyerKey).filter(Boolean)).size,
+          live: buildAnchorLiveAgg(name, curSessions, pay),
         },
         previousSameDays: {
           paymentGmv: prevPay,
@@ -591,6 +654,7 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
           refundAmount: prevM.refundAmount,
           orderCount: prevViews.length,
           dealUsers: new Set(prevViews.map((v) => v.buyerKey).filter(Boolean)).size,
+          live: buildAnchorLiveAgg(name, prevSessions, prevPay),
         },
         gmvDecomposition: gmvDecomposition(
           { paymentGmv: pay, orderCount: views.length },

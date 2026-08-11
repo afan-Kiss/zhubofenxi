@@ -140,12 +140,134 @@ export function mergeLiveReviewDetailFields(
 export interface LiveReviewCandidateRow {
   id: string
   startTime: Date | null
+  endTime?: Date | null
   rawJson: unknown
 }
 
+export type LiveReviewSelectReason = 'missing_or_failed' | 'cooldown_refresh' | 'historical_refresh'
+
+export const DEFAULT_DETAIL_COOLDOWN_MS = 6 * 60 * 60 * 1000
+export const DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
+/** 刚结束：下播后仍视为近期场次（与增量刷新窗口一致） */
+export const RECENTLY_ENDED_MS = 2 * 60 * 60 * 1000
+
+export function parseLiveReviewSyncedAtMs(raw: Record<string, unknown>): number | null {
+  const full = raw._liveReviewFullySyncedAt
+  const synced = raw._liveReviewSyncedAt
+  for (const v of [full, synced]) {
+    if (typeof v === 'string' && v.trim()) {
+      const ms = Date.parse(v)
+      if (Number.isFinite(ms)) return ms
+    }
+  }
+  return null
+}
+
+function dateKeyFromMs(ms: number): string {
+  // Asia/Shanghai YYYY-MM-DD via UTC+8 offset
+  const d = new Date(ms + 8 * 3600_000)
+  const y = d.getUTCFullYear()
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(d.getUTCDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+/** 增量：今天 / 昨天 / 仍在播 / 刚结束 */
+export function isIncrementalRecentSession(
+  row: { startTime: Date | null; endTime?: Date | null },
+  opts: { now?: number; todayKey: string; yesterdayKey: string; recentlyEndedMs?: number },
+): boolean {
+  const now = opts.now ?? Date.now()
+  const recentlyEndedMs = opts.recentlyEndedMs ?? RECENTLY_ENDED_MS
+  if (row.endTime == null) return true
+  if (row.endTime.getTime() > now - recentlyEndedMs) return true
+  if (!row.startTime) return false
+  const key = dateKeyFromMs(row.startTime.getTime())
+  return key === opts.todayKey || key === opts.yesterdayKey
+}
+
+export function isCooldownRefreshDue(
+  raw: Record<string, unknown>,
+  opts: { now?: number; cooldownMs: number },
+): boolean {
+  if (liveRawNeedsLiveReview(raw)) return false
+  const syncedAt = parseLiveReviewSyncedAtMs(raw)
+  if (syncedAt == null) return true
+  const now = opts.now ?? Date.now()
+  return now - syncedAt >= opts.cooldownMs
+}
+
+export function isHistoricalRefreshDue(
+  raw: Record<string, unknown>,
+  opts: { now?: number; refreshIntervalMs: number },
+): boolean {
+  if (liveRawNeedsLiveReview(raw)) return false
+  const syncedAt = parseLiveReviewSyncedAtMs(raw)
+  if (syncedAt == null) return true
+  const now = opts.now ?? Date.now()
+  return now - syncedAt >= opts.refreshIntervalMs
+}
+
+export function resolveLiveReviewSelectReason(
+  row: LiveReviewCandidateRow,
+  opts: {
+    mode: 'history_backfill' | 'historical_refresh' | 'incremental'
+    now?: number
+    todayKey?: string
+    yesterdayKey?: string
+    cooldownMs?: number
+    refreshIntervalMs?: number
+    recentlyEndedMs?: number
+  },
+): LiveReviewSelectReason | null {
+  const raw = asRecord(row.rawJson) ?? {}
+  if (liveRawNeedsLiveReview(raw)) return 'missing_or_failed'
+
+  if (opts.mode === 'history_backfill') return null
+
+  if (opts.mode === 'incremental') {
+    const todayKey = opts.todayKey
+    const yesterdayKey = opts.yesterdayKey
+    if (!todayKey || !yesterdayKey) return null
+    if (
+      !isIncrementalRecentSession(row, {
+        now: opts.now,
+        todayKey,
+        yesterdayKey,
+        recentlyEndedMs: opts.recentlyEndedMs,
+      })
+    ) {
+      return null
+    }
+    if (
+      isCooldownRefreshDue(raw, {
+        now: opts.now,
+        cooldownMs: opts.cooldownMs ?? DEFAULT_DETAIL_COOLDOWN_MS,
+      })
+    ) {
+      return 'cooldown_refresh'
+    }
+    return null
+  }
+
+  // historical_refresh
+  if (
+    isHistoricalRefreshDue(raw, {
+      now: opts.now,
+      refreshIntervalMs: opts.refreshIntervalMs ?? DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
+    })
+  ) {
+    return 'historical_refresh'
+  }
+  return null
+}
+
 /**
- * 历史补齐：优先最老的缺详情场次（asc）。
- * 增量：仍可按 desc 优先近期。
+ * 候选选择：
+ * - history_backfill：仅 missing/failed，最老优先
+ * - incremental：missing/failed 优先；今天/昨天/刚结束的 full 可按 cooldown 刷新
+ * - historical_refresh：missing/failed 优先；30 天窗内 full 可按 refreshInterval 刷新
+ * 不得无条件用 liveRawNeedsLiveReview 滤掉全部 full 场次。
  */
 export function selectLiveReviewEnrichCandidates<T extends LiveReviewCandidateRow>(
   rows: T[],
@@ -153,27 +275,60 @@ export function selectLiveReviewEnrichCandidates<T extends LiveReviewCandidateRo
     mode: 'history_backfill' | 'historical_refresh' | 'incremental'
     maxSessions: number
     preferSessionIds?: Set<string>
+    now?: number
+    todayKey?: string
+    yesterdayKey?: string
+    cooldownMs?: number
+    refreshIntervalMs?: number
+    recentlyEndedMs?: number
   },
-): T[] {
-  const needing = rows.filter((r) => {
-    const raw = asRecord(r.rawJson) ?? {}
-    return liveRawNeedsLiveReview(raw)
-  })
+): Array<T & { selectReason: LiveReviewSelectReason }> {
+  const scored: Array<T & { selectReason: LiveReviewSelectReason; priority: number }> = []
+  for (const row of rows) {
+    const reason = resolveLiveReviewSelectReason(row, opts)
+    if (!reason) continue
+    scored.push({
+      ...row,
+      selectReason: reason,
+      priority: reason === 'missing_or_failed' ? 2 : 1,
+    })
+  }
 
   const prefer = opts.preferSessionIds
-  needing.sort((a, b) => {
+  scored.sort((a, b) => {
     if (prefer && prefer.size > 0) {
       const pa = prefer.has(a.id) ? 1 : 0
       const pb = prefer.has(b.id) ? 1 : 0
       if (pa !== pb) return pb - pa
     }
+    if (a.priority !== b.priority) return b.priority - a.priority
     const ta = a.startTime?.getTime() ?? 0
     const tb = b.startTime?.getTime() ?? 0
     if (opts.mode === 'history_backfill') return ta - tb // oldest first
-    return tb - ta // recent first
+    // incremental / historical_refresh：同优先级下近期优先（缺详情也先啃近窗）
+    if (a.selectReason === 'missing_or_failed' && b.selectReason === 'missing_or_failed') {
+      // 缺详情：历史刷新窗内仍偏老优先，避免永远补不到旧的；增量窗短，用近期优先
+      if (opts.mode === 'historical_refresh') return ta - tb
+      return tb - ta
+    }
+    return tb - ta
   })
 
-  return needing.slice(0, Math.max(0, opts.maxSessions))
+  return scored.slice(0, Math.max(0, opts.maxSessions)).map((row) => {
+    const { priority: _priority, ...rest } = row
+    return rest as T & { selectReason: LiveReviewSelectReason }
+  })
+}
+
+/** 刷新类候选需重拉全部分部 */
+export function liveReviewPartsForSelectReason(
+  reason: LiveReviewSelectReason,
+  status: LiveReviewPartsStatus,
+): LiveReviewPartKey[] {
+  if (reason === 'cooldown_refresh' || reason === 'historical_refresh') {
+    return [...LIVE_REVIEW_PART_KEYS]
+  }
+  return liveReviewPartsNeedingFetch(status)
 }
 
 /** 全量扫描 remaining（禁止 take:N 截断后判完成） */
@@ -219,4 +374,41 @@ export function pickPrimaryCanonicalAnchorName(
   )
   const name = best.anchorName.trim()
   return name || null
+}
+
+export interface CanonicalSegmentMetric {
+  anchorName: string
+  clippedStartTime: string
+  clippedEndTime: string
+  clippedDurationMinutes: number
+  overlapMinutes: number
+}
+
+/** 主播直播时长：按 clippedDurationMinutes 加总，不可把整场全算给 primary */
+export function sumClippedLiveHoursForAnchor(
+  sessions: Array<{ canonicalSegments?: CanonicalSegmentMetric[] | null }>,
+  anchorName: string,
+): number {
+  let minutes = 0
+  for (const s of sessions) {
+    for (const seg of s.canonicalSegments ?? []) {
+      if (seg.anchorName.trim() === anchorName.trim()) {
+        minutes += Math.max(0, seg.clippedDurationMinutes || 0)
+      }
+    }
+  }
+  return minutes / 60
+}
+
+export function countSessionsTouchingAnchor(
+  sessions: Array<{ canonicalSegments?: CanonicalSegmentMetric[] | null }>,
+  anchorName: string,
+): number {
+  let n = 0
+  for (const s of sessions) {
+    if ((s.canonicalSegments ?? []).some((seg) => seg.anchorName.trim() === anchorName.trim())) {
+      n++
+    }
+  }
+  return n
 }

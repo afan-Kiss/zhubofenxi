@@ -15,7 +15,10 @@ import { REALTIME_METRIC_PRESERVE_KEYS } from './xhs-live-realtime-metric.servic
 import {
   asRecord,
   countLiveReviewRemainingMissing,
+  DEFAULT_DETAIL_COOLDOWN_MS,
+  DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
   liveRawNeedsLiveReview,
+  liveReviewPartsForSelectReason,
   liveReviewPartsFullyComplete,
   liveReviewPartsNeedingFetch,
   mergeLiveReviewDetailFields,
@@ -24,13 +27,14 @@ import {
   selectLiveReviewEnrichCandidates,
   type LiveReviewPartKey,
   type LiveReviewPartsStatus,
+  type LiveReviewSelectReason,
 } from './xhs-live-review-enrich.util'
 
 const SETTING_HISTORY_BACKFILL_DONE = 'liveReviewHistoryBackfillDone'
 const SETTING_LAST_HISTORICAL_REFRESH = 'liveReviewLastHistoricalRefreshAt'
 const HISTORY_BACKFILL_START = '2026-06-01'
-const HISTORICAL_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
-const DETAIL_COOLDOWN_MS = 6 * 60 * 60 * 1000
+const HISTORICAL_REFRESH_INTERVAL_MS = DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS
+const DETAIL_COOLDOWN_MS = DEFAULT_DETAIL_COOLDOWN_MS
 const DEFAULT_MAX_SESSIONS = 40
 const REQUEST_GAP_MS = 180
 /** 历史扫描分页，避免一次加载过大；完成判断必须扫完全部页 */
@@ -117,6 +121,11 @@ export {
   shiftMonthSameDay,
   unionMapKeys,
   pickPrimaryCanonicalAnchorName,
+  isCooldownRefreshDue,
+  isHistoricalRefreshDue,
+  resolveLiveReviewSelectReason,
+  DEFAULT_DETAIL_COOLDOWN_MS,
+  DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
 } from './xhs-live-review-enrich.util'
 
 /** @deprecated 使用 liveRawNeedsLiveReview；保留兼容 */
@@ -264,6 +273,7 @@ async function loadCandidateRows(params: {
     liveAccountName: string | null
     startTime: Date | null
     endTime: Date | null
+    selectReason?: LiveReviewSelectReason
   }>
 > {
   if (params.forceSessionIds && params.sessionIds?.length) {
@@ -293,6 +303,18 @@ async function loadCandidateRows(params: {
     endTime: true,
   } as const
 
+  const todayKey = formatDateKeyShanghai(new Date())
+  const yesterdayKey = formatDateKeyShanghai(new Date(Date.now() - 24 * 60 * 60 * 1000))
+  const selectOpts = {
+    mode: params.window.mode,
+    preferSessionIds: params.sessionIds?.length ? new Set(params.sessionIds) : undefined,
+    now: Date.now(),
+    todayKey,
+    yesterdayKey,
+    cooldownMs: DETAIL_COOLDOWN_MS,
+    refreshIntervalMs: HISTORICAL_REFRESH_INTERVAL_MS,
+  } as const
+
   // 历史补齐：按 startTime asc 分页拉取，直到凑满 maxSessions 个「缺详情」或扫完
   if (params.window.mode === 'history_backfill') {
     const collected: Array<{
@@ -303,6 +325,7 @@ async function loadCandidateRows(params: {
       liveAccountName: string | null
       startTime: Date | null
       endTime: Date | null
+      selectReason?: LiveReviewSelectReason
     }> = []
     let skip = 0
     const pageSize = Math.max(params.maxSessions * 3, 120)
@@ -319,9 +342,8 @@ async function loadCandidateRows(params: {
       })
       if (page.length === 0) break
       const batch = selectLiveReviewEnrichCandidates(page, {
-        mode: 'history_backfill',
+        ...selectOpts,
         maxSessions: params.maxSessions - collected.length,
-        preferSessionIds: params.sessionIds?.length ? new Set(params.sessionIds) : undefined,
       })
       collected.push(...batch)
       skip += page.length
@@ -330,7 +352,7 @@ async function loadCandidateRows(params: {
     return collected.slice(0, params.maxSessions)
   }
 
-  // 增量 / 历史刷新：窗口内全量候选（含仍在播），再按规则筛选
+  // 增量 / 历史刷新：窗口内场次交给选择器（含 full 到期刷新），禁止只留 missing
   const rows = await prisma.xhsRawLiveSession.findMany({
     where: {
       ...(params.liveAccountId ? { liveAccountId: params.liveAccountId } : {}),
@@ -343,17 +365,9 @@ async function loadCandidateRows(params: {
     select,
   })
 
-  const stillLiveOrNeeding = rows.filter((row) => {
-    const raw = asRecord(row.rawJson) ?? {}
-    const stillLive = row.endTime == null || row.endTime.getTime() > Date.now() - 2 * 60 * 60 * 1000
-    if (stillLive) return liveRawNeedsLiveReview(raw) || liveRawShouldFetchLiveReview(raw)
-    return liveRawNeedsLiveReview(raw)
-  })
-
-  return selectLiveReviewEnrichCandidates(stillLiveOrNeeding, {
-    mode: params.window.mode,
+  return selectLiveReviewEnrichCandidates(rows, {
+    ...selectOpts,
     maxSessions: params.maxSessions,
-    preferSessionIds: params.sessionIds?.length ? new Set(params.sessionIds) : undefined,
   })
 }
 
@@ -398,7 +412,10 @@ export async function enrichLiveSessionsWithLiveReview(params: {
     }
     const raw = asRecord(row.rawJson) ?? {}
     const prevStatus = readLiveReviewPartsStatus(raw)
-    const needing = liveReviewPartsNeedingFetch(prevStatus)
+    const selectReason: LiveReviewSelectReason =
+      row.selectReason ??
+      (liveRawNeedsLiveReview(raw) ? 'missing_or_failed' : 'cooldown_refresh')
+    const needing = liveReviewPartsForSelectReason(selectReason, prevStatus)
     if (needing.length === 0 && !params.forceSessionIds) {
       skipped++
       continue

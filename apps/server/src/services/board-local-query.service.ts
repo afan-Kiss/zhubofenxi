@@ -857,7 +857,10 @@ export async function executeBoardLocalQuery(params: {
     )
   }
 
-  const storedReconciliation = await getBoardReconciliationResult(params.preset)
+  const storedReconciliation =
+    params.preset === 'custom'
+      ? null
+      : await getBoardReconciliationResult(params.preset, startDate, endDate)
   const reconciliation = buildApiReconciliationPayload(storedReconciliation, boardCache)
 
   return {

@@ -8,6 +8,7 @@ import {
   getBusinessBoardCache,
   type BusinessBoardCacheEntry,
 } from './business-cache.service'
+import type { BusinessDataGenerationSnapshot } from './business-data-generation.service'
 import { getSetting, setSetting } from './system-setting.service'
 import { logInfo, logWarn } from '../utils/server-log'
 import { resolveBusinessRange, type BusinessRangePreset } from '../utils/business-range'
@@ -36,29 +37,120 @@ export interface BoardReconciliationResult {
 
 const SETTING_KEY = 'boardCrossPageReconciliation'
 const MONEY_EPS = 0.01
+const RATE_EPS = 0.0001
+
+/** 与 BusinessDataGenerationSnapshot 全部 10 个 generation 字段顺序一致 */
+const GENERATION_FIELDS = [
+  'ordersGeneration',
+  'liveSessionsGeneration',
+  'settlementsGeneration',
+  'workbenchGeneration',
+  'timeSearchGeneration',
+  'scheduleGeneration',
+  'manualOverrideGeneration',
+  'offlineDealGeneration',
+  'anchorMasterGeneration',
+  'qualityGeneration',
+] as const satisfies ReadonlyArray<keyof BusinessDataGenerationSnapshot>
 
 type StoredMap = Record<string, BoardReconciliationResult>
 
-function num(v: unknown): number {
-  const n = Number(v ?? 0)
-  return Number.isFinite(n) ? n : 0
+const REQUIRED_CORE_FIELDS = [
+  'totalGmv',
+  'orderCount',
+  'validSalesAmount',
+  'actualSignedAmount',
+  'signedOrderCount',
+  'awaitingSignCompletionAmount',
+  'awaitingSignCompletionOrderCount',
+  'returnAmount',
+  'returnCount',
+  'returnRate',
+  'qualityReturnCount',
+  'signRate',
+] as const
+
+type RequiredCoreField = (typeof REQUIRED_CORE_FIELDS)[number]
+
+const FIELD_ALIASES: Record<RequiredCoreField, string[]> = {
+  totalGmv: ['totalGmv', 'gmv'],
+  orderCount: ['orderCount', 'paidOrderCount'],
+  validSalesAmount: ['validSalesAmount', 'effectiveGmv'],
+  actualSignedAmount: ['actualSignedAmount'],
+  signedOrderCount: ['signedOrderCount', 'actualSignedCount'],
+  awaitingSignCompletionAmount: ['awaitingSignCompletionAmount'],
+  awaitingSignCompletionOrderCount: ['awaitingSignCompletionOrderCount'],
+  returnAmount: ['returnAmount'],
+  returnCount: ['returnCount'],
+  returnRate: ['returnRate'],
+  qualityReturnCount: ['qualityReturnCount'],
+  signRate: ['signRate'],
+}
+
+function hasOwn(obj: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(obj, key) && obj[key] !== undefined
+}
+
+function fieldPresent(obj: Record<string, unknown>, field: RequiredCoreField): boolean {
+  return FIELD_ALIASES[field].some((k) => hasOwn(obj, k))
+}
+
+function readPresentNumber(
+  obj: Record<string, unknown>,
+  keys: string[],
+): { present: boolean; value: number } {
+  for (const k of keys) {
+    if (!hasOwn(obj, k)) continue
+    const n = Number(obj[k])
+    return { present: true, value: Number.isFinite(n) ? n : Number.NaN }
+  }
+  return { present: false, value: 0 }
+}
+
+function readPresentRate(
+  obj: Record<string, unknown>,
+  keys: string[],
+): { present: boolean; value: number | null } {
+  for (const k of keys) {
+    if (!hasOwn(obj, k)) continue
+    const raw = obj[k]
+    if (raw === null) return { present: true, value: null }
+    const n = Number(raw)
+    if (!Number.isFinite(n)) return { present: true, value: null }
+    return { present: true, value: n }
+  }
+  return { present: false, value: null }
 }
 
 function round2(n: number): number {
   return Math.round(n * 100) / 100
 }
 
-function generationToken(entry: BusinessBoardCacheEntry): string | null {
+function rateFromCounts(numerator: number, denominator: number): number | null {
+  if (denominator <= 0) return null
+  return numerator / denominator
+}
+
+function ratesEqual(a: number | null, b: number | null): boolean {
+  if (a === null && b === null) return true
+  if (a === null || b === null) return false
+  return Math.abs(a - b) <= RATE_EPS
+}
+
+export function buildReconciliationStorageKey(
+  preset: string,
+  startDate: string,
+  endDate: string,
+): string {
+  return `${preset}|${startDate}|${endDate}`
+}
+
+export function generationToken(entry: BusinessBoardCacheEntry): string | null {
   const g = entry.dataGeneration
   if (!g) return null
-  return [
-    g.ordersGeneration,
-    g.workbenchGeneration,
-    g.timeSearchGeneration,
-    g.scheduleGeneration,
-    g.manualOverrideGeneration,
-    g.offlineDealGeneration,
-  ].join(':')
+  return GENERATION_FIELDS.map((f) => Number((g as BusinessDataGenerationSnapshot)[f] ?? 0)).join(
+    ':',
+  )
 }
 
 function moneyMismatch(
@@ -90,10 +182,46 @@ function countMismatch(
   }
 }
 
+function rateMismatch(
+  metric: string,
+  overviewValue: number | null,
+  anchorValue: number | null,
+): BoardReconciliationMismatch | null {
+  if (ratesEqual(overviewValue, anchorValue)) return null
+  const ov = overviewValue === null ? null : round2(overviewValue)
+  const an = anchorValue === null ? null : round2(anchorValue)
+  return {
+    metric,
+    overviewValue: ov,
+    anchorValue: an,
+    difference: ov === null || an === null ? null : round2(ov - an),
+  }
+}
+
+function missingFieldMismatch(scope: string, field: string): BoardReconciliationMismatch {
+  return {
+    metric: `missing_metric_field:${scope}.${field}`,
+    overviewValue: null,
+    anchorValue: null,
+    difference: null,
+  }
+}
+
 /** 累加全部主播行（含线下专属 + 未归属），禁止按前端可见过滤 */
-export function sumAnchorLeaderboardFacts(
-  leaderboard: Array<Record<string, unknown>>,
-): Record<string, number> {
+export function sumAnchorLeaderboardFacts(leaderboard: Array<Record<string, unknown>>): {
+  totalGmv: number
+  orderCount: number
+  validSalesAmount: number
+  actualSignedAmount: number
+  signedOrderCount: number
+  awaitingSignCompletionAmount: number
+  awaitingSignCompletionOrderCount: number
+  returnAmount: number
+  returnCount: number
+  qualityReturnCount: number
+  returnRate: number | null
+  signRate: number | null
+} {
   let totalGmv = 0
   let orderCount = 0
   let validSalesAmount = 0
@@ -106,16 +234,27 @@ export function sumAnchorLeaderboardFacts(
   let qualityReturnCount = 0
 
   for (const row of leaderboard) {
-    totalGmv += num(row.totalGmv ?? row.gmv)
-    orderCount += num(row.orderCount ?? row.paidOrderCount)
-    validSalesAmount += num(row.validSalesAmount ?? row.effectiveGmv)
-    actualSignedAmount += num(row.actualSignedAmount)
-    signedOrderCount += num(row.signedOrderCount ?? row.actualSignedCount)
-    awaitingSignCompletionAmount += num(row.awaitingSignCompletionAmount)
-    awaitingSignCompletionOrderCount += num(row.awaitingSignCompletionOrderCount)
-    returnAmount += num(row.returnAmount)
-    returnCount += num(row.returnCount)
-    qualityReturnCount += num(row.qualityReturnCount)
+    const gmv = readPresentNumber(row, ['totalGmv', 'gmv'])
+    const orders = readPresentNumber(row, ['orderCount', 'paidOrderCount'])
+    const valid = readPresentNumber(row, ['validSalesAmount', 'effectiveGmv'])
+    const signedAmt = readPresentNumber(row, ['actualSignedAmount'])
+    const signedCnt = readPresentNumber(row, ['signedOrderCount', 'actualSignedCount'])
+    const awaitingAmt = readPresentNumber(row, ['awaitingSignCompletionAmount'])
+    const awaitingCnt = readPresentNumber(row, ['awaitingSignCompletionOrderCount'])
+    const retAmt = readPresentNumber(row, ['returnAmount'])
+    const retCnt = readPresentNumber(row, ['returnCount'])
+    const quality = readPresentNumber(row, ['qualityReturnCount'])
+
+    totalGmv += gmv.present ? gmv.value : 0
+    orderCount += orders.present ? orders.value : 0
+    validSalesAmount += valid.present ? valid.value : 0
+    actualSignedAmount += signedAmt.present ? signedAmt.value : 0
+    signedOrderCount += signedCnt.present ? signedCnt.value : 0
+    awaitingSignCompletionAmount += awaitingAmt.present ? awaitingAmt.value : 0
+    awaitingSignCompletionOrderCount += awaitingCnt.present ? awaitingCnt.value : 0
+    returnAmount += retAmt.present ? retAmt.value : 0
+    returnCount += retCnt.present ? retCnt.value : 0
+    qualityReturnCount += quality.present ? quality.value : 0
   }
 
   return {
@@ -129,136 +268,207 @@ export function sumAnchorLeaderboardFacts(
     returnAmount: round2(returnAmount),
     returnCount,
     qualityReturnCount,
+    returnRate: rateFromCounts(returnCount, orderCount),
+    signRate: rateFromCounts(signedOrderCount, orderCount),
+  }
+}
+
+function collectMissingFields(
+  scope: string,
+  obj: Record<string, unknown>,
+  mismatches: BoardReconciliationMismatch[],
+): void {
+  for (const field of REQUIRED_CORE_FIELDS) {
+    if (!fieldPresent(obj, field)) {
+      mismatches.push(missingFieldMismatch(scope, field))
+    }
   }
 }
 
 export function reconcileBusinessBoardCacheEntry(
   entry: BusinessBoardCacheEntry,
 ): BoardReconciliationResult {
-  const overview = entry.summary ?? {}
-  const anchorSummary = entry.anchorPerformanceSummary ?? overview
+  const overview = (entry.summary ?? {}) as Record<string, unknown>
+  const anchorSummary = (entry.anchorPerformanceSummary ?? overview) as Record<string, unknown>
   const leaderboard = entry.enrichedAnchorLeaderboard ?? entry.anchorLeaderboard ?? []
   const summed = sumAnchorLeaderboardFacts(leaderboard)
   const mismatches: BoardReconciliationMismatch[] = []
 
+  collectMissingFields('overview', overview, mismatches)
+  collectMissingFields('anchorPerformanceSummary', anchorSummary, mismatches)
+
   const moneyKeys: Array<{
-    metric: string
-    overview: number
-    fromSummary: number
-    fromCards: number
+    metric: Exclude<
+      RequiredCoreField,
+      'orderCount' | 'signedOrderCount' | 'awaitingSignCompletionOrderCount' | 'returnCount' | 'qualityReturnCount' | 'returnRate' | 'signRate'
+    >
+    aliases: string[]
   }> = [
-    {
-      metric: 'totalGmv',
-      overview: num(overview.totalGmv ?? overview.gmv),
-      fromSummary: num(anchorSummary.totalGmv ?? anchorSummary.gmv),
-      fromCards: summed.totalGmv,
-    },
-    {
-      metric: 'validSalesAmount',
-      overview: num(overview.validSalesAmount ?? overview.effectiveGmv),
-      fromSummary: num(anchorSummary.validSalesAmount ?? anchorSummary.effectiveGmv),
-      fromCards: summed.validSalesAmount,
-    },
-    {
-      metric: 'actualSignedAmount',
-      overview: num(overview.actualSignedAmount),
-      fromSummary: num(anchorSummary.actualSignedAmount),
-      fromCards: summed.actualSignedAmount,
-    },
+    { metric: 'totalGmv', aliases: FIELD_ALIASES.totalGmv },
+    { metric: 'validSalesAmount', aliases: FIELD_ALIASES.validSalesAmount },
+    { metric: 'actualSignedAmount', aliases: FIELD_ALIASES.actualSignedAmount },
     {
       metric: 'awaitingSignCompletionAmount',
-      overview: num(overview.awaitingSignCompletionAmount),
-      fromSummary: num(anchorSummary.awaitingSignCompletionAmount),
-      fromCards: summed.awaitingSignCompletionAmount,
+      aliases: FIELD_ALIASES.awaitingSignCompletionAmount,
     },
-    {
-      metric: 'returnAmount',
-      overview: num(overview.returnAmount),
-      fromSummary: num(anchorSummary.returnAmount),
-      fromCards: summed.returnAmount,
-    },
+    { metric: 'returnAmount', aliases: FIELD_ALIASES.returnAmount },
   ]
 
   for (const row of moneyKeys) {
-    const m1 = moneyMismatch(
-      `${row.metric}(overview_vs_anchorSummary)`,
-      row.overview,
-      row.fromSummary,
-    )
+    const ov = readPresentNumber(overview, row.aliases)
+    const an = readPresentNumber(anchorSummary, row.aliases)
+    if (!ov.present || !an.present) continue
+    const m1 = moneyMismatch(`${row.metric}(overview_vs_anchorSummary)`, ov.value, an.value)
     if (m1) mismatches.push(m1)
-    const m2 = moneyMismatch(`${row.metric}(overview_vs_allAnchors)`, row.overview, row.fromCards)
+    const m2 = moneyMismatch(`${row.metric}(overview_vs_allAnchors)`, ov.value, summed[row.metric])
     if (m2) mismatches.push(m2)
   }
 
   const countKeys: Array<{
-    metric: string
-    overview: number
-    fromSummary: number
-    fromCards: number
+    metric: Extract<
+      RequiredCoreField,
+      | 'orderCount'
+      | 'signedOrderCount'
+      | 'awaitingSignCompletionOrderCount'
+      | 'returnCount'
+      | 'qualityReturnCount'
+    >
+    aliases: string[]
   }> = [
-    {
-      metric: 'orderCount',
-      overview: num(overview.orderCount ?? overview.paidOrderCount),
-      fromSummary: num(anchorSummary.orderCount ?? anchorSummary.paidOrderCount),
-      fromCards: summed.orderCount,
-    },
+    { metric: 'orderCount', aliases: FIELD_ALIASES.orderCount },
     {
       metric: 'signedOrderCount',
-      overview: num(overview.signedOrderCount ?? overview.actualSignedCount),
-      fromSummary: num(anchorSummary.signedOrderCount ?? anchorSummary.actualSignedCount),
-      fromCards: summed.signedOrderCount,
+      aliases: FIELD_ALIASES.signedOrderCount,
     },
     {
       metric: 'awaitingSignCompletionOrderCount',
-      overview: num(overview.awaitingSignCompletionOrderCount),
-      fromSummary: num(anchorSummary.awaitingSignCompletionOrderCount),
-      fromCards: summed.awaitingSignCompletionOrderCount,
+      aliases: FIELD_ALIASES.awaitingSignCompletionOrderCount,
     },
-    {
-      metric: 'returnCount',
-      overview: num(overview.returnCount),
-      fromSummary: num(anchorSummary.returnCount),
-      fromCards: summed.returnCount,
-    },
+    { metric: 'returnCount', aliases: FIELD_ALIASES.returnCount },
     {
       metric: 'qualityReturnCount',
-      overview: num(overview.qualityReturnCount),
-      fromSummary: num(anchorSummary.qualityReturnCount),
-      fromCards: summed.qualityReturnCount,
+      aliases: FIELD_ALIASES.qualityReturnCount,
     },
   ]
 
   for (const row of countKeys) {
-    const m1 = countMismatch(
-      `${row.metric}(overview_vs_anchorSummary)`,
-      row.overview,
-      row.fromSummary,
-    )
+    const ov = readPresentNumber(overview, row.aliases)
+    const an = readPresentNumber(anchorSummary, row.aliases)
+    if (!ov.present || !an.present) continue
+    const m1 = countMismatch(`${row.metric}(overview_vs_anchorSummary)`, ov.value, an.value)
     if (m1) mismatches.push(m1)
-    const m2 = countMismatch(`${row.metric}(overview_vs_allAnchors)`, row.overview, row.fromCards)
+    const m2 = countMismatch(
+      `${row.metric}(overview_vs_allAnchors)`,
+      ov.value,
+      summed[row.metric],
+    )
     if (m2) mismatches.push(m2)
   }
 
-  const ovOrders = num(overview.orderCount ?? overview.paidOrderCount)
-  const ovReturns = num(overview.returnCount)
-  const anOrders = num(anchorSummary.orderCount ?? anchorSummary.paidOrderCount)
-  const anReturns = num(anchorSummary.returnCount)
-  const ovRate = ovOrders > 0 ? ovReturns / ovOrders : 0
-  const anRate = anOrders > 0 ? anReturns / anOrders : 0
-  if (ovOrders !== anOrders || ovReturns !== anReturns) {
-    mismatches.push({
-      metric: 'returnRate(numerator_denominator)',
-      overviewValue: round2(ovRate),
-      anchorValue: round2(anRate),
-      difference: round2(ovRate - anRate),
-    })
+  const ovOrders = readPresentNumber(overview, FIELD_ALIASES.orderCount)
+  const ovReturns = readPresentNumber(overview, FIELD_ALIASES.returnCount)
+  const ovSigned = readPresentNumber(overview, FIELD_ALIASES.signedOrderCount)
+  const anOrders = readPresentNumber(anchorSummary, FIELD_ALIASES.orderCount)
+  const anReturns = readPresentNumber(anchorSummary, FIELD_ALIASES.returnCount)
+  const anSigned = readPresentNumber(anchorSummary, FIELD_ALIASES.signedOrderCount)
+
+  const ovReturnComputed =
+    ovOrders.present && ovReturns.present
+      ? rateFromCounts(ovReturns.value, ovOrders.value)
+      : null
+  const anReturnComputed =
+    anOrders.present && anReturns.present
+      ? rateFromCounts(anReturns.value, anOrders.value)
+      : null
+  const ovSignComputed =
+    ovOrders.present && ovSigned.present
+      ? rateFromCounts(ovSigned.value, ovOrders.value)
+      : null
+  const anSignComputed =
+    anOrders.present && anSigned.present
+      ? rateFromCounts(anSigned.value, anOrders.value)
+      : null
+
+  const ovReturnStored = readPresentRate(overview, FIELD_ALIASES.returnRate)
+  const anReturnStored = readPresentRate(anchorSummary, FIELD_ALIASES.returnRate)
+  const ovSignStored = readPresentRate(overview, FIELD_ALIASES.signRate)
+  const anSignStored = readPresentRate(anchorSummary, FIELD_ALIASES.signRate)
+
+  if (ovReturnStored.present) {
+    const m = rateMismatch(
+      'returnRate(overview_stored_vs_computed)',
+      ovReturnStored.value,
+      ovReturnComputed,
+    )
+    if (m) mismatches.push(m)
+  }
+  if (anReturnStored.present) {
+    const m = rateMismatch(
+      'returnRate(anchorSummary_stored_vs_computed)',
+      anReturnStored.value,
+      anReturnComputed,
+    )
+    if (m) mismatches.push(m)
+  }
+  if (ovSignStored.present) {
+    const m = rateMismatch(
+      'signRate(overview_stored_vs_computed)',
+      ovSignStored.value,
+      ovSignComputed,
+    )
+    if (m) mismatches.push(m)
+  }
+  if (anSignStored.present) {
+    const m = rateMismatch(
+      'signRate(anchorSummary_stored_vs_computed)',
+      anSignStored.value,
+      anSignComputed,
+    )
+    if (m) mismatches.push(m)
   }
 
-  const online = num(overview.onlineGmv)
-  const offline = num(overview.offlineGmv)
-  const total = num(overview.totalGmv ?? overview.gmv)
-  const splitDiff = moneyMismatch('totalGmv(online_plus_offline)', total, round2(online + offline))
-  if (splitDiff) mismatches.push(splitDiff)
+  if (ovReturnStored.present && anReturnStored.present) {
+    const m = rateMismatch(
+      'returnRate(overview_vs_anchorSummary)',
+      ovReturnStored.value,
+      anReturnStored.value,
+    )
+    if (m) mismatches.push(m)
+  }
+  if (ovSignStored.present && anSignStored.present) {
+    const m = rateMismatch(
+      'signRate(overview_vs_anchorSummary)',
+      ovSignStored.value,
+      anSignStored.value,
+    )
+    if (m) mismatches.push(m)
+  }
+
+  if (ovReturnStored.present) {
+    const m = rateMismatch(
+      'returnRate(overview_vs_allAnchors)',
+      ovReturnStored.value,
+      summed.returnRate,
+    )
+    if (m) mismatches.push(m)
+  }
+  if (ovSignStored.present) {
+    const m = rateMismatch('signRate(overview_vs_allAnchors)', ovSignStored.value, summed.signRate)
+    if (m) mismatches.push(m)
+  }
+
+  // online + offline 拆分：仅在字段齐全时校验，缺失不静默用 0 冒充
+  const online = readPresentNumber(overview, ['onlineGmv'])
+  const offline = readPresentNumber(overview, ['offlineGmv'])
+  const total = readPresentNumber(overview, FIELD_ALIASES.totalGmv)
+  if (online.present && offline.present && total.present) {
+    const splitDiff = moneyMismatch(
+      'totalGmv(online_plus_offline)',
+      total.value,
+      round2(online.value + offline.value),
+    )
+    if (splitDiff) mismatches.push(splitDiff)
+  }
 
   const checkedAt = new Date().toISOString()
   const generation = generationToken(entry)
@@ -306,15 +516,18 @@ export async function persistBoardReconciliationResult(
   result: BoardReconciliationResult,
 ): Promise<void> {
   const store = await readStore()
-  store[result.preset] = result
+  const key = buildReconciliationStorageKey(result.preset, result.startDate, result.endDate)
+  store[key] = result
   await setSetting(SETTING_KEY, JSON.stringify(store))
 }
 
 export async function getBoardReconciliationResult(
   preset: string,
+  startDate: string,
+  endDate: string,
 ): Promise<BoardReconciliationResult | null> {
   const store = await readStore()
-  return store[preset] ?? null
+  return store[buildReconciliationStorageKey(preset, startDate, endDate)] ?? null
 }
 
 export async function reconcileAndPersistCacheEntry(
@@ -358,23 +571,29 @@ export async function runBoardCrossPageReconciliationForPresets(
   return out
 }
 
-export function buildApiReconciliationPayload(
-  stored: BoardReconciliationResult | null,
-  entry: BusinessBoardCacheEntry | null,
-): BoardReconciliationResult {
-  if (stored) {
-    const gen = entry ? generationToken(entry) : stored.generation
-    if (gen && stored.generation && gen !== stored.generation) {
-      return {
-        ...stored,
-        status: 'pending',
-        generation: gen,
-        mismatches: [],
-        checkedAt: new Date().toISOString(),
-      }
-    }
-    return stored
-  }
+function entryFingerprint(entry: BusinessBoardCacheEntry): string {
+  return entry.attributionAlgorithmVersion || BUSINESS_CACHE_FINGERPRINT
+}
+
+function entryMetricsVersion(entry: BusinessBoardCacheEntry): string {
+  return String(entry.summary?.metricsVersion ?? BUSINESS_METRICS_VERSION)
+}
+
+export function isStoredReconciliationCompatible(
+  stored: BoardReconciliationResult,
+  entry: BusinessBoardCacheEntry,
+): boolean {
+  if (stored.preset !== entry.preset) return false
+  if (stored.startDate !== entry.startDate) return false
+  if (stored.endDate !== entry.endDate) return false
+  const gen = generationToken(entry)
+  if (!gen || !stored.generation || gen !== stored.generation) return false
+  if (stored.businessCacheFingerprint !== entryFingerprint(entry)) return false
+  if (stored.businessMetricsVersion !== entryMetricsVersion(entry)) return false
+  return true
+}
+
+function pendingPayload(entry: BusinessBoardCacheEntry | null): BoardReconciliationResult {
   return {
     status: 'pending',
     checkedAt: new Date().toISOString(),
@@ -382,9 +601,31 @@ export function buildApiReconciliationPayload(
     preset: entry?.preset ?? '',
     startDate: entry?.startDate ?? '',
     endDate: entry?.endDate ?? '',
-    businessMetricsVersion: BUSINESS_METRICS_VERSION,
-    businessCacheFingerprint: BUSINESS_CACHE_FINGERPRINT,
+    businessMetricsVersion: entry ? entryMetricsVersion(entry) : BUSINESS_METRICS_VERSION,
+    businessCacheFingerprint: entry ? entryFingerprint(entry) : BUSINESS_CACHE_FINGERPRINT,
     cacheBuiltAt: entry?.lastBuiltAt ?? null,
     mismatches: [],
   }
+}
+
+/**
+ * API 返回 reconciliation：
+ * - custom：对当前 entry 只读 reconcile，禁止复用其它 custom 范围缓存
+ * - 其它：仅当 stored 与当前 entry 在 preset/日期/完整 generation/指纹/指标版本全部一致时才返回 stored
+ */
+export function buildApiReconciliationPayload(
+  stored: BoardReconciliationResult | null,
+  entry: BusinessBoardCacheEntry | null,
+): BoardReconciliationResult {
+  if (!entry) return pendingPayload(null)
+
+  if (entry.preset === 'custom') {
+    return reconcileBusinessBoardCacheEntry(entry)
+  }
+
+  if (stored && isStoredReconciliationCompatible(stored, entry)) {
+    return stored
+  }
+
+  return pendingPayload(entry)
 }

@@ -106,9 +106,12 @@ function baseRows() {
     returnAmount: 5,
     returnCount: 1,
     qualityReturnCount: 0,
+    returnRate: 0.5,
+    signRate: 0.5,
   }
   const offline = {
     anchorName: '逸凡',
+    systemKey: 'YIFAN_MANUAL',
     totalGmv: 30,
     orderCount: 1,
     validSalesAmount: 30,
@@ -119,6 +122,8 @@ function baseRows() {
     returnAmount: 0,
     returnCount: 0,
     qualityReturnCount: 0,
+    returnRate: 0,
+    signRate: 1,
     offlineOnly: true,
   }
   const unassigned = {
@@ -133,6 +138,8 @@ function baseRows() {
     returnAmount: 0,
     returnCount: 0,
     qualityReturnCount: 0,
+    returnRate: 0,
+    signRate: 0,
   }
   const refundHeavy = {
     anchorName: '小白',
@@ -146,6 +153,8 @@ function baseRows() {
     returnAmount: 50,
     returnCount: 1,
     qualityReturnCount: 1,
+    returnRate: 1,
+    signRate: 0,
   }
   return [row, offline, unassigned, refundHeavy]
 }
@@ -231,6 +240,243 @@ function testReconcilePassAndFail(): void {
   assert.equal(summed.returnRate, 0.4)
   assert.equal(summed.signRate, 0.4)
   console.log('  [unit] reconcile pass/fail + all-anchors sum OK')
+}
+
+function testAnchorRowIntegrityGate(): void {
+  const summary = baseSummary()
+  const rows = baseRows()
+
+  // 正常多主播 PASS
+  const ok = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary,
+      anchorPerformanceSummary: summary,
+      enrichedAnchorLeaderboard: rows,
+    }),
+  )
+  assert.equal(ok.status, 'pass', JSON.stringify(ok.mismatches))
+  console.log('  [unit] normal multi-anchor rows PASS')
+
+  // 缺 actualSignedAmount（真实值为 0）仍 FAIL
+  const missingSigned = rows.map((r) => {
+    if (r.anchorName !== '小白') return { ...r }
+    const copy = { ...r, actualSignedAmount: 0 }
+    delete (copy as { actualSignedAmount?: number }).actualSignedAmount
+    return copy
+  })
+  const missSignedRes = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary,
+      anchorPerformanceSummary: summary,
+      enrichedAnchorLeaderboard: missingSigned,
+    }),
+  )
+  assert.equal(missSignedRes.status, 'failed')
+  assert.ok(
+    missSignedRes.mismatches.some(
+      (m) => m.metric === 'missing_anchor_metric_field:小白.actualSignedAmount',
+    ),
+    JSON.stringify(missSignedRes.mismatches),
+  )
+  console.log('  [unit] missing actualSignedAmount (even if 0) => FAIL')
+
+  // 缺 returnRate（飞云）
+  const emptySummary = {
+    totalGmv: 0,
+    onlineGmv: 0,
+    offlineGmv: 0,
+    validSalesAmount: 0,
+    orderCount: 0,
+    actualSignedAmount: 0,
+    signedOrderCount: 0,
+    awaitingSignCompletionAmount: 0,
+    awaitingSignCompletionOrderCount: 0,
+    returnAmount: 0,
+    returnCount: 0,
+    qualityReturnCount: 0,
+    returnRate: null,
+    signRate: null,
+    metricsVersion: BUSINESS_METRICS_VERSION,
+  }
+  const feiyunMissingReturnRate = {
+    anchorName: '飞云',
+    totalGmv: 0,
+    orderCount: 0,
+    validSalesAmount: 0,
+    actualSignedAmount: 0,
+    signedOrderCount: 0,
+    awaitingSignCompletionAmount: 0,
+    awaitingSignCompletionOrderCount: 0,
+    returnAmount: 0,
+    returnCount: 0,
+    qualityReturnCount: 0,
+    signRate: null as number | null,
+  }
+  const missReturnRateRes = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary: emptySummary,
+      anchorPerformanceSummary: emptySummary,
+      enrichedAnchorLeaderboard: [feiyunMissingReturnRate],
+    }),
+  )
+  assert.equal(missReturnRateRes.status, 'failed')
+  assert.ok(
+    missReturnRateRes.mismatches.some(
+      (m) => m.metric === 'missing_anchor_metric_field:飞云.returnRate',
+    ),
+    JSON.stringify(missReturnRateRes.mismatches),
+  )
+  console.log('  [unit] missing returnRate => FAIL')
+
+  // 主播 returnRate 与自身退款单数不符
+  const badReturnRate = rows.map((r) =>
+    r.anchorName === '小白' ? { ...r, returnRate: 0.2 } : { ...r },
+  )
+  const badReturnRes = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary,
+      anchorPerformanceSummary: summary,
+      enrichedAnchorLeaderboard: badReturnRate,
+    }),
+  )
+  assert.equal(badReturnRes.status, 'failed')
+  assert.ok(
+    badReturnRes.mismatches.some((m) => m.metric === 'anchor_rate_mismatch:小白.returnRate'),
+    JSON.stringify(badReturnRes.mismatches),
+  )
+  console.log('  [unit] wrong anchor returnRate => FAIL')
+
+  // 主播 signRate 与自身签收单数不符
+  const withFeiyun = [
+    ...rows.filter((r) => r.anchorName !== '逸凡'),
+    {
+      anchorName: '飞云',
+      totalGmv: 30,
+      orderCount: 1,
+      validSalesAmount: 30,
+      actualSignedAmount: 30,
+      signedOrderCount: 1,
+      awaitingSignCompletionAmount: 0,
+      awaitingSignCompletionOrderCount: 0,
+      returnAmount: 0,
+      returnCount: 0,
+      qualityReturnCount: 0,
+      returnRate: 0,
+      signRate: 0.1,
+    },
+  ]
+  const badSignSummary = {
+    ...summary,
+    offlineGmv: 0,
+    onlineGmv: 200,
+  }
+  const badSignRes = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary: badSignSummary,
+      anchorPerformanceSummary: badSignSummary,
+      enrichedAnchorLeaderboard: withFeiyun,
+    }),
+  )
+  assert.equal(badSignRes.status, 'failed')
+  assert.ok(
+    badSignRes.mismatches.some((m) => m.metric === 'anchor_rate_mismatch:飞云.signRate'),
+    JSON.stringify(badSignRes.mismatches),
+  )
+  console.log('  [unit] wrong anchor signRate => FAIL')
+
+  // orderCount=0 rate=0 FAIL；rate=null PASS
+  const zeroRate0 = {
+    anchorName: '空卡',
+    totalGmv: 0,
+    orderCount: 0,
+    validSalesAmount: 0,
+    actualSignedAmount: 0,
+    signedOrderCount: 0,
+    awaitingSignCompletionAmount: 0,
+    awaitingSignCompletionOrderCount: 0,
+    returnAmount: 0,
+    returnCount: 0,
+    qualityReturnCount: 0,
+    returnRate: 0,
+    signRate: 0,
+  }
+  const zeroSummary = emptySummary
+  const zeroFail = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary: zeroSummary,
+      anchorPerformanceSummary: zeroSummary,
+      enrichedAnchorLeaderboard: [zeroRate0],
+    }),
+  )
+  assert.equal(zeroFail.status, 'failed')
+  assert.ok(zeroFail.mismatches.some((m) => m.metric.includes('anchor_rate_mismatch:空卡')))
+  console.log('  [unit] orderCount=0 rate=0 => FAIL')
+
+  const zeroOk = { ...zeroRate0, returnRate: null, signRate: null }
+  const zeroPass = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary: zeroSummary,
+      anchorPerformanceSummary: zeroSummary,
+      enrichedAnchorLeaderboard: [zeroOk],
+    }),
+  )
+  assert.equal(zeroPass.status, 'pass', JSON.stringify(zeroPass.mismatches))
+  console.log('  [unit] orderCount=0 rate=null => PASS')
+
+  // 重复主播行 FAIL（不自动合并）
+  const dup = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary,
+      anchorPerformanceSummary: summary,
+      enrichedAnchorLeaderboard: [...rows, { ...rows[0]! }],
+    }),
+  )
+  assert.equal(dup.status, 'failed')
+  assert.ok(
+    dup.mismatches.some((m) => m.metric.startsWith('duplicate_anchor_row:')),
+    JSON.stringify(dup.mismatches),
+  )
+  console.log('  [unit] duplicate anchor row => FAIL')
+
+  // 负 GMV / NaN / rate>1 FAIL
+  const neg = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary: zeroSummary,
+      anchorPerformanceSummary: zeroSummary,
+      enrichedAnchorLeaderboard: [{ ...zeroOk, totalGmv: -1, gmv: -1 }],
+    }),
+  )
+  assert.equal(neg.status, 'failed')
+  assert.ok(neg.mismatches.some((m) => m.metric.includes('invalid_anchor_metric:空卡.totalGmv')))
+
+  const nanRow = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary: zeroSummary,
+      anchorPerformanceSummary: zeroSummary,
+      enrichedAnchorLeaderboard: [{ ...zeroOk, orderCount: Number.NaN }],
+    }),
+  )
+  assert.equal(nanRow.status, 'failed')
+  assert.ok(nanRow.mismatches.some((m) => m.metric.includes('invalid_anchor_metric:空卡.orderCount')))
+
+  const rateOver = reconcileBusinessBoardCacheEntry(
+    makeEntry({
+      summary,
+      anchorPerformanceSummary: summary,
+      enrichedAnchorLeaderboard: rows.map((r) =>
+        r.anchorName === '小白' ? { ...r, returnRate: 1.5 } : { ...r },
+      ),
+    }),
+  )
+  assert.equal(rateOver.status, 'failed')
+  assert.ok(
+    rateOver.mismatches.some(
+      (m) =>
+        m.metric === 'invalid_anchor_metric:小白.returnRate' ||
+        m.metric === 'anchor_rate_mismatch:小白.returnRate',
+    ),
+  )
+  console.log('  [unit] negative GMV / NaN / rate>1 => FAIL')
 }
 
 function testMissingMetricFieldsFail(): void {
@@ -547,6 +793,7 @@ async function main(): Promise<void> {
   testStableSnapshotNeverOverrides()
   testGenerationTokenIncludesAllTenFields()
   testReconcilePassAndFail()
+  testAnchorRowIntegrityGate()
   testMissingMetricFieldsFail()
   testWrongReturnRateAndSignRateFail()
   testStoredKeyAndCompatibilityPending()

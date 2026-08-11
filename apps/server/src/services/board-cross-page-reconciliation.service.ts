@@ -207,6 +207,171 @@ function missingFieldMismatch(scope: string, field: string): BoardReconciliation
   }
 }
 
+function simpleMismatch(
+  metric: string,
+  overviewValue: number | null = null,
+  anchorValue: number | null = null,
+): BoardReconciliationMismatch {
+  return {
+    metric,
+    overviewValue,
+    anchorValue,
+    difference:
+      overviewValue === null || anchorValue === null
+        ? null
+        : round2(overviewValue - anchorValue),
+  }
+}
+
+function resolveAnchorDisplayName(row: Record<string, unknown>, index: number): string {
+  const name = String(row.anchorName ?? '').trim()
+  if (name) return name
+  const systemKey = String(row.systemKey ?? '').trim()
+  if (systemKey) return systemKey
+  const anchorId = String(row.anchorId ?? '').trim()
+  if (anchorId) return anchorId
+  return `row#${index}`
+}
+
+/** systemKey > anchorId > anchorName */
+export function resolveAnchorRowIdentity(row: Record<string, unknown>): string {
+  const systemKey = String(row.systemKey ?? '').trim()
+  if (systemKey) return `systemKey:${systemKey}`
+  const anchorId = String(row.anchorId ?? '').trim()
+  if (anchorId) return `anchorId:${anchorId}`
+  const name = String(row.anchorName ?? '').trim() || '未归属'
+  return `anchorName:${name}`
+}
+
+const MONEY_ROW_FIELDS: RequiredCoreField[] = [
+  'totalGmv',
+  'validSalesAmount',
+  'actualSignedAmount',
+  'awaitingSignCompletionAmount',
+  'returnAmount',
+]
+
+const COUNT_ROW_FIELDS: RequiredCoreField[] = [
+  'orderCount',
+  'signedOrderCount',
+  'awaitingSignCompletionOrderCount',
+  'returnCount',
+  'qualityReturnCount',
+]
+
+/**
+ * 主播业绩每一行：字段齐全、数值合法、比例自洽、无重复稳定身份。
+ * 发现重复只 FAIL，不自动合并。
+ */
+export function validateAnchorLeaderboardRows(
+  leaderboard: Array<Record<string, unknown>>,
+): BoardReconciliationMismatch[] {
+  const mismatches: BoardReconciliationMismatch[] = []
+  const seen = new Map<string, number>()
+
+  for (let i = 0; i < leaderboard.length; i++) {
+    const row = leaderboard[i]!
+    const label = resolveAnchorDisplayName(row, i)
+
+    if (!hasOwn(row, 'anchorName') || !String(row.anchorName ?? '').trim()) {
+      mismatches.push(
+        simpleMismatch(`missing_anchor_metric_field:${label}.anchorName`),
+      )
+    }
+
+    for (const field of REQUIRED_CORE_FIELDS) {
+      if (!fieldPresent(row, field)) {
+        mismatches.push(
+          simpleMismatch(`missing_anchor_metric_field:${label}.${field}`),
+        )
+      }
+    }
+
+    for (const field of MONEY_ROW_FIELDS) {
+      const read = readPresentNumber(row, FIELD_ALIASES[field])
+      if (!read.present) continue
+      if (!Number.isFinite(read.value) || read.value < 0) {
+        mismatches.push(
+          simpleMismatch(
+            `invalid_anchor_metric:${label}.${field}`,
+            null,
+            Number.isFinite(read.value) ? read.value : null,
+          ),
+        )
+      }
+    }
+
+    for (const field of COUNT_ROW_FIELDS) {
+      const read = readPresentNumber(row, FIELD_ALIASES[field])
+      if (!read.present) continue
+      if (!Number.isFinite(read.value) || !Number.isInteger(read.value) || read.value < 0) {
+        mismatches.push(
+          simpleMismatch(
+            `invalid_anchor_metric:${label}.${field}`,
+            null,
+            Number.isFinite(read.value) ? read.value : null,
+          ),
+        )
+      }
+    }
+
+    for (const rateField of ['returnRate', 'signRate'] as const) {
+      if (!fieldPresent(row, rateField)) continue
+      const rawKey = FIELD_ALIASES[rateField].find((k) => hasOwn(row, k))!
+      const raw = row[rawKey]
+      if (raw === null) continue
+      const n = Number(raw)
+      if (!Number.isFinite(n) || n < 0 || n > 1) {
+        mismatches.push(
+          simpleMismatch(
+            `invalid_anchor_metric:${label}.${rateField}`,
+            null,
+            Number.isFinite(n) ? n : null,
+          ),
+        )
+      }
+    }
+
+    const orders = readPresentNumber(row, FIELD_ALIASES.orderCount)
+    const returns = readPresentNumber(row, FIELD_ALIASES.returnCount)
+    const signed = readPresentNumber(row, FIELD_ALIASES.signedOrderCount)
+    const returnRate = readPresentRate(row, FIELD_ALIASES.returnRate)
+    const signRate = readPresentRate(row, FIELD_ALIASES.signRate)
+
+    if (orders.present && returns.present && returnRate.present) {
+      const expected = rateFromCounts(returns.value, orders.value)
+      if (!ratesEqual(returnRate.value, expected)) {
+        mismatches.push(
+          rateMismatch(
+            `anchor_rate_mismatch:${label}.returnRate`,
+            returnRate.value,
+            expected,
+          )!,
+        )
+      }
+    }
+
+    if (orders.present && signed.present && signRate.present) {
+      const expected = rateFromCounts(signed.value, orders.value)
+      if (!ratesEqual(signRate.value, expected)) {
+        mismatches.push(
+          rateMismatch(`anchor_rate_mismatch:${label}.signRate`, signRate.value, expected)!,
+        )
+      }
+    }
+
+    const identity = resolveAnchorRowIdentity(row)
+    const prev = seen.get(identity)
+    if (prev !== undefined) {
+      mismatches.push(simpleMismatch(`duplicate_anchor_row:${identity}`))
+    } else {
+      seen.set(identity, i)
+    }
+  }
+
+  return mismatches
+}
+
 /** 累加全部主播行（含线下专属 + 未归属），禁止按前端可见过滤 */
 export function sumAnchorLeaderboardFacts(leaderboard: Array<Record<string, unknown>>): {
   totalGmv: number
@@ -296,6 +461,7 @@ export function reconcileBusinessBoardCacheEntry(
 
   collectMissingFields('overview', overview, mismatches)
   collectMissingFields('anchorPerformanceSummary', anchorSummary, mismatches)
+  mismatches.push(...validateAnchorLeaderboardRows(leaderboard))
 
   const moneyKeys: Array<{
     metric: Exclude<

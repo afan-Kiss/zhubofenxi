@@ -14,10 +14,12 @@ import { requestXhsApi } from './xhs-api-client.service'
 import { REALTIME_METRIC_PRESERVE_KEYS } from './xhs-live-realtime-metric.service'
 import {
   asRecord,
+  countHistoricalRefreshDue,
   countLiveReviewRemainingMissing,
   DEFAULT_DETAIL_COOLDOWN_MS,
   DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
   liveRawNeedsLiveReview,
+  liveReviewHistoricalRefreshSettingKey,
   liveReviewPartsForSelectReason,
   liveReviewPartsFullyComplete,
   liveReviewPartsNeedingFetch,
@@ -25,13 +27,15 @@ import {
   mergeLiveReviewPartsStatus,
   readLiveReviewPartsStatus,
   selectLiveReviewEnrichCandidates,
+  shouldMarkAccountHistoricalRefreshDone,
   type LiveReviewPartKey,
   type LiveReviewPartsStatus,
   type LiveReviewSelectReason,
 } from './xhs-live-review-enrich.util'
 
 const SETTING_HISTORY_BACKFILL_DONE = 'liveReviewHistoryBackfillDone'
-const SETTING_LAST_HISTORICAL_REFRESH = 'liveReviewLastHistoricalRefreshAt'
+/** @deprecated 仅兼容旧全局键；新逻辑按账号写入 liveReviewLastHistoricalRefreshAt:<id> */
+const SETTING_LAST_HISTORICAL_REFRESH_LEGACY = 'liveReviewLastHistoricalRefreshAt'
 const HISTORY_BACKFILL_START = '2026-06-01'
 const HISTORICAL_REFRESH_INTERVAL_MS = DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS
 const DETAIL_COOLDOWN_MS = DEFAULT_DETAIL_COOLDOWN_MS
@@ -65,6 +69,7 @@ export interface EnrichLiveReviewResult {
   warnings: string[]
   mode: 'incremental' | 'history_backfill' | 'historical_refresh'
   remainingMissingCount?: number
+  remainingRefreshDueCount?: number
 }
 
 function sleep(ms: number) {
@@ -117,6 +122,7 @@ export {
   liveReviewPartsFullyComplete,
   selectLiveReviewEnrichCandidates,
   countLiveReviewRemainingMissing,
+  countHistoricalRefreshDue,
   mergeLiveReviewDetailFields,
   shiftMonthSameDay,
   unionMapKeys,
@@ -124,6 +130,9 @@ export {
   isCooldownRefreshDue,
   isHistoricalRefreshDue,
   resolveLiveReviewSelectReason,
+  liveReviewHistoricalRefreshSettingKey,
+  shouldMarkAccountHistoricalRefreshDone,
+  resolveHistoricalRefreshModeForAccount,
   DEFAULT_DETAIL_COOLDOWN_MS,
   DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
 } from './xhs-live-review-enrich.util'
@@ -162,12 +171,15 @@ export function mergePreserveLiveReviewFields(
   return out
 }
 
-async function resolveEnrichWindow(now = new Date()): Promise<{
+async function resolveEnrichWindow(params: {
+  liveAccountId?: string
+  now?: Date
+}): Promise<{
   startDate: string
   endDate: string
   mode: EnrichLiveReviewResult['mode']
-  markHistoricalRefresh?: boolean
 }> {
+  const now = params.now ?? new Date()
   const today = formatDateKeyShanghai(now)
   const backfillDone = (await getSetting(SETTING_HISTORY_BACKFILL_DONE)) === '1'
   if (!backfillDone) {
@@ -177,14 +189,22 @@ async function resolveEnrichWindow(now = new Date()): Promise<{
       mode: 'history_backfill',
     }
   }
-  const lastRefresh = parseIsoMs(await getSetting(SETTING_LAST_HISTORICAL_REFRESH))
+
+  const accountId = params.liveAccountId?.trim()
+  let lastRefresh: number | null = null
+  if (accountId) {
+    lastRefresh = parseIsoMs(await getSetting(liveReviewHistoricalRefreshSettingKey(accountId)))
+  } else {
+    // 无账号时仅兼容读旧全局键，避免误伤；正常同步路径必带 liveAccountId
+    lastRefresh = parseIsoMs(await getSetting(SETTING_LAST_HISTORICAL_REFRESH_LEGACY))
+  }
+
   if (lastRefresh == null || now.getTime() - lastRefresh >= HISTORICAL_REFRESH_INTERVAL_MS) {
     const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
     return {
       startDate: formatDateKeyShanghai(start),
       endDate: today,
       mode: 'historical_refresh',
-      markHistoricalRefresh: true,
     }
   }
   const y = new Date(now.getTime() - 24 * 60 * 60 * 1000)
@@ -193,6 +213,40 @@ async function resolveEnrichWindow(now = new Date()): Promise<{
     endDate: today,
     mode: 'incremental',
   }
+}
+
+/** 分页统计该账号 30 天窗内仍 due 的 historical_refresh 场次 */
+export async function countAccountHistoricalRefreshDue(params: {
+  startDate: string
+  endDate: string
+  liveAccountId: string
+  nowMs?: number
+}): Promise<number> {
+  const startMs = startOfDayMsShanghai(params.startDate)
+  const endMs = endOfDayMsShanghai(params.endDate) + 1
+  let remaining = 0
+  let cursor: string | undefined
+  const nowMs = params.nowMs ?? Date.now()
+  for (;;) {
+    const page = await prisma.xhsRawLiveSession.findMany({
+      where: {
+        liveAccountId: params.liveAccountId,
+        startTime: { gte: new Date(startMs), lt: new Date(endMs) },
+        ...(cursor ? { id: { gt: cursor } } : {}),
+      },
+      orderBy: { id: 'asc' },
+      take: HISTORY_SCAN_PAGE,
+      select: { id: true, startTime: true, endTime: true, rawJson: true },
+    })
+    if (page.length === 0) break
+    remaining += countHistoricalRefreshDue(page, {
+      now: nowMs,
+      refreshIntervalMs: HISTORICAL_REFRESH_INTERVAL_MS,
+    })
+    cursor = page[page.length - 1]!.id
+    if (page.length < HISTORY_SCAN_PAGE) break
+  }
+  return remaining
 }
 
 async function fetchAllNotes(
@@ -389,7 +443,7 @@ export async function enrichLiveSessionsWithLiveReview(params: {
   let notePages = 0
   const maxSessions = params.maxSessions ?? DEFAULT_MAX_SESSIONS
 
-  const window = await resolveEnrichWindow()
+  const window = await resolveEnrichWindow({ liveAccountId: params.liveAccountId })
   const rows = await loadCandidateRows({
     window,
     liveAccountId: params.liveAccountId,
@@ -400,7 +454,7 @@ export async function enrichLiveSessionsWithLiveReview(params: {
 
   logInfo(
     '直播回放补齐',
-    `mode=${window.mode} window=${window.startDate}~${window.endDate} candidates=${rows.length} max=${maxSessions}`,
+    `mode=${window.mode} account=${params.liveAccountId ?? '-'} window=${window.startDate}~${window.endDate} candidates=${rows.length} max=${maxSessions}`,
   )
 
   for (const row of rows) {
@@ -654,6 +708,7 @@ export async function enrichLiveSessionsWithLiveReview(params: {
   }
 
   let remainingMissingCount: number | undefined
+  let remainingRefreshDueCount: number | undefined
   if (window.mode === 'history_backfill' && !params.forceSessionIds) {
     // 全局全量扫描；禁止 take:800 截断后误判完成
     remainingMissingCount = await countHistoryLiveReviewRemainingMissing({
@@ -662,10 +717,29 @@ export async function enrichLiveSessionsWithLiveReview(params: {
     })
     if (remainingMissingCount === 0) {
       await setSetting(SETTING_HISTORY_BACKFILL_DONE, '1')
-      await setSetting(SETTING_LAST_HISTORICAL_REFRESH, new Date().toISOString())
+      // 不写全局/账号 historical refresh 时间：各账号随后独立进入 30 天刷新
     }
-  } else if (window.markHistoricalRefresh && !params.forceSessionIds) {
-    await setSetting(SETTING_LAST_HISTORICAL_REFRESH, new Date().toISOString())
+  } else if (
+    window.mode === 'historical_refresh' &&
+    !params.forceSessionIds &&
+    params.liveAccountId?.trim()
+  ) {
+    const accountId = params.liveAccountId.trim()
+    remainingRefreshDueCount = await countAccountHistoricalRefreshDue({
+      startDate: window.startDate,
+      endDate: window.endDate,
+      liveAccountId: accountId,
+    })
+    if (shouldMarkAccountHistoricalRefreshDone(remainingRefreshDueCount)) {
+      await setSetting(
+        liveReviewHistoricalRefreshSettingKey(accountId),
+        new Date().toISOString(),
+      )
+    } else {
+      warnings.push(
+        `账号 ${accountId} 历史刷新未完成，剩余 due=${remainingRefreshDueCount}，下轮继续`,
+      )
+    }
   }
 
   return {
@@ -678,5 +752,6 @@ export async function enrichLiveSessionsWithLiveReview(params: {
     warnings: warnings.slice(0, 20),
     mode: window.mode,
     remainingMissingCount,
+    remainingRefreshDueCount,
   }
 }

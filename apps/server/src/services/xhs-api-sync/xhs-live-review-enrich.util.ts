@@ -151,6 +151,57 @@ export const DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000
 /** 刚结束：下播后仍视为近期场次（与增量刷新窗口一致） */
 export const RECENTLY_ENDED_MS = 2 * 60 * 60 * 1000
 
+/** 按直播账号独立记录历史刷新完成时间 */
+export function liveReviewHistoricalRefreshSettingKey(liveAccountId: string): string {
+  const id = liveAccountId.trim()
+  if (!id) throw new Error('liveAccountId required for historical refresh setting key')
+  return `liveReviewLastHistoricalRefreshAt:${id}`
+}
+
+/** 是否应写入该账号的 lastHistoricalRefreshAt（必须 remainingDue === 0） */
+export function shouldMarkAccountHistoricalRefreshDone(remainingRefreshDueCount: number): boolean {
+  return remainingRefreshDueCount === 0
+}
+
+/**
+ * 统计 historical_refresh 模式下仍需处理的场次（missing/failed 或 full 到期刷新）
+ */
+export function countHistoricalRefreshDue(
+  rows: LiveReviewCandidateRow[],
+  opts: { now?: number; refreshIntervalMs?: number },
+): number {
+  let n = 0
+  for (const row of rows) {
+    const reason = resolveLiveReviewSelectReason(row, {
+      mode: 'historical_refresh',
+      now: opts.now,
+      refreshIntervalMs: opts.refreshIntervalMs ?? DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
+    })
+    if (reason) n++
+  }
+  return n
+}
+
+/**
+ * 模拟「账号 A 完成后账号 B 仍可进 historical_refresh」的纯函数判定
+ */
+export function resolveHistoricalRefreshModeForAccount(params: {
+  liveAccountId: string
+  settings: Record<string, string | null | undefined>
+  nowMs: number
+  refreshIntervalMs?: number
+}): 'historical_refresh' | 'incremental' {
+  const key = liveReviewHistoricalRefreshSettingKey(params.liveAccountId)
+  const raw = params.settings[key]
+  const lastMs =
+    typeof raw === 'string' && raw.trim() ? Date.parse(raw) : Number.NaN
+  const interval = params.refreshIntervalMs ?? DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS
+  if (!Number.isFinite(lastMs) || params.nowMs - lastMs >= interval) {
+    return 'historical_refresh'
+  }
+  return 'incremental'
+}
+
 export function parseLiveReviewSyncedAtMs(raw: Record<string, unknown>): number | null {
   const full = raw._liveReviewFullySyncedAt
   const synced = raw._liveReviewSyncedAt

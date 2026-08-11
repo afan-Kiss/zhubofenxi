@@ -5,8 +5,10 @@
  */
 import assert from 'node:assert/strict'
 import {
-  countLiveReviewRemainingMissing,
-  countSessionsTouchingAnchor,
+  liveReviewHistoricalRefreshSettingKey,
+  shouldMarkAccountHistoricalRefreshDone,
+  resolveHistoricalRefreshModeForAccount,
+  countHistoricalRefreshDue,
   DEFAULT_DETAIL_COOLDOWN_MS,
   DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
   isCooldownRefreshDue,
@@ -23,6 +25,8 @@ import {
   shiftMonthSameDay,
   sumClippedLiveHoursForAnchor,
   unionMapKeys,
+  countSessionsTouchingAnchor,
+  countLiveReviewRemainingMissing,
 } from '../../src/services/xhs-api-sync/xhs-live-review-enrich.util'
 
 function fullOkRaw(syncedAtIso: string) {
@@ -264,6 +268,82 @@ function main() {
     5,
     '禁止把整场 5h 全算给 primary',
   )
+
+  // 11) 按账号独立历史刷新：A 完成不能阻止 B
+  const nowMs = Date.parse('2026-08-11T12:00:00+08:00')
+  const keyA = liveReviewHistoricalRefreshSettingKey('acct-A')
+  const keyB = liveReviewHistoricalRefreshSettingKey('acct-B')
+  assert.equal(keyA, 'liveReviewLastHistoricalRefreshAt:acct-A')
+  assert.notEqual(keyA, keyB)
+  const settingsAfterA = {
+    [keyA]: new Date(nowMs).toISOString(),
+    [keyB]: null,
+  }
+  assert.equal(
+    resolveHistoricalRefreshModeForAccount({
+      liveAccountId: 'acct-A',
+      settings: settingsAfterA,
+      nowMs,
+      refreshIntervalMs: DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
+    }),
+    'incremental',
+    'A 刚写完成时间 → incremental',
+  )
+  assert.equal(
+    resolveHistoricalRefreshModeForAccount({
+      liveAccountId: 'acct-B',
+      settings: settingsAfterA,
+      nowMs,
+      refreshIntervalMs: DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
+    }),
+    'historical_refresh',
+    'A 完成不得阻止 B 进入 historical_refresh',
+  )
+
+  // remainingRefreshDueCount > 0 不得标记完成
+  const dueRows = [
+    {
+      id: 'd1',
+      startTime: new Date('2026-07-20T01:00:00+08:00'),
+      endTime: new Date('2026-07-20T03:00:00+08:00'),
+      rawJson: fullOkRaw(new Date(nowMs - 26 * 60 * 60 * 1000).toISOString()),
+    },
+    {
+      id: 'd2',
+      startTime: new Date('2026-07-21T01:00:00+08:00'),
+      endTime: new Date('2026-07-21T03:00:00+08:00'),
+      rawJson: fullOkRaw(new Date(nowMs - 26 * 60 * 60 * 1000).toISOString()),
+    },
+  ]
+  const dueCount = countHistoricalRefreshDue(dueRows, {
+    now: nowMs,
+    refreshIntervalMs: DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
+  })
+  assert.equal(dueCount, 2)
+  assert.equal(shouldMarkAccountHistoricalRefreshDone(dueCount), false)
+  assert.equal(shouldMarkAccountHistoricalRefreshDone(0), true)
+
+  // 单次 maxSessions 截断：刷了 1 场后仍有 due → 不标记
+  const afterOneBatch = selectLiveReviewEnrichCandidates(dueRows, {
+    mode: 'historical_refresh',
+    maxSessions: 1,
+    now: nowMs,
+    refreshIntervalMs: DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS,
+  })
+  assert.equal(afterOneBatch.length, 1)
+  const stillDue = countHistoricalRefreshDue(
+    dueRows.map((r) =>
+      r.id === afterOneBatch[0]!.id
+        ? {
+            ...r,
+            rawJson: fullOkRaw(new Date(nowMs).toISOString()), // 本批已刷
+          }
+        : r,
+    ),
+    { now: nowMs, refreshIntervalMs: DEFAULT_HISTORICAL_REFRESH_INTERVAL_MS },
+  )
+  assert.equal(stillDue, 1)
+  assert.equal(shouldMarkAccountHistoricalRefreshDone(stillDue), false)
 
   console.log('[acceptance] OK: live-review / AI-export pure helpers')
 }

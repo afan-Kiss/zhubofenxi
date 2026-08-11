@@ -275,7 +275,12 @@ export async function syncLiveSessionListOnlyWithSave(
       })
       warnings.push(
         `回放详情补齐(${review.mode})：完整 ${review.enriched} / 部分 ${review.partial} / 跳过 ${review.skipped} / 失败 ${review.failed} / 尝试 ${review.attempted}` +
-          (review.remainingMissingCount != null ? ` / 历史剩余缺详情 ${review.remainingMissingCount}` : ''),
+          (review.remainingMissingCount != null
+            ? ` / 历史缺详情剩余 ${review.remainingMissingCount}`
+            : '') +
+          (review.remainingRefreshDueCount != null
+            ? ` / 30天刷新剩余 ${review.remainingRefreshDueCount}`
+            : ''),
       )
       warnings.push(...review.warnings.slice(0, 8))
     } catch (err) {

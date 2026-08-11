@@ -5,6 +5,8 @@ export type XhsApiKey =
   | 'live_overview'
   | 'live_traffic_core'
   | 'live_realtime_metric'
+  | 'live_replay_transform'
+  | 'live_replay_note'
   | 'pending_settlement_list'
   | 'settled_settlement_list'
   | 'settlement_detail'

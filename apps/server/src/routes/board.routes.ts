@@ -618,6 +618,25 @@ boardRouter.get('/daily-report/debug-live-sessions', async (req, res) => {
   }
 })
 
+boardRouter.get('/month-compare/ai-export', async (req, res) => {
+  try {
+    const asOfDate = req.query.asOfDate ? String(req.query.asOfDate) : undefined
+    const { buildBusinessAiAnalysisExport } = await import(
+      '../services/business-ai-analysis-export.service'
+    )
+    const payload = await buildBusinessAiAnalysisExport({ asOfDate })
+    const dateKey = payload.meta.asOfDate
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="business-analysis-${dateKey}.json"`,
+    )
+    res.status(200).json(payload)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '导出 AI 分析数据失败', 500)
+  }
+})
+
 boardRouter.get('/operations-report/daily', async (req, res) => {
   try {
     const startDate = req.query.startDate ? String(req.query.startDate) : ''

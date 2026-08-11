@@ -65,6 +65,8 @@ const COOLDOWN_MS_BY_API: Record<string, number> = {
   live_overview: 30 * 60 * 1000,
   live_traffic_core: 30 * 60 * 1000,
   live_realtime_metric: 30 * 60 * 1000,
+  live_replay_transform: 30 * 60 * 1000,
+  live_replay_note: 30 * 60 * 1000,
   pending_settlement_list: 30 * 60 * 1000,
   settled_settlement_list: 30 * 60 * 1000,
   settlement_detail: 30 * 60 * 1000,

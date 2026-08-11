@@ -12,6 +12,7 @@ import {
 import { getApiDefinition, isApiConfigured } from './xhs-api-registry'
 import { requestXhsApi } from './xhs-api-client.service'
 import { mergePreserveRealtimeMetricFields } from './xhs-live-realtime-metric.service'
+import { mergePreserveLiveReviewFields } from './xhs-live-review-enrich.service'
 
 const DEFAULT_MAX_PAGES = 100
 
@@ -61,8 +62,11 @@ async function saveLiveSessionItem(
     pickLiveField(item, 'nickName') ?? pickLiveField(item, 'userId')
   const startTime = parseLiveDateTime(extractFieldValue(item, 'liveStartTime'))
   const endTime = parseLiveDateTime(extractFieldValue(item, 'liveEndTime'))
-  // 保留已补齐的大屏指标，避免 sellerLiveDetailData 整表覆盖冲掉 live_ctr / 60s
-  const mergedRaw = mergePreserveRealtimeMetricFields(existing?.rawJson, item)
+  // 保留已补齐的大屏/回放指标，避免 sellerLiveDetailData 整表覆盖冲掉 live_ctr / 回放详情
+  const mergedRaw = mergePreserveLiveReviewFields(
+    existing?.rawJson,
+    mergePreserveRealtimeMetricFields(existing?.rawJson, item) as Record<string, unknown>,
+  )
   const rawJson = mergedRaw as Prisma.InputJsonValue
 
   await prisma.xhsRawLiveSession.upsert({
@@ -256,6 +260,26 @@ export async function syncLiveSessionListOnlyWithSave(
     } catch (err) {
       warnings.push(
         `大屏指标补齐异常：${err instanceof Error ? err.message : String(err)}`.slice(0, 160),
+      )
+    }
+
+    try {
+      const { enrichLiveSessionsWithLiveReview } = await import('./xhs-live-review-enrich.service')
+      const review = await enrichLiveSessionsWithLiveReview({
+        sessionIds: [...new Set(savedSessionIds)],
+        liveAccountId: params.liveAccountId,
+        liveAccountName,
+        syncJobId: params.syncJobId,
+        context: params.context,
+        maxSessions: 36,
+      })
+      warnings.push(
+        `回放详情补齐(${review.mode})：成功 ${review.enriched} / 跳过 ${review.skipped} / 失败 ${review.failed} / 尝试 ${review.attempted}`,
+      )
+      warnings.push(...review.warnings.slice(0, 8))
+    } catch (err) {
+      warnings.push(
+        `回放详情补齐异常：${err instanceof Error ? err.message : String(err)}`.slice(0, 160),
       )
     }
   }

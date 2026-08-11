@@ -97,7 +97,7 @@ export const METRIC_EXPLAIN: Record<BoardMetricExplainKey, string> = {
 
   buyerRankingSample:
 
-    '按支付时间统计，客户按买家ID去重。支付基数低于 ¥29.00 的低价刷单订单已自动排除。品退数据优先来自官方品质负反馈接口，并与售后接口交叉印证。',
+    '按支付时间统计，客户按买家ID去重。支付基数低于 ¥18.00 的刷单/测试类订单已自动排除。品退数据优先来自官方品质负反馈接口，并与售后接口交叉印证。',
 
   earnedAmount:
 

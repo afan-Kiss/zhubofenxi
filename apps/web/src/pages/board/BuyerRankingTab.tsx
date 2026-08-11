@@ -757,7 +757,7 @@ export const BuyerRankingTab: React.FC = () => {
         <div className="rounded-2xl border border-emerald-100 bg-emerald-50/40 px-3 py-2.5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-emerald-900">
-              按支付时间统计 · 支付基数低于 ¥29 已剔除 · 默认最近90天
+              按支付时间统计 · 支付基数低于 ¥18 已剔除 · 默认最近90天
               {valueRankingData?.range ? (
                 <span className="ml-1 font-medium">
                   （{valueRankingData.range.presetLabel}：{valueRankingData.range.startDate} 至{' '}

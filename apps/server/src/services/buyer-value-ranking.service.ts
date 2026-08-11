@@ -235,7 +235,7 @@ export async function buildBuyerValueRanking(params: {
     empty: sorted.length === 0,
     dataNote:
       range.isAll
-        ? '全量历史客户画像；支付基数低于 ¥29 的订单已剔除；按 buyerKey 聚合。'
-        : `按支付时间 ${range.startDate} ~ ${range.endDate} 统计；支付基数低于 ¥29 的订单已剔除。`,
+        ? '全量历史客户画像；支付基数低于 ¥18 的订单已剔除；按 buyerKey 聚合。'
+        : `按支付时间 ${range.startDate} ~ ${range.endDate} 统计；支付基数低于 ¥18 的订单已剔除。`,
   }
 }

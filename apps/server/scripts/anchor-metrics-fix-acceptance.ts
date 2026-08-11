@@ -496,8 +496,8 @@ function testCoreMetricsLowPriceOnly(issues: string[]) {
     issues,
   )
   assert(
-    isExcludedFromCoreMetrics(makeView({ paymentBaseCent: 2100 })),
-    '21 元低价单应排除',
+    isExcludedFromCoreMetrics(makeView({ paymentBaseCent: 1000 })),
+    '10 元刷单/测试单应排除',
     issues,
   )
   const kept = filterViewsForCoreMetrics([
@@ -508,24 +508,24 @@ function testCoreMetricsLowPriceOnly(issues: string[]) {
 }
 
 function testLowPriceBrush(issues: string[]) {
-  assert(LOW_PRICE_BRUSH_THRESHOLD_CENT === 2900, '阈值应为 2900 分', issues)
+  assert(LOW_PRICE_BRUSH_THRESHOLD_CENT === 1800, '阈值应为 1800 分', issues)
   assert(
-    isLowPriceBrushOrderView(makeView({ paymentBaseCent: 2100 })),
-    '21 元应视为低价刷单',
+    isLowPriceBrushOrderView(makeView({ paymentBaseCent: 1000 })),
+    '10 元应视为刷单/测试单',
     issues,
   )
   assert(
-    isLowPriceBrushOrderView(makeView({ paymentBaseCent: 2899 })),
-    '28.99 元应视为低价刷单',
+    isLowPriceBrushOrderView(makeView({ paymentBaseCent: 1799 })),
+    '17.99 元应视为刷单/测试单',
     issues,
   )
   assert(
-    !isLowPriceBrushOrderView(makeView({ paymentBaseCent: 2900 })),
-    '29 元不应视为低价刷单',
+    !isLowPriceBrushOrderView(makeView({ paymentBaseCent: 1800 })),
+    '18 元不应视为刷单/测试单',
     issues,
   )
   assert(
-    resolvePaymentBaseCentForBrushCheck(makeView({ paymentBaseCent: 2100 })) === 2100,
+    resolvePaymentBaseCentForBrushCheck(makeView({ paymentBaseCent: 1000 })) === 1000,
     '低价判断应基于 paymentBaseCent',
     issues,
   )

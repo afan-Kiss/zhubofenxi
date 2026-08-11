@@ -176,7 +176,7 @@ function main() {
     issues,
   )
 
-  assert(LOW_PRICE_BRUSH_THRESHOLD_CENT === 2900, '低价刷单阈值应为 2900 分', issues)
+  assert(LOW_PRICE_BRUSH_THRESHOLD_CENT === 1800, '低价刷单阈值应为 1800 分', issues)
 
   const highValueDef = buildHighValueCustomerDefinition()
   assert(highValueDef.amountThreshold === 3000, '高价值签收金额阈值应为 3000', issues)

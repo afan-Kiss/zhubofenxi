@@ -63,20 +63,20 @@ function makeView(partial: Partial<AnalyzedOrderView>): AnalyzedOrderView {
 }
 
 function testThresholdConfig(issues: string[]) {
-  assert(LOW_PRICE_BRUSH_THRESHOLD_CENT === 2900, '低价刷单阈值应为 2900 分', issues)
+  assert(LOW_PRICE_BRUSH_THRESHOLD_CENT === 1800, '低价刷单阈值应为 1800 分', issues)
   const meta = describeMetricsExclusionConfig()
-  assert(meta.lowPriceBrushThresholdYuan === 29, '导出摘要阈值应为 29 元', issues)
+  assert(meta.lowPriceBrushThresholdYuan === 18, '导出摘要阈值应为 18 元', issues)
 }
 
 function testLowPriceExcluded(issues: string[]) {
   const v = makeView({
-    paymentBaseCent: 2100,
-    effectiveGmvCent: 2100,
+    paymentBaseCent: 1000,
+    effectiveGmvCent: 1000,
     isEffectiveSigned: true,
-    actualSignAmountCent: 2100,
+    actualSignAmountCent: 1000,
     statusSigned: true,
   })
-  assert(isExcludedFromCoreMetrics(v), '21 元应视为低价刷单并排除', issues)
+  assert(isExcludedFromCoreMetrics(v), '10 元应视为刷单/测试单并排除', issues)
   const metrics = calculateBusinessMetrics(filterViewsForCoreMetrics([v]))
   assert(metrics.actualSignedAmount === 0, '排除后签收额应为 0', issues)
   assert(metrics.orderCount === 0, '排除后支付单数应为 0', issues)
@@ -98,8 +98,8 @@ function testNormalPriceIncluded(issues: string[]) {
 }
 
 function testBoundary(issues: string[]) {
-  assert(isExcludedFromCoreMetrics(makeView({ paymentBaseCent: 2899 })), '28.99 元应排除', issues)
-  assert(!isExcludedFromCoreMetrics(makeView({ paymentBaseCent: 2900 })), '29 元应计入', issues)
+  assert(isExcludedFromCoreMetrics(makeView({ paymentBaseCent: 1799 })), '17.99 元应排除', issues)
+  assert(!isExcludedFromCoreMetrics(makeView({ paymentBaseCent: 1800 })), '18 元应计入', issues)
 }
 
 function testMixedFilter(issues: string[]) {

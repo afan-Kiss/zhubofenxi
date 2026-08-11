@@ -148,7 +148,7 @@ export function classifyAnchorPocketOrder(params: {
       ...base,
       isBrushOrder: true,
       brushAmountCent: paidCent,
-      explain: `支付金额 ${centToYuan(paidCent)} 元低于 ¥29，按刷单剔除，不计入业绩与实际到账`,
+      explain: `支付金额 ${centToYuan(paidCent)} 元低于 ¥18，按刷单/测试单剔除，不计入业绩与实际到账`,
     }
   }
 

@@ -1,11 +1,18 @@
 import type { AnalyzedOrderView } from '../types/analysis'
 
-/** 订单支付基数低于 29 元视为低价刷单，不纳入主播业绩 / 买家排行 */
-export const LOW_PRICE_BRUSH_THRESHOLD_CENT = 2900
+/**
+ * 经营分析最低实付门槛（分）：原始订单仍完整保存；
+ * paidAmountCent < 1800（¥18）不参与经营/主播/上月对比/AI 分析。
+ * ¥18 本身保留（>= 1800 计入）。
+ */
+export const MIN_ANALYSIS_ORDER_AMOUNT_CENT = 1800
+
+/** @deprecated 兼容旧名；与 MIN_ANALYSIS_ORDER_AMOUNT_CENT 相同 */
+export const LOW_PRICE_BRUSH_THRESHOLD_CENT = MIN_ANALYSIS_ORDER_AMOUNT_CENT
 
 /** 买家榜/客户榜统一说明文案 */
 export const LOW_PRICE_BRUSH_BUYER_RANKING_NOTE =
-  '支付基数低于 ¥29.00 的低价刷单订单已自动排除。'
+  '支付基数低于 ¥18.00 的刷单/测试类订单已自动排除。'
 
 const PRODUCT_UNIT_PRICE_KEYS = [
   'productPrice',
@@ -108,7 +115,7 @@ export function filterViewsForAnchorPerformance<T extends AnalyzedOrderView>(
   return views.filter((v) => !isLowPriceBrushOrderView(v))
 }
 
-/** 买家排行 / 买家画像：支付基数低于 29 元的订单不参与聚合 */
+/** 买家排行 / 买家画像：支付基数低于 ¥18 的订单不参与聚合 */
 export function filterViewsForBuyerRanking<T extends AnalyzedOrderView>(
   views: Array<T & { raw?: Record<string, unknown> }>,
 ): Array<T & { raw?: Record<string, unknown> }> {

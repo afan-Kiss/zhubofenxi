@@ -1,13 +1,13 @@
 /**
  * 上月对比 / ChatGPT 分析数据导出
- * 基于现有经营缓存 + XhsRawLiveSession（含回放补齐字段），不改写归属口径。
+ * 基于 loadRangeFactBundle（canonical 归属 + 源头过滤 <¥18）+ XhsRawLiveSession（含回放补齐字段）。
  */
 import { prisma } from '../lib/prisma'
 import type { AnalyzedOrderView } from '../types/analysis'
 import { formatDateKeyShanghai, formatDateTimeShanghai } from '../utils/business-timezone'
 import { eachDayInShanghaiRange } from '../utils/each-day-shanghai'
-import { getOrBuildBusinessBoardCache } from './business-cache.service'
 import { calculateBusinessMetrics } from './business-metrics.service'
+import { loadRangeFactBundle } from './board-range-fact-bundle.service'
 import { extractLiveSessionTraffic } from './live-session-traffic.util'
 import { resolveGoodReviewShopKey, GOOD_REVIEW_SHOPS } from '../config/good-review-shops.constants'
 import { getSetting } from './system-setting.service'
@@ -15,6 +15,16 @@ import { getEffectiveScheduleTableForDate } from './anchor-daily-schedule.servic
 import { matchLiveSessionToScheduleSegments } from './daily-report-live-schedule-match.service'
 import { formatLiveDurationMinutes } from './anchor-live-sessions.service'
 import type { AnchorLiveSessionBrief } from './anchor-live-sessions.service'
+import { MIN_ANALYSIS_ORDER_AMOUNT_CENT } from './low-price-brush-order.service'
+import {
+  ANALYSIS_ORDER_MIN_PAID_YUAN,
+  buildAfterSalesBlock,
+  buildDataFreshness,
+  buildLiveReviewQualityByShop,
+  buildLogisticsBlock,
+  buildReconciliationBlock,
+  summarizeLowAmountExcluded,
+} from './business-ai-analysis-extras.util'
 import {
   shiftMonthSameDay,
   unionMapKeys,
@@ -23,6 +33,7 @@ import {
   liveReviewPartsFullyComplete,
   countSessionsTouchingAnchor,
   sumClippedLiveHoursForAnchor,
+  countLiveReviewRemainingMissing,
   type CanonicalSegmentMetric,
 } from './xhs-api-sync/xhs-live-review-enrich.util'
 
@@ -187,13 +198,20 @@ function extractSessionMetrics(s: SessionRow) {
 }
 
 async function loadBoardPeriod(startDate: string, endDate: string) {
-  const cache = await getOrBuildBusinessBoardCache({
+  const bundle = await loadRangeFactBundle({
     preset: 'custom',
     startDate,
     endDate,
-    interactive: true,
   })
-  const views = (cache.views ?? []) as AnalyzedOrderView[]
+  // 源头过滤：仅 >= ¥18；售后/签收/物流全部基于同一 eligible 集合
+  const views = bundle.coreMetricViews as Array<AnalyzedOrderView & { raw?: Record<string, unknown> }>
+  const allRemapped = bundle.remappedViews as Array<
+    AnalyzedOrderView & { raw?: Record<string, unknown> }
+  >
+  const lowAmountExcluded = summarizeLowAmountExcluded(allRemapped)
+  const offlineEligible = (bundle.offlineViews as Array<AnalyzedOrderView & { raw?: Record<string, unknown> }>).filter(
+    (v) => !(v.paymentBaseCent > 0 && v.paymentBaseCent < MIN_ANALYSIS_ORDER_AMOUNT_CENT),
+  )
   const metrics = calculateBusinessMetrics(views)
   const paymentGmv = views.reduce((s, v) => s + (v.paymentBaseCent ?? 0), 0) / 100
   const orderCount = views.length
@@ -218,6 +236,9 @@ async function loadBoardPeriod(startDate: string, endDate: string) {
     startDate,
     endDate,
     views,
+    allRemapped,
+    offlineViews: offlineEligible,
+    lowAmountExcluded,
     metrics,
     paymentGmv,
     orderCount,
@@ -532,11 +553,61 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
   const historyBackfillDone = (await getSetting('liveReviewHistoryBackfillDone')) === '1'
   const withReview = sessionMetrics.filter((s) => s.traffic != null || s.overview != null).length
   const withNotes = sessionMetrics.filter((s) => s.noteDetailAvailable).length
+  let remainingBackfill: number | null = null
+  try {
+    remainingBackfill = countLiveReviewRemainingMissing(
+      sessionsDb.map((s) => ({ rawJson: s.rawJson })),
+    )
+  } catch {
+    remainingBackfill = null
+  }
+  const lastEnrichCandidates = sessionMetrics
+    .map((s) => {
+      const raw = asRecord(sessionsDb.find((d) => d.id === s.dbId)?.rawJson)
+      const synced = raw?._liveReviewSyncedAt ?? raw?._liveReviewFullySyncedAt
+      return typeof synced === 'string' ? synced : null
+    })
+    .filter(Boolean) as string[]
+  const lastEnrichAt =
+    lastEnrichCandidates.length > 0
+      ? lastEnrichCandidates.sort().at(-1) ?? null
+      : null
+  const liveReviewQuality = buildLiveReviewQualityByShop(
+    sessionMetrics,
+    remainingBackfill,
+    lastEnrichAt,
+  )
 
   const overallCur = summarizeOrders('本月同期', periodThisMonthToDate)
   const overallPrev = summarizeOrders('上月同期', periodLastMonthSameDays)
   const sessCur = sessionAgg(curSessions)
   const sessPrev = sessionAgg(prevSessions)
+
+  const logisticsCurrent = buildLogisticsBlock(periodThisMonthToDate.views)
+  const logisticsPrev = buildLogisticsBlock(periodLastMonthSameDays.views)
+  const afterSalesCurrent = buildAfterSalesBlock(periodThisMonthToDate.views)
+  const afterSalesPrev = buildAfterSalesBlock(periodLastMonthSameDays.views)
+  const reconciliationCurrent = buildReconciliationBlock({
+    orderPaymentGmv: periodThisMonthToDate.paymentGmv,
+    sessionPaymentGmv: sessCur.paymentGmv,
+    eligibleOrderCount: periodThisMonthToDate.orderCount,
+    sessionDealOrders: sessCur.dealOrders,
+    excluded: periodThisMonthToDate.lowAmountExcluded,
+    offlineViews: periodThisMonthToDate.offlineViews,
+  })
+  const reconciliationPrev = buildReconciliationBlock({
+    orderPaymentGmv: periodLastMonthSameDays.paymentGmv,
+    sessionPaymentGmv: sessPrev.paymentGmv,
+    eligibleOrderCount: periodLastMonthSameDays.orderCount,
+    sessionDealOrders: sessPrev.dealOrders,
+    excluded: periodLastMonthSameDays.lowAmountExcluded,
+    offlineViews: periodLastMonthSameDays.offlineViews,
+  })
+  const dataFreshness = buildDataFreshness({
+    views: periodThisMonthToDate.views,
+    sessions: sessionMetrics,
+    asOfDate: asOf,
+  })
 
   return {
     meta: {
@@ -545,11 +616,15 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
       timezone: 'Asia/Shanghai',
       purpose: 'ChatGPT business analysis export — facts only, no coaching conclusions',
       definitions: {
-        paymentGmv: '支付GMV：区间内经营缓存 views.paymentBaseCent 合计（元）',
-        receivedGmv: '签收GMV：actualSignedAmount（已完成/交易完成口径）',
-        refundAmount: '退款金额：经营指标 refundAmount',
+        analysisOrderMinPaidAmount: ANALYSIS_ORDER_MIN_PAID_YUAN,
+        analysisOrderMinPaidAmountNote:
+          '原始订单正常保存；经营分析排除实付金额<18元订单（analysisExcludedLowAmountOrder）。¥18 本身保留。',
+        paymentGmv: '支付GMV：区间内 eligible views.paymentBaseCent 合计（元），已排除 <¥18',
+        receivedGmv: '签收GMV：actualSignedAmount（已完成/交易完成口径，仅 eligible）',
+        refundAmount: '退款金额：仅 eligibleOrderIds 上的售后/退款',
         validRemainingGmv: '支付GMV - 已退款金额（近似留存，非财务结算）',
-        orderAttribution: 'canonical attribution（下单时间匹配排班/场次）；未改写',
+        orderAttribution:
+          'canonical attribution：订单店铺/直播号 + 下单时间 + 当日有效排班/真实场次；禁止跨店仅按时间匹配',
         sessionSource: 'XhsRawLiveSession.rawJson + live_review 补齐字段',
         canonicalAnchorName:
           '经营日报 matchLiveSessionToScheduleSegments；sessions.canonicalSegments 为完整切段',
@@ -572,10 +647,20 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
       orderCountThisMonthToDate: periodThisMonthToDate.orderCount,
       orderCountLastMonthSameDays: periodLastMonthSameDays.orderCount,
       unassignedOrdersThisMonthToDate: periodThisMonthToDate.unassigned,
+      lowAmountExcludedOrders: {
+        current: periodThisMonthToDate.lowAmountExcluded,
+        previousSameDays: periodLastMonthSameDays.lowAmountExcluded,
+      },
+      liveReview: liveReviewQuality,
       missingCapabilities: [
         withNotes === 0 ? 'note_detail_sparse_or_unavailable' : null,
         withReview < sessionMetrics.length * 0.3 ? 'live_review_enrich_incomplete' : null,
       ].filter(Boolean),
+    },
+    dataFreshness,
+    reconciliation: {
+      current: reconciliationCurrent,
+      previousSameDays: reconciliationPrev,
     },
     comparisonPeriods: {
       monthToDateSameDays: {
@@ -720,14 +805,12 @@ export async function buildBusinessAiAnalysisExport(params?: { asOfDate?: string
       lastMonthSameDays: overallPrev,
     },
     logistics: {
-      note: '签收/在途口径来自经营指标 actualSignedAmount / awaitingSignCompletion（若缓存提供）',
-      currentSignedAmount: periodThisMonthToDate.signedAmount,
-      currentSignedOrders: periodThisMonthToDate.signedOrders,
-      awaitingSignCompletionAmount: periodThisMonthToDate.metrics.awaitingSignCompletionAmount ?? null,
+      current: logisticsCurrent,
+      previousSameDays: logisticsPrev,
     },
     afterSales: {
-      refundAmount: periodThisMonthToDate.refundAmount,
-      refundOrders: periodThisMonthToDate.refundOrders,
+      current: afterSalesCurrent,
+      previousSameDays: afterSalesPrev,
       refundOrderRate: rateObj(periodThisMonthToDate.refundOrders, periodThisMonthToDate.orderCount),
       refundAmountRate: rateObj(periodThisMonthToDate.refundAmount, periodThisMonthToDate.paymentGmv),
     },

@@ -787,7 +787,7 @@ export const AnchorPerformanceTab: React.FC = () => {
                       label: '线下 GMV',
                       value: boardGmvSplit.offlineGmv,
                       clickable: true,
-                      helper: '查看逸凡线下成交明细',
+                      helper: '查看线下成交明细',
                     },
                   ]
                 : []),
@@ -804,7 +804,7 @@ export const AnchorPerformanceTab: React.FC = () => {
                 key={item.label}
                 type="button"
                 data-testid="offline-gmv-card"
-                aria-label={`线下 GMV ${formatMoney(item.value)}，查看逸凡线下成交明细`}
+                aria-label={`线下 GMV ${formatMoney(item.value)}，查看线下成交明细`}
                 onClick={() => {
                   setReturnRefundDrawerAnchor(null)
                   setReturnCountDrawerAnchor(null)
@@ -834,7 +834,7 @@ export const AnchorPerformanceTab: React.FC = () => {
           )}
           <p className="col-span-2 text-[11px] text-slate-400 md:col-span-4">
             {boardGmvSplit.showOfflineGmv
-              ? '总 GMV = 线上 + 线下（线下自 2026-07-14 起计入）；未归属已计入总 GMV。线下专属主播请点「线下 GMV」。'
+              ? '总 GMV = 线上 + 线下（线下自 2026-07-14 起计入）；未归属已计入总 GMV。线下成交明细请点「线下 GMV」。'
               : '当前区间早于线下 GMV 生效日（2026-07-14），总 GMV = 线上 GMV。'}
           </p>
         </div>
@@ -1199,9 +1199,7 @@ export const AnchorPerformanceTab: React.FC = () => {
                 : anchorSummaryMetricValue(filteredPerformanceSummary, metricDrawer)
           }
           blacklistedBuyerIds={blacklistedBuyerIds}
-          onOrderAnchorAssigned={
-            metricDrawer === 'offlineGmv' ? undefined : handleOrderAnchorAssigned
-          }
+          onOrderAnchorAssigned={handleOrderAnchorAssigned}
         />
       ) : null}
 

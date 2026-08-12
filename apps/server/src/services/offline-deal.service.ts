@@ -121,16 +121,18 @@ async function writeAudit(params: {
   })
 }
 
-function invalidateAfterWrite(reason: string) {
+async function invalidateAfterWrite(reason: string) {
   clearScheduleAttributionCache()
   clearCanonicalAttributionCache()
   if (process.env.OFFLINE_DEAL_SKIP_CACHE_INVALIDATE === '1') return
-  void invalidateAndRebuildBusinessBoardCache(reason).catch((e) => {
+  try {
+    await invalidateAndRebuildBusinessBoardCache(reason)
+  } catch (e) {
     logInfo(
       '线下成交',
       `缓存重建异常（下次访问将重建）：${e instanceof Error ? e.message : String(e)}`,
     )
-  })
+  }
 }
 
 /**

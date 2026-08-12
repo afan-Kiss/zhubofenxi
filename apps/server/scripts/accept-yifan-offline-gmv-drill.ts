@@ -132,32 +132,32 @@ async function main() {
     operator: 'accept-yifan-drill',
   })
 
-  // 非逸凡线下成交：下钻仍应包含（全量线下 GMV）
+  // 非逸凡线下成交：下钻仍应包含；日报计入该主播而非逸凡
   const other = await prisma.anchor.findFirst({
     where: {
       deletedAt: null,
-      systemKey: { not: YIFAN_SYSTEM_KEY },
-      OR: [{ systemKey: null }, { systemKey: { not: YIFAN_SYSTEM_KEY } }],
+      enabled: true,
+      OR: [{ systemKey: null }, { NOT: { systemKey: YIFAN_SYSTEM_KEY } }],
     },
+    orderBy: { sortOrder: 'asc' },
   })
   let otherDealAmount = 0
   let otherDealKey: string | null = null
-  if (other) {
-    const otherKey = `accept-other-offline-${stamp}`
-    const otherDeal = await createOfflineDeal({
-      amountYuan: 321,
-      dealAt: `${DAY}T15:00:00+08:00`,
-      anchorId: other.id,
-      anchorName: other.name,
-      externalKey: otherKey,
-      idempotencyKey: otherKey,
-      status: 'confirmed',
-      operator: 'accept-yifan-drill',
-    })
-    otherDealAmount = 321
-    otherDealKey = otherDeal.dealKey
-    assert.ok(otherDeal.anchorId !== yifan.id)
-  }
+  assert.ok(other, '需要至少一名非逸凡主播用于跨主播线下验收')
+  const otherKey = `accept-other-offline-${stamp}`
+  const otherDeal = await createOfflineDeal({
+    amountYuan: 321,
+    dealAt: `${DAY}T15:00:00+08:00`,
+    anchorId: other!.id,
+    anchorName: other!.name,
+    externalKey: otherKey,
+    idempotencyKey: otherKey,
+    status: 'confirmed',
+    operator: 'accept-yifan-drill',
+  })
+  otherDealAmount = 321
+  otherDealKey = otherDeal.dealKey
+  assert.ok(otherDeal.anchorId !== yifan.id)
 
   const offlineViews = await loadOfflineDealViewsForRange(DAY, DAY)
   const confirmedView = offlineViews.find((v) => v.offlineDealKey === confirmed.dealKey)
@@ -245,7 +245,7 @@ async function main() {
   assert.ok(renamed)
   assert.equal(renamed!.systemKey, YIFAN_SYSTEM_KEY)
 
-  // 有线下出单时，日报图片 payload 含线下 GMV + 逸凡卡片（不计入真实发货）
+  // 有线下出单时，日报图片 payload 含线下 GMV；逸凡仅计入其名下线下，其他主播线下进对应主播行
   await getOrBuildBusinessBoardCache({
     preset: 'custom',
     startDate: DAY,
@@ -258,17 +258,33 @@ async function main() {
     endDate: DAY,
   })
   assert.ok(
-    Number(dailyReport.summary.offlineGmvYuan ?? 0) >= 1888.5 - 0.02,
-    '日报 summary.offlineGmvYuan 应含确认线下单',
+    Number(dailyReport.summary.offlineGmvYuan ?? 0) >= expectedMin - 0.02,
+    '日报 summary.offlineGmvYuan 应含全部确认线下单',
   )
   assert.ok(
     Number(dailyReport.summary.totalShippedAmountYuan ?? 0) >= 0,
     '真实发货字段仍存在',
   )
   const yifanRow = dailyReport.anchors.find((a) => a.systemKey === YIFAN_SYSTEM_KEY)
-  assert.ok(yifanRow, '有线下出单时日报 anchors 应含 YIFAN_MANUAL')
-  assert.ok(Number(yifanRow!.gmvYuan ?? 0) >= 1888.5 - 0.02)
+  assert.ok(yifanRow, '有逸凡线下出单时日报 anchors 应含 YIFAN_MANUAL')
+  // 当日可能有历史验收残留；逸凡行不得含 other 这笔 321
+  assert.ok(
+    !listOfflineDealKeys(yifanRow).includes(otherDealKey!),
+    '逸凡日报明细不得含其他主播线下成交',
+  )
+  assert.ok(
+    Number(yifanRow!.gmvYuan ?? 0) + 0.001 < Number(dailyReport.summary.offlineGmvYuan ?? 0),
+    '逸凡 gmv 应小于全部线下合计（存在其他主播线下时）',
+  )
   assert.equal(Number(yifanRow!.shippedAmountYuan ?? 0), 0, '逸凡线下不计入真实发货')
+  const otherRow = dailyReport.anchors.find(
+    (a) => a.anchorId === other!.id || a.anchorName === other!.name,
+  )
+  assert.ok(otherRow, '指派给直播主播的线下成交应出现在该主播日报行')
+  assert.ok(
+    Number(otherRow!.gmvYuan ?? 0) >= otherDealAmount - 0.02,
+    '直播主播日报 gmv 应含其名下线下成交',
+  )
 
   console.log('OK accept-yifan-offline-gmv-drill', {
     offlineGmvCard: detail.summary.valueRaw,
@@ -276,8 +292,18 @@ async function main() {
     reportAnchorCount: reportAnchors.length,
     dailyReportOfflineGmv: dailyReport.summary.offlineGmvYuan,
     dailyReportHasYifan: Boolean(yifanRow),
-    otherOfflineExcluded: otherDealAmount > 0,
+    yifanGmv: yifanRow?.gmvYuan,
+    otherAnchor: other!.name,
+    otherGmv: otherRow?.gmvYuan,
   })
+}
+
+function listOfflineDealKeys(
+  row: { shippedOrders?: Array<{ orderNo?: string }> } | undefined,
+): string[] {
+  return (row?.shippedOrders ?? [])
+    .map((o) => String(o.orderNo ?? ''))
+    .filter((k) => k.startsWith('OFF-'))
 }
 
 main().catch((err) => {

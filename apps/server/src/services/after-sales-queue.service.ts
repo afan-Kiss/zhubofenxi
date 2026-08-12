@@ -970,10 +970,33 @@ export async function completeAfterSalesQueueTask(params: {
     rawDisposition === 'retry_wait' &&
     ((isStackOverflow && tempCount >= AFTER_SALES_MAX_STACK_OVERFLOW_ATTEMPTS) ||
       tempCount >= AFTER_SALES_MAX_TEMPORARY_ATTEMPTS)
-  const disposition = hitAttemptCap ? 'failed' : rawDisposition
-  const cappedErrorType = hitAttemptCap ? 'attempt_cap' : errorType
+
+  // 平台 5xx / 冷却 / 网络：触顶后挂长退避重试，避免误报「失败」且计数不清零导致永远修不好
+  const transientPlatform =
+    errorType === 'http_500' ||
+    errorType === 'http_502' ||
+    errorType === 'http_503' ||
+    errorType === 'http_504' ||
+    errorType === 'http_429' ||
+    errorType === 'platform_cooling' ||
+    errorType === 'network_timeout'
+  const parkTransient =
+    hitAttemptCap && transientPlatform && !isStackOverflow
+
+  const disposition = parkTransient
+    ? 'retry_wait'
+    : hitAttemptCap
+      ? 'failed'
+      : rawDisposition
+  const cappedErrorType = hitAttemptCap
+    ? parkTransient
+      ? errorType
+      : 'attempt_cap'
+    : errorType
   const cappedErrorMessage = hitAttemptCap
-    ? `重试次数过多已停止（${tempCount}次）：${(result.fetchError ?? '').slice(0, 120)}`
+    ? parkTransient
+      ? `平台临时异常已暂停补查（已试 ${tempCount} 次，稍后自动继续）：${(result.fetchError ?? '').slice(0, 100)}`
+      : `重试次数过多已停止（${tempCount}次）：${(result.fetchError ?? '').slice(0, 120)}`
     : result.fetchError
 
   await applyShopOutcomePersistent(liveAccountId, disposition, cappedErrorType, cappedErrorMessage)
@@ -987,7 +1010,9 @@ export async function completeAfterSalesQueueTask(params: {
   }
 
   if (disposition === 'retry_wait') {
-    const nextAt = computeNextAttemptAt(tempCount, cappedErrorMessage)
+    const nextAt = parkTransient
+      ? new Date(now.getTime() + 6 * 60 * 60_000 + Math.floor(Math.random() * 15 * 60_000))
+      : computeNextAttemptAt(tempCount, cappedErrorMessage)
     await prisma.xhsAfterSalesWorkbenchQueue.update({
       where: { id: queueId },
       data: {
@@ -996,7 +1021,8 @@ export async function completeAfterSalesQueueTask(params: {
         lastError: cappedErrorMessage,
         nextAttemptAt: nextAt,
         lastAttemptAt: now,
-        temporaryAttemptCount: { increment: 1 },
+        // 触顶停车：清零临时计数，到期后重新给满额重试机会
+        temporaryAttemptCount: parkTransient ? 0 : { increment: 1 },
         attempts: { increment: 1 },
         ...clearClaim,
       },
@@ -1006,7 +1032,7 @@ export async function completeAfterSalesQueueTask(params: {
       orderNo: params.orderNo,
       fromStatus: current.status,
       toStatus: 'retry_wait',
-      reason: cappedErrorType,
+      reason: parkTransient ? `park_transient:${errorType}` : cappedErrorType,
       errorType: cappedErrorType,
       workerId: params.workerId,
       claimToken: params.claimToken,

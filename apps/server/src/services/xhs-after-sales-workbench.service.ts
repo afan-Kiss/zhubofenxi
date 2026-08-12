@@ -1646,6 +1646,8 @@ export async function enqueueWorkbenchSync(
       claimToken: null,
       claimedAt: null,
       statusChangedAt: now,
+      // 重开必须清零临时重试计数，否则 attempt_cap 后立刻再次触顶，永远修不好
+      temporaryAttemptCount: 0,
       priority: nextPriority,
       triggerReason: eligibility.reason || decision.reason,
       signalDetectedAt: existingQueue.signalDetectedAt ?? now,

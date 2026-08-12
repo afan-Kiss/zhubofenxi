@@ -490,7 +490,10 @@ export function isEffectiveSignedOrder(params: {
 export function isEffectiveSignedView(v: AnalyzedOrderView): boolean {
   // 平台「已签收/已收货」永不进已签收金额池（防止旧缓存 isEffectiveSigned=true 误入）
   if (isStatusCourierSignedOnlyView(v)) return false
-  if (v.isEffectiveSigned != null) return v.isEffectiveSigned
+  // 非交易完成才信任缓存位；「已签收→已完成」后旧 isEffectiveSigned=false 必须重算
+  if (v.isEffectiveSigned != null && !isStatusCompletedView(v)) {
+    return v.isEffectiveSigned
+  }
   const refundCent = v.successfulRefundAmountCent ?? v.productRefundAmountCent ?? 0
   const qualifiesAfterSale = orderQualifiesForActualSignedAfterSale({
     afterSaleRecords: [],

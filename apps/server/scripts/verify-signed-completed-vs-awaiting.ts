@@ -133,4 +133,39 @@ assert.equal(
   'stale isEffectiveSigned on 已签收 must still go to awaiting',
 )
 
+// 视图文案仍停在「已签收」，但已 attach 的 raw 已是「已完成」→ 进实际签收，不进待签收完成
+{
+  const staleTextFreshRaw = stubView({
+    orderStatusText: '已签收',
+    isEffectiveSigned: false,
+    statusSigned: false,
+    actualSignAmountCent: 50000,
+    raw: { statusDesc: '已完成' },
+  } as Partial<AnalyzedOrderView>)
+  assert.equal(
+    isEffectiveSignedView(staleTextFreshRaw),
+    true,
+    'raw 已完成 overrides stale 已签收 text for signed pool',
+  )
+  assert.equal(
+    isAwaitingSignCompletionView(staleTextFreshRaw),
+    false,
+    'raw 已完成 must leave awaiting pool',
+  )
+}
+
+// 仅文案已完成、旧 isEffectiveSigned=false → 也应进实际签收
+assert.equal(
+  isEffectiveSignedView(
+    stubView({
+      orderStatusText: '已完成',
+      isEffectiveSigned: false,
+      statusSigned: false,
+      actualSignAmountCent: 50000,
+    }),
+  ),
+  true,
+  'completed text must recompute past stale isEffectiveSigned=false',
+)
+
 console.log('verify-signed-completed-vs-awaiting OK')

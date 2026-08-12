@@ -18,7 +18,8 @@ export const LEADERBOARD_GROUP_VERSION = 'leaderboard-group-v2-formal-id-2026-07
  * 与 business-metrics.service BUSINESS_METRICS_VERSION 对齐：
  * 已签收金额仅交易完成 + 正在路上/待签收完成拆分。改口径时两边一起 bump。
  */
-export const BUSINESS_METRICS_CACHE_VERSION = 'v13-signed-completed-only-awaiting-2026-08-10'
+export const BUSINESS_METRICS_CACHE_VERSION =
+  'v14-cache-views-remapped-status-invalidate-2026-08-12'
 
 export const BUSINESS_CACHE_FINGERPRINT = [
   CANONICAL_ATTRIBUTION_VERSION,

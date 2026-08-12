@@ -86,12 +86,23 @@ export function isStatusSignedOrder(order: NormalizedOrder): boolean {
   return isStatusCompletedOrder(order)
 }
 
+function viewOrderStatusParts(v: AnalyzedOrderView): Array<string | undefined | null> {
+  const raw = (v as AnalyzedOrderView & { raw?: Record<string, unknown> }).raw
+  const rawText =
+    raw && typeof raw === 'object'
+      ? String(
+          raw.statusDesc ?? raw.status_desc ?? raw.statusName ?? raw.tradeStatus ?? '',
+        )
+      : ''
+  return [v.orderStatusText, rawText]
+}
+
 export function isStatusCompletedView(v: AnalyzedOrderView): boolean {
-  return isStatusCompletedFromTexts(v.orderStatusText)
+  return isStatusCompletedFromTexts(...viewOrderStatusParts(v))
 }
 
 export function isStatusCourierSignedOnlyView(v: AnalyzedOrderView): boolean {
-  return isStatusCourierSignedOnlyFromTexts(v.orderStatusText)
+  return isStatusCourierSignedOnlyFromTexts(...viewOrderStatusParts(v))
 }
 
 /** @deprecated 同 isStatusCompletedView */

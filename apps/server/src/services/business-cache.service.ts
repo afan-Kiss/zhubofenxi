@@ -383,15 +383,15 @@ export async function buildAndSetBusinessBoardCache(params: {
       mergedViews,
       offlineViews,
       coreMetricViews,
-      remappedViews: remappedCoreViews,
+      remappedViews,
       anchorPerformanceViews: performanceViews,
       qualityRefundViews,
       rawByMatch,
       artifacts,
       liveSessions,
     } = bundle
-    // 总览与主播同一代 remapped + 核心过滤事实池（禁止再用 unmapped 单独算总览）
-    void remappedCoreViews
+    // 总览 / 主播榜 / 明细下钻同一代 remapped（禁止把未 canonical 的 mergedViews 塞进 cache.views）
+    void mergedViews
 
     const summary = buildSummaryFromViews(coreMetricViews)
     const abnormalOrderCount = artifacts?.abnormalOrderCount ?? 0
@@ -468,11 +468,11 @@ export async function buildAndSetBusinessBoardCache(params: {
       anchorLeaderboard: anchorLeaderboard as unknown as Array<Record<string, unknown>>,
       enrichedAnchorLeaderboard,
       anchorPerformanceSummary,
-      views: mergedViews,
+      views: remappedViews,
       rawByMatch,
       liveSessions,
       blacklistedBuyerIds,
-      orderCount: mergedViews.length,
+      orderCount: remappedViews.length,
       lastBuiltAt: new Date().toISOString(),
       workbenchCacheMaxUpdatedAt,
       timeSearchCacheMaxUpdatedAt,
@@ -514,7 +514,7 @@ export async function buildAndSetBusinessBoardCache(params: {
     }
     logInfo(
       '经营缓存',
-      `${presetLabel(params.preset)} 重新构建完成：${mergedViews.length} 单（含线下 ${offlineViews.length}），用时 ${entry.buildDurationMs}ms，${retain ? '已驻留' : '按需 LRU 驻留'}，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
+      `${presetLabel(params.preset)} 重新构建完成：${remappedViews.length} 单（含线下 ${offlineViews.length}），用时 ${entry.buildDurationMs}ms，${retain ? '已驻留' : '按需 LRU 驻留'}，sourceDataMaxTime=${sourceDataMaxTime ?? '—'}`,
     )
     return entry
   } catch (e) {

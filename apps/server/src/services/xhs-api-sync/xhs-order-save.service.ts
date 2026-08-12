@@ -21,8 +21,35 @@ import {
   toPrismaNormalizedOrderColumns,
 } from '../normalized-order-columns.service'
 import { ensureOrderRawCompletionFields } from '../order-raw-completion.util'
+import { scheduleBusinessBoardCacheInvalidationForPayTime } from '../business-cache-range-invalidation.service'
 
 const DEFAULT_MAX_PAGES = SAFE_MAX_PAGES
+
+function normalizeStatusText(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/\s+/g, ' ')
+}
+
+function maybeInvalidateBoardCacheForOrderStatusChange(params: {
+  previousStatusText?: string | null
+  nextStatusText?: string | null
+  orderTime: Date | null
+  raw: Record<string, unknown>
+  displayNo: string
+}): void {
+  const prev = normalizeStatusText(params.previousStatusText)
+  const next = normalizeStatusText(params.nextStatusText)
+  if (!next || prev === next) return
+  const payTime =
+    params.orderTime ??
+    params.raw.paidAt ??
+    params.raw.orderedAt ??
+    params.raw.paid_at ??
+    params.raw.ordered_at ??
+    null
+  scheduleBusinessBoardCacheInvalidationForPayTime(payTime as Date | string | null, params.displayNo)
+}
 
 function pickId(item: Record<string, unknown>, keys: string[]): string | null {
   for (const key of keys) {
@@ -98,7 +125,7 @@ async function saveOrderPackage(
           packageId,
         },
       },
-      select: { id: true },
+      select: { id: true, orderStatusText: true },
     })
     await prisma.xhsRawOrder.upsert({
       where: {
@@ -128,6 +155,13 @@ async function saveOrderPackage(
         ...structured,
       },
     })
+    maybeInvalidateBoardCacheForOrderStatusChange({
+      previousStatusText: existing?.orderStatusText,
+      nextStatusText: structured.orderStatusText,
+      orderTime,
+      raw: item,
+      displayNo: (packageId || orderId || '').trim(),
+    })
     maybeEnqueueAfterSalesWorkbench({
       displayNo: (packageId || orderId || '').trim(),
       liveAccountId,
@@ -139,6 +173,7 @@ async function saveOrderPackage(
 
   const existing = await prisma.xhsRawOrder.findFirst({
     where: { liveAccountId, orderId: orderId! },
+    select: { id: true, orderStatusText: true },
   })
   if (existing) {
     await prisma.xhsRawOrder.update({
@@ -167,6 +202,13 @@ async function saveOrderPackage(
       },
     })
   }
+  maybeInvalidateBoardCacheForOrderStatusChange({
+    previousStatusText: existing?.orderStatusText,
+    nextStatusText: structured.orderStatusText,
+    orderTime,
+    raw: item,
+    displayNo: (packageId || orderId || '').trim(),
+  })
   maybeEnqueueAfterSalesWorkbench({
     displayNo: (packageId || orderId || '').trim(),
     liveAccountId,

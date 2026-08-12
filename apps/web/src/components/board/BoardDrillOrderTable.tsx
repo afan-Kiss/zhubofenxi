@@ -26,6 +26,7 @@ import { normalizeBuyerDrawerOrderRow } from '../../lib/buyer-drawer-order-row'
 import { formatRefundSourceLabel } from '../../lib/refund-source-label'
 import { ListViewToggle, type ListViewMode } from '../ui/ListViewToggle'
 import { OrderAnchorAssignControl } from './OrderAnchorAssignControl'
+import { OfflineDealManageControl } from './OfflineDealManageControl'
 import { QianfanOrderDetailButton } from './QianfanOrderDetailButton'
 
 export type { BoardDrillOrderRow }
@@ -33,6 +34,8 @@ export type { BoardDrillOrderRow }
 const BOARD_COLUMN_COUNT = 17
 const BOARD_COLUMN_COUNT_WITH_ASSIGN = 18
 const BUYER_COLUMN_COUNT = 7
+const OFFLINE_COLUMN_COUNT = 8
+const OFFLINE_COLUMN_COUNT_WITH_MANAGE = 9
 
 interface Props {
   rows: BoardDrillOrderRow[] | Array<Record<string, unknown>>
@@ -40,7 +43,7 @@ interface Props {
   loading?: boolean
   emptyText?: string
   listKey?: string
-  /** 买家 Drawer 明细表：拆分金额列；offline：线下成交下钻（无直播号/场次/改归属） */
+  /** 买家 Drawer 明细表：拆分金额列；offline：线下成交下钻 */
   variant?: 'board' | 'buyer' | 'offline'
   headerRefundOrderCount?: number
   /** 已签收金额抽屉：主金额列展示 signedAmount */
@@ -50,6 +53,12 @@ interface Props {
     assigningOrderNo?: string | null
     onAssign: (orderNo: string, anchorName: string) => void
     onClearManualOverride?: (orderNo: string) => void
+  }
+  offlineDealManage?: {
+    anchorOptions: Array<{ id: string; name: string; label?: string }>
+    busyDealId?: string | null
+    onAssign: (dealId: string, anchorName: string) => void
+    onDelete: (dealId: string) => void
   }
 }
 
@@ -83,16 +92,20 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
   headerRefundOrderCount,
   amountMode = 'default',
   manualAnchorAssign,
+  offlineDealManage,
 }) => {
   const { formatMoney } = useAmountDisplay()
   const blacklistSet = useMemo(() => new Set(blacklistedBuyerIds), [blacklistedBuyerIds])
   const isBuyer = variant === 'buyer'
   const isOffline = variant === 'offline'
   const showManualAssign = Boolean(manualAnchorAssign) && !isOffline
+  const showOfflineManage = Boolean(offlineDealManage) && isOffline
   const columnCount = isBuyer
     ? BUYER_COLUMN_COUNT
     : isOffline
-      ? 8
+      ? showOfflineManage
+        ? OFFLINE_COLUMN_COUNT_WITH_MANAGE
+        : OFFLINE_COLUMN_COUNT
       : showManualAssign
         ? BOARD_COLUMN_COUNT_WITH_ASSIGN
         : BOARD_COLUMN_COUNT
@@ -163,6 +176,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
         className={cardClass}
         amountMode={amountMode}
         manualAnchorAssign={isOffline ? undefined : manualAnchorAssign}
+        offlineDealManage={isOffline ? offlineDealManage : undefined}
         offlineMode={isOffline}
       />
       <div className={tableWrapClass}>
@@ -185,6 +199,9 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
               <th className="whitespace-nowrap px-2 py-2">退款金额</th>
               <th className="whitespace-nowrap px-2 py-2">净金额</th>
               <th className="whitespace-nowrap px-2 py-2">状态 / 备注</th>
+              {showOfflineManage ? (
+                <th className="min-w-[180px] whitespace-nowrap px-2 py-2">操作</th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -203,6 +220,7 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                 const pay = Number(r.merchantReceivableAmount ?? r.paymentBaseAmount ?? r.statPaidAmount ?? 0)
                 const refund = Number(r.refundAmount ?? r.productRefundAmount ?? 0)
                 const net = Math.round((pay - refund) * 100) / 100
+                const dealId = r.offlineDealId ? String(r.offlineDealId) : ''
                 return (
                   <tr
                     key={`${boardRowDisplayOrderNo(r)}-${idx}`}
@@ -251,6 +269,22 @@ export const BoardDrillOrderTable: React.FC<Props> = ({
                         </div>
                       ) : null}
                     </td>
+                    {showOfflineManage && offlineDealManage ? (
+                      <td className="px-2 py-1.5">
+                        {dealId ? (
+                          <OfflineDealManageControl
+                            dealId={dealId}
+                            defaultAnchorName={r.anchorName}
+                            anchorOptions={offlineDealManage.anchorOptions}
+                            busyDealId={offlineDealManage.busyDealId}
+                            onAssign={offlineDealManage.onAssign}
+                            onDelete={offlineDealManage.onDelete}
+                          />
+                        ) : (
+                          <span className="text-[10px] text-slate-400">无成交 ID</span>
+                        )}
+                      </td>
+                    ) : null}
                   </tr>
                 )
               })

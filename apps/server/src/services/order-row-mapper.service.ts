@@ -198,6 +198,7 @@ export interface BoardOrderRow {
   /** online | offline */
   dealSource?: 'online' | 'offline'
   offlineDealKey?: string | null
+  offlineDealId?: string | null
   attributedBy?: string | null
   attributedAt?: string | null
   /** 退货退款分类 */
@@ -519,6 +520,10 @@ export function mapViewToBoardOrderRow(
       attributionSource === 'manual_override' || attributionSource === 'offline_manual',
     dealSource,
     offlineDealKey: v.offlineDealKey ?? (dealSource === 'offline' ? displayOrderNo : null),
+    offlineDealId:
+      rawRec.offlineDealId != null
+        ? String(rawRec.offlineDealId)
+        : null,
     attributedBy:
       rawRec.attributedBy != null
         ? String(rawRec.attributedBy)

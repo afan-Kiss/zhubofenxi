@@ -7,13 +7,10 @@ import {
   listOfflineDealAudit,
   listOfflineDeals,
   reassignOfflineDeal,
+  softDeleteOfflineDeal,
   updateOfflineDealStatus,
 } from '../services/offline-deal.service'
-import {
-  getAnchorConfigSync,
-  refreshAnchorConfigCache,
-  YIFAN_SYSTEM_KEY,
-} from '../services/anchor.service'
+import { getAnchorConfigSync, refreshAnchorConfigCache } from '../services/anchor.service'
 
 export const offlineDealRouter = Router()
 
@@ -23,17 +20,21 @@ offlineDealRouter.get('/anchor-options', async (_req, res) => {
   try {
     await refreshAnchorConfigCache()
     const config = getAnchorConfigSync()
-    // 线下成交固定归属逸凡，选项仅返回系统线下主播
     const anchors = config.anchors
-      .filter((a) => a.enabled && a.systemKey === YIFAN_SYSTEM_KEY)
+      .filter((a) => a.enabled)
       .map((a) => ({
         id: a.id,
         name: a.name,
         attributionMode: a.attributionMode ?? 'manual',
         systemKey: a.systemKey ?? null,
-        label: `${a.name}｜线下成交固定归属`,
+        label: a.systemKey === 'YIFAN_MANUAL' ? `${a.name}｜线下专属` : a.name,
       }))
-    sendOk(res, { anchors })
+    sendOk(res, {
+      anchors: [
+        { id: '', name: '未归属', attributionMode: 'manual', systemKey: null, label: '未归属（待指派）' },
+        ...anchors,
+      ],
+    })
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '获取主播选项失败', 500)
   }
@@ -118,6 +119,32 @@ offlineDealRouter.post('/:id/status', async (req, res) => {
     sendOk(res, result)
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '更新状态失败', 400)
+  }
+})
+
+offlineDealRouter.post('/:id/delete', async (req, res) => {
+  try {
+    const result = await softDeleteOfflineDeal({
+      dealId: req.params.id,
+      operator: req.user!.username,
+      reason: req.body?.reason != null ? String(req.body.reason) : undefined,
+    })
+    sendOk(res, result)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '删除线下成交失败', 400)
+  }
+})
+
+offlineDealRouter.delete('/:id', async (req, res) => {
+  try {
+    const result = await softDeleteOfflineDeal({
+      dealId: req.params.id,
+      operator: req.user!.username,
+      reason: req.body?.reason != null ? String(req.body.reason) : undefined,
+    })
+    sendOk(res, result)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '删除线下成交失败', 400)
   }
 })
 

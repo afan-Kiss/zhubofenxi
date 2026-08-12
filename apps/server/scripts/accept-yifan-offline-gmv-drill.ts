@@ -132,7 +132,7 @@ async function main() {
     operator: 'accept-yifan-drill',
   })
 
-  // 非逸凡历史异常线下：下钻必须排除
+  // 非逸凡线下成交：下钻仍应包含（全量线下 GMV）
   const other = await prisma.anchor.findFirst({
     where: {
       deletedAt: null,
@@ -141,6 +141,7 @@ async function main() {
     },
   })
   let otherDealAmount = 0
+  let otherDealKey: string | null = null
   if (other) {
     const otherKey = `accept-other-offline-${stamp}`
     const otherDeal = await createOfflineDeal({
@@ -154,6 +155,7 @@ async function main() {
       operator: 'accept-yifan-drill',
     })
     otherDealAmount = 321
+    otherDealKey = otherDeal.dealKey
     assert.ok(otherDeal.anchorId !== yifan.id)
   }
 
@@ -178,7 +180,7 @@ async function main() {
     '经营看板总 GMV = 线上 + 线下',
   )
 
-  // offlineGmv 下钻：只含逸凡 confirmed，支付金额不扣退款
+  // offlineGmv 下钻：全部 confirmed 线下成交，支付金额不扣退款
   process.env.OFFLINE_DEAL_SKIP_CACHE_INVALIDATE = '1'
   const detail = await buildBoardMetricDetail({
     metric: 'offlineGmv',
@@ -191,11 +193,11 @@ async function main() {
     username: 'accept-script',
   })
 
-  assert.equal(detail.title, '线下 GMV｜逸凡')
+  assert.equal(detail.title, '线下 GMV')
   assert.equal(detail.allowManualAnchorAssign, false)
-  assert.equal(detail.scope?.anchorSystemKey, YIFAN_SYSTEM_KEY)
+  assert.equal((detail as { allowOfflineDealManage?: boolean }).allowOfflineDealManage, true)
   assert.equal(detail.scope?.dealSource, 'offline')
-  assert.equal(detail.scope?.anchorId, yifan.id)
+  assert.ok(!detail.scope?.anchorSystemKey)
 
   for (const row of detail.rows) {
     assert.ok(
@@ -205,6 +207,7 @@ async function main() {
       '下钻行必须是线下成交',
     )
     assert.notEqual(String(row.orderNo ?? '').startsWith('P-'), true)
+    assert.ok(row.offlineDealId, '下钻行需带 offlineDealId 以便指派/删除')
   }
 
   const sumPay = detail.rows.reduce(
@@ -212,8 +215,8 @@ async function main() {
     0,
   )
   // 分页可能截断；用 summary / valueRaw 做卡片一致性
-  assert.ok(Math.abs(Number(detail.summary.valueRaw ?? 0) - 1888.5) < 0.02 ||
-    Number(detail.summary.valueRaw ?? 0) >= 1888.5 - 0.02)
+  const expectedMin = 1888.5 + otherDealAmount
+  assert.ok(Number(detail.summary.valueRaw ?? 0) >= expectedMin - 0.02)
   assert.ok(
     Math.abs(Number(detail.summary.valueRaw ?? 0) - sumPay) < 0.02 ||
       detail.pagination.total > detail.rows.length,
@@ -225,6 +228,9 @@ async function main() {
   assert.ok(!keys.has(draftKey) && ![...keys].some((k) => k.includes('draft')))
   assert.ok(![...keys].some((k) => k.includes(cancelled.dealKey)))
   assert.ok(![...keys].some((k) => k.includes(voided.dealKey)))
+  if (otherDealKey) {
+    assert.ok(keys.has(otherDealKey), '非逸凡线下成交应出现在线下 GMV 下钻')
+  }
 
   // 有退款仍按支付金额计入
   const hitRow = detail.rows.find((r) => String(r.offlineDealKey) === confirmed.dealKey)

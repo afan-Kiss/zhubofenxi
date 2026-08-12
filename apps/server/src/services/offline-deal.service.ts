@@ -5,7 +5,7 @@
  */
 import { prisma } from '../lib/prisma'
 import type { AnalyzedOrderView } from '../types/analysis'
-import { getAnchorConfigSync, refreshAnchorConfigCache, findYifanManualSystemAnchor } from './anchor.service'
+import { getAnchorConfigSync, refreshAnchorConfigCache } from './anchor.service'
 import { findAnchorByName } from './anchor-rules.service'
 import { invalidateAndRebuildBusinessBoardCache } from './business-cache.service'
 import { clearScheduleAttributionCache } from './anchor-schedule-attribution.service'
@@ -415,9 +415,6 @@ export async function createOfflineDeal(input: {
   idempotencyKey?: string | null
 }) {
   await refreshAnchorConfigCache()
-  const yifan = findYifanManualSystemAnchor(getAnchorConfigSync())
-  if (!yifan) throw new Error('系统线下主播未初始化（YIFAN_MANUAL）')
-  // 线下成交固定归属逸凡，不允许改归其他主播
   const amountYuan = Number(input.amountYuan)
   if (!Number.isFinite(amountYuan) || amountYuan <= 0) {
     throw new Error('成交金额必须大于 0')
@@ -431,7 +428,16 @@ export async function createOfflineDeal(input: {
   const externalKey = await assertExternalKeyAvailable(
     input.idempotencyKey?.trim() || input.externalKey,
   )
-  const anchor = { anchorId: yifan.id, anchorName: yifan.name }
+
+  const rawName = input.anchorName?.trim() || ''
+  const rawId = input.anchorId?.trim() || ''
+  const wantPending =
+    input.allowPending === true ||
+    (!rawId && !rawName) ||
+    rawName === '未归属'
+  const anchor = wantPending
+    ? { anchorId: null as string | null, anchorName: null as string | null }
+    : resolveAnchorInput({ anchorId: rawId || null, anchorName: rawName || null })
 
   let dealKey = generateDealKey(dealAt)
   for (let i = 0; i < 5; i++) {
@@ -478,7 +484,7 @@ export async function createOfflineDeal(input: {
     return {
       ...created,
       amountYuan: centToYuan(created.amountCent),
-      pendingAttribution: !created.anchorId,
+      pendingAttribution: !created.anchorId && (!created.anchorName || created.anchorName === '未归属'),
     }
   } catch (e) {
     if (e && typeof e === 'object' && 'code' in e && (e as { code: string }).code === 'P2002') {
@@ -488,14 +494,107 @@ export async function createOfflineDeal(input: {
   }
 }
 
-export async function reassignOfflineDeal(_params: {
+export async function reassignOfflineDeal(params: {
   dealId: string
   anchorId?: string | null
   anchorName?: string | null
   operator?: string | null
   reason?: string | null
-}): Promise<never> {
-  throw new Error('线下成交固定归属系统线下主播，不允许改归其他主播')
+}) {
+  await refreshAnchorConfigCache()
+  const existing = await prisma.offlineDeal.findFirst({
+    where: { id: params.dealId, deletedAt: null },
+  })
+  if (!existing) throw new Error('线下成交不存在')
+
+  const rawName = params.anchorName?.trim() || ''
+  const rawId = params.anchorId?.trim() || ''
+  const wantPending = (!rawId && !rawName) || rawName === '未归属'
+  const anchor = wantPending
+    ? { anchorId: null as string | null, anchorName: null as string | null }
+    : resolveAnchorInput({ anchorId: rawId || null, anchorName: rawName || null })
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.offlineDeal.update({
+      where: { id: existing.id },
+      data: {
+        anchorId: anchor.anchorId,
+        anchorName: anchor.anchorName,
+        updatedBy: params.operator ?? null,
+      },
+    })
+    await tx.offlineDealAuditLog.create({
+      data: {
+        dealId: row.id,
+        dealKey: row.dealKey,
+        action: 'reassign',
+        beforeJson: JSON.stringify(existing),
+        afterJson: JSON.stringify(row),
+        beforeAnchorId: existing.anchorId,
+        afterAnchorId: row.anchorId,
+        operator: params.operator ?? null,
+        reason: params.reason ?? null,
+      },
+    })
+    return row
+  })
+
+  logInfo(
+    '线下成交',
+    `改归属 ${updated.dealKey} ${existing.anchorName ?? '待归属'} → ${updated.anchorName ?? '待归属'}`,
+  )
+  await invalidateAfterWrite(`offline-deal-reassign:${updated.dealKey}`)
+  return {
+    ...updated,
+    amountYuan: centToYuan(updated.amountCent),
+    pendingAttribution: !updated.anchorId && (!updated.anchorName || updated.anchorName === '未归属'),
+    message: updated.anchorName
+      ? `已将 ${updated.dealKey} 指派给${updated.anchorName}`
+      : `已将 ${updated.dealKey} 设为待归属`,
+  }
+}
+
+export async function softDeleteOfflineDeal(params: {
+  dealId: string
+  operator?: string | null
+  reason?: string | null
+}) {
+  const existing = await prisma.offlineDeal.findFirst({
+    where: { id: params.dealId, deletedAt: null },
+  })
+  if (!existing) throw new Error('线下成交不存在或已删除')
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const row = await tx.offlineDeal.update({
+      where: { id: existing.id },
+      data: {
+        deletedAt: new Date(),
+        updatedBy: params.operator ?? null,
+      },
+    })
+    await tx.offlineDealAuditLog.create({
+      data: {
+        dealId: row.id,
+        dealKey: row.dealKey,
+        action: 'delete',
+        beforeJson: JSON.stringify(existing),
+        afterJson: JSON.stringify(row),
+        beforeAnchorId: existing.anchorId,
+        afterAnchorId: row.anchorId,
+        operator: params.operator ?? null,
+        reason: params.reason ?? '用户删除',
+      },
+    })
+    return row
+  })
+
+  logInfo('线下成交', `删除 ${updated.dealKey}`)
+  await invalidateAfterWrite(`offline-deal-delete:${updated.dealKey}`)
+  return {
+    ...updated,
+    amountYuan: centToYuan(updated.amountCent),
+    message: `已删除线下成交 ${updated.dealKey}`,
+  }
 }
 
 export async function updateOfflineDealStatus(params: {

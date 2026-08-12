@@ -59,6 +59,7 @@ interface MetricDetailData {
   overviewStableWarning?: string
   overviewStableSnapshot?: boolean
   allowManualAnchorAssign?: boolean
+  allowOfflineDealManage?: boolean
   scope?: {
     dealSource?: string
     anchorSystemKey?: string
@@ -105,6 +106,13 @@ export const BoardMetricDrawer: React.FC<Props> = ({
   const pageSize = 18
   const [reloadNonce, setReloadNonce] = useState(0)
   const [liveBlacklist, setLiveBlacklist] = useState<string[]>(blacklistedBuyerIds)
+  const [offlineAnchorOptions, setOfflineAnchorOptions] = useState<
+    Array<{ id: string; name: string; label?: string }>
+  >([])
+  const [offlineOptionsError, setOfflineOptionsError] = useState<string | null>(null)
+  const [busyOfflineDealId, setBusyOfflineDealId] = useState<string | null>(null)
+  const [offlineManageError, setOfflineManageError] = useState<string | null>(null)
+  const [offlineManageSuccess, setOfflineManageSuccess] = useState<string | null>(null)
 
   const bumpReload = () => setReloadNonce((n) => n + 1)
 
@@ -128,6 +136,74 @@ export const BoardMetricDrawer: React.FC<Props> = ({
   })
 
   const isSignedAmountMetric = metric === 'actualSignedAmount'
+  const isOfflineGmvMetricOpen = open && metric === 'offlineGmv'
+
+  useEffect(() => {
+    if (!isOfflineGmvMetricOpen) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await apiRequest<{
+          anchors: Array<{ id: string; name: string; label?: string }>
+        }>('/api/offline-deals/anchor-options')
+        if (cancelled) return
+        setOfflineAnchorOptions(res.anchors ?? [])
+        setOfflineOptionsError(null)
+      } catch (e) {
+        if (cancelled) return
+        setOfflineOptionsError(e instanceof Error ? e.message : '加载主播选项失败')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [isOfflineGmvMetricOpen, reloadNonce])
+
+  const handleOfflineAssign = async (dealId: string, targetAnchorName: string) => {
+    setBusyOfflineDealId(dealId)
+    setOfflineManageError(null)
+    setOfflineManageSuccess(null)
+    try {
+      const pending = !targetAnchorName.trim() || targetAnchorName.trim() === '未归属'
+      const res = await apiRequest<{ message?: string }>(
+        `/api/offline-deals/${encodeURIComponent(dealId)}/reassign`,
+        {
+          method: 'POST',
+          body: JSON.stringify(
+            pending
+              ? { anchorName: '未归属' }
+              : { anchorName: targetAnchorName.trim() },
+          ),
+        },
+      )
+      setOfflineManageSuccess(res.message || '已更新归属')
+      bumpReload()
+      onOrderAnchorAssigned?.()
+    } catch (e) {
+      setOfflineManageError(e instanceof Error ? e.message : '指派失败')
+    } finally {
+      setBusyOfflineDealId(null)
+    }
+  }
+
+  const handleOfflineDelete = async (dealId: string) => {
+    setBusyOfflineDealId(dealId)
+    setOfflineManageError(null)
+    setOfflineManageSuccess(null)
+    try {
+      const res = await apiRequest<{ message?: string }>(
+        `/api/offline-deals/${encodeURIComponent(dealId)}/delete`,
+        { method: 'POST', body: JSON.stringify({}) },
+      )
+      setOfflineManageSuccess(res.message || '已删除')
+      bumpReload()
+      onOrderAnchorAssigned?.()
+    } catch (e) {
+      setOfflineManageError(e instanceof Error ? e.message : '删除失败')
+    } finally {
+      setBusyOfflineDealId(null)
+    }
+  }
 
   useEffect(() => {
     if (!open || !startDate || !endDate || isSignedAmountMetric) return
@@ -183,6 +259,8 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     setError(null)
     clearAssignError()
     clearAssignSuccess()
+    setOfflineManageError(null)
+    setOfflineManageSuccess(null)
   }, [metric, startDate, endDate, open, anchorId, anchorName, preset, overviewStableSnapshot, clearAssignError, clearAssignSuccess, isSignedAmountMetric])
 
   if (isSignedAmountMetric) {
@@ -239,6 +317,8 @@ export const BoardMetricDrawer: React.FC<Props> = ({
   const isOfflineGmvMetric = metric === 'offlineGmv'
   const allowManualAssign =
     !isOfflineGmvMetric && data?.allowManualAnchorAssign !== false
+  const allowOfflineManage =
+    isOfflineGmvMetric && data?.allowOfflineDealManage !== false
 
   const drawerSubtitle = (() => {
     if (isOfflineGmvMetric) {
@@ -267,7 +347,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
     <BoardDrawerShell
       open={open}
       onClose={onClose}
-      title={data?.title ?? (isOfflineGmvMetric ? '线下 GMV｜逸凡' : '指标明细')}
+      title={data?.title ?? (isOfflineGmvMetric ? '线下 GMV' : '指标明细')}
       subtitle={drawerSubtitle}
       scrollResetKey={page}
       footer={
@@ -434,7 +514,7 @@ export const BoardMetricDrawer: React.FC<Props> = ({
               loading={loading && !!data}
               emptyText={
                 isOfflineGmvMetric
-                  ? '当前日期范围内暂无已确认的逸凡线下成交'
+                  ? '当前日期范围内暂无已确认的线下成交'
                   : '该指标下暂无匹配订单'
               }
               amountMode="default"
@@ -449,6 +529,20 @@ export const BoardMetricDrawer: React.FC<Props> = ({
                       },
                       onClearManualOverride: (orderNo) => {
                         void handleClearManualOverride(orderNo)
+                      },
+                    }
+                  : undefined
+              }
+              offlineDealManage={
+                allowOfflineManage
+                  ? {
+                      anchorOptions: offlineAnchorOptions,
+                      busyDealId: busyOfflineDealId,
+                      onAssign: (dealId, targetAnchorName) => {
+                        void handleOfflineAssign(dealId, targetAnchorName)
+                      },
+                      onDelete: (dealId) => {
+                        void handleOfflineDelete(dealId)
                       },
                     }
                   : undefined
@@ -472,6 +566,15 @@ export const BoardMetricDrawer: React.FC<Props> = ({
           ) : null}
           {allowManualAssign && !useSignedEmbeddedView && assignSuccess ? (
             <p className="text-xs text-emerald-700">{assignSuccess}</p>
+          ) : null}
+          {allowOfflineManage && offlineOptionsError ? (
+            <p className="text-xs text-red-600">主播选项加载失败：{offlineOptionsError}</p>
+          ) : null}
+          {allowOfflineManage && offlineManageError ? (
+            <p className="text-xs text-red-600">{offlineManageError}</p>
+          ) : null}
+          {allowOfflineManage && offlineManageSuccess ? (
+            <p className="text-xs text-emerald-700">{offlineManageSuccess}</p>
           ) : null}
         </div>
       ) : null}

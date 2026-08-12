@@ -20,9 +20,10 @@ export const OfflineDealEntryPanel: React.FC<{
   defaultDealDate?: string | null
   defaultAnchorName?: string
   onCreated?: () => void
-}> = ({ defaultDealDate, onCreated }) => {
+}> = ({ defaultDealDate, defaultAnchorName, onCreated }) => {
   const [open, setOpen] = useState(false)
-  const [yifan, setYifan] = useState<AnchorOption | null>(null)
+  const [anchors, setAnchors] = useState<AnchorOption[]>([])
+  const [selectedName, setSelectedName] = useState('未归属')
   const [loadingOptions, setLoadingOptions] = useState(false)
   const [saving, setSaving] = useState(false)
   const [flash, setFlash] = useState<Flash | null>(null)
@@ -43,8 +44,14 @@ export const OfflineDealEntryPanel: React.FC<{
     setLoadingOptions(true)
     try {
       const res = await apiRequest<{ anchors: AnchorOption[] }>('/api/offline-deals/anchor-options')
-      const hit = (res.anchors ?? [])[0] ?? null
-      setYifan(hit)
+      const list = res.anchors ?? []
+      setAnchors(list)
+      const preferred =
+        (defaultAnchorName &&
+          list.find((a) => a.name === defaultAnchorName || a.label === defaultAnchorName)) ||
+        list.find((a) => a.name === '未归属') ||
+        list[0]
+      if (preferred) setSelectedName(preferred.name)
     } catch (e) {
       setFlash({
         type: 'error',
@@ -53,27 +60,33 @@ export const OfflineDealEntryPanel: React.FC<{
     } finally {
       setLoadingOptions(false)
     }
-  }, [])
+  }, [defaultAnchorName])
 
   useEffect(() => {
     if (open) void loadOptions()
   }, [open, loadOptions])
 
+  const selected = useMemo(
+    () => anchors.find((a) => a.name === selectedName) ?? null,
+    [anchors, selectedName],
+  )
+
   const canSubmit = useMemo(() => {
     if (saving || loadingOptions) return false
-    if (!yifan?.name) return false
+    if (!selected) return false
     const n = Number(amount)
     if (!Number.isFinite(n) || n <= 0) return false
     return true
-  }, [amount, loadingOptions, saving, yifan])
+  }, [amount, loadingOptions, saving, selected])
 
   const submit = async () => {
-    if (!canSubmit || !yifan) return
+    if (!canSubmit || !selected) return
     setSaving(true)
     setFlash(null)
     const idempotencyKey =
       externalKey.trim() ||
       `ui-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const pending = selected.name === '未归属' || !selected.id
     try {
       const dealAtIso = offlineDealAtToIso(dealAt)
       const res = await apiRequest<{ message?: string }>('/api/offline-deals', {
@@ -81,8 +94,9 @@ export const OfflineDealEntryPanel: React.FC<{
         body: JSON.stringify({
           amountYuan: Number(amount),
           dealAt: dealAtIso,
-          anchorId: yifan.id,
-          anchorName: yifan.name,
+          ...(pending
+            ? { allowPending: true, anchorName: '未归属' }
+            : { anchorId: selected.id, anchorName: selected.name }),
           customerLabel: customerLabel.trim() || undefined,
           note: note.trim() || undefined,
           externalKey: externalKey.trim() || undefined,
@@ -124,7 +138,7 @@ export const OfflineDealEntryPanel: React.FC<{
       {open ? (
         <div className="absolute right-0 z-30 mt-2 w-[min(100vw-2rem,28rem)] rounded-xl border border-slate-200 bg-white p-3 shadow-lg sm:w-[28rem]">
           <p className="text-[11px] text-slate-500">
-            线下成交固定归属逸凡，自 2026-07-14 起计入总支付与线下 GMV。成交时间默认跟上方日期（今日/昨日）一致。
+            线下成交可指定任意主播或暂不归属；自 2026-07-14 起计入总支付与线下 GMV。成交时间默认跟上方日期（今日/昨日）一致。
           </p>
 
           {flash ? (
@@ -154,13 +168,22 @@ export const OfflineDealEntryPanel: React.FC<{
             </label>
             <label className="text-xs text-slate-600">
               归属主播
-              <div className="mt-0.5 rounded border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm text-slate-800">
-                {loadingOptions
-                  ? '加载中…'
-                  : yifan
-                    ? `${yifan.name}（固定）`
-                    : '系统线下主播未就绪'}
-              </div>
+              <select
+                value={selectedName}
+                disabled={loadingOptions || anchors.length === 0}
+                onChange={(e) => setSelectedName(e.target.value)}
+                className="mt-0.5 block w-full rounded border border-slate-200 px-2 py-1.5 text-sm"
+              >
+                {loadingOptions ? (
+                  <option>加载中…</option>
+                ) : (
+                  anchors.map((a) => (
+                    <option key={`${a.id}-${a.name}`} value={a.name}>
+                      {a.label || a.name}
+                    </option>
+                  ))
+                )}
+              </select>
             </label>
             <label className="text-xs text-slate-600 sm:col-span-2">
               成交时间*

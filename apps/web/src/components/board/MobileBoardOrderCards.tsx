@@ -10,6 +10,7 @@ import {
 } from '../../lib/board-order-row'
 import { BuyerDisplay } from './BuyerDisplay'
 import { OrderAnchorAssignControl } from './OrderAnchorAssignControl'
+import { OfflineDealManageControl } from './OfflineDealManageControl'
 import { QianfanOrderDetailButton } from './QianfanOrderDetailButton'
 
 interface Props {
@@ -18,13 +19,19 @@ interface Props {
   blacklistedBuyerIds?: string[]
   className?: string
   amountMode?: 'default' | 'signed'
-  /** 线下 GMV 下钻：不展示直播号 / 千帆跳转 / 改归属 */
+  /** 线下 GMV 下钻：不展示直播号 / 千帆跳转；可指派/删除 */
   offlineMode?: boolean
   manualAnchorAssign?: {
     anchorOptions: Array<{ id: string; name: string }>
     assigningOrderNo?: string | null
     onAssign: (orderNo: string, anchorName: string) => void
     onClearManualOverride?: (orderNo: string) => void
+  }
+  offlineDealManage?: {
+    anchorOptions: Array<{ id: string; name: string; label?: string }>
+    busyDealId?: string | null
+    onAssign: (dealId: string, anchorName: string) => void
+    onDelete: (dealId: string) => void
   }
 }
 
@@ -58,6 +65,7 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
   amountMode = 'default',
   offlineMode = false,
   manualAnchorAssign,
+  offlineDealManage,
 }) => {
   const { formatMoney } = useAmountDisplay()
   const blacklistSet = new Set(blacklistedBuyerIds)
@@ -131,6 +139,19 @@ export const MobileBoardOrderCards: React.FC<Props> = ({
                 <FieldRow label="净金额">{formatMoney(net)}</FieldRow>
                 <FieldRow label="状态">{displayCell(r.orderStatus)}</FieldRow>
               </div>
+              {offlineDealManage && r.offlineDealId ? (
+                <div className="mt-2 border-t border-rose-50 pt-2">
+                  <OfflineDealManageControl
+                    dealId={String(r.offlineDealId)}
+                    defaultAnchorName={r.anchorName}
+                    anchorOptions={offlineDealManage.anchorOptions}
+                    busyDealId={offlineDealManage.busyDealId}
+                    onAssign={offlineDealManage.onAssign}
+                    onDelete={offlineDealManage.onDelete}
+                    compact
+                  />
+                </div>
+              ) : null}
               {r.attributedBy ? (
                 <div className="mt-2 border-t border-rose-50 pt-2">
                   <button

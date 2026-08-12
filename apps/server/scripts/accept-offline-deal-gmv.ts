@@ -9,6 +9,7 @@ import {
   loadOfflineDealViewsForRange,
   offlineDealToAnalyzedView,
   reassignOfflineDeal,
+  softDeleteOfflineDeal,
   splitGmvByDealSource,
   updateOfflineDealStatus,
   isOfflineDealView,
@@ -146,7 +147,7 @@ async function main() {
   assert.equal(resolved.canonicalAnchorName, yifan.name)
   setCanonicalAttributionTestFixtures(null)
 
-  // 5. 未指定主播：线下成交固定归属系统线下主播逸凡（不允许待归属）
+  // 5. 未指定主播：可确认成交并计入未归属 GMV
   const pendingKey = `accept-pending-${Date.now()}`
   const pending = await createOfflineDeal({
     amountYuan: 500,
@@ -157,16 +158,16 @@ async function main() {
     idempotencyKey: pendingKey,
     operator: 'accept-script',
   })
-  assert.equal(pending.pendingAttribution, false)
-  assert.equal(pending.anchorName, yifan.name)
+  assert.equal(pending.pendingAttribution, true)
+  assert.ok(!pending.anchorName || pending.anchorName === '未归属')
   const pendingView = offlineDealToAnalyzedView(
     await prisma.offlineDeal.findUniqueOrThrow({ where: { id: pending.id } }),
   )
-  assert.equal(pendingView.anchorName, yifan.name)
+  assert.ok(!pendingView.anchorName || pendingView.anchorName === '未归属')
   assert.equal(pendingView.includedInGmv, true)
   const pendingSplit = splitGmvByDealSource([pendingView])
   assert.equal(Number(pendingSplit.offlineGmv.toFixed(2)), 500)
-  assert.equal(Number(pendingSplit.unassignedGmv.toFixed(2)), 0)
+  assert.equal(Number(pendingSplit.unassignedGmv.toFixed(2)), 500)
 
   // 6. 重复提交
   await assert.rejects(
@@ -183,17 +184,45 @@ async function main() {
     /已存在|冲突/,
   )
 
-  // 7+8. 改归属：线下成交固定逸凡，禁止改归其他主播
-  await assert.rejects(
-    () =>
-      reassignOfflineDeal({
-        dealId: created.id,
-        anchorName: '子杰',
-        operator: 'accept-script',
-        reason: '验收改归属',
-      }),
-    /不允许改归|固定归属/,
-  )
+  // 7+8. 改归属：可指派给其他主播
+  const otherAnchor = await prisma.anchor.findFirst({
+    where: {
+      deletedAt: null,
+      enabled: true,
+      id: { not: yifan.id },
+      OR: [{ systemKey: null }, { systemKey: { not: 'YIFAN_MANUAL' } }],
+    },
+  })
+  assert.ok(otherAnchor, '需要另一名启用主播用于改归属验收')
+  const reassigned = await reassignOfflineDeal({
+    dealId: created.id,
+    anchorName: otherAnchor!.name,
+    operator: 'accept-script',
+    reason: '验收改归属',
+  })
+  assert.equal(reassigned.anchorName, otherAnchor!.name)
+  assert.equal(reassigned.pendingAttribution, false)
+
+  // 软删除后不计 GMV
+  const delKey = `accept-del-${Date.now()}`
+  const toDelete = await createOfflineDeal({
+    amountYuan: 77,
+    dealAt: `${DAY}T16:30:00+08:00`,
+    anchorName: yifan.name,
+    externalKey: delKey,
+    idempotencyKey: delKey,
+    status: 'confirmed',
+    operator: 'accept-script',
+  })
+  await softDeleteOfflineDeal({
+    dealId: toDelete.id,
+    operator: 'accept-script',
+    reason: '验收删除',
+  })
+  const deletedRow = await prisma.offlineDeal.findUniqueOrThrow({ where: { id: toDelete.id } })
+  assert.ok(deletedRow.deletedAt)
+  const deletedViews = await loadOfflineDealViewsForRange(DAY, DAY)
+  assert.ok(!deletedViews.some((v) => v.offlineDealKey === toDelete.dealKey))
 
   // 9. 作废不计入
   const voidKey = `accept-void-${Date.now()}`
@@ -257,7 +286,7 @@ async function main() {
     '12. 已归属+未归属=总（本脚本仅线下样本时 online=0）',
   )
 
-  // 13. 零线上但有线下仍上榜
+  // 13. 零线上但有线下仍上榜（用仍归属逸凡的成交）
   setAnchorConfigCacheForTests({
     anchors: [
       {
@@ -274,7 +303,7 @@ async function main() {
   const onlyOfflineBoard = ensureAnchorPerformanceLeaderboardSlots(
     aggregateAnchorLeaderboard([
       offlineDealToAnalyzedView(
-        await prisma.offlineDeal.findUniqueOrThrow({ where: { id: created.id } }),
+        await prisma.offlineDeal.findUniqueOrThrow({ where: { id: refundDeal.id } }),
       ),
     ]),
     DAY,

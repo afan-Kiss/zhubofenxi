@@ -86,6 +86,7 @@ export interface BoardDrillOrderRow {
   manualOverride?: boolean
   dealSource?: 'online' | 'offline' | string | null
   offlineDealKey?: string | null
+  offlineDealId?: string | null
   offlineDealNote?: string | null
   attributedBy?: string | null
   attributedAt?: string | null
@@ -313,6 +314,8 @@ export function normalizeBoardOrderRow(raw: Record<string, unknown>): BoardDrill
           : 'online',
     offlineDealKey:
       raw.offlineDealKey != null ? String(raw.offlineDealKey).trim() || null : null,
+    offlineDealId:
+      raw.offlineDealId != null ? String(raw.offlineDealId).trim() || null : null,
     offlineDealNote:
       raw.offlineDealNote != null ? String(raw.offlineDealNote).trim() || null : null,
     attributedBy: raw.attributedBy != null ? String(raw.attributedBy).trim() || null : null,

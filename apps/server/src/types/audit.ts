@@ -8,6 +8,8 @@ export const AUDIT_ACTIONS = [
   'create_user',
   'update_user',
   'disable_user',
+  'enable_user',
+  'delete_user',
   'change_own_password',
   'reset_user_password',
   'save_cookie',

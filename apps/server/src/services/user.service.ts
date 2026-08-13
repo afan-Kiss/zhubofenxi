@@ -6,6 +6,8 @@ import { isUserRole } from '../types/roles'
 
 import { hashPassword, verifyPassword } from '../utils/password'
 
+import { isPrimarySuperAdminUsername } from '../utils/primary-super-admin'
+
 import { writeOperationLog } from './audit.service'
 
 
@@ -229,36 +231,152 @@ export async function createUser(input: {
 
 
 
-export async function updateUser(
+/**
+ * 账号管理权限：
+ * - fanfan 为最高权限，可停用/删除/改角色任意账号（含 admin）
+ * - 其他管理员不可动 fanfan，也不可停用/删除/改角色其他超级管理员
+ */
+export function assertCanManageUser(actor: {
+  id: string
+  username: string
+}, target: {
+  id: string
+  username: string
+  role: string
+}, action: 'update' | 'disable' | 'enable' | 'delete' | 'reset_password'): void {
+  if (actor.id === target.id && (action === 'disable' || action === 'delete')) {
+    throw new Error(action === 'delete' ? '不能删除当前登录账号' : '不能禁用当前登录账号')
+  }
 
-  id: string,
+  if (isPrimarySuperAdminUsername(target.username)) {
+    if (!isPrimarySuperAdminUsername(actor.username)) {
+      throw new Error('无权操作最高权限账号 fanfan')
+    }
+    if (action === 'disable' || action === 'delete') {
+      throw new Error('最高权限账号 fanfan 不可停用或删除')
+    }
+    if (action === 'update') {
+      throw new Error('最高权限账号 fanfan 的角色与状态不可修改')
+    }
+  }
 
-  patch: { role?: UserRole; enabled?: boolean },
-
-): Promise<SafeUser> {
-
-  const data: { role?: string; enabled?: boolean } = {}
-
-
-
-  if (patch.role !== undefined) data.role = patch.role
-
-  if (patch.enabled !== undefined) data.enabled = patch.enabled
-
-
-
-  const user = await prisma.user.update({ where: { id }, data })
-
-  return toSafeUser(user)
-
+  const targetIsSuperAdmin = target.role === 'super_admin'
+  if (targetIsSuperAdmin && !isPrimarySuperAdminUsername(actor.username)) {
+    throw new Error('仅最高权限账号 fanfan 可管理管理员账号')
+  }
 }
 
+export async function updateUser(
+  id: string,
+  patch: { role?: UserRole; enabled?: boolean },
+  actor?: { id: string; username: string },
+): Promise<SafeUser> {
+  const target = await findUserById(id)
+  if (!target) throw new Error('用户不存在')
 
+  if (actor) {
+    assertCanManageUser(actor, target, 'update')
+    if (patch.enabled === false) {
+      assertCanManageUser(actor, target, 'disable')
+    }
+    if (patch.enabled === true) {
+      assertCanManageUser(actor, target, 'enable')
+    }
+  }
 
-export async function disableUser(id: string): Promise<SafeUser> {
+  if (
+    isPrimarySuperAdminUsername(target.username) &&
+    patch.role !== undefined &&
+    patch.role !== 'super_admin'
+  ) {
+    throw new Error('最高权限账号 fanfan 必须保持超级管理员角色')
+  }
 
-  return updateUser(id, { enabled: false })
+  const data: { role?: string; enabled?: boolean } = {}
+  if (patch.role !== undefined) data.role = patch.role
+  if (patch.enabled !== undefined) data.enabled = patch.enabled
 
+  const user = await prisma.user.update({ where: { id }, data })
+  return toSafeUser(user)
+}
+
+export async function disableUser(
+  id: string,
+  actor: { id: string; username: string; role?: string },
+): Promise<SafeUser> {
+  const target = await findUserById(id)
+  if (!target) throw new Error('用户不存在')
+  assertCanManageUser(actor, target, 'disable')
+
+  const updated = await prisma.user.update({
+    where: { id },
+    data: { enabled: false },
+  })
+  await writeOperationLog({
+    userId: actor.id,
+    username: actor.username,
+    role: actor.role ?? 'super_admin',
+    action: 'disable_user',
+    module: 'user',
+    description: `停用用户 ${target.username}`,
+    meta: { targetUserId: target.id, targetUsername: target.username },
+  })
+  return toSafeUser(updated)
+}
+
+export async function enableUser(
+  id: string,
+  actor: { id: string; username: string; role?: string },
+): Promise<SafeUser> {
+  const target = await findUserById(id)
+  if (!target) throw new Error('用户不存在')
+  assertCanManageUser(actor, target, 'enable')
+
+  const updated = await prisma.user.update({
+    where: { id },
+    data: { enabled: true },
+  })
+  await writeOperationLog({
+    userId: actor.id,
+    username: actor.username,
+    role: actor.role ?? 'super_admin',
+    action: 'enable_user',
+    module: 'user',
+    description: `启用用户 ${target.username}`,
+    meta: { targetUserId: target.id, targetUsername: target.username },
+  })
+  return toSafeUser(updated)
+}
+
+export async function deleteUser(
+  id: string,
+  actor: { id: string; username: string; role: string },
+  audit?: { requestId?: string; ip?: string; userAgent?: string },
+): Promise<{ id: string; username: string }> {
+  const target = await findUserById(id)
+  if (!target) throw new Error('用户不存在')
+  assertCanManageUser(actor, target, 'delete')
+
+  await prisma.user.delete({ where: { id } })
+
+  await writeOperationLog({
+    userId: actor.id,
+    username: actor.username,
+    role: actor.role,
+    action: 'delete_user',
+    module: 'user',
+    description: `删除用户 ${target.username}`,
+    ip: audit?.ip ?? null,
+    userAgent: audit?.userAgent ?? null,
+    requestId: audit?.requestId ?? null,
+    meta: {
+      targetUserId: target.id,
+      targetUsername: target.username,
+      targetRole: target.role,
+    },
+  })
+
+  return { id: target.id, username: target.username }
 }
 
 
@@ -488,7 +606,11 @@ export async function resetUserPassword(input: {
 
   if (!target) throw new Error('用户不存在')
 
-
+  assertCanManageUser(
+    { id: input.actorId, username: input.actorUsername },
+    target,
+    'reset_password',
+  )
 
   const mustChange = input.mustChangePassword !== false
 

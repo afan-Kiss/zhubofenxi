@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Copy, Eye, EyeOff } from 'lucide-react'
 import { apiRequest } from '../../lib/api'
 import { formatDateTimeShanghai } from '../../lib/business-timezone'
+import { useAuth } from '../../providers/AuthProvider'
 
 interface UserRow {
   id: string
@@ -19,6 +20,7 @@ interface UserRow {
   registeredClientLabel: string
   lastLoginClientInfo?: string
   lastLoginClientLabel?: string
+  isPrimarySuperAdmin?: boolean
 }
 
 const ROLE_OPTIONS = [
@@ -32,6 +34,8 @@ const ROLE_LABEL: Record<string, string> = {
   boss: '老板',
   staff: '员工',
 }
+
+const PRIMARY_SUPER_ADMIN_USERNAME = 'fanfan'
 
 function formatDateTime(iso: string | null): string {
   return formatDateTimeShanghai(iso)
@@ -49,7 +53,13 @@ function resolveLastAccessClientInfo(row: UserRow): string {
   return row.lastAccessClientInfo ?? row.lastLoginClientInfo ?? '—'
 }
 
+function isPrimarySuperAdmin(row: UserRow): boolean {
+  return row.isPrimarySuperAdmin === true || row.username === PRIMARY_SUPER_ADMIN_USERNAME
+}
+
 export const UserManagementPanel: React.FC = () => {
+  const { user: currentUser } = useAuth()
+  const isTopAdmin = currentUser?.username === PRIMARY_SUPER_ADMIN_USERNAME
   const [users, setUsers] = useState<UserRow[]>([])
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -59,6 +69,16 @@ export const UserManagementPanel: React.FC = () => {
   const [resetId, setResetId] = useState<string | null>(null)
   const [resetPassword, setResetPassword] = useState('')
   const [resetConfirm, setResetConfirm] = useState('')
+
+  const createRoleOptions = isTopAdmin
+    ? ROLE_OPTIONS
+    : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin')
+
+  useEffect(() => {
+    if (!isTopAdmin && role === 'super_admin') {
+      setRole('staff')
+    }
+  }, [isTopAdmin, role])
 
   const load = async () => {
     const rows = await apiRequest<UserRow[]>('/api/users')
@@ -82,6 +102,12 @@ export const UserManagementPanel: React.FC = () => {
     }
   }, [])
 
+  const canManageRow = (row: UserRow): boolean => {
+    if (isPrimarySuperAdmin(row)) return false
+    if (row.role === 'super_admin') return isTopAdmin
+    return true
+  }
+
   const create = async () => {
     setMessage('')
     try {
@@ -99,16 +125,53 @@ export const UserManagementPanel: React.FC = () => {
   }
 
   const updateRole = async (id: string, nextRole: string) => {
-    await apiRequest(`/api/users/${id}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ role: nextRole }),
-    })
-    await load()
+    setMessage('')
+    try {
+      await apiRequest(`/api/users/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ role: nextRole }),
+      })
+      await load()
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : '更新角色失败')
+    }
   }
 
   const disable = async (id: string) => {
-    await apiRequest(`/api/users/${id}/disable`, { method: 'PATCH' })
-    await load()
+    setMessage('')
+    try {
+      await apiRequest(`/api/users/${id}/disable`, { method: 'PATCH' })
+      await load()
+      setMessage('账号已停用')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : '停用失败')
+    }
+  }
+
+  const enable = async (id: string) => {
+    setMessage('')
+    try {
+      await apiRequest(`/api/users/${id}/enable`, { method: 'PATCH' })
+      await load()
+      setMessage('账号已启用')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : '启用失败')
+    }
+  }
+
+  const remove = async (row: UserRow) => {
+    const ok = window.confirm(
+      `确认删除账号「${row.username}」？删除后不可恢复，该账号将立即无法登录。`,
+    )
+    if (!ok) return
+    setMessage('')
+    try {
+      await apiRequest(`/api/users/${row.id}`, { method: 'DELETE' })
+      await load()
+      setMessage(`已删除账号 ${row.username}`)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : '删除失败')
+    }
   }
 
   const submitReset = async (id: string) => {
@@ -153,7 +216,10 @@ export const UserManagementPanel: React.FC = () => {
         <div>
           <h3 className="text-base font-semibold text-slate-900">账号管理</h3>
           <p className="mt-1 text-xs text-slate-500">
-            创建或停用登录账号，查看密码、注册时间与访问环境。「最新访问」为最近一次进入系统的时间（含保持登录）。用户自行改密后将不再显示密码。
+            创建、停用或删除登录账号；查看密码、注册时间与访问环境。「最新访问」为最近一次进入系统的时间（含保持登录）。
+            {isTopAdmin
+              ? ' 当前为最高权限账号 fanfan，可管理含管理员在内的全部账号。'
+              : ' 管理员账号仅最高权限 fanfan 可停用或删除。'}
           </p>
         </div>
         <button
@@ -186,7 +252,7 @@ export const UserManagementPanel: React.FC = () => {
           value={role}
           onChange={(e) => setRole(e.target.value)}
         >
-          {ROLE_OPTIONS.map((o) => (
+          {createRoleOptions.map((o) => (
             <option key={o.value} value={o.value}>
               {o.label}
             </option>
@@ -219,134 +285,179 @@ export const UserManagementPanel: React.FC = () => {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
-              <React.Fragment key={u.id}>
-                <tr className="border-b border-slate-100 align-top">
-                  <td className="py-2 pr-3 font-medium text-slate-900">{u.username}</td>
-                  <td className="py-2 pr-3">
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={
-                          u.managedPassword
-                            ? 'font-mono text-slate-800'
-                            : 'text-slate-400'
-                        }
-                      >
-                        {displayPassword(u.managedPassword)}
-                      </span>
-                      {u.managedPassword ? (
-                        <button
-                          type="button"
-                          title="复制密码"
-                          onClick={() => void copyPassword(u.managedPassword!)}
-                          className="text-slate-400 hover:text-slate-700"
-                        >
-                          <Copy className="h-3.5 w-3.5" />
-                        </button>
+            {users.map((u) => {
+              const manageable = canManageRow(u)
+              const primary = isPrimarySuperAdmin(u)
+              return (
+                <React.Fragment key={u.id}>
+                  <tr className="border-b border-slate-100 align-top">
+                    <td className="py-2 pr-3 font-medium text-slate-900">
+                      {u.username}
+                      {primary ? (
+                        <span className="ml-2 text-[11px] font-normal text-amber-700">最高权限</span>
                       ) : null}
-                    </div>
-                  </td>
-                  <td className="py-2 pr-3 whitespace-nowrap text-slate-700">
-                    {formatDateTime(u.createdAt)}
-                  </td>
-                  <td className="py-2 pr-3 min-w-[8rem] text-xs text-slate-600">
-                    <div>{u.registeredClientLabel}</div>
-                    {u.registeredClientInfo !== u.registeredClientLabel &&
-                    u.registeredClientInfo !== '—' ? (
-                      <div className="mt-0.5 text-[10px] text-slate-400">{u.registeredClientInfo}</div>
-                    ) : null}
-                  </td>
-                  <td className="py-2 pr-3 whitespace-nowrap text-slate-700">
-                    {formatDateTime(resolveLastAccess(u))}
-                  </td>
-                  <td className="py-2 pr-3 min-w-[8rem] text-xs text-slate-600">
-                    <div>{resolveLastAccessClientLabel(u)}</div>
-                    {resolveLastAccessClientInfo(u) !== resolveLastAccessClientLabel(u) &&
-                    resolveLastAccessClientInfo(u) !== '—' ? (
-                      <div className="mt-0.5 text-[10px] text-slate-400">
-                        {resolveLastAccessClientInfo(u)}
+                    </td>
+                    <td className="py-2 pr-3">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={
+                            u.managedPassword ? 'font-mono text-slate-800' : 'text-slate-400'
+                          }
+                        >
+                          {displayPassword(u.managedPassword)}
+                        </span>
+                        {u.managedPassword ? (
+                          <button
+                            type="button"
+                            title="复制密码"
+                            onClick={() => void copyPassword(u.managedPassword!)}
+                            className="text-slate-400 hover:text-slate-700"
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                        ) : null}
                       </div>
-                    ) : null}
-                  </td>
-                  <td className="py-2 pr-3">
-                    <select
-                      className="rounded border border-slate-200 px-2 py-1"
-                      value={u.role}
-                      onChange={(e) => void updateRole(u.id, e.target.value)}
-                    >
-                      {ROLE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
-                    <span className="ml-2 text-xs text-slate-400">{ROLE_LABEL[u.role] ?? u.role}</span>
-                  </td>
-                  <td className="py-2 pr-3">{u.enabled ? '正常' : '已停用'}</td>
-                  <td className="py-2">
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        className="text-sky-600 hover:underline"
-                        onClick={() => {
-                          setResetId(resetId === u.id ? null : u.id)
-                          setResetPassword('')
-                          setResetConfirm('')
-                        }}
-                      >
-                        {resetId === u.id ? '取消重置' : '重置密码'}
-                      </button>
-                      {u.enabled ? (
-                        <button
-                          type="button"
-                          className="text-rose-600 hover:underline"
-                          onClick={() => void disable(u.id)}
-                        >
-                          停用
-                        </button>
+                    </td>
+                    <td className="py-2 pr-3 whitespace-nowrap text-slate-700">
+                      {formatDateTime(u.createdAt)}
+                    </td>
+                    <td className="py-2 pr-3 min-w-[8rem] text-xs text-slate-600">
+                      <div>{u.registeredClientLabel}</div>
+                      {u.registeredClientInfo !== u.registeredClientLabel &&
+                      u.registeredClientInfo !== '—' ? (
+                        <div className="mt-0.5 text-[10px] text-slate-400">
+                          {u.registeredClientInfo}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-3 whitespace-nowrap text-slate-700">
+                      {formatDateTime(resolveLastAccess(u))}
+                    </td>
+                    <td className="py-2 pr-3 min-w-[8rem] text-xs text-slate-600">
+                      <div>{resolveLastAccessClientLabel(u)}</div>
+                      {resolveLastAccessClientInfo(u) !== resolveLastAccessClientLabel(u) &&
+                      resolveLastAccessClientInfo(u) !== '—' ? (
+                        <div className="mt-0.5 text-[10px] text-slate-400">
+                          {resolveLastAccessClientInfo(u)}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="py-2 pr-3">
+                      {manageable ? (
+                        <>
+                          <select
+                            className="rounded border border-slate-200 px-2 py-1"
+                            value={u.role}
+                            onChange={(e) => void updateRole(u.id, e.target.value)}
+                          >
+                            {(isTopAdmin
+                              ? ROLE_OPTIONS
+                              : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin')
+                            ).map((o) => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                          <span className="ml-2 text-xs text-slate-400">
+                            {ROLE_LABEL[u.role] ?? u.role}
+                          </span>
+                        </>
                       ) : (
-                        <span className="text-slate-400">已停用</span>
+                        <span className="text-slate-700">
+                          {primary ? '最高权限' : ROLE_LABEL[u.role] ?? u.role}
+                        </span>
                       )}
-                    </div>
-                  </td>
-                </tr>
-                {resetId === u.id ? (
-                  <tr className="border-b border-slate-100 bg-slate-50">
-                    <td colSpan={9} className="py-3">
-                      <div className="flex flex-wrap items-end gap-2">
-                        <label className="grid gap-1 text-xs text-slate-600">
-                          新密码
-                          <input
-                            type="text"
-                            autoComplete="off"
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                            value={resetPassword}
-                            onChange={(e) => setResetPassword(e.target.value)}
-                          />
-                        </label>
-                        <label className="grid gap-1 text-xs text-slate-600">
-                          确认密码
-                          <input
-                            type="text"
-                            autoComplete="off"
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
-                            value={resetConfirm}
-                            onChange={(e) => setResetConfirm(e.target.value)}
-                          />
-                        </label>
-                        <button
-                          type="button"
-                          onClick={() => void submitReset(u.id)}
-                          className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white"
-                        >
-                          保存新密码
-                        </button>
+                    </td>
+                    <td className="py-2 pr-3">{u.enabled ? '正常' : '已停用'}</td>
+                    <td className="py-2">
+                      <div className="flex flex-wrap gap-2">
+                        {(manageable || (primary && isTopAdmin)) && (
+                          <button
+                            type="button"
+                            className="text-sky-600 hover:underline"
+                            onClick={() => {
+                              setResetId(resetId === u.id ? null : u.id)
+                              setResetPassword('')
+                              setResetConfirm('')
+                            }}
+                          >
+                            {resetId === u.id ? '取消重置' : '重置密码'}
+                          </button>
+                        )}
+                        {manageable ? (
+                          <>
+                            {u.enabled ? (
+                              <button
+                                type="button"
+                                className="text-rose-600 hover:underline"
+                                onClick={() => void disable(u.id)}
+                              >
+                                停用
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="text-emerald-600 hover:underline"
+                                onClick={() => void enable(u.id)}
+                              >
+                                启用
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="text-rose-700 hover:underline"
+                              onClick={() => void remove(u)}
+                            >
+                              删除
+                            </button>
+                          </>
+                        ) : primary ? (
+                          <span className="text-slate-400">受保护</span>
+                        ) : (
+                          <span className="text-slate-400">仅 fanfan 可管理</span>
+                        )}
                       </div>
                     </td>
                   </tr>
-                ) : null}
-              </React.Fragment>
-            ))}
+                  {resetId === u.id ? (
+                    <tr className="border-b border-slate-100 bg-slate-50">
+                      <td colSpan={9} className="py-3">
+                        <div className="flex flex-wrap items-end gap-2">
+                          <label className="grid gap-1 text-xs text-slate-600">
+                            新密码
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                              value={resetPassword}
+                              onChange={(e) => setResetPassword(e.target.value)}
+                            />
+                          </label>
+                          <label className="grid gap-1 text-xs text-slate-600">
+                            确认密码
+                            <input
+                              type="text"
+                              autoComplete="off"
+                              className="rounded-lg border border-slate-200 px-3 py-2 text-sm"
+                              value={resetConfirm}
+                              onChange={(e) => setResetConfirm(e.target.value)}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => void submitReset(u.id)}
+                            className="rounded-lg bg-slate-900 px-3 py-2 text-sm text-white"
+                          >
+                            保存新密码
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                </React.Fragment>
+              )
+            })}
           </tbody>
         </table>
       </div>

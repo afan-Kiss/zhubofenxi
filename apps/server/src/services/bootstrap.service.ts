@@ -1,9 +1,9 @@
 import { prisma } from '../lib/prisma'
+import { PRIMARY_SUPER_ADMIN_USERNAME } from '../utils/primary-super-admin'
 import { hashPassword } from '../utils/password'
 
 const DEFAULT_ADMIN_USERNAME = 'admin'
 const DEFAULT_ADMIN_PASSWORD = 'admin123456'
-const PRIMARY_SUPER_ADMIN_USERNAME = 'fanfan'
 
 /** 仅在数据库无任何用户时创建默认 admin，并标记需改密 */
 export async function ensureDefaultAdmin(): Promise<void> {

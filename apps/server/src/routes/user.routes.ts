@@ -4,7 +4,9 @@ import { requireAuth } from '../middleware/auth.middleware'
 import { requireRole } from '../middleware/role.middleware'
 import {
   createUser,
+  deleteUser,
   disableUser,
+  enableUser,
   listUsers,
   resetUserPassword,
   updateUser,
@@ -12,6 +14,7 @@ import {
 } from '../services/user.service'
 import type { UserRole } from '../types/roles'
 import { isUserRole } from '../types/roles'
+import { isPrimarySuperAdminUsername } from '../utils/primary-super-admin'
 import { sendFail, sendOk } from '../utils/response'
 import { formatClientInfo, formatUserAgentLabel } from '../utils/user-agent-label'
 
@@ -47,6 +50,7 @@ function serializeAdminUser(u: AdminUserView) {
     lastLoginAt: lastAccessAt,
     createdAt: u.createdAt.toISOString(),
     updatedAt: u.updatedAt.toISOString(),
+    isPrimarySuperAdmin: isPrimarySuperAdminUsername(u.username),
   }
 }
 
@@ -74,6 +78,10 @@ userRouter.post('/', async (req, res) => {
   }
   if (password.length < 8) {
     sendFail(res, '密码长度不能少于 8 位')
+    return
+  }
+  if (role === 'super_admin' && !isPrimarySuperAdminUsername(req.user!.username)) {
+    sendFail(res, '仅最高权限账号 fanfan 可创建管理员')
     return
   }
 
@@ -140,7 +148,10 @@ userRouter.patch('/:id', async (req, res) => {
   }
 
   try {
-    const user = await updateUser(id, patch)
+    const user = await updateUser(id, patch, {
+      id: req.user!.id,
+      username: req.user!.username,
+    })
     sendOk(res, {
       ...user,
       passwordChangedAt: user.passwordChangedAt?.toISOString() ?? null,
@@ -148,21 +159,20 @@ userRouter.patch('/:id', async (req, res) => {
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString(),
     })
-  } catch {
-    sendFail(res, '更新用户失败', 500)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '更新用户失败', 400)
   }
 })
 
 userRouter.patch('/:id/disable', async (req, res) => {
   const { id } = req.params
-  const current = req.user!
-  if (current.id === id) {
-    sendFail(res, '不能禁用当前登录账号')
-    return
-  }
 
   try {
-    const user = await disableUser(id)
+    const user = await disableUser(id, {
+      id: req.user!.id,
+      username: req.user!.username,
+      role: req.user!.role,
+    })
     sendOk(res, {
       ...user,
       passwordChangedAt: user.passwordChangedAt?.toISOString() ?? null,
@@ -170,7 +180,51 @@ userRouter.patch('/:id/disable', async (req, res) => {
       createdAt: user.createdAt.toISOString(),
       updatedAt: user.updatedAt.toISOString(),
     })
-  } catch {
-    sendFail(res, '禁用用户失败', 500)
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '禁用用户失败', 400)
+  }
+})
+
+userRouter.patch('/:id/enable', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const user = await enableUser(id, {
+      id: req.user!.id,
+      username: req.user!.username,
+      role: req.user!.role,
+    })
+    sendOk(res, {
+      ...user,
+      passwordChangedAt: user.passwordChangedAt?.toISOString() ?? null,
+      lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
+      createdAt: user.createdAt.toISOString(),
+      updatedAt: user.updatedAt.toISOString(),
+    })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '启用用户失败', 400)
+  }
+})
+
+userRouter.delete('/:id', async (req, res) => {
+  const { id } = req.params
+
+  try {
+    const result = await deleteUser(
+      id,
+      {
+        id: req.user!.id,
+        username: req.user!.username,
+        role: req.user!.role,
+      },
+      {
+        requestId: req.requestId,
+        ip: getClientIp(req),
+        userAgent: req.headers['user-agent'] ?? undefined,
+      },
+    )
+    sendOk(res, { message: `已删除账号 ${result.username}`, ...result })
+  } catch (err) {
+    sendFail(res, err instanceof Error ? err.message : '删除用户失败', 400)
   }
 })

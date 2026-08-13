@@ -39,6 +39,7 @@ export type SafeUser = {
 /** 超级管理员用户列表专用，含可查看的登录密码与客户端信息 */
 export type AdminUserView = SafeUser & {
   managedPassword: string | null
+  remark: string | null
   registeredIp: string | null
   registeredUserAgent: string | null
   lastLoginIp: string | null
@@ -123,6 +124,8 @@ function toAdminUser(user: {
 
   managedPassword: string | null
 
+  remark: string | null
+
   registeredIp: string | null
 
   registeredUserAgent: string | null
@@ -138,6 +141,8 @@ function toAdminUser(user: {
     ...toSafeUser(user),
 
     managedPassword: user.managedPassword,
+
+    remark: user.remark ?? null,
 
     registeredIp: user.registeredIp,
 
@@ -187,6 +192,8 @@ export async function createUser(input: {
 
   role: UserRole
 
+  remark?: string | null
+
   registration?: { ip?: string | null; userAgent?: string | null }
 
 }): Promise<AdminUserView> {
@@ -199,6 +206,8 @@ export async function createUser(input: {
 
   const passwordHash = await hashPassword(input.password)
 
+  const remark = input.remark?.trim() || null
+
   const user = await prisma.user.create({
 
     data: {
@@ -208,6 +217,8 @@ export async function createUser(input: {
       passwordHash,
 
       managedPassword: input.password,
+
+      remark,
 
       registeredIp: input.registration?.ip?.trim() || null,
 
@@ -235,6 +246,7 @@ export async function createUser(input: {
  * 账号管理权限：
  * - fanfan 为最高权限，可停用/删除/改角色任意账号（含 admin）
  * - 其他管理员不可动 fanfan，也不可停用/删除/改角色其他超级管理员
+ * - 任意管理员可重置自己的密码
  */
 export function assertCanManageUser(actor: {
   id: string
@@ -248,6 +260,11 @@ export function assertCanManageUser(actor: {
     throw new Error(action === 'delete' ? '不能删除当前登录账号' : '不能禁用当前登录账号')
   }
 
+  // 自己重置自己的密码始终允许（账号管理页是当前唯一改密入口）
+  if (action === 'reset_password' && actor.id === target.id) {
+    return
+  }
+
   if (isPrimarySuperAdminUsername(target.username)) {
     if (!isPrimarySuperAdminUsername(actor.username)) {
       throw new Error('无权操作最高权限账号 fanfan')
@@ -255,9 +272,7 @@ export function assertCanManageUser(actor: {
     if (action === 'disable' || action === 'delete') {
       throw new Error('最高权限账号 fanfan 不可停用或删除')
     }
-    if (action === 'update') {
-      throw new Error('最高权限账号 fanfan 的角色与状态不可修改')
-    }
+    return
   }
 
   const targetIsSuperAdmin = target.role === 'super_admin'
@@ -268,9 +283,9 @@ export function assertCanManageUser(actor: {
 
 export async function updateUser(
   id: string,
-  patch: { role?: UserRole; enabled?: boolean },
+  patch: { role?: UserRole; enabled?: boolean; remark?: string | null },
   actor?: { id: string; username: string },
-): Promise<SafeUser> {
+): Promise<AdminUserView> {
   const target = await findUserById(id)
   if (!target) throw new Error('用户不存在')
 
@@ -282,22 +297,33 @@ export async function updateUser(
     if (patch.enabled === true) {
       assertCanManageUser(actor, target, 'enable')
     }
+    if (
+      patch.role === 'super_admin' &&
+      !isPrimarySuperAdminUsername(actor.username)
+    ) {
+      throw new Error('仅最高权限账号 fanfan 可设置管理员角色')
+    }
   }
 
-  if (
-    isPrimarySuperAdminUsername(target.username) &&
-    patch.role !== undefined &&
-    patch.role !== 'super_admin'
-  ) {
-    throw new Error('最高权限账号 fanfan 必须保持超级管理员角色')
+  if (isPrimarySuperAdminUsername(target.username)) {
+    if (patch.role !== undefined && patch.role !== 'super_admin') {
+      throw new Error('最高权限账号 fanfan 必须保持超级管理员角色')
+    }
+    if (patch.enabled !== undefined && patch.enabled !== target.enabled) {
+      throw new Error('最高权限账号 fanfan 的状态不可修改')
+    }
   }
 
-  const data: { role?: string; enabled?: boolean } = {}
+  const data: { role?: string; enabled?: boolean; remark?: string | null } = {}
   if (patch.role !== undefined) data.role = patch.role
   if (patch.enabled !== undefined) data.enabled = patch.enabled
+  if (patch.remark !== undefined) {
+    const next = patch.remark == null ? null : String(patch.remark).trim()
+    data.remark = next || null
+  }
 
   const user = await prisma.user.update({ where: { id }, data })
-  return toSafeUser(user)
+  return toAdminUser(user)
 }
 
 export async function disableUser(

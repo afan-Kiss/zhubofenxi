@@ -4,7 +4,9 @@ import { useAuth } from '../../providers/AuthProvider'
 import { PAGE_PERMISSION_ROUTES, type PagePermissionKey } from '../../lib/page-permissions'
 
 function routePermission(pathname: string): PagePermissionKey | null {
-  if (pathname === '/' || pathname.startsWith('/?')) return 'overview'
+  // `/` 会重定向到主播业绩，不做 overview 权限拦截
+  if (pathname === '/' || pathname.startsWith('/?')) return 'anchors'
+  if (pathname.startsWith('/overview')) return 'overview'
   if (pathname.startsWith('/anchors')) return 'anchors'
   if (pathname.startsWith('/buyers')) return 'buyers'
   if (pathname.startsWith('/lucky-gifts')) return 'lucky_gifts'

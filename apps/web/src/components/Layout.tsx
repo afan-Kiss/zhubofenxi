@@ -36,19 +36,18 @@ const ALL_NAV: Array<{
   tone?: 'default' | 'muted'
 }> = [
   {
-    to: '/',
-    end: true,
-    label: '经营总览',
-    icon: LayoutDashboard,
-    dataTestId: 'tab-overview',
-    permission: 'overview',
-  },
-  {
     to: '/anchors',
     label: '主播业绩',
     icon: UserCircle,
     dataTestId: 'tab-anchors',
     permission: 'anchors',
+  },
+  {
+    to: '/overview',
+    label: '经营总览',
+    icon: LayoutDashboard,
+    dataTestId: 'tab-overview',
+    permission: 'overview',
   },
   {
     to: '/buyers',
@@ -147,7 +146,7 @@ export const Layout: React.FC = () => {
   const handleSettingsCancel = useCallback(() => {
     setSettingsDialogOpen(false)
     if (location.pathname === '/settings') {
-      navigate('/')
+      navigate('/anchors')
     }
   }, [location.pathname, navigate])
 

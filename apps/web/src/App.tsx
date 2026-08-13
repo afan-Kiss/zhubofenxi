@@ -61,7 +61,8 @@ const App: React.FC = () => {
             <Route path="/mobile/daily-report-upload" element={<DailyReportMobileUploadPage />} />
             <Route element={<RequireAuth />}>
               <Route element={<Layout />}>
-                <Route index element={<OverviewTab />} />
+                <Route index element={<Navigate to="/anchors" replace />} />
+                <Route path="overview" element={<OverviewTab />} />
                 <Route path="anchors" element={<AnchorPerformanceTab />} />
                 <Route path="anchor-schedules" element={<AnchorSchedulePage />} />
                 <Route path="anchors/:anchorId" element={<Navigate to="/anchors" replace />} />
@@ -87,15 +88,15 @@ const App: React.FC = () => {
                   }
                 />
                 <Route path="boss-dashboard" element={<BossDashboardPage />} />
-                <Route path="orders" element={<Navigate to="/" replace />} />
-                <Route path="billing" element={<Navigate to="/" replace />} />
+                <Route path="orders" element={<Navigate to="/anchors" replace />} />
+                <Route path="billing" element={<Navigate to="/anchors" replace />} />
                 <Route path="settings" element={<SettingsTab />} />
-                <Route path="dashboard" element={<Navigate to="/" replace />} />
+                <Route path="dashboard" element={<Navigate to="/anchors" replace />} />
                 <Route path="buyer-ranking" element={<Navigate to="/buyers" replace />} />
                 <Route path="admin" element={<Navigate to="/settings" replace />} />
               </Route>
             </Route>
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/anchors" replace />} />
           </Routes>
         </BrowserRouter>
       </AuthProvider>

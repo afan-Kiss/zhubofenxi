@@ -25,7 +25,7 @@ export const PAGE_PERMISSION_LABELS: Record<PagePermissionKey, string> = {
 }
 
 export const PAGE_PERMISSION_ROUTES: Record<PagePermissionKey, string> = {
-  overview: '/',
+  overview: '/overview',
   anchors: '/anchors',
   buyers: '/buyers',
   lucky_gifts: '/lucky-gifts',

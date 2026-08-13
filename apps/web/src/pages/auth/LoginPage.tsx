@@ -21,7 +21,7 @@ export const LoginPage: React.FC = () => {
         body: JSON.stringify({ username, password }),
       })
       await refresh()
-      navigate('/', { replace: true })
+      navigate('/anchors', { replace: true })
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败')
     } finally {

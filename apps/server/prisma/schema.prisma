@@ -13,6 +13,8 @@ model User {
   passwordHash       String
   /// 管理员可见的登录密码（创建/重置时写入；用户自行改密后清空）
   managedPassword    String?
+  /// 账号备注（管理员可见，便于区分用途）
+  remark             String?
   role               String
   enabled            Boolean   @default(true)
   mustChangePassword Boolean   @default(false)

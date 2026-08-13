@@ -32,6 +32,7 @@ function serializeAdminUser(u: AdminUserView) {
   return {
     ...u,
     managedPassword: u.managedPassword,
+    remark: u.remark ?? null,
     registeredIp: u.registeredIp,
     registeredUserAgent: u.registeredUserAgent,
     registeredClientLabel: formatUserAgentLabel(u.registeredUserAgent),
@@ -67,6 +68,10 @@ userRouter.post('/', async (req, res) => {
   const username = String(req.body?.username ?? '').trim()
   const password = String(req.body?.password ?? '')
   const role = String(req.body?.role ?? '')
+  const remark =
+    req.body?.remark === undefined || req.body?.remark === null
+      ? null
+      : String(req.body.remark)
 
   if (!username || !password) {
     sendFail(res, '请填写用户名和密码')
@@ -90,6 +95,7 @@ userRouter.post('/', async (req, res) => {
       username,
       password,
       role,
+      remark,
       registration: {
         ip: getClientIp(req),
         userAgent: req.headers['user-agent'] ?? undefined,
@@ -134,7 +140,7 @@ userRouter.patch('/:id/password', async (req, res) => {
 
 userRouter.patch('/:id', async (req, res) => {
   const { id } = req.params
-  const patch: { role?: UserRole; enabled?: boolean } = {}
+  const patch: { role?: UserRole; enabled?: boolean; remark?: string | null } = {}
 
   if (req.body?.role !== undefined) {
     if (!isUserRole(String(req.body.role))) {
@@ -146,19 +152,16 @@ userRouter.patch('/:id', async (req, res) => {
   if (req.body?.enabled !== undefined) {
     patch.enabled = Boolean(req.body.enabled)
   }
+  if (req.body?.remark !== undefined) {
+    patch.remark = req.body.remark == null ? null : String(req.body.remark)
+  }
 
   try {
     const user = await updateUser(id, patch, {
       id: req.user!.id,
       username: req.user!.username,
     })
-    sendOk(res, {
-      ...user,
-      passwordChangedAt: user.passwordChangedAt?.toISOString() ?? null,
-      lastLoginAt: user.lastLoginAt?.toISOString() ?? null,
-      createdAt: user.createdAt.toISOString(),
-      updatedAt: user.updatedAt.toISOString(),
-    })
+    sendOk(res, serializeAdminUser(user))
   } catch (err) {
     sendFail(res, err instanceof Error ? err.message : '更新用户失败', 400)
   }

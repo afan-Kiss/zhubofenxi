@@ -15,6 +15,7 @@ import {
 import {
   extractSellerIdFromOrderRaw,
   resolveOrderShopOwnership,
+  shouldDeleteContaminatedOrderRow,
 } from '../src/services/order-shop-ownership.util'
 import { invalidateBusinessBoardCache, scheduleBusinessBoardCacheRebuild } from '../src/services/business-cache.service'
 
@@ -80,7 +81,17 @@ async function main() {
     })
     if (verdict.status === 'unknown_seller') unknownSellerIdCount++
     if (verdict.status === 'unknown_sync_shop') unknownSyncShopCount++
-    if (verdict.status !== 'mismatch' || !verdict.ownerShopKey || !verdict.syncShopKey) continue
+    if (
+      !shouldDeleteContaminatedOrderRow({
+        sellerId,
+        liveAccountName: row.liveAccountName,
+        platformName: syncShopKey,
+        raw,
+      })
+    ) {
+      continue
+    }
+    if (!verdict.ownerShopKey || !verdict.syncShopKey) continue
     toDelete.push({
       id: row.id,
       packageId: row.packageId,

@@ -10,6 +10,7 @@ import {
   preferOrdersBySellerOwnership,
   preferViewsBySellerOwnership,
   resolveOrderShopOwnership,
+  shouldDeleteContaminatedOrderRow,
   shouldSkipCrossShopOrderSave,
   type ShopOwnershipStatus,
 } from '../src/services/order-shop-ownership.util'
@@ -248,13 +249,69 @@ function main() {
   assert.equal(unknownSkip.skipSave, false)
   assert.equal(unknownSkip.status, 'unknown_seller')
 
-  // --- Test 7: cleanup 覆盖逻辑（packageId null + orderId）用归属函数模拟 ---
-  const orderIdOnlyMismatch = resolveOrderShopOwnership({
-    sellerId: sellerHt,
-    liveAccountName: '祥钰珠宝',
-  })
-  assert.equal(orderIdOnlyMismatch.status, 'mismatch')
-  assert.equal(orderIdOnlyMismatch.skipSave, true)
+  // --- Test 7: cleanup 覆盖 packageId=null + orderId 有值 ---
+  assert.equal(
+    shouldDeleteContaminatedOrderRow({
+      sellerId: sellerHt,
+      liveAccountName: '祥钰珠宝',
+      platformName: 'xiangyu',
+      raw: { orderId: '80215261802834767', sellerId: sellerHt },
+    }),
+    true,
+  )
+  assert.equal(
+    shouldDeleteContaminatedOrderRow({
+      sellerId: '',
+      liveAccountName: '祥钰珠宝',
+      platformName: 'xiangyu',
+      raw: { orderId: '80215261802834767' },
+    }),
+    false,
+    'UNKNOWN seller 不得自动删除',
+  )
+  assert.equal(
+    shouldDeleteContaminatedOrderRow({
+      sellerId: sellerXy,
+      liveAccountName: '祥钰珠宝',
+      platformName: 'xiangyu',
+    }),
+    false,
+    'MATCH 不删',
+  )
+
+  // MATCH + 同店 UNKNOWN 多 SKU 仍可合并；异店 UNKNOWN 不并入
+  const matchPlusUnknown = [
+    baseOrder({
+      sourceRowIndex: 1,
+      matchOrderId: 'P_UNK',
+      liveAccountName: '和田雅玉',
+      raw: { sellerId: sellerHt, skuId: 'SKU-A' },
+      gmvCent: 200000,
+    }),
+    baseOrder({
+      sourceRowIndex: 2,
+      matchOrderId: 'P_UNK',
+      liveAccountName: '和田雅玉',
+      raw: { skuId: 'SKU-B' },
+      gmvCent: 161800,
+    }),
+    baseOrder({
+      sourceRowIndex: 3,
+      matchOrderId: 'P_UNK',
+      liveAccountName: '祥钰珠宝',
+      raw: { skuId: 'SKU-C' },
+      gmvCent: 99900,
+    }),
+  ]
+  const unkPart = partitionOrdersByShopOwnership(matchPlusUnknown)
+  assert.equal(unkPart.mergeable.length, 2)
+  assert.equal(
+    unkPart.mergeable.every((o) => o.liveAccountName === '和田雅玉'),
+    true,
+  )
+  const unkDeduped = dedupeOrders(matchPlusUnknown)
+  assert.equal(unkDeduped.uniqueOrders.length, 1)
+  assert.equal(unkDeduped.uniqueOrders[0]!.gmvCent, 361800)
 
   // --- Test 8: 四店矩阵拦截 ---
   const pairs: Array<[GoodReviewShopKey, GoodReviewShopKey]> = [

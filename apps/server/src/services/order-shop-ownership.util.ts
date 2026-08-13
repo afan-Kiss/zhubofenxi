@@ -105,9 +105,12 @@ export function resolveOrderShopOwnership(params: {
 }
 
 export function resolveViewShopOwnership(view: AnalyzedOrderView): ShopOwnershipVerdict {
+  // 主路径用稳定字段 sellerId；若旧缓存缺字段且已 attach raw，则回退 extractSellerIdFromOrderRaw
+  const raw = (view as AnalyzedOrderView & { raw?: Record<string, unknown> }).raw
   return resolveOrderShopOwnership({
     sellerId: view.sellerId,
     liveAccountName: view.liveAccountName,
+    raw,
   })
 }
 
@@ -155,9 +158,16 @@ export interface OwnershipPartition<T> {
   unknownCount: number
 }
 
+function ownershipShopIdentity(verdict: ShopOwnershipVerdict, liveAccountName?: string | null): string {
+  if (verdict.syncShopKey) return `key:${verdict.syncShopKey}`
+  const name = String(liveAccountName ?? '').trim()
+  return name ? `name:${name}` : ''
+}
+
 function partitionByOwnership<T>(
   items: T[],
   resolve: (item: T) => ShopOwnershipVerdict,
+  pickLiveAccountName: (item: T) => string | null | undefined,
 ): OwnershipPartition<T> {
   if (items.length === 0) {
     return {
@@ -169,19 +179,30 @@ function partitionByOwnership<T>(
     }
   }
   const matched: T[] = []
-  const unknown: T[] = []
+  const unknown: Array<{ item: T; verdict: ShopOwnershipVerdict }> = []
   const contaminated: T[] = []
   for (const item of items) {
     const v = resolve(item)
     if (v.status === 'match') matched.push(item)
     else if (v.status === 'mismatch') contaminated.push(item)
-    else unknown.push(item)
+    else unknown.push({ item, verdict: v })
   }
   const hasMatch = matched.length > 0
   if (hasMatch) {
-    // 有真店 MATCH：只合并 MATCH；MISMATCH 剔除；UNKNOWN 不参与金额合并（避免无 sellerId 的假店行掺入）
+    // 有 MATCH：剔除全部 MISMATCH；同店 UNKNOWN 保留（兼容缺 sellerId 的多 SKU）；异店 UNKNOWN 不并入
+    const matchIds = new Set(
+      matched
+        .map((m) => ownershipShopIdentity(resolve(m), pickLiveAccountName(m)))
+        .filter(Boolean),
+    )
+    const unknownSameShop = unknown
+      .filter((u) => {
+        const id = ownershipShopIdentity(u.verdict, pickLiveAccountName(u.item))
+        return id !== '' && matchIds.has(id)
+      })
+      .map((u) => u.item)
     return {
-      mergeable: matched,
+      mergeable: [...matched, ...unknownSameShop],
       contaminated,
       allMismatch: false,
       hasMatch: true,
@@ -199,7 +220,7 @@ function partitionByOwnership<T>(
   }
   // 无 MATCH：保留 UNKNOWN 兼容；明确 MISMATCH 仍剔除
   return {
-    mergeable: unknown,
+    mergeable: unknown.map((u) => u.item),
     contaminated,
     allMismatch: false,
     hasMatch: false,
@@ -210,29 +231,51 @@ function partitionByOwnership<T>(
 export function partitionOrdersByShopOwnership(
   orders: NormalizedOrder[],
 ): OwnershipPartition<NormalizedOrder> {
-  return partitionByOwnership(orders, resolveNormalizedOrderShopOwnership)
+  return partitionByOwnership(
+    orders,
+    resolveNormalizedOrderShopOwnership,
+    (o) => o.liveAccountName,
+  )
 }
 
 export function partitionViewsByShopOwnership(
   views: AnalyzedOrderView[],
 ): OwnershipPartition<AnalyzedOrderView> {
-  return partitionByOwnership(views, resolveViewShopOwnership)
+  return partitionByOwnership(views, resolveViewShopOwnership, (v) => v.liveAccountName)
 }
 
-/** @deprecated 使用 partitionOrdersByShopOwnership；保留名兼容旧调用 */
+/** 过滤后可合并行；全部 MISMATCH 返回空（不得进错误店） */
 export function preferOrdersBySellerOwnership(orders: NormalizedOrder[]): NormalizedOrder[] {
   const part = partitionOrdersByShopOwnership(orders)
   if (part.mergeable.length > 0) return part.mergeable
+  if (part.allMismatch || part.contaminated.length > 0) return []
   return orders
 }
 
-/** 看板视图：过滤 MISMATCH，MATCH 优先 */
+/** 看板视图：过滤 MISMATCH；有 MATCH 时只留真店(+同店 UNKNOWN)；全部 MISMATCH → 空 */
 export function preferViewsBySellerOwnership(views: AnalyzedOrderView[]): AnalyzedOrderView[] {
   const part = partitionViewsByShopOwnership(views)
   if (part.mergeable.length > 0) return part.mergeable
-  // 全部 MISMATCH → 空（不得进入正常指标）
-  if (part.allMismatch) return []
+  if (part.allMismatch || part.contaminated.length > 0) return []
   return views
+}
+
+/**
+ * 清理脚本用：是否应删除该行（仅明确 MISMATCH）。
+ * 覆盖 packageId / orderId-only；UNKNOWN 不删。
+ */
+export function shouldDeleteContaminatedOrderRow(params: {
+  sellerId?: string | null
+  liveAccountName?: string | null
+  platformName?: string | null
+  raw?: Record<string, unknown> | null
+}): boolean {
+  const verdict = resolveOrderShopOwnership(params)
+  return (
+    verdict.status === 'mismatch' &&
+    verdict.ownerShopKey != null &&
+    verdict.syncShopKey != null
+  )
 }
 
 /** 看板挂载 raw 时补齐 sellerId，避免旧缓存 View 缺字段导致归属失效 */

@@ -151,17 +151,27 @@ export function logOrderSyncComplete(params: {
   ownership?: {
     resolvedSyncShopKey?: string | null
     syncShopIdentitySource?: string
+    syncShopUnknown?: boolean
     matchedCount?: number
     crossShopSkippedCount?: number
     unknownSellerCount?: number
     unknownSellerRate?: number
     unknownSyncShopCount?: number
     ownershipDegraded?: boolean
+    authFailed?: boolean
+    syncStopped?: boolean
   }
 }): void {
   const name = resolveSyncAccountDisplayName(params.ctx.accountName, params.ctx.accountIndex ?? 1)
   if (params.apiRows === 0) {
     logInfo(ORDER_SCOPE, `${name} 读取完成：接口返回 0 条，本账号本范围暂无订单`)
+    const o0 = params.ownership
+    if (o0) {
+      logInfo(
+        ORDER_SCOPE,
+        `${name} 归属：liveAccountId=${params.ctx.liveAccountId ?? '—'} shopKey=${o0.resolvedSyncShopKey ?? 'null'} identitySource=${o0.syncShopIdentitySource ?? '—'} syncShopUnknown=${o0.syncShopUnknown ? 'yes' : 'no'} matched=0 crossShopSkipped=0 unknownSeller=0(0%) unknownSyncShop=0 degraded=${o0.ownershipDegraded ? 'yes' : 'no'} authFailed=${o0.authFailed ? 'yes' : 'no'}`,
+      )
+    }
     return
   }
   logInfo(
@@ -176,7 +186,7 @@ export function logOrderSyncComplete(params: {
         : '0%'
     logInfo(
       ORDER_SCOPE,
-      `${name} 归属：liveAccountId=${params.ctx.liveAccountId ?? '—'} shopKey=${o.resolvedSyncShopKey ?? 'null'} identitySource=${o.syncShopIdentitySource ?? '—'} matched=${o.matchedCount ?? 0} crossShopSkipped=${o.crossShopSkippedCount ?? 0} unknownSeller=${o.unknownSellerCount ?? 0}(${ratePct}) unknownSyncShop=${o.unknownSyncShopCount ?? 0} degraded=${o.ownershipDegraded ? 'yes' : 'no'}`,
+      `${name} 归属：liveAccountId=${params.ctx.liveAccountId ?? '—'} shopKey=${o.resolvedSyncShopKey ?? 'null'} identitySource=${o.syncShopIdentitySource ?? '—'} syncShopUnknown=${o.syncShopUnknown ? 'yes' : 'no'} matched=${o.matchedCount ?? 0} crossShopSkipped=${o.crossShopSkippedCount ?? 0} unknownSeller=${o.unknownSellerCount ?? 0}(${ratePct}) unknownSyncShop=${o.unknownSyncShopCount ?? 0} degraded=${o.ownershipDegraded ? 'yes' : 'no'} authFailed=${o.authFailed ? 'yes' : 'no'} syncStopped=${o.syncStopped ? 'yes' : 'no'}`,
     )
   }
 }

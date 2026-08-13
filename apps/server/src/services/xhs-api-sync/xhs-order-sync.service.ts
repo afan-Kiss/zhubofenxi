@@ -12,6 +12,10 @@ import {
   shouldStopPagination,
 } from './xhs-page-pagination.util'
 import { pickOfficialDisplayOrderNo } from '../order-display-no.service'
+import type {
+  OrderOwnershipSyncDiagnostics,
+  SyncShopIdentitySource,
+} from '../sync-shop-identity.service'
 
 const DEFAULT_MAX_PAGES = SAFE_MAX_PAGES
 
@@ -30,7 +34,7 @@ export interface SyncOrderListOnlyParams {
   accountTotal?: number
 }
 
-export interface SyncOrderListOnlyResult {
+export type SyncOrderListOnlyResult = {
   total: number
   itemCount: number
   pageCount: number
@@ -43,27 +47,20 @@ export interface SyncOrderListOnlyResult {
   createdCount?: number
   updatedCount?: number
   skippedCount?: number
-  /** sellerId 与同步店一致 */
-  matchedCount?: number
-  /** 明确串店被拦截 */
-  crossShopSkippedCount?: number
-  /** sellerId 缺失或不在四店映射 */
-  unknownSellerCount?: number
-  /** sellerId 未知比例（itemCount=0 时为 0） */
-  unknownSellerRate?: number
-  /** 同步店无法识别为四店 */
-  unknownSyncShopCount?: number
-  /** 本账号解析出的官方 shopKey */
-  resolvedSyncShopKey?: string | null
-  /** shopKey 解析来源 */
-  syncShopIdentitySource?:
-    | 'platform_credential'
-    | 'platform_name'
-    | 'live_account_name'
-    | 'unknown'
-  /** 跨店保护处于降级（同步店未知或 sellerId 未知比例过高） */
-  ownershipDegraded?: boolean
-}
+} & Partial<OrderOwnershipSyncDiagnostics>
+
+export type SyncOrderListResult = {
+  itemCount: number
+  requestCount: number
+  warnings: string[]
+  authFailed?: boolean
+  syncStopped?: boolean
+  apiRowCount?: number
+  createdCount?: number
+  updatedCount?: number
+} & Partial<OrderOwnershipSyncDiagnostics>
+
+export type { OrderOwnershipSyncDiagnostics, SyncShopIdentitySource }
 
 export interface FetchOrderPackagesResult {
   packages: Record<string, unknown>[]
@@ -444,7 +441,7 @@ export async function syncOrderList(params: {
   liveAccountName?: string
   accountIndex?: number
   accountTotal?: number
-}): Promise<{ itemCount: number; requestCount: number; warnings: string[]; authFailed?: boolean; syncStopped?: boolean; apiRowCount?: number; createdCount?: number; updatedCount?: number }> {
+}): Promise<SyncOrderListResult> {
   const result = await syncOrderListOnly({
     startDate: params.startDate,
     endDate: params.endDate,
@@ -467,6 +464,15 @@ export async function syncOrderList(params: {
     apiRowCount: result.itemCount,
     createdCount: result.createdCount,
     updatedCount: result.updatedCount,
+    matchedCount: result.matchedCount,
+    crossShopSkippedCount: result.crossShopSkippedCount,
+    unknownSellerCount: result.unknownSellerCount,
+    unknownSellerRate: result.unknownSellerRate,
+    unknownSyncShopCount: result.unknownSyncShopCount,
+    resolvedSyncShopKey: result.resolvedSyncShopKey,
+    syncShopIdentitySource: result.syncShopIdentitySource,
+    syncShopUnknown: result.syncShopUnknown,
+    ownershipDegraded: result.ownershipDegraded,
   }
 }
 

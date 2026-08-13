@@ -296,6 +296,17 @@ export async function executeDailyStrategySync(
       accountOrderApiRows = orderList.apiRowCount ?? orderList.itemCount
       accountOrderSaved = orderList.itemCount
 
+      if (orderList.ownershipDegraded) {
+        const { logWarn } = await import('../utils/server-log')
+        logWarn(
+          '订单同步归属',
+          `账号「${account.name}」ownershipDegraded=true syncShopUnknown=${orderList.syncShopUnknown ? 'yes' : 'no'} shopKey=${orderList.resolvedSyncShopKey ?? 'null'} source=${orderList.syncShopIdentitySource ?? '—'} unknownSeller=${orderList.unknownSellerCount ?? 0}/${accountOrderApiRows} unknownSyncShop=${orderList.unknownSyncShopCount ?? 0}`,
+        )
+        warnings.push(
+          `直播号「${account.name}」跨店归属保护处于降级状态（syncShopUnknown=${orderList.syncShopUnknown ? 'yes' : 'no'}）`,
+        )
+      }
+
       if (orderList.authFailed) {
         accountAuthFailed = true
         accountFailReason = orderList.warnings.at(-1) ?? 'Cookie 已失效'

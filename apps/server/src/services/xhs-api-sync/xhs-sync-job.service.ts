@@ -390,6 +390,13 @@ export async function executeXhsSyncJob(
       warnings: [] as string[],
       apiRowCount: 0,
       authFailed: false,
+      ownershipDegraded: false,
+      degradedAccountCount: 0,
+      degradedAccounts: [] as Array<{
+        liveAccountId?: string
+        accountName: string
+        reason: string
+      }>,
     }
     let liveList = {
       itemCount: 0,
@@ -421,6 +428,25 @@ export async function executeXhsSyncJob(
       orderList.apiRowCount =
         (orderList.apiRowCount ?? 0) + (orderPart.apiRowCount ?? orderPart.itemCount)
       orderList.requestCount += orderPart.requestCount
+      if (orderPart.ownershipDegraded) {
+        orderList.ownershipDegraded = true
+        orderList.degradedAccountCount++
+        const reason = orderPart.syncShopUnknown
+          ? 'syncShopUnknown'
+          : (orderPart.unknownSellerRate ?? 0) >= 0.2
+            ? 'unknownSellerRate'
+            : 'ownershipDegraded'
+        orderList.degradedAccounts.push({
+          liveAccountId: account.id,
+          accountName: accountLabel,
+          reason,
+        })
+        const { logWarn } = await import('../../utils/server-log')
+        logWarn(
+          '订单同步归属',
+          `账号「${accountLabel}」ownershipDegraded=true reason=${reason} shopKey=${orderPart.resolvedSyncShopKey ?? 'null'} source=${orderPart.syncShopIdentitySource ?? '—'} unknownSeller=${orderPart.unknownSellerCount ?? 0} unknownSyncShop=${orderPart.unknownSyncShopCount ?? 0}`,
+        )
+      }
       if (orderPart.authFailed) {
         orderList.authFailed = true
         if (account.id) {
@@ -462,6 +488,9 @@ export async function executeXhsSyncJob(
       await logSync('api_sync_order_list_success', '订单列表同步完成', jobId, {
         itemCount: orderList.itemCount,
         accountCount: syncTargets.length,
+        ownershipDegraded: orderList.ownershipDegraded,
+        degradedAccountCount: orderList.degradedAccountCount,
+        degradedAccounts: orderList.degradedAccounts,
       }, userId, audit)
     }
 

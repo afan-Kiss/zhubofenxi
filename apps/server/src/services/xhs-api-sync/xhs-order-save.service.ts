@@ -27,8 +27,9 @@ import {
   resolveOrderShopOwnership,
 } from '../order-shop-ownership.util'
 import {
-  computeUnknownSellerRate,
-  isUnknownSellerRateDegraded,
+  appendOwnershipSyncWarnings,
+  buildOwnershipSyncSummary,
+  emptyOwnershipSyncSummary,
   loadSyncShopIdentity,
   type SyncShopIdentity,
 } from '../sync-shop-identity.service'
@@ -288,6 +289,7 @@ export async function syncOrderListOnlyWithSave(
   params: SyncOrderListOnlyParams,
 ): Promise<SyncOrderListOnlyResult> {
   if (!isApiConfigured('order_list')) {
+    const empty = emptyOwnershipSyncSummary()
     return {
       total: 0,
       itemCount: 0,
@@ -296,6 +298,7 @@ export async function syncOrderListOnlyWithSave(
       firstOrderId: null,
       firstPackageId: null,
       warnings: ['订单列表接口未配置'],
+      ...empty,
     }
   }
 
@@ -354,6 +357,59 @@ export async function syncOrderListOnlyWithSave(
     warnings.push('当前同步账号无法识别官方店铺归属，跨店保护已降级为兼容模式')
   }
 
+  const buildResult = (extra?: {
+    authFailed?: boolean
+    syncStopped?: boolean
+  }): SyncOrderListOnlyResult => {
+    const skippedCount = Math.max(0, itemCount - savedCount)
+    const ownership = buildOwnershipSyncSummary({
+      itemCount,
+      matchedCount,
+      crossShopSkippedCount,
+      unknownSellerCount,
+      orderLevelUnknownSyncShopCount: unknownSyncShopCount,
+      syncIdentity,
+    })
+    appendOwnershipSyncWarnings(warnings, ownership, itemCount)
+    const durationSec = (Date.now() - syncStarted) / 1000
+    logOrderSyncComplete({
+      ctx: accountCtx,
+      apiRows: itemCount,
+      created: createdCount,
+      updated: updatedCount,
+      skipped: skippedCount,
+      durationSec,
+      ownership: {
+        resolvedSyncShopKey: ownership.resolvedSyncShopKey,
+        syncShopIdentitySource: ownership.syncShopIdentitySource,
+        syncShopUnknown: ownership.syncShopUnknown,
+        matchedCount: ownership.matchedCount,
+        crossShopSkippedCount: ownership.crossShopSkippedCount,
+        unknownSellerCount: ownership.unknownSellerCount,
+        unknownSellerRate: ownership.unknownSellerRate,
+        unknownSyncShopCount: ownership.unknownSyncShopCount,
+        ownershipDegraded: ownership.ownershipDegraded,
+        authFailed: extra?.authFailed,
+        syncStopped: extra?.syncStopped,
+      },
+    })
+    return {
+      total,
+      itemCount,
+      pageCount,
+      savedCount,
+      firstOrderId,
+      firstPackageId,
+      warnings,
+      createdCount,
+      updatedCount,
+      skippedCount,
+      authFailed: extra?.authFailed,
+      syncStopped: extra?.syncStopped,
+      ...ownership,
+    }
+  }
+
   while (pageNo <= maxPages) {
     await params.progress?.beforeRequest('order_list', pageNo, totalPageEstimate)
 
@@ -393,20 +449,10 @@ export async function syncOrderListOnlyWithSave(
             logXhsAccountAuthFailed(accountCtx, res.httpStatus)
           }
         }
-        return {
-          total,
-          itemCount,
-          pageCount,
-          savedCount,
-          firstOrderId,
-          firstPackageId,
-          warnings,
+        return buildResult({
           authFailed: true,
           syncStopped: Boolean(res.authError.stopRound),
-          createdCount,
-          updatedCount,
-          skippedCount: itemCount - savedCount,
-        }
+        })
       }
       logOrderSyncFailed(accountCtx, errMsg)
       break
@@ -467,80 +513,5 @@ export async function syncOrderListOnlyWithSave(
     warnings.push(`已达到最大页数保护 ${maxPages}，可能未拉取完整数据`)
   }
 
-  const durationSec = (Date.now() - syncStarted) / 1000
-  const skippedCount = Math.max(0, itemCount - savedCount)
-  const unknownSellerRate = computeUnknownSellerRate(unknownSellerCount, itemCount)
-  // 账号级：同步店无法识别时，按本批全部计入 unknownSyncShop（便于观测），订单侧 status 仍可能是 unknown_seller 优先
-  const accountUnknownSyncShop = !syncIdentity.shopKey
-  if (accountUnknownSyncShop && unknownSyncShopCount === 0 && itemCount > 0) {
-    // 账号身份未知但订单因 seller 未知先记成 unknown_seller：仍标记降级
-  }
-  const effectiveUnknownSyncShopCount = accountUnknownSyncShop
-    ? Math.max(unknownSyncShopCount, itemCount > 0 ? 1 : 0)
-    : unknownSyncShopCount
-
-  if (unknownSellerCount > 0) {
-    warnings.push(
-      `发现 ${unknownSellerCount} 条订单 sellerId 无法识别，已按兼容模式保存，请检查平台 sellerId 字段是否变化`,
-    )
-  }
-  if (isUnknownSellerRateDegraded(unknownSellerCount, itemCount)) {
-    warnings.push(
-      `sellerId 无法识别比例异常（${unknownSellerCount}/${itemCount}=${(unknownSellerRate * 100).toFixed(1)}%），本次订单归属保护可能降级，请检查平台字段是否变化`,
-    )
-  }
-  if (crossShopSkippedCount > 0) {
-    warnings.push(`跨店拦截 ${crossShopSkippedCount} 条（sellerId 归属其他官方店，未写入本店）`)
-  }
-  if (accountUnknownSyncShop) {
-    // 账号级 warning 已在开头添加；补充计数说明
-    if (!warnings.some((w) => w.includes('跨店保护已降级'))) {
-      warnings.push('当前同步账号无法识别官方店铺归属，跨店保护已降级为兼容模式')
-    }
-  } else if (unknownSyncShopCount > 0) {
-    warnings.push(`发现 ${unknownSyncShopCount} 条订单同步店无法识别为四店官方账号`)
-  }
-
-  const ownershipDegraded =
-    accountUnknownSyncShop || isUnknownSellerRateDegraded(unknownSellerCount, itemCount)
-
-  logOrderSyncComplete({
-    ctx: accountCtx,
-    apiRows: itemCount,
-    created: createdCount,
-    updated: updatedCount,
-    skipped: skippedCount,
-    durationSec,
-    ownership: {
-      resolvedSyncShopKey: syncIdentity.shopKey,
-      syncShopIdentitySource: syncIdentity.source,
-      matchedCount,
-      crossShopSkippedCount,
-      unknownSellerCount,
-      unknownSellerRate,
-      unknownSyncShopCount: effectiveUnknownSyncShopCount,
-      ownershipDegraded,
-    },
-  })
-
-  return {
-    total,
-    itemCount,
-    pageCount,
-    savedCount,
-    firstOrderId,
-    firstPackageId,
-    warnings,
-    createdCount,
-    updatedCount,
-    skippedCount,
-    matchedCount,
-    crossShopSkippedCount,
-    unknownSellerCount,
-    unknownSellerRate,
-    unknownSyncShopCount: effectiveUnknownSyncShopCount,
-    resolvedSyncShopKey: syncIdentity.shopKey,
-    syncShopIdentitySource: syncIdentity.source,
-    ownershipDegraded,
-  }
+  return buildResult()
 }

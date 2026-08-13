@@ -25,9 +25,14 @@ import { scheduleBusinessBoardCacheInvalidationForPayTime } from '../business-ca
 import {
   extractSellerIdFromOrderRaw,
   resolveOrderShopOwnership,
-  resolveSyncShopKey,
 } from '../order-shop-ownership.util'
-import { logWarn } from '../../utils/server-log'
+import {
+  computeUnknownSellerRate,
+  isUnknownSellerRateDegraded,
+  loadSyncShopIdentity,
+  type SyncShopIdentity,
+} from '../sync-shop-identity.service'
+import { logInfo, logWarn } from '../../utils/server-log'
 
 const DEFAULT_MAX_PAGES = SAFE_MAX_PAGES
 
@@ -103,6 +108,7 @@ async function saveOrderPackage(
   syncJobId: string | null | undefined,
   liveAccountId: string,
   liveAccountName: string,
+  syncIdentity: SyncShopIdentity,
 ): Promise<{
   saved: boolean
   created: boolean
@@ -116,19 +122,19 @@ async function saveOrderPackage(
   const orderId = pickId(item, ['orderId', 'order_id', 'orderNo', 'order_no'])
   if (!packageId && !orderId) return { saved: false, created: false }
 
-  // 串店拦截：sellerId 明确属于另一官方店时，禁止写入当前同步账号
+  // 串店拦截：使用账号级已解析的稳定 shopKey（禁止每单再查 credential / 仅靠名称）
   const sellerId = extractSellerIdFromOrderRaw(item)
-  const syncShopKey = resolveSyncShopKey({ liveAccountName })
   const ownership = resolveOrderShopOwnership({
     sellerId,
     liveAccountName,
-    platformName: syncShopKey,
+    syncShopKey: syncIdentity.shopKey,
+    platformName: syncIdentity.credentialPlatformName ?? syncIdentity.shopKey,
     raw: item,
   })
   if (ownership.skipSave) {
     logWarn(
       '订单串店拦截',
-      `skip packageId=${packageId || orderId || '—'} sync=${liveAccountName}/${ownership.syncShopKey} owner=${ownership.ownerShopKey} sellerId=${sellerId}`,
+      `skip packageId=${packageId || orderId || '—'} sync=${liveAccountName}/${ownership.syncShopKey} owner=${ownership.ownerShopKey} sellerId=${sellerId} identitySource=${syncIdentity.source}`,
     )
     return {
       saved: false,
@@ -317,6 +323,11 @@ export async function syncOrderListOnlyWithSave(
 
   const liveAccountId = params.liveAccountId ?? 'legacy'
   const liveAccountName = params.liveAccountName ?? '未知直播号'
+  // 每个同步账号只解析一次 shopKey（最多一次 PlatformCredential 查询）
+  const syncIdentity = await loadSyncShopIdentity({
+    liveAccountId,
+    liveAccountName,
+  })
   const accountCtx = {
     accountName: liveAccountName,
     liveAccountId: params.liveAccountId,
@@ -335,6 +346,13 @@ export async function syncOrderListOnlyWithSave(
   } = await import('../../utils/sync-cmd-log')
 
   logOrderSyncStart(accountCtx, dateRange)
+  logInfo(
+    '订单同步归属',
+    `账号=${liveAccountName} liveAccountId=${liveAccountId} shopKey=${syncIdentity.shopKey ?? 'null'} identitySource=${syncIdentity.source}`,
+  )
+  if (!syncIdentity.shopKey) {
+    warnings.push('当前同步账号无法识别官方店铺归属，跨店保护已降级为兼容模式')
+  }
 
   while (pageNo <= maxPages) {
     await params.progress?.beforeRequest('order_list', pageNo, totalPageEstimate)
@@ -414,6 +432,7 @@ export async function syncOrderListOnlyWithSave(
         params.syncJobId,
         liveAccountId,
         liveAccountName,
+        syncIdentity,
       )
       if (saved.ownershipStatus === 'match') matchedCount++
       else if (saved.ownershipStatus === 'mismatch' || saved.skippedCrossShop) crossShopSkippedCount++
@@ -450,17 +469,41 @@ export async function syncOrderListOnlyWithSave(
 
   const durationSec = (Date.now() - syncStarted) / 1000
   const skippedCount = Math.max(0, itemCount - savedCount)
+  const unknownSellerRate = computeUnknownSellerRate(unknownSellerCount, itemCount)
+  // 账号级：同步店无法识别时，按本批全部计入 unknownSyncShop（便于观测），订单侧 status 仍可能是 unknown_seller 优先
+  const accountUnknownSyncShop = !syncIdentity.shopKey
+  if (accountUnknownSyncShop && unknownSyncShopCount === 0 && itemCount > 0) {
+    // 账号身份未知但订单因 seller 未知先记成 unknown_seller：仍标记降级
+  }
+  const effectiveUnknownSyncShopCount = accountUnknownSyncShop
+    ? Math.max(unknownSyncShopCount, itemCount > 0 ? 1 : 0)
+    : unknownSyncShopCount
+
   if (unknownSellerCount > 0) {
     warnings.push(
       `发现 ${unknownSellerCount} 条订单 sellerId 无法识别，已按兼容模式保存，请检查平台 sellerId 字段是否变化`,
     )
   }
+  if (isUnknownSellerRateDegraded(unknownSellerCount, itemCount)) {
+    warnings.push(
+      `sellerId 无法识别比例异常（${unknownSellerCount}/${itemCount}=${(unknownSellerRate * 100).toFixed(1)}%），本次订单归属保护可能降级，请检查平台字段是否变化`,
+    )
+  }
   if (crossShopSkippedCount > 0) {
     warnings.push(`跨店拦截 ${crossShopSkippedCount} 条（sellerId 归属其他官方店，未写入本店）`)
   }
-  if (unknownSyncShopCount > 0) {
+  if (accountUnknownSyncShop) {
+    // 账号级 warning 已在开头添加；补充计数说明
+    if (!warnings.some((w) => w.includes('跨店保护已降级'))) {
+      warnings.push('当前同步账号无法识别官方店铺归属，跨店保护已降级为兼容模式')
+    }
+  } else if (unknownSyncShopCount > 0) {
     warnings.push(`发现 ${unknownSyncShopCount} 条订单同步店无法识别为四店官方账号`)
   }
+
+  const ownershipDegraded =
+    accountUnknownSyncShop || isUnknownSellerRateDegraded(unknownSellerCount, itemCount)
+
   logOrderSyncComplete({
     ctx: accountCtx,
     apiRows: itemCount,
@@ -468,6 +511,16 @@ export async function syncOrderListOnlyWithSave(
     updated: updatedCount,
     skipped: skippedCount,
     durationSec,
+    ownership: {
+      resolvedSyncShopKey: syncIdentity.shopKey,
+      syncShopIdentitySource: syncIdentity.source,
+      matchedCount,
+      crossShopSkippedCount,
+      unknownSellerCount,
+      unknownSellerRate,
+      unknownSyncShopCount: effectiveUnknownSyncShopCount,
+      ownershipDegraded,
+    },
   })
 
   return {
@@ -484,6 +537,10 @@ export async function syncOrderListOnlyWithSave(
     matchedCount,
     crossShopSkippedCount,
     unknownSellerCount,
-    unknownSyncShopCount,
+    unknownSellerRate,
+    unknownSyncShopCount: effectiveUnknownSyncShopCount,
+    resolvedSyncShopKey: syncIdentity.shopKey,
+    syncShopIdentitySource: syncIdentity.source,
+    ownershipDegraded,
   }
 }

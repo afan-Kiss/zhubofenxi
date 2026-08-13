@@ -148,6 +148,16 @@ export function logOrderSyncComplete(params: {
   updated: number
   skipped: number
   durationSec: number
+  ownership?: {
+    resolvedSyncShopKey?: string | null
+    syncShopIdentitySource?: string
+    matchedCount?: number
+    crossShopSkippedCount?: number
+    unknownSellerCount?: number
+    unknownSellerRate?: number
+    unknownSyncShopCount?: number
+    ownershipDegraded?: boolean
+  }
 }): void {
   const name = resolveSyncAccountDisplayName(params.ctx.accountName, params.ctx.accountIndex ?? 1)
   if (params.apiRows === 0) {
@@ -158,6 +168,17 @@ export function logOrderSyncComplete(params: {
     ORDER_SCOPE,
     `${name} 读取完成：接口返回 ${params.apiRows} 条，新增 ${params.created} 条，更新 ${params.updated} 条，跳过 ${params.skipped} 条，用时 ${params.durationSec.toFixed(1)} 秒`,
   )
+  const o = params.ownership
+  if (o) {
+    const ratePct =
+      o.unknownSellerRate != null && Number.isFinite(o.unknownSellerRate)
+        ? `${(o.unknownSellerRate * 100).toFixed(1)}%`
+        : '0%'
+    logInfo(
+      ORDER_SCOPE,
+      `${name} 归属：liveAccountId=${params.ctx.liveAccountId ?? '—'} shopKey=${o.resolvedSyncShopKey ?? 'null'} identitySource=${o.syncShopIdentitySource ?? '—'} matched=${o.matchedCount ?? 0} crossShopSkipped=${o.crossShopSkippedCount ?? 0} unknownSeller=${o.unknownSellerCount ?? 0}(${ratePct}) unknownSyncShop=${o.unknownSyncShopCount ?? 0} degraded=${o.ownershipDegraded ? 'yes' : 'no'}`,
+    )
+  }
 }
 
 export function logOrderSyncFailed(ctx: SyncAccountContext, reason: string): void {

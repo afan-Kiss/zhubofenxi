@@ -58,14 +58,19 @@ export function resolveOrderShopOwnership(params: {
   sellerId?: string | null
   liveAccountName?: string | null
   platformName?: string | null
+  /** 已解析的稳定同步店；优先于名称解析 */
+  syncShopKey?: GoodReviewShopKey | null
   raw?: Record<string, unknown> | null
 }): ShopOwnershipVerdict {
   const sellerId =
     String(params.sellerId ?? '').trim() || extractSellerIdFromOrderRaw(params.raw ?? null)
-  const syncShopKey = resolveSyncShopKey({
-    liveAccountName: params.liveAccountName,
-    platformName: params.platformName,
-  })
+  const syncShopKey =
+    params.syncShopKey !== undefined
+      ? params.syncShopKey
+      : resolveSyncShopKey({
+          liveAccountName: params.liveAccountName,
+          platformName: params.platformName,
+        })
   const ownerShopKey = resolveGoodReviewShopKeyBySellerId(sellerId)
 
   if (!sellerId || !ownerShopKey) {

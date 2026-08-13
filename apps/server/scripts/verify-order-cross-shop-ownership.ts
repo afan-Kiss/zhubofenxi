@@ -15,6 +15,13 @@ import {
   type ShopOwnershipStatus,
 } from '../src/services/order-shop-ownership.util'
 import {
+  computeUnknownSellerRate,
+  isUnknownSellerRateDegraded,
+  resolveSyncShopIdentityFromFields,
+  UNKNOWN_SELLER_WARN_MIN_COUNT,
+  UNKNOWN_SELLER_WARN_RATE,
+} from '../src/services/sync-shop-identity.service'
+import {
   GOOD_REVIEW_SHOP_KEYS,
   OFFICIAL_SHOP_SELLER_IDS,
   getGoodReviewShopName,
@@ -360,7 +367,104 @@ function main() {
   assert.equal(statuses.length, 4)
   assert.ok(getGoodReviewShopName('hetianyayu').includes('和田'))
 
-  console.log('verify-order-cross-shop-ownership: OK (8 suites)')
+  // ========== 加固：同步身份 / 比例 / DuplicateOrderGroup ==========
+
+  // Test I1: 改名仍靠 credentialPlatformName=hetianyayu
+  const renamed = resolveSyncShopIdentityFromFields({
+    liveAccountId: 'acc-ht',
+    liveAccountName: '和田雅玉旗舰店2026',
+    credentialPlatformName: 'hetianyayu',
+  })
+  assert.equal(renamed.shopKey, 'hetianyayu')
+  assert.equal(renamed.source, 'platform_credential')
+  const blockByStable = resolveOrderShopOwnership({
+    sellerId: sellerXy,
+    liveAccountName: '和田雅玉旗舰店2026',
+    syncShopKey: renamed.shopKey,
+  })
+  assert.equal(blockByStable.status, 'mismatch')
+  assert.equal(blockByStable.skipSave, true)
+
+  // Test I2: 无 credential，名称 fallback
+  const nameFb = resolveSyncShopIdentityFromFields({
+    liveAccountId: 'legacy',
+    liveAccountName: '祥钰珠宝',
+  })
+  assert.equal(nameFb.shopKey, 'xiangyu')
+  assert.equal(nameFb.source, 'live_account_name')
+
+  // Test I3: 完全无法识别 -> unknown
+  const unknownSync = resolveSyncShopIdentityFromFields({
+    liveAccountId: 'legacy',
+    liveAccountName: '某某临时店',
+  })
+  assert.equal(unknownSync.shopKey, null)
+  assert.equal(unknownSync.source, 'unknown')
+  const unkSyncOwn = resolveOrderShopOwnership({
+    sellerId: sellerHt,
+    liveAccountName: '某某临时店',
+    syncShopKey: unknownSync.shopKey,
+  })
+  assert.equal(unkSyncOwn.status, 'unknown_sync_shop')
+  assert.equal(unkSyncOwn.skipSave, false)
+
+  // Test I4: 低比例 unknown seller 不 degraded
+  assert.equal(isUnknownSellerRateDegraded(5, 1000), false)
+  assert.equal(computeUnknownSellerRate(5, 1000), 0.005)
+
+  // Test I5: 高比例 degraded
+  assert.equal(isUnknownSellerRateDegraded(300, 1000), true)
+  assert.ok(UNKNOWN_SELLER_WARN_RATE === 0.2)
+  assert.ok(UNKNOWN_SELLER_WARN_MIN_COUNT === 20)
+
+  // Test I6: itemCount=0 不 NaN
+  assert.equal(computeUnknownSellerRate(10, 0), 0)
+  assert.equal(Number.isFinite(computeUnknownSellerRate(10, 0)), true)
+  assert.equal(isUnknownSellerRateDegraded(10, 0), false)
+
+  // Test I7: DuplicateOrderGroup 诊断字段
+  const diag = dedupeOrders(crossSku).duplicateOrders[0]!
+  assert.equal(dedupeOrders(crossSku).uniqueOrders[0]!.gmvCent, 361800)
+  assert.equal(diag.contaminatedCount, 1)
+  assert.deepEqual(diag.rawOriginalGmvCents, [361800, 100000])
+  assert.deepEqual(diag.mergeableGmvCents, [361800])
+  assert.equal(diag.amountConsistent, true)
+  assert.deepEqual(diag.originalGmvCents, [361800])
+
+  // Test I8: 同店多 SKU contaminatedCount=0
+  const multiDiag = dedupeOrders(sameShopMultiSku)
+  assert.equal(multiDiag.uniqueOrders[0]!.gmvCent, 361800)
+  assert.equal(multiDiag.duplicateOrders[0]!.contaminatedCount, 0)
+  assert.equal(multiDiag.duplicateOrders[0]!.amountConsistent, false)
+  assert.deepEqual(multiDiag.duplicateOrders[0]!.mergeableGmvCents, [200000, 161800])
+
+  // Test I9: 同金额重复
+  const sameAmt = dedupeOrders(sameSkuDup).duplicateOrders[0]!
+  assert.equal(sameAmt.amountConsistent, true)
+  assert.deepEqual(sameAmt.mergeableGmvCents, [361800, 361800])
+  assert.equal(sameAmt.contaminatedCount, 0)
+
+  // Test I10: 四店 platformName 均可解析
+  for (const key of GOOD_REVIEW_SHOP_KEYS) {
+    const idn = resolveSyncShopIdentityFromFields({
+      liveAccountId: `id-${key}`,
+      liveAccountName: '随便改名也不影响',
+      credentialPlatformName: key,
+    })
+    assert.equal(idn.shopKey, key, key)
+    assert.equal(idn.source, 'platform_credential', key)
+  }
+
+  // 名称优先权：credential 覆盖错误名称
+  const overrideName = resolveSyncShopIdentityFromFields({
+    liveAccountId: 'x',
+    liveAccountName: '祥钰珠宝',
+    credentialPlatformName: 'hetianyayu',
+  })
+  assert.equal(overrideName.shopKey, 'hetianyayu')
+  assert.equal(overrideName.source, 'platform_credential')
+
+  console.log('verify-order-cross-shop-ownership: OK (8 base + identity/diagnostics suites)')
 }
 
 main()

@@ -121,9 +121,25 @@ export interface NormalizedOrder {
 export interface DuplicateOrderGroup {
   orderId: string
   count: number
+  /**
+   * mergeable 行（实际参与合并）金额是否一致。
+   * 不得用 raw 全量金额列表判断，否则串店过滤后会语义矛盾。
+   */
   amountConsistent: boolean
   finalGmvCent: number
+  /**
+   * 兼容字段：与 mergeableGmvCents 相同（参与合并行的金额）。
+   * 若需原始未过滤金额，请用 rawOriginalGmvCents。
+   */
   originalGmvCents: number[]
+  /** 过滤前全部原始行金额 */
+  rawOriginalGmvCents?: number[]
+  /** 实际参与合并的行金额 */
+  mergeableGmvCents?: number[]
+  /** 明确 MISMATCH 被排除的行数 */
+  contaminatedCount?: number
+  /** 组内 UNKNOWN（seller/sync）计数 */
+  unknownCount?: number
   sourceRowIndexes: number[]
 }
 

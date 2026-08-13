@@ -49,8 +49,20 @@ export interface SyncOrderListOnlyResult {
   crossShopSkippedCount?: number
   /** sellerId 缺失或不在四店映射 */
   unknownSellerCount?: number
+  /** sellerId 未知比例（itemCount=0 时为 0） */
+  unknownSellerRate?: number
   /** 同步店无法识别为四店 */
   unknownSyncShopCount?: number
+  /** 本账号解析出的官方 shopKey */
+  resolvedSyncShopKey?: string | null
+  /** shopKey 解析来源 */
+  syncShopIdentitySource?:
+    | 'platform_credential'
+    | 'platform_name'
+    | 'live_account_name'
+    | 'unknown'
+  /** 跨店保护处于降级（同步店未知或 sellerId 未知比例过高） */
+  ownershipDegraded?: boolean
 }
 
 export interface FetchOrderPackagesResult {

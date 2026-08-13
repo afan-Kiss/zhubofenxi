@@ -87,6 +87,29 @@ function markContaminatedAbnormal(order: NormalizedOrder): NormalizedOrder {
   return cloned
 }
 
+function buildDuplicateDiagnostics(
+  matchOrderId: string,
+  list: NormalizedOrder[],
+  part: ReturnType<typeof partitionOrdersByShopOwnership>,
+  finalGmvCent: number,
+): DuplicateOrderGroup {
+  const mergeableGmvCents = part.mergeable.map((o) => o.gmvCent)
+  const rawOriginalGmvCents = list.map((o) => o.gmvCent)
+  return {
+    orderId: matchOrderId,
+    count: list.length,
+    amountConsistent: new Set(mergeableGmvCents).size <= 1,
+    finalGmvCent,
+    // 兼容：与 amountConsistent 对齐，使用 mergeable 金额
+    originalGmvCents: mergeableGmvCents,
+    rawOriginalGmvCents,
+    mergeableGmvCents,
+    contaminatedCount: part.contaminated.length,
+    unknownCount: part.unknownCount,
+    sourceRowIndexes: part.mergeable.map((o) => o.sourceRowIndex),
+  }
+}
+
 export function dedupeOrders(orders: NormalizedOrder[]): OrderDedupeResult {
   const abnormalOrders: NormalizedOrder[] = []
   const validOrders: NormalizedOrder[] = []
@@ -125,29 +148,16 @@ export function dedupeOrders(orders: NormalizedOrder[]): OrderDedupeResult {
     if (part.mergeable.length === 1) {
       uniqueOrders.push(part.mergeable[0]!)
       if (list.length > 1) {
-        duplicateOrders.push({
-          orderId: matchOrderId,
-          count: list.length,
-          amountConsistent: true,
-          finalGmvCent: part.mergeable[0]!.gmvCent,
-          originalGmvCents: list.map((o) => o.gmvCent),
-          sourceRowIndexes: part.mergeable.map((o) => o.sourceRowIndex),
-        })
+        duplicateOrders.push(
+          buildDuplicateDiagnostics(matchOrderId, list, part, part.mergeable[0]!.gmvCent),
+        )
       }
       continue
     }
 
-    const originalGmvCents = part.mergeable.map((o) => o.gmvCent)
     const merged = mergeMatchOrderGroup(part.mergeable)
     uniqueOrders.push(merged)
-    duplicateOrders.push({
-      orderId: matchOrderId,
-      count: list.length,
-      amountConsistent: new Set(originalGmvCents).size === 1,
-      finalGmvCent: merged.gmvCent,
-      originalGmvCents: list.map((o) => o.gmvCent),
-      sourceRowIndexes: part.mergeable.map((o) => o.sourceRowIndex),
-    })
+    duplicateOrders.push(buildDuplicateDiagnostics(matchOrderId, list, part, merged.gmvCent))
   }
 
   return {

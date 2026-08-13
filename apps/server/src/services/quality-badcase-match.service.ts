@@ -52,10 +52,16 @@ function findOrderByPackageId(
 ): NormalizedOrder | null {
   const target = packageId.trim()
   if (!target) return null
+  const sameAccount: NormalizedOrder[] = []
+  const otherAccount: NormalizedOrder[] = []
   for (const o of orders) {
-    if (!sameLiveAccount(o, liveAccountId)) continue
-    if (orderNoCandidates(o).some((no) => no === target)) return o
+    if (!orderNoCandidates(o).some((no) => no === target)) continue
+    if (sameLiveAccount(o, liveAccountId)) sameAccount.push(o)
+    else otherAccount.push(o)
   }
+  if (sameAccount.length > 0) return sameAccount[0]!
+  // 官方品退接口偶发挂到兄弟店：P 单号全局唯一时按订单主表纠正店铺
+  if (otherAccount.length === 1) return otherAccount[0]!
   return null
 }
 
@@ -66,16 +72,26 @@ function findAfterSaleBySourceBizId(
 ): { orderNo: string; record: Record<string, unknown> } | null {
   const target = sourceBizId.trim()
   if (!target) return null
-  const prefix = `${resolveLiveAccountId(liveAccountId)}::`
+  const accountId = resolveLiveAccountId(liveAccountId)
+  const prefix = `${accountId}::`
+  const sameAccount: Array<{ orderNo: string; record: Record<string, unknown>; accountId: string }> =
+    []
+  const otherAccount: Array<{ orderNo: string; record: Record<string, unknown>; accountId: string }> =
+    []
   for (const [key, records] of rawAfterSalesByOrderNo) {
-    if (!key.startsWith(prefix)) continue
+    const sep = key.indexOf('::')
+    const keyAccount = sep >= 0 ? key.slice(0, sep) : LEGACY_LIVE_ACCOUNT_ID
+    const orderNo = sep >= 0 ? key.slice(sep + 2) : key
     for (const rec of records) {
       const rid = pickString(rec, ['returns_id', 'returnsId', 'return_id', 'sourceBizId'])
-      if (rid === target) {
-        return { orderNo: key.slice(prefix.length), record: rec }
-      }
+      if (rid !== target) continue
+      const hit = { orderNo, record: rec, accountId: keyAccount }
+      if (key.startsWith(prefix)) sameAccount.push(hit)
+      else otherAccount.push(hit)
     }
   }
+  if (sameAccount.length > 0) return sameAccount[0]!
+  if (otherAccount.length === 1) return otherAccount[0]!
   return null
 }
 
@@ -98,7 +114,11 @@ export function matchQualityBadCases(params: {
   return params.cases.map((c) => {
     const liveAccountId = resolveLiveAccountId(c.liveAccountId)
     let matchedOrder = findOrderByPackageId(c.packageId, liveAccountId, orders)
-    let matchedAfterSale: { orderNo: string; record: Record<string, unknown> } | null = null
+    let matchedAfterSale: {
+      orderNo: string
+      record: Record<string, unknown>
+      accountId?: string
+    } | null = null
     if (c.sourceBizId && rawAfterSalesByOrderNo) {
       matchedAfterSale = findAfterSaleBySourceBizId(
         c.sourceBizId,
@@ -106,8 +126,15 @@ export function matchQualityBadCases(params: {
         rawAfterSalesByOrderNo,
       )
       if (!matchedOrder && matchedAfterSale) {
+        const afterAccount = matchedAfterSale.accountId ?? liveAccountId
         matchedOrder =
-          orderIndex.get(liveAccountOrderKey(liveAccountId, matchedAfterSale.orderNo)) ?? null
+          orderIndex.get(liveAccountOrderKey(afterAccount, matchedAfterSale.orderNo)) ??
+          orderIndex.get(liveAccountOrderKey(liveAccountId, matchedAfterSale.orderNo)) ??
+          null
+        if (!matchedOrder) {
+          // 售后单号全局唯一时再按订单号回查主表
+          matchedOrder = findOrderByPackageId(matchedAfterSale.orderNo, afterAccount, orders)
+        }
       }
     }
 

@@ -123,8 +123,32 @@ export async function saveQualityBadCases(cases: NormalizedQualityBadCase[]): Pr
       },
     })
   }
-  memoryCases = cases
-  memoryLoadedAt = Date.now()
+  // 跨店纠正后会换 liveAccountId，清掉旧店下同包裹未匹配残行
+  await cleanupStaleUnmatchedQualityBadCases(cases)
+  memoryCases = null
+  memoryLoadedAt = 0
+}
+
+/** 已匹配成功的包裹号，删除其他账号下仍标记 unmatched 的重复品退行 */
+export async function cleanupStaleUnmatchedQualityBadCases(
+  matchedCases: NormalizedQualityBadCase[],
+): Promise<number> {
+  const matchedPackageIds = [
+    ...new Set(
+      matchedCases
+        .filter((c) => c.matchStatus !== 'unmatched')
+        .map((c) => c.packageId.trim())
+        .filter(Boolean),
+    ),
+  ]
+  if (matchedPackageIds.length === 0) return 0
+  const result = await prisma.qualityBadCase.deleteMany({
+    where: {
+      matchStatus: 'unmatched',
+      packageId: { in: matchedPackageIds },
+    },
+  })
+  return result.count
 }
 
 export async function loadAllQualityBadCases(force = false): Promise<NormalizedQualityBadCase[]> {

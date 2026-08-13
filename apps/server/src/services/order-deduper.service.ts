@@ -1,5 +1,6 @@
 import type { DuplicateOrderGroup, NormalizedOrder, OrderDedupeResult } from '../types/analysis'
 import { sumCent } from '../utils/money'
+import { preferOrdersBySellerOwnership } from './order-shop-ownership.util'
 
 function cloneOrder(order: NormalizedOrder): NormalizedOrder {
   return { ...order, errors: [...order.errors], raw: { ...order.raw } }
@@ -103,16 +104,18 @@ export function dedupeOrders(orders: NormalizedOrder[]): OrderDedupeResult {
       continue
     }
 
-    const originalGmvCents = list.map((o) => o.gmvCent)
-    const merged = mergeMatchOrderGroup(list)
+    // 跨店同 P：优先保留 sellerId 归属店，避免串店行（updatedAt 更新）抢走来源直播号
+    const preferred = preferOrdersBySellerOwnership(list)
+    const originalGmvCents = preferred.map((o) => o.gmvCent)
+    const merged = mergeMatchOrderGroup(preferred)
     uniqueOrders.push(merged)
     duplicateOrders.push({
       orderId: matchOrderId,
-      count: list.length,
+      count: preferred.length,
       amountConsistent: new Set(originalGmvCents).size === 1,
       finalGmvCent: merged.gmvCent,
       originalGmvCents,
-      sourceRowIndexes: list.map((o) => o.sourceRowIndex),
+      sourceRowIndexes: preferred.map((o) => o.sourceRowIndex),
     })
   }
 

@@ -21,6 +21,30 @@ export const GOOD_REVIEW_SHOPS: GoodReviewShopDefinition[] = [
   { shopKey: 'xyxiangyu', shopName: 'XY祥钰珠宝' },
 ]
 
+/**
+ * 四店订单 rawJson.sellerId（主卖家）。
+ * 用于拦截「Cookie/同步串店」把别店订单写入本店 liveAccountId。
+ * 若平台换绑卖家，需同步更新此处。
+ */
+export const OFFICIAL_SHOP_SELLER_IDS: Record<GoodReviewShopKey, string> = {
+  shiyuju: '6a1a80892300910015e858f8',
+  hetianyayu: '6a195ac98228a600152aa204',
+  xiangyu: '691c5763084ee90015198056',
+  xyxiangyu: '6a018fa530c9cf001512022a',
+}
+
+const SHOP_KEY_BY_SELLER_ID = new Map<string, GoodReviewShopKey>(
+  (Object.entries(OFFICIAL_SHOP_SELLER_IDS) as Array<[GoodReviewShopKey, string]>).map(
+    ([shopKey, sellerId]) => [sellerId, shopKey],
+  ),
+)
+
+export function resolveGoodReviewShopKeyBySellerId(sellerId: string): GoodReviewShopKey | null {
+  const id = String(sellerId || '').trim()
+  if (!id) return null
+  return SHOP_KEY_BY_SELLER_ID.get(id) ?? null
+}
+
 const SHOP_KEY_BY_NAME = new Map<QianfanShopName, GoodReviewShopKey>(
   GOOD_REVIEW_SHOPS.map((s) => [s.shopName, s.shopKey]),
 )

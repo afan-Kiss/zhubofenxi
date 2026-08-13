@@ -2,6 +2,7 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { resolveDisplayOrderNoForView } from './order-display-no.service'
 import { resolveViewRefundAmountCent } from './order-refund-metrics.service'
 import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
+import { preferViewsBySellerOwnership } from './order-shop-ownership.util'
 
 export interface OrderRateResult {
   numeratorOrderCount: number
@@ -27,19 +28,33 @@ export function resolveMetricOrderNo(
   return no
 }
 
-/** 按 P 单号去重，保留首条视图（品退 Drawer 与卡片分子对齐） */
+/** 按 P 单号去重，跨店同 P 优先 sellerId 归属店，否则保留首条；维持首次出现顺序 */
 export function dedupeViewsByMetricOrderNo(views: AnalyzedOrderView[]): AnalyzedOrderView[] {
-  const seen = new Set<string>()
-  const out: AnalyzedOrderView[] = []
+  const groups = new Map<string, AnalyzedOrderView[]>()
+  const sequence: Array<{ kind: 'bare'; view: AnalyzedOrderView } | { kind: 'key'; no: string }> =
+    []
   for (const v of views) {
     const no = resolveMetricOrderNo(v)
     if (!no) {
-      out.push(v)
+      sequence.push({ kind: 'bare', view: v })
       continue
     }
-    if (seen.has(no)) continue
-    seen.add(no)
-    out.push(v)
+    const list = groups.get(no)
+    if (!list) {
+      groups.set(no, [v])
+      sequence.push({ kind: 'key', no })
+    } else {
+      list.push(v)
+    }
+  }
+  const out: AnalyzedOrderView[] = []
+  for (const item of sequence) {
+    if (item.kind === 'bare') {
+      out.push(item.view)
+      continue
+    }
+    const preferred = preferViewsBySellerOwnership(groups.get(item.no) ?? [])
+    if (preferred[0]) out.push(preferred[0])
   }
   return out
 }

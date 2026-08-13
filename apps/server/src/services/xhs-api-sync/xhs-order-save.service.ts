@@ -22,6 +22,12 @@ import {
 } from '../normalized-order-columns.service'
 import { ensureOrderRawCompletionFields } from '../order-raw-completion.util'
 import { scheduleBusinessBoardCacheInvalidationForPayTime } from '../business-cache-range-invalidation.service'
+import {
+  extractSellerIdFromOrderRaw,
+  resolveSyncShopKey,
+  shouldSkipCrossShopOrderSave,
+} from '../order-shop-ownership.util'
+import { logWarn } from '../../utils/server-log'
 
 const DEFAULT_MAX_PAGES = SAFE_MAX_PAGES
 
@@ -97,13 +103,25 @@ async function saveOrderPackage(
   syncJobId: string | null | undefined,
   liveAccountId: string,
   liveAccountName: string,
-): Promise<{ saved: boolean; created: boolean }> {
+): Promise<{ saved: boolean; created: boolean; skippedCrossShop?: boolean }> {
   // 定时同步入库前：晋升官方完成时间 / 交易完成文案到稳定字段
   ensureOrderRawCompletionFields(item)
 
   const packageId = pickId(item, ['packageId', 'package_id', 'packageNo', 'package_no'])
   const orderId = pickId(item, ['orderId', 'order_id', 'orderNo', 'order_no'])
   if (!packageId && !orderId) return { saved: false, created: false }
+
+  // 串店拦截：sellerId 明确属于另一官方店时，禁止写入当前同步账号
+  const sellerId = extractSellerIdFromOrderRaw(item)
+  const syncShopKey = resolveSyncShopKey({ liveAccountName })
+  const cross = shouldSkipCrossShopOrderSave({ syncShopKey, sellerId })
+  if (cross.skip) {
+    logWarn(
+      '订单串店拦截',
+      `skip packageId=${packageId || orderId || '—'} sync=${liveAccountName}/${syncShopKey} owner=${cross.ownerShopKey} sellerId=${sellerId}`,
+    )
+    return { saved: false, created: false, skippedCrossShop: true }
+  }
 
   const orderTime = parseOrderTime(item)
   const buyerId = extractBuyerId(item)

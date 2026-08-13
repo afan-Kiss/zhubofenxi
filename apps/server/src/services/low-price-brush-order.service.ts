@@ -1,4 +1,5 @@
 import type { AnalyzedOrderView } from '../types/analysis'
+import { attachOrderRawToView } from './order-shop-ownership.util'
 
 /**
  * 经营分析最低实付门槛（分）：原始订单仍完整保存；
@@ -86,7 +87,7 @@ export function attachRawByMatchToViews<T extends AnalyzedOrderView>(
   return views.map((v) => {
     const raw = rawByMatch.get(v.matchOrderId || v.orderId)
     if (!raw) return v
-    return Object.assign({}, v, { raw }) as T & { raw?: Record<string, unknown> }
+    return attachOrderRawToView(v, raw)
   })
 }
 

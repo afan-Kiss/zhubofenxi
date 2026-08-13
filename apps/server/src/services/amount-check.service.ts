@@ -8,6 +8,7 @@ import {
 } from './order-amount-metrics.service'
 import { aggregateViewsMetrics } from './board-metrics.service'
 import { mapViewToBoardOrderRow } from './order-row-mapper.service'
+import { attachOrderRawToView } from './order-shop-ownership.util'
 import { computeGrossProfitBreakdown } from './gross-profit.service'
 import { buildOrderSettlementKeyIndex } from './settlement-order-key-match.util'
 import type { AnalyzedOrderView } from '../types/analysis'
@@ -117,7 +118,7 @@ export async function buildAmountCheckReport(
   const allRows = views.map((v) => {
     const raw = rawByMatch.get(v.matchOrderId || v.orderId)
     return viewToAmountCheckRow(
-      Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
+      attachOrderRawToView(v, raw),
     )
   })
 

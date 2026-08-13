@@ -2,7 +2,7 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { resolveDisplayOrderNoForView } from './order-display-no.service'
 import { resolveViewRefundAmountCent } from './order-refund-metrics.service'
 import { isEffectiveSignedView } from './strict-after-sale-metrics.service'
-import { preferViewsBySellerOwnership } from './order-shop-ownership.util'
+import { preferViewsBySellerOwnership, partitionViewsByShopOwnership, filterOutCrossShopContaminatedViews } from './order-shop-ownership.util'
 
 export interface OrderRateResult {
   numeratorOrderCount: number
@@ -28,7 +28,7 @@ export function resolveMetricOrderNo(
   return no
 }
 
-/** 按 P 单号去重，跨店同 P 优先 sellerId 归属店，否则保留首条；维持首次出现顺序 */
+/** 按 P 单号去重：明确 MISMATCH 剔除；有 MATCH 时只留真店；全部 MISMATCH 不进指标 */
 export function dedupeViewsByMetricOrderNo(views: AnalyzedOrderView[]): AnalyzedOrderView[] {
   const groups = new Map<string, AnalyzedOrderView[]>()
   const sequence: Array<{ kind: 'bare'; view: AnalyzedOrderView } | { kind: 'key'; no: string }> =
@@ -50,7 +50,8 @@ export function dedupeViewsByMetricOrderNo(views: AnalyzedOrderView[]): Analyzed
   const out: AnalyzedOrderView[] = []
   for (const item of sequence) {
     if (item.kind === 'bare') {
-      out.push(item.view)
+      const part = partitionViewsByShopOwnership([item.view])
+      if (part.mergeable[0]) out.push(part.mergeable[0])
       continue
     }
     const preferred = preferViewsBySellerOwnership(groups.get(item.no) ?? [])
@@ -83,8 +84,9 @@ function compareCoreMetricViewPriority(a: AnalyzedOrderView, b: AnalyzedOrderVie
 export function dedupeCoreMetricViewsByOrderNoBestValue(
   views: AnalyzedOrderView[],
 ): AnalyzedOrderView[] {
+  const safe = filterOutCrossShopContaminatedViews(views)
   const bestByOrderNo = new Map<string, AnalyzedOrderView>()
-  for (const v of views) {
+  for (const v of safe) {
     const no = resolveMetricOrderNo(v)
     if (!no) continue
     const prev = bestByOrderNo.get(no)
@@ -94,7 +96,7 @@ export function dedupeCoreMetricViewsByOrderNoBestValue(
   }
   const seen = new Set<string>()
   const out: AnalyzedOrderView[] = []
-  for (const v of views) {
+  for (const v of safe) {
     const no = resolveMetricOrderNo(v)
     if (!no) {
       out.push(v)
@@ -111,8 +113,9 @@ export function dedupeCoreMetricViewsByOrderNoBestValue(
 export function dedupeRefundMetricViewsByOrderNoMaxRefund(
   views: AnalyzedOrderView[],
 ): AnalyzedOrderView[] {
+  const safe = filterOutCrossShopContaminatedViews(views)
   const bestByOrderNo = new Map<string, AnalyzedOrderView>()
-  for (const v of views) {
+  for (const v of safe) {
     const no = resolveMetricOrderNo(v)
     if (!no) continue
     const prev = bestByOrderNo.get(no)
@@ -122,7 +125,7 @@ export function dedupeRefundMetricViewsByOrderNoMaxRefund(
   }
   const seen = new Set<string>()
   const out: AnalyzedOrderView[] = []
-  for (const v of views) {
+  for (const v of safe) {
     const no = resolveMetricOrderNo(v)
     if (!no) {
       out.push(v)
@@ -140,8 +143,9 @@ export function dedupeViewsByOrderNoBestValue(
   views: AnalyzedOrderView[],
   comparePriority: (a: AnalyzedOrderView, b: AnalyzedOrderView) => number,
 ): AnalyzedOrderView[] {
+  const safe = filterOutCrossShopContaminatedViews(views)
   const bestByOrderNo = new Map<string, AnalyzedOrderView>()
-  for (const v of views) {
+  for (const v of safe) {
     const no = resolveMetricOrderNo(v)
     if (!no) continue
     const prev = bestByOrderNo.get(no)
@@ -151,7 +155,7 @@ export function dedupeViewsByOrderNoBestValue(
   }
   const seen = new Set<string>()
   const out: AnalyzedOrderView[] = []
-  for (const v of views) {
+  for (const v of safe) {
     const no = resolveMetricOrderNo(v)
     if (!no) {
       out.push(v)
@@ -168,8 +172,9 @@ export function dedupeViewsByOrderNoBestValue(
 export function dedupeFreightRefundViewsByOrderNoMaxFreight(
   views: AnalyzedOrderView[],
 ): AnalyzedOrderView[] {
+  const safe = filterOutCrossShopContaminatedViews(views)
   const bestByOrderNo = new Map<string, AnalyzedOrderView>()
-  for (const v of views) {
+  for (const v of safe) {
     const no = resolveMetricOrderNo(v)
     if (!no) continue
     const prev = bestByOrderNo.get(no)
@@ -181,7 +186,7 @@ export function dedupeFreightRefundViewsByOrderNoMaxFreight(
   }
   const seen = new Set<string>()
   const out: AnalyzedOrderView[] = []
-  for (const v of views) {
+  for (const v of safe) {
     const no = resolveMetricOrderNo(v)
     if (!no) {
       out.push(v)

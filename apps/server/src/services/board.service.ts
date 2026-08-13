@@ -3,6 +3,7 @@ import type { AnalyzedOrderView } from '../types/analysis'
 import { buildBuyerRanking, type BuyerRankingType } from './buyer-ranking.service'
 import { loadBuyerRankingWithAutoFill } from './buyer-ranking-fill.service'
 import { mapViewToBoardOrderRow } from './order-row-mapper.service'
+import { attachOrderRawToView } from './order-shop-ownership.util'
 import { paginatedResponse, clampPagination } from '../utils/pagination'
 import { normalizeBoardPreset } from './board-metrics.service'
 import { resolveBusinessRange } from '../utils/business-range'
@@ -131,9 +132,7 @@ export async function getBoardOrders(
 
   const rows = filtered.map((v) => {
     const raw = rawByMatch.get(v.matchOrderId || v.orderId)
-    const row = mapViewToBoardOrderRow(
-      Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
-    )
+    const row = mapViewToBoardOrderRow(attachOrderRawToView(v, raw))
     return {
       orderNo: row.orderNo,
       displayOrderNo: row.displayOrderNo,

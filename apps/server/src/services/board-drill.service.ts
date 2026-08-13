@@ -28,6 +28,7 @@ import { getAnchorConfigSync } from './anchor.service'
 import { resolveAnchorWeeklyRankingScope } from './anchor-buyer-weekly-ranking.service'
 import { enrichBuyerOrderRowFromWorkbench } from './buyer-order-standard.service'
 import { mapViewToBoardDrillRow } from './order-row-mapper.service'
+import { attachOrderRawToView } from './order-shop-ownership.util'
 import { isAfterSalesResultPending, shouldFetchInputFromView } from './after-sales-fetch-decision.service'
 import {
   bootstrapWorkbenchCache,
@@ -372,7 +373,7 @@ export async function buildAnchorDrill(params: {
       const raw = scoped.rawByMatch.get(v.matchOrderId || v.orderId)
       const bid = v.buyerId?.trim() ?? ''
       const row = mapViewToBoardDrillRow(
-        Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
+        attachOrderRawToView(v, raw),
         { useBuyerRefund: true },
       )
       const blocked =
@@ -823,11 +824,7 @@ export async function buildBuyerProfileDrill(params: {
       buyerViews
         .filter((v) => {
           const raw = rawByMatch.get(v.matchOrderId || v.orderId)
-          const input = shouldFetchInputFromView(
-            Object.assign({}, v, {
-              raw,
-            }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
-          )
+          const input = shouldFetchInputFromView(attachOrderRawToView(v, raw))
           const orderNo = (v.displayOrderNo || v.officialOrderNo || v.packageId || '').trim()
           const cached = orderNo
             ? getWorkbenchRefundFromMemory(v.liveAccountId, orderNo)
@@ -856,10 +853,9 @@ export async function buildBuyerProfileDrill(params: {
         ? getWorkbenchRefundFromMemory(v.liveAccountId, orderNo)
         : undefined
       const std = enrichBuyerOrderRowFromWorkbench(stdRaw, workbench ?? null, v)
-      const row = mapViewToBoardDrillRow(
-        Object.assign({}, v ?? {}, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
-        { useBuyerRefund: true },
-      )
+      const row = mapViewToBoardDrillRow(attachOrderRawToView(v ?? ({} as AnalyzedOrderView), raw), {
+        useBuyerRefund: true,
+      })
       const blocked = blacklist.has(row.buyerKey) || Boolean(stats?.isBlacklisted)
       return {
         ...row,
@@ -984,7 +980,7 @@ export async function syncBuyerProfileAfterSales(params: {
         .filter((v) => {
           const raw = rawByMatch.get(v.matchOrderId || v.orderId)
           const input = shouldFetchInputFromView(
-            Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
+            attachOrderRawToView(v, raw),
           )
           const orderNo = (v.displayOrderNo || v.officialOrderNo || v.packageId || '').trim()
           const cached = orderNo

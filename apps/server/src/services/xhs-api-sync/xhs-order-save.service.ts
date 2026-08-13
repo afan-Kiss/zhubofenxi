@@ -24,8 +24,8 @@ import { ensureOrderRawCompletionFields } from '../order-raw-completion.util'
 import { scheduleBusinessBoardCacheInvalidationForPayTime } from '../business-cache-range-invalidation.service'
 import {
   extractSellerIdFromOrderRaw,
+  resolveOrderShopOwnership,
   resolveSyncShopKey,
-  shouldSkipCrossShopOrderSave,
 } from '../order-shop-ownership.util'
 import { logWarn } from '../../utils/server-log'
 
@@ -103,7 +103,12 @@ async function saveOrderPackage(
   syncJobId: string | null | undefined,
   liveAccountId: string,
   liveAccountName: string,
-): Promise<{ saved: boolean; created: boolean; skippedCrossShop?: boolean }> {
+): Promise<{
+  saved: boolean
+  created: boolean
+  skippedCrossShop?: boolean
+  ownershipStatus?: import('../order-shop-ownership.util').ShopOwnershipStatus
+}> {
   // 定时同步入库前：晋升官方完成时间 / 交易完成文案到稳定字段
   ensureOrderRawCompletionFields(item)
 
@@ -114,13 +119,23 @@ async function saveOrderPackage(
   // 串店拦截：sellerId 明确属于另一官方店时，禁止写入当前同步账号
   const sellerId = extractSellerIdFromOrderRaw(item)
   const syncShopKey = resolveSyncShopKey({ liveAccountName })
-  const cross = shouldSkipCrossShopOrderSave({ syncShopKey, sellerId })
-  if (cross.skip) {
+  const ownership = resolveOrderShopOwnership({
+    sellerId,
+    liveAccountName,
+    platformName: syncShopKey,
+    raw: item,
+  })
+  if (ownership.skipSave) {
     logWarn(
       '订单串店拦截',
-      `skip packageId=${packageId || orderId || '—'} sync=${liveAccountName}/${syncShopKey} owner=${cross.ownerShopKey} sellerId=${sellerId}`,
+      `skip packageId=${packageId || orderId || '—'} sync=${liveAccountName}/${ownership.syncShopKey} owner=${ownership.ownerShopKey} sellerId=${sellerId}`,
     )
-    return { saved: false, created: false, skippedCrossShop: true }
+    return {
+      saved: false,
+      created: false,
+      skippedCrossShop: true,
+      ownershipStatus: ownership.status,
+    }
   }
 
   const orderTime = parseOrderTime(item)
@@ -186,7 +201,7 @@ async function saveOrderPackage(
       structured,
       raw: item,
     })
-    return { saved: true, created: !existing }
+    return { saved: true, created: !existing, ownershipStatus: ownership.status }
   }
 
   const existing = await prisma.xhsRawOrder.findFirst({
@@ -233,7 +248,7 @@ async function saveOrderPackage(
     structured,
     raw: item,
   })
-  return { saved: true, created: !existing }
+  return { saved: true, created: !existing, ownershipStatus: ownership.status }
 }
 
 /** 仅有售后信号时入队；无信号的普通 P 单不进队列 */
@@ -290,6 +305,10 @@ export async function syncOrderListOnlyWithSave(
   let savedCount = 0
   let createdCount = 0
   let updatedCount = 0
+  let matchedCount = 0
+  let crossShopSkippedCount = 0
+  let unknownSellerCount = 0
+  let unknownSyncShopCount = 0
   let total = 0
   let firstOrderId: string | null = null
   let firstPackageId: string | null = null
@@ -396,6 +415,10 @@ export async function syncOrderListOnlyWithSave(
         liveAccountId,
         liveAccountName,
       )
+      if (saved.ownershipStatus === 'match') matchedCount++
+      else if (saved.ownershipStatus === 'mismatch' || saved.skippedCrossShop) crossShopSkippedCount++
+      else if (saved.ownershipStatus === 'unknown_seller') unknownSellerCount++
+      else if (saved.ownershipStatus === 'unknown_sync_shop') unknownSyncShopCount++
       if (saved.saved) {
         savedCount++
         if (saved.created) createdCount++
@@ -427,6 +450,17 @@ export async function syncOrderListOnlyWithSave(
 
   const durationSec = (Date.now() - syncStarted) / 1000
   const skippedCount = Math.max(0, itemCount - savedCount)
+  if (unknownSellerCount > 0) {
+    warnings.push(
+      `发现 ${unknownSellerCount} 条订单 sellerId 无法识别，已按兼容模式保存，请检查平台 sellerId 字段是否变化`,
+    )
+  }
+  if (crossShopSkippedCount > 0) {
+    warnings.push(`跨店拦截 ${crossShopSkippedCount} 条（sellerId 归属其他官方店，未写入本店）`)
+  }
+  if (unknownSyncShopCount > 0) {
+    warnings.push(`发现 ${unknownSyncShopCount} 条订单同步店无法识别为四店官方账号`)
+  }
   logOrderSyncComplete({
     ctx: accountCtx,
     apiRows: itemCount,
@@ -447,5 +481,9 @@ export async function syncOrderListOnlyWithSave(
     createdCount,
     updatedCount,
     skippedCount,
+    matchedCount,
+    crossShopSkippedCount,
+    unknownSellerCount,
+    unknownSyncShopCount,
   }
 }

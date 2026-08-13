@@ -26,6 +26,7 @@ import {
   grossProfitToDisplay,
 } from './gross-profit.service'
 import { dedupeOrders } from './order-deduper.service'
+import { extractSellerIdFromOrderRaw } from './order-shop-ownership.util'
 import { normalizeLiveSessions } from './live-session.service'
 import { normalizeOrders } from './order-normalizer.service'
 import {
@@ -242,6 +243,7 @@ function buildViews(
       anchorName: attr.anchorName,
       liveAccountId: o.liveAccountId,
       liveAccountName: o.liveAccountName,
+      sellerId: extractSellerIdFromOrderRaw(o.raw) || undefined,
       attributionType: attr.attributionType,
       matchedRuleName: attr.matchedRuleName,
       matchedLiveStartTime: attr.matchedLiveStartTime,

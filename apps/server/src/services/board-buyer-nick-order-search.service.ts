@@ -5,6 +5,7 @@
 import type { UserRole } from '../types/roles'
 import type { AnalyzedOrderView } from '../types/analysis'
 import { mapViewToBoardOrderRow } from './order-row-mapper.service'
+import { attachOrderRawToView } from './order-shop-ownership.util'
 import {
   isStaffUnbound,
   staffAnchorFilter,
@@ -332,9 +333,7 @@ export async function searchBoardOrdersByBuyerNick(
     : limit
   const slice = matched.slice(0, candidateLimit)
 
-  const withRaw = slice.map((v) =>
-    Object.assign({}, v, { raw: lookupRaw(v, pool.rawByMatch) }),
-  ) as Array<AnalyzedOrderView & { raw?: Record<string, unknown> }>
+  const withRaw = slice.map((v) => attachOrderRawToView(v, lookupRaw(v, pool.rawByMatch)))
 
   const dateKeys = withRaw
     .map((v) => orderDateKeyShanghai(v.orderTimeText || ''))
@@ -361,7 +360,7 @@ export async function searchBoardOrdersByBuyerNick(
   for (const v of remapped) {
     const raw = lookupRaw(v, pool.rawByMatch)
     const row = mapViewToBoardOrderRow(
-      Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
+      attachOrderRawToView(v, raw),
     )
     const shopName =
       String(row.liveAccountName ?? '').trim() ||

@@ -1,5 +1,6 @@
 /**
  * 清理串店写入：删除 sellerId 归属他店、却挂在本店 liveAccountId 下的 XhsRawOrder。
+ * 覆盖 packageId 有值 与 packageId 为空但 orderId 有值 的历史行。
  * 默认 dry-run；传 --apply 才删除，并失效经营看板缓存。
  *
  * 例：
@@ -9,15 +10,20 @@
 import { prisma } from '../src/lib/prisma'
 import {
   OFFICIAL_SHOP_SELLER_IDS,
-  resolveGoodReviewShopKeyBySellerId,
   type GoodReviewShopKey,
 } from '../src/config/good-review-shops.constants'
-import { extractSellerIdFromOrderRaw } from '../src/services/order-shop-ownership.util'
-import { invalidateBusinessBoardCache } from '../src/services/business-cache.service'
+import {
+  extractSellerIdFromOrderRaw,
+  resolveOrderShopOwnership,
+} from '../src/services/order-shop-ownership.util'
+import { invalidateBusinessBoardCache, scheduleBusinessBoardCacheRebuild } from '../src/services/business-cache.service'
 
 const APPLY = process.argv.includes('--apply')
 
 async function main() {
+  // 先摸一下连接，避免 invalidate 时 engine 未就绪
+  await prisma.$queryRaw`SELECT 1`
+
   const creds = await prisma.platformCredential.findMany({
     select: { id: true, platformName: true, displayName: true },
   })
@@ -29,14 +35,16 @@ async function main() {
     }
   }
 
+  const accountIds = [...shopKeyByAccountId.keys()]
   const rows = await prisma.xhsRawOrder.findMany({
     where: {
-      liveAccountId: { in: [...shopKeyByAccountId.keys()] },
-      packageId: { not: null },
+      liveAccountId: { in: accountIds },
+      OR: [{ packageId: { not: null } }, { orderId: { not: null } }],
     },
     select: {
       id: true,
       packageId: true,
+      orderId: true,
       liveAccountId: true,
       liveAccountName: true,
       rawJson: true,
@@ -46,6 +54,7 @@ async function main() {
   const toDelete: Array<{
     id: string
     packageId: string | null
+    orderId: string | null
     liveAccountId: string
     liveAccountName: string | null
     syncShopKey: GoodReviewShopKey
@@ -53,24 +62,34 @@ async function main() {
     sellerId: string
   }> = []
 
+  let unknownSellerIdCount = 0
+  let unknownSyncShopCount = 0
+
   for (const row of rows) {
-    const syncShopKey = shopKeyByAccountId.get(row.liveAccountId)
-    if (!syncShopKey) continue
+    const syncShopKey = shopKeyByAccountId.get(row.liveAccountId) ?? null
     const raw =
       row.rawJson && typeof row.rawJson === 'object' && !Array.isArray(row.rawJson)
         ? (row.rawJson as Record<string, unknown>)
         : null
     const sellerId = extractSellerIdFromOrderRaw(raw)
-    const ownerShopKey = resolveGoodReviewShopKeyBySellerId(sellerId)
-    if (!ownerShopKey || ownerShopKey === syncShopKey) continue
+    const verdict = resolveOrderShopOwnership({
+      sellerId,
+      liveAccountName: row.liveAccountName,
+      platformName: syncShopKey,
+      raw,
+    })
+    if (verdict.status === 'unknown_seller') unknownSellerIdCount++
+    if (verdict.status === 'unknown_sync_shop') unknownSyncShopCount++
+    if (verdict.status !== 'mismatch' || !verdict.ownerShopKey || !verdict.syncShopKey) continue
     toDelete.push({
       id: row.id,
       packageId: row.packageId,
+      orderId: row.orderId,
       liveAccountId: row.liveAccountId,
       liveAccountName: row.liveAccountName,
-      syncShopKey,
-      ownerShopKey,
-      sellerId,
+      syncShopKey: verdict.syncShopKey,
+      ownerShopKey: verdict.ownerShopKey,
+      sellerId: verdict.sellerId,
     })
   }
 
@@ -86,9 +105,13 @@ async function main() {
         apply: APPLY,
         scanned: rows.length,
         contaminated: toDelete.length,
+        deleted: APPLY ? undefined : 0,
+        unknownSellerIdCount,
+        unknownSyncShopCount,
         byPair: Object.fromEntries(byPair),
         samples: toDelete.slice(0, 8).map((d) => ({
           packageId: d.packageId,
+          orderId: d.orderId,
           sync: d.syncShopKey,
           owner: d.ownerShopKey,
           liveAccountName: d.liveAccountName,
@@ -113,7 +136,24 @@ async function main() {
     deleted += res.count
   }
   invalidateBusinessBoardCache()
-  console.log(`deleted=${deleted} boardCache invalidated`)
+  scheduleBusinessBoardCacheRebuild('cleanup-cross-shop-order-contamination')
+  console.log(
+    JSON.stringify(
+      {
+        apply: true,
+        scanned: rows.length,
+        contaminated: toDelete.length,
+        deleted,
+        unknownSellerIdCount,
+        unknownSyncShopCount,
+        byPair: Object.fromEntries(byPair),
+        boardCacheInvalidated: true,
+        boardCacheRebuildScheduled: true,
+      },
+      null,
+      2,
+    ),
+  )
 }
 
 main()

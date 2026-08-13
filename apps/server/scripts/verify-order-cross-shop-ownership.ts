@@ -1,17 +1,30 @@
 /**
- * 验收：跨店同 P 去重优先 sellerId 归属店；串店入库应跳过。
+ * 跨店归属 / 去重 / View sellerId 透传 / 串店金额防累加 — 完整回归
  */
 import assert from 'node:assert/strict'
 import { dedupeOrders } from '../src/services/order-deduper.service'
+import { dedupeViewsByMetricOrderNo } from '../src/services/calc-refund-rate.service'
 import {
   extractSellerIdFromOrderRaw,
+  partitionOrdersByShopOwnership,
   preferOrdersBySellerOwnership,
+  preferViewsBySellerOwnership,
+  resolveOrderShopOwnership,
   shouldSkipCrossShopOrderSave,
+  type ShopOwnershipStatus,
 } from '../src/services/order-shop-ownership.util'
-import { OFFICIAL_SHOP_SELLER_IDS } from '../src/config/good-review-shops.constants'
-import type { NormalizedOrder } from '../src/types/analysis'
+import {
+  GOOD_REVIEW_SHOP_KEYS,
+  OFFICIAL_SHOP_SELLER_IDS,
+  getGoodReviewShopName,
+  type GoodReviewShopKey,
+} from '../src/config/good-review-shops.constants'
+import type { AnalyzedOrderView, NormalizedOrder } from '../src/types/analysis'
 
-function baseOrder(partial: Partial<NormalizedOrder> & Pick<NormalizedOrder, 'matchOrderId' | 'liveAccountName' | 'raw'>): NormalizedOrder {
+function baseOrder(
+  partial: Partial<NormalizedOrder> &
+    Pick<NormalizedOrder, 'matchOrderId' | 'liveAccountName' | 'raw'>,
+): NormalizedOrder {
   return {
     sourceRowIndex: 1,
     orderId: '1',
@@ -50,63 +63,247 @@ function baseOrder(partial: Partial<NormalizedOrder> & Pick<NormalizedOrder, 'ma
   }
 }
 
+function baseView(
+  partial: Partial<AnalyzedOrderView> &
+    Pick<AnalyzedOrderView, 'displayOrderNo' | 'liveAccountName' | 'sellerId'>,
+): AnalyzedOrderView {
+  return {
+    orderId: partial.displayOrderNo,
+    packageId: partial.displayOrderNo,
+    bizOrderId: partial.displayOrderNo,
+    displayOrderNo: partial.displayOrderNo,
+    officialOrderNo: partial.displayOrderNo,
+    matchOrderId: partial.displayOrderNo,
+    orderTimeText: '',
+    buyerId: '',
+    anchorId: '',
+    anchorName: '未归属',
+    liveAccountName: partial.liveAccountName,
+    sellerId: partial.sellerId,
+    attributionType: 'unassigned',
+    gmvCent: 100,
+    productAmountCent: 100,
+    receivableAmountCent: 100,
+    freightCent: 0,
+    platformDiscountCent: 0,
+    actualPaidCent: 100,
+    actualSellerReceiveAmountCent: 100,
+    actualSignedAmountCent: 0,
+    orderStatusText: '',
+    afterSaleStatusText: '',
+    isSigned: false,
+    isReturned: false,
+    isActualSigned: false,
+    isQualityReturn: false,
+    returnAmountCent: 0,
+    productRefundAmountCent: 0,
+    freightRefundAmountCent: 0,
+    realAfterSaleAmountCent: 0,
+    isFreightRefundOnly: false,
+    afterSaleClosedNoRefund: false,
+    isReturnRefund: false,
+    isRefundOnly: false,
+    isRealProductRefund: false,
+    afterSaleCategory: 'none',
+    afterSaleStatusLabel: '—',
+    afterSaleDisplayType: '—',
+    isSizeMismatch: false,
+    reasonText: '',
+    effectiveGmvCent: 100,
+    paymentBaseCent: 100,
+    paymentBaseSource: 'test',
+    includedInGmv: true,
+    countsForSigned: false,
+    countsForGrossProfit: false,
+    gmvExcludeReason: null,
+    ...partial,
+  }
+}
+
 function main() {
   const sellerHt = OFFICIAL_SHOP_SELLER_IDS.hetianyayu
   const sellerXy = OFFICIAL_SHOP_SELLER_IDS.xiangyu
-
-  assert.equal(extractSellerIdFromOrderRaw({ sellerId: sellerHt }), sellerHt)
-  assert.equal(
-    extractSellerIdFromOrderRaw({ baseInfo: { seller_id: sellerXy } }),
-    sellerXy,
-  )
-
-  const skip = shouldSkipCrossShopOrderSave({
-    syncShopKey: 'xiangyu',
-    sellerId: sellerHt,
-  })
-  assert.equal(skip.skip, true)
-  assert.equal(skip.ownerShopKey, 'hetianyayu')
-
-  const keep = shouldSkipCrossShopOrderSave({
-    syncShopKey: 'hetianyayu',
-    sellerId: sellerHt,
-  })
-  assert.equal(keep.skip, false)
-
-  const allowUnknown = shouldSkipCrossShopOrderSave({
-    syncShopKey: 'xiangyu',
-    sellerId: 'unknown-seller',
-  })
-  assert.equal(allowUnknown.skip, false)
-
   const pkg = 'P802152618028347671'
-  const wrongFirst = [
+
+  // --- extract ---
+  assert.equal(extractSellerIdFromOrderRaw({ sellerId: sellerHt }), sellerHt)
+  assert.equal(extractSellerIdFromOrderRaw({ baseInfo: { seller_id: sellerXy } }), sellerXy)
+
+  // --- Test 1: View sellerId 透传，假店排第一仍选真店 ---
+  const viewsWrongFirst = [
+    baseView({
+      displayOrderNo: pkg,
+      liveAccountName: '祥钰珠宝',
+      sellerId: sellerHt,
+      gmvCent: 361800,
+    }),
+    baseView({
+      displayOrderNo: pkg,
+      liveAccountName: '和田雅玉',
+      sellerId: sellerHt,
+      gmvCent: 361800,
+    }),
+  ]
+  const preferredViews = preferViewsBySellerOwnership(viewsWrongFirst)
+  assert.equal(preferredViews[0]!.liveAccountName, '和田雅玉')
+  const dedupedViews = dedupeViewsByMetricOrderNo(viewsWrongFirst)
+  assert.equal(dedupedViews.length, 1)
+  assert.equal(dedupedViews[0]!.liveAccountName, '和田雅玉')
+  assert.equal(dedupedViews[0]!.sellerId, sellerHt)
+
+  // --- Test 2: 跨店不同 SKU 不得金额相加 ---
+  const crossSku = [
     baseOrder({
       sourceRowIndex: 1,
       matchOrderId: pkg,
-      liveAccountId: 'xy',
-      liveAccountName: '祥钰珠宝',
-      raw: { sellerId: sellerHt },
+      liveAccountId: 'ht',
+      liveAccountName: '和田雅玉',
+      raw: { sellerId: sellerHt, skuId: 'SKU-A' },
       gmvCent: 361800,
     }),
     baseOrder({
       sourceRowIndex: 2,
       matchOrderId: pkg,
-      liveAccountId: 'ht',
+      liveAccountId: 'xy',
+      liveAccountName: '祥钰珠宝',
+      raw: { sellerId: sellerHt, skuId: 'SKU-B' },
+      gmvCent: 100000,
+    }),
+  ]
+  const dedupedCross = dedupeOrders(crossSku)
+  assert.equal(dedupedCross.uniqueOrders.length, 1)
+  assert.equal(dedupedCross.uniqueOrders[0]!.liveAccountName, '和田雅玉')
+  assert.equal(dedupedCross.uniqueOrders[0]!.gmvCent, 361800)
+  assert.ok(dedupedCross.abnormalOrders.length >= 1)
+  assert.ok(dedupedCross.abnormalOrders.some((o) => o.errors.some((e) => e.includes('跨店污染'))))
+
+  // --- Test 3: 同店正常多 SKU 仍可合并 ---
+  const sameShopMultiSku = [
+    baseOrder({
+      sourceRowIndex: 1,
+      matchOrderId: 'P_MULTI',
       liveAccountName: '和田雅玉',
-      raw: { sellerId: sellerHt },
+      raw: { sellerId: sellerHt, skuId: 'SKU-A' },
+      gmvCent: 200000,
+    }),
+    baseOrder({
+      sourceRowIndex: 2,
+      matchOrderId: 'P_MULTI',
+      liveAccountName: '和田雅玉',
+      raw: { sellerId: sellerHt, skuId: 'SKU-B' },
+      gmvCent: 161800,
+    }),
+  ]
+  const mergedMulti = dedupeOrders(sameShopMultiSku)
+  assert.equal(mergedMulti.uniqueOrders.length, 1)
+  assert.equal(mergedMulti.uniqueOrders[0]!.gmvCent, 361800)
+
+  // --- Test 4: 同 SKU 重复不累加 ---
+  const sameSkuDup = [
+    baseOrder({
+      sourceRowIndex: 1,
+      matchOrderId: 'P_DUP',
+      liveAccountName: '和田雅玉',
+      raw: { sellerId: sellerHt, skuId: 'SKU-A' },
+      gmvCent: 361800,
+    }),
+    baseOrder({
+      sourceRowIndex: 2,
+      matchOrderId: 'P_DUP',
+      liveAccountName: '和田雅玉',
+      raw: { sellerId: sellerHt, skuId: 'SKU-A' },
       gmvCent: 361800,
     }),
   ]
-  const preferred = preferOrdersBySellerOwnership(wrongFirst)
+  const dedupedSameSku = dedupeOrders(sameSkuDup)
+  assert.equal(dedupedSameSku.uniqueOrders.length, 1)
+  assert.equal(dedupedSameSku.uniqueOrders[0]!.gmvCent, 361800)
+
+  // --- Test 5: 全部 MISMATCH 不得进祥钰 GMV ---
+  const allMismatch = [
+    baseOrder({
+      sourceRowIndex: 1,
+      matchOrderId: pkg,
+      liveAccountName: '祥钰珠宝',
+      raw: { sellerId: sellerHt, skuId: 'SKU-A' },
+      gmvCent: 361800,
+    }),
+  ]
+  const allMismatchResult = dedupeOrders(allMismatch)
+  assert.equal(allMismatchResult.uniqueOrders.length, 0)
+  assert.equal(allMismatchResult.abnormalOrders.length, 1)
+  assert.equal(allMismatchResult.summary.totalGmvCent, 0)
+
+  // --- Test 6: UNKNOWN 兼容保存 + 状态 ---
+  const unknown = resolveOrderShopOwnership({
+    sellerId: '',
+    liveAccountName: '祥钰珠宝',
+  })
+  assert.equal(unknown.status, 'unknown_seller')
+  assert.equal(unknown.skipSave, false)
+  const unknownSkip = shouldSkipCrossShopOrderSave({
+    syncShopKey: 'xiangyu',
+    sellerId: 'unknown-seller-xyz',
+  })
+  assert.equal(unknownSkip.skipSave, false)
+  assert.equal(unknownSkip.status, 'unknown_seller')
+
+  // --- Test 7: cleanup 覆盖逻辑（packageId null + orderId）用归属函数模拟 ---
+  const orderIdOnlyMismatch = resolveOrderShopOwnership({
+    sellerId: sellerHt,
+    liveAccountName: '祥钰珠宝',
+  })
+  assert.equal(orderIdOnlyMismatch.status, 'mismatch')
+  assert.equal(orderIdOnlyMismatch.skipSave, true)
+
+  // --- Test 8: 四店矩阵拦截 ---
+  const pairs: Array<[GoodReviewShopKey, GoodReviewShopKey]> = [
+    ['shiyuju', 'hetianyayu'],
+    ['hetianyayu', 'xiangyu'],
+    ['xiangyu', 'xyxiangyu'],
+    ['xyxiangyu', 'shiyuju'],
+  ]
+  for (const [owner, sync] of pairs) {
+    const v = shouldSkipCrossShopOrderSave({
+      syncShopKey: sync,
+      sellerId: OFFICIAL_SHOP_SELLER_IDS[owner],
+    })
+    assert.equal(v.skipSave, true, `${owner}->${sync}`)
+    assert.equal(v.status, 'mismatch')
+    assert.equal(v.ownerShopKey, owner)
+  }
+  for (const key of GOOD_REVIEW_SHOP_KEYS) {
+    const v = shouldSkipCrossShopOrderSave({
+      syncShopKey: key,
+      sellerId: OFFICIAL_SHOP_SELLER_IDS[key],
+    })
+    assert.equal(v.skipSave, false, `match ${key}`)
+    assert.equal(v.status, 'match')
+  }
+
+  // partition: MATCH 存在时 MISMATCH 进 contaminated
+  const part = partitionOrdersByShopOwnership(crossSku)
+  assert.equal(part.hasMatch, true)
+  assert.equal(part.mergeable.length, 1)
+  assert.equal(part.contaminated.length, 1)
+  assert.equal(part.mergeable[0]!.liveAccountName, '和田雅玉')
+
+  // preferOrders 兼容：只返回 mergeable
+  const preferred = preferOrdersBySellerOwnership(crossSku)
+  assert.equal(preferred.length, 1)
   assert.equal(preferred[0]!.liveAccountName, '和田雅玉')
 
-  const deduped = dedupeOrders(wrongFirst)
-  assert.equal(deduped.uniqueOrders.length, 1)
-  assert.equal(deduped.uniqueOrders[0]!.liveAccountName, '和田雅玉')
-  assert.equal(deduped.uniqueOrders[0]!.gmvCent, 361800)
+  // 状态枚举完整性
+  const statuses: ShopOwnershipStatus[] = [
+    'match',
+    'mismatch',
+    'unknown_seller',
+    'unknown_sync_shop',
+  ]
+  assert.equal(statuses.length, 4)
+  assert.ok(getGoodReviewShopName('hetianyayu').includes('和田'))
 
-  console.log('verify-order-cross-shop-ownership: OK')
+  console.log('verify-order-cross-shop-ownership: OK (8 suites)')
 }
 
 main()

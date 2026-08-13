@@ -11,6 +11,8 @@ import { hasAnyEnabledApi } from './xhs-api-sync/xhs-api-registry'
 import { XHS_API_NOT_CONFIGURED_MSG } from './xhs-api-sync/xhs-api-types'
 import { fetchLiveRangeAnalysis } from './board-live-analysis.service'
 import { viewBelongsToAnchor } from './anchor-attribution.util'
+import { mapViewToBoardDrillRow } from './order-row-mapper.service'
+import { attachOrderRawToView } from './order-shop-ownership.util'
 import {
   aggregateAnchorLeaderboard,
   aggregateViewsMetrics,
@@ -18,7 +20,6 @@ import {
 } from './board-metrics.service'
 import { buildBlacklistedBuyerIds, calculateBusinessMetrics } from './business-metrics.service'
 import { logAnchorMetricsDebug, logBoardMetricsDebug, warnAnchorTotalsMismatch } from './board-metrics-debug.service'
-import { mapViewToBoardDrillRow } from './order-row-mapper.service'
 import { AMOUNT_FORMULA_VERSION } from './order-amount-metrics.service'
 import {
   completeLiveQueryJob,
@@ -226,10 +227,10 @@ function mapOrderRow(
   raw?: Record<string, unknown>,
   isBlacklistedBuyer = false,
 ): Record<string, unknown> {
-  return mapViewToBoardDrillRow(
-    Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
-    { isBlacklistedBuyer, useBuyerRefund: true },
-  ) as unknown as Record<string, unknown>
+  return mapViewToBoardDrillRow(attachOrderRawToView(v, raw), {
+    isBlacklistedBuyer,
+    useBuyerRefund: true,
+  }) as unknown as Record<string, unknown>
 }
 
 /**

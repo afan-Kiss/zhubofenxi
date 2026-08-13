@@ -1,6 +1,7 @@
 import type { UserRole } from '../types/roles'
 import type { AnalyzedOrderView } from '../types/analysis'
 import { mapViewToBoardDrillRow, type BoardDrillOrderRow } from './order-row-mapper.service'
+import { attachOrderRawToView } from './order-shop-ownership.util'
 import { normalizeBoardPreset } from './board-metrics.service'
 import { formatCount, formatRate, formatYuan } from '../utils/money'
 import { dedupeViewsByMetricOrderNo, dedupeRefundMetricViewsByOrderNoMaxRefund, dedupeCoreMetricViewsByOrderNoBestValue, dedupeFreightRefundViewsByOrderNoMaxFreight } from './calc-refund-rate.service'
@@ -752,7 +753,7 @@ export async function buildBoardMetricDetail(params: {
     .map((v) => {
       const raw = rawByMatch.get(v.matchOrderId || v.orderId)
       const row = mapViewToBoardDrillRow(
-        Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
+        attachOrderRawToView(v, raw),
         { useBuyerRefund: true },
       )
       const blocked = blacklist.has(row.buyerKey)

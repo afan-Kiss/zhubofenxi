@@ -243,6 +243,10 @@ export interface AnalyzedOrderView {
   anchorName: string
   liveAccountId?: string
   liveAccountName?: string
+  /**
+   * 平台订单 sellerId（从 rawJson 提取后稳定透传；跨店归属禁止依赖 view.raw）
+   */
+  sellerId?: string
   attributionType: AttributionType
   matchedRuleName?: string
   matchedLiveStartTime?: string

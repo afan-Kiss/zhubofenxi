@@ -43,6 +43,14 @@ export interface SyncOrderListOnlyResult {
   createdCount?: number
   updatedCount?: number
   skippedCount?: number
+  /** sellerId 与同步店一致 */
+  matchedCount?: number
+  /** 明确串店被拦截 */
+  crossShopSkippedCount?: number
+  /** sellerId 缺失或不在四店映射 */
+  unknownSellerCount?: number
+  /** 同步店无法识别为四店 */
+  unknownSyncShopCount?: number
 }
 
 export interface FetchOrderPackagesResult {

@@ -1,6 +1,10 @@
 import type { DuplicateOrderGroup, NormalizedOrder, OrderDedupeResult } from '../types/analysis'
 import { sumCent } from '../utils/money'
-import { preferOrdersBySellerOwnership } from './order-shop-ownership.util'
+import {
+  crossShopContaminationError,
+  partitionOrdersByShopOwnership,
+  resolveNormalizedOrderShopOwnership,
+} from './order-shop-ownership.util'
 
 function cloneOrder(order: NormalizedOrder): NormalizedOrder {
   return { ...order, errors: [...order.errors], raw: { ...order.raw } }
@@ -75,6 +79,14 @@ function mergeMatchOrderGroup(group: NormalizedOrder[]): NormalizedOrder {
   return sumAmountFields(mergedLines)
 }
 
+function markContaminatedAbnormal(order: NormalizedOrder): NormalizedOrder {
+  const cloned = cloneOrder(order)
+  const verdict = resolveNormalizedOrderShopOwnership(cloned)
+  const msg = crossShopContaminationError(verdict)
+  if (!cloned.errors.includes(msg)) cloned.errors.push(msg)
+  return cloned
+}
+
 export function dedupeOrders(orders: NormalizedOrder[]): OrderDedupeResult {
   const abnormalOrders: NormalizedOrder[] = []
   const validOrders: NormalizedOrder[] = []
@@ -99,23 +111,42 @@ export function dedupeOrders(orders: NormalizedOrder[]): OrderDedupeResult {
   const duplicateOrders: DuplicateOrderGroup[] = []
 
   for (const [matchOrderId, list] of groups) {
-    if (list.length === 1) {
-      uniqueOrders.push(list[0])
+    // 单条也要过归属：单独挂在假店的 MISMATCH 不得进正常指标
+    const part = partitionOrdersByShopOwnership(list)
+    for (const bad of part.contaminated) {
+      abnormalOrders.push(markContaminatedAbnormal(bad))
+    }
+
+    if (part.mergeable.length === 0) {
+      // 全部 MISMATCH（或无可合并行）→ 不进 uniqueOrders
       continue
     }
 
-    // 跨店同 P：优先保留 sellerId 归属店，避免串店行（updatedAt 更新）抢走来源直播号
-    const preferred = preferOrdersBySellerOwnership(list)
-    const originalGmvCents = preferred.map((o) => o.gmvCent)
-    const merged = mergeMatchOrderGroup(preferred)
+    if (part.mergeable.length === 1) {
+      uniqueOrders.push(part.mergeable[0]!)
+      if (list.length > 1) {
+        duplicateOrders.push({
+          orderId: matchOrderId,
+          count: list.length,
+          amountConsistent: true,
+          finalGmvCent: part.mergeable[0]!.gmvCent,
+          originalGmvCents: list.map((o) => o.gmvCent),
+          sourceRowIndexes: part.mergeable.map((o) => o.sourceRowIndex),
+        })
+      }
+      continue
+    }
+
+    const originalGmvCents = part.mergeable.map((o) => o.gmvCent)
+    const merged = mergeMatchOrderGroup(part.mergeable)
     uniqueOrders.push(merged)
     duplicateOrders.push({
       orderId: matchOrderId,
-      count: preferred.length,
+      count: list.length,
       amountConsistent: new Set(originalGmvCents).size === 1,
       finalGmvCent: merged.gmvCent,
-      originalGmvCents,
-      sourceRowIndexes: preferred.map((o) => o.sourceRowIndex),
+      originalGmvCents: list.map((o) => o.gmvCent),
+      sourceRowIndexes: part.mergeable.map((o) => o.sourceRowIndex),
     })
   }
 

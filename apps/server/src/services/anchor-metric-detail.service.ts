@@ -5,6 +5,7 @@ import { getAnchorConfigSync } from './anchor.service'
 import { dedupeViewsByMetricOrderNo, resolveMetricOrderNo } from './calc-refund-rate.service'
 import { buildOrderMetricSets } from './order-metric-sets.service'
 import { mapViewToBoardOrderRow, type BoardOrderRow } from './order-row-mapper.service'
+import { attachOrderRawToView } from './order-shop-ownership.util'
 import type { AnalyzedOrderView } from '../types/analysis'
 import { isQualityRefundOrder, viewCountsAsPaidOrder } from './business-metrics.service'
 import { countUnmatchedOfficialQualityCases, getQualityBadCasesSync } from './quality-badcase-store.service'
@@ -135,7 +136,7 @@ export async function buildAnchorMetricDetail(params: {
     sourceViews.map((v) => {
       const raw = rawByMatch.get(v.matchOrderId || v.orderId)
       return mapViewToBoardOrderRow(
-        Object.assign({}, v, { raw }) as AnalyzedOrderView & { raw?: Record<string, unknown> },
+        attachOrderRawToView(v, raw),
         { useBuyerRefund: true },
       )
     }),

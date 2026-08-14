@@ -320,6 +320,7 @@ export const OverviewTab: React.FC = () => {
       ? overviewMeta.stableVsLatest.message
       : null
   const reconciliationFailed = data?.reconciliation?.status === 'failed'
+  const reconciliationPending = data?.reconciliation?.status === 'pending'
 
   const isRealtimePreset = preset === 'today' || preset === 'yesterday'
   const isSyncingNow =
@@ -509,6 +510,10 @@ export const OverviewTab: React.FC = () => {
       {reconciliationFailed ? (
         <div className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-900">
           经营数据对账异常，当前数据暂不建议作为最终经营依据。
+        </div>
+      ) : reconciliationPending ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          经营数据对账进行中，页面会自动刷新至对账完成。
         </div>
       ) : null}
       {stableWarning ? (

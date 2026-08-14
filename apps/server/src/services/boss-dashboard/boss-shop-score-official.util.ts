@@ -89,7 +89,10 @@ export function resolveOfficialTrend(params: {
   previous: number | null | undefined
   /** 官方接口较前日文案，如「无变化」 */
   officialCompareStatus?: string | null
-  /** 当前快照是否仅有总分（无品质/物流/服务） */
+  /**
+   * 当前快照按「仅总分」处理：无分项、sourceApi=partial、或分项由昨快照 carry 且与昨完全一致。
+   * 用于仲裁「总分滞后追上」假下降。
+   */
   currentOverallOnly?: boolean
   /** 上一快照分项（完整时可用于仲裁） */
   previousSubs?: {

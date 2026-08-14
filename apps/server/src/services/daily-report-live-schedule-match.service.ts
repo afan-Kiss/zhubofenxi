@@ -409,7 +409,7 @@ export function matchLiveSessionToOverlappingScheduleRows(
   }))
 }
 
-/** 将真实场次裁剪为与排班重叠的时间段（保留扩展字段，liveId 加 segment 后缀防去重） */
+/** 将真实场次裁剪为与排班重叠的时间段（金额按时长比例分摊，liveId 加 segment 后缀防去重） */
 export function clipLiveSessionToScheduleOverlap(
   session: AnchorLiveSessionBrief,
   clippedStartMs: number,
@@ -417,9 +417,28 @@ export function clipLiveSessionToScheduleOverlap(
   scheduleRowId?: string,
 ): AnchorLiveSessionBrief {
   const clippedDurationMinutes = Math.max(0, Math.round((clippedEndMs - clippedStartMs) / 60_000))
+  const originalDurationMinutes = Math.max(0, session.durationMinutes)
+  const moneyRatio =
+    originalDurationMinutes > 0 ? clippedDurationMinutes / originalDurationMinutes : 1
+  const scaleMoney = (value: unknown): number | undefined => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+    return Math.round(value * moneyRatio * 100) / 100
+  }
+  const scaleCount = (value: unknown): number | undefined => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return undefined
+    return Math.max(0, Math.round(value * moneyRatio))
+  }
   const segmentKey = scheduleRowId
     ? `${scheduleRowId}::${clippedStartMs}`
     : String(clippedStartMs)
+  const sessionMoney = session as AnchorLiveSessionBrief & {
+    sellerRealIncomeAmtYuan?: number
+    refundAmtYuan?: number
+    dealOrderCnt?: number
+  }
+  const scaledGmv = scaleMoney(sessionMoney.sellerRealIncomeAmtYuan)
+  const scaledRefund = scaleMoney(sessionMoney.refundAmtYuan)
+  const scaledDealCnt = scaleCount(sessionMoney.dealOrderCnt)
   return {
     ...session,
     liveId: `${session.liveId}::seg::${segmentKey}`,
@@ -427,6 +446,9 @@ export function clipLiveSessionToScheduleOverlap(
     endTime: formatDateTimeShanghai(new Date(clippedEndMs)),
     durationMinutes: clippedDurationMinutes,
     durationText: formatLiveDurationMinutes(clippedDurationMinutes),
+    ...(scaledGmv != null ? { sellerRealIncomeAmtYuan: scaledGmv } : {}),
+    ...(scaledRefund != null ? { refundAmtYuan: scaledRefund } : {}),
+    ...(scaledDealCnt != null ? { dealOrderCnt: scaledDealCnt } : {}),
   }
 }
 

@@ -16,6 +16,7 @@ import { BusinessSyncProgressCard } from '../../components/board/BusinessSyncPro
 import { resolveProgressCardVariant, isBusinessSyncActive } from '../../lib/business-sync-ui'
 import { CookieHealthBanner } from '../../components/board/CookieHealthBanner'
 import {
+  anchorRowGmv,
   anchorRowRate,
   isSingleDayPreset,
   aggregateSummaryFromAnchorRows,
@@ -406,10 +407,7 @@ export const AnchorPerformanceTab: React.FC = () => {
     const base =
       anchorFilter === '全部'
         ? visibleLiveAnchorRows
-        : visibleLiveAnchorRows.filter(
-            (a) =>
-              String(a.anchorName) === anchorFilter || String(a.anchorName).includes(anchorFilter),
-          )
+        : visibleLiveAnchorRows.filter((a) => String(a.anchorName) === anchorFilter)
     if (Object.keys(leaveOverrides).length === 0) return base
     return base.map((a) => {
       const key = String(a.anchorId ?? '').trim() || String(a.anchorName ?? '').trim()
@@ -441,21 +439,44 @@ export const AnchorPerformanceTab: React.FC = () => {
         (row) => Number(row.orderCount ?? row.paidOrderCount ?? 0) > 0,
       ))
   const cards = filteredPerformanceSummary ?? {}
-  /** 总/线上/线下/未归属：必须用后端汇总，禁止对可见主播行求和（否则会丢线下 GMV） */
+  /** 总/线上/线下/未归属：全部时用后端汇总；筛选单主播时按可见行拆分，避免误读为全店 */
   const boardGmvSplit = useMemo(() => {
-    const src = (performanceSummary ?? displaySummary ?? {}) as Record<string, unknown>
     const showOffline = rangeIncludesOfflineGmvSurface(startDate, endDate)
-    const onlineGmv = Number(src.onlineGmv ?? 0)
-    const offlineGmv = showOffline ? Number(src.offlineGmv ?? 0) : 0
-    const unassignedGmv = Number(src.unassignedGmv ?? 0)
+    if (anchorFilter === '全部') {
+      const src = (performanceSummary ?? displaySummary ?? {}) as Record<string, unknown>
+      const onlineGmv = Number(src.onlineGmv ?? 0)
+      const offlineGmv = showOffline ? Number(src.offlineGmv ?? 0) : 0
+      const unassignedGmv = Number(src.unassignedGmv ?? 0)
+      return {
+        totalGmv: showOffline ? Number(src.totalGmv ?? src.gmv ?? 0) : onlineGmv,
+        onlineGmv,
+        offlineGmv,
+        unassignedGmv,
+        showOfflineGmv: showOffline,
+      }
+    }
+    let onlineGmv = 0
+    let offlineGmv = 0
+    for (const row of anchors) {
+      const offline = showOffline ? Number(row.offlineGmv ?? 0) : 0
+      const onlineRaw = row.onlineGmv
+      const online =
+        onlineRaw != null && onlineRaw !== ''
+          ? Number(onlineRaw)
+          : Math.max(0, anchorRowGmv(row) - offline)
+      onlineGmv += Number.isFinite(online) ? online : 0
+      offlineGmv += Number.isFinite(offline) ? offline : 0
+    }
+    const unassignedGmv =
+      anchorFilter === '未归属' ? onlineGmv + offlineGmv : 0
     return {
-      totalGmv: showOffline ? Number(src.totalGmv ?? src.gmv ?? 0) : onlineGmv,
+      totalGmv: onlineGmv + offlineGmv,
       onlineGmv,
       offlineGmv,
       unassignedGmv,
       showOfflineGmv: showOffline,
     }
-  }, [performanceSummary, displaySummary, startDate, endDate])
+  }, [performanceSummary, displaySummary, startDate, endDate, anchorFilter, anchors])
   const showLivePeriod = isSingleDayPreset(preset, startDate, endDate)
   const showRates = showLongPeriodRates(preset, startDate, endDate)
   const boardDataVisible =
@@ -695,6 +716,10 @@ export const AnchorPerformanceTab: React.FC = () => {
       {data?.reconciliation?.status === 'failed' ? (
         <div className="rounded-xl border border-rose-300 bg-rose-50 px-3 py-2 text-sm text-rose-900">
           经营数据对账异常，当前数据暂不建议作为最终经营依据。
+        </div>
+      ) : data?.reconciliation?.status === 'pending' ? (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          经营数据对账进行中，页面会自动刷新至对账完成。
         </div>
       ) : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1168,14 +1193,14 @@ export const AnchorPerformanceTab: React.FC = () => {
           preset={preset}
           anchorId={
             metricDrawer === 'offlineGmv'
-              ? undefined
+              ? selectedAnchorMeta?.anchorId
               : returnRefundDrawerAnchor?.anchorId ??
                 returnCountDrawerAnchor?.anchorId ??
                 selectedAnchorMeta?.anchorId
           }
           anchorName={
             metricDrawer === 'offlineGmv'
-              ? undefined
+              ? selectedAnchorMeta?.anchorName
               : returnRefundDrawerAnchor?.anchorName ??
                 returnCountDrawerAnchor?.anchorName ??
                 selectedAnchorMeta?.anchorName

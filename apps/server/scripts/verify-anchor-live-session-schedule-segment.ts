@@ -130,6 +130,18 @@ async function main(): Promise<void> {
   assert.equal(anchorLivePeriod(assign1, 'A'), '09:00~14:00', '场景1 A 时段')
   assert.equal(anchorLivePeriod(assign1, 'B'), '14:00~18:00', '场景1 B 时段')
   assert.equal(assign1.unassignedSessions.length, 0, '场景1 不应有未归属场次')
+  {
+    const a = assign1.byAnchor.get('A')![0]!
+    const b = assign1.byAnchor.get('B')![0]!
+    // 整场 9h / A 5h / B 4h → GMV 1000 按比例分摊，禁止两卡各拿 1000
+    assert.equal(a.sellerRealIncomeAmtYuan, 555.56, '场景1 A GMV 按时长分摊')
+    assert.equal(b.sellerRealIncomeAmtYuan, 444.44, '场景1 B GMV 按时长分摊')
+    assert.equal(
+      Math.round((a.sellerRealIncomeAmtYuan + b.sellerRealIncomeAmtYuan) * 100) / 100,
+      1000,
+      '场景1 切段 GMV 合计仍为整场',
+    )
+  }
   console.log('PASS 场景1: 09:00-18:00 → A 09:00~14:00, B 14:00~18:00')
 
   // 场景 2：13:40-16:20 跨排班边界

@@ -220,6 +220,23 @@ function resolveScheduleCanonicalAnchorId(row: EffectiveScheduleCacheRow): strin
   return resolveAnchorId(row.anchorName)
 }
 
+/** 真实场次命中后补 id：正式配置优先，否则回落当日排班 temporaryAnchorKey */
+async function resolveCanonicalAnchorIdForLiveHit(
+  anchorName: string,
+  dateKey: string,
+): Promise<string> {
+  const formal = resolveAnchorId(anchorName)
+  if (formal) return formal
+  const schedules = await loadEffectiveSchedules(dateKey)
+  const name = anchorName.trim()
+  const matched = schedules.filter((row) => row.anchorName.trim() === name)
+  for (const row of matched) {
+    const id = resolveScheduleCanonicalAnchorId(row)
+    if (id) return id
+  }
+  return ''
+}
+
 function pickLiveAccount(
   view: AnalyzedOrderView & { raw?: Record<string, unknown> },
 ): { id: string; name: string } {
@@ -715,8 +732,12 @@ export async function resolveCanonicalOrderAttribution(
     return unassignedResult(live, create.text, create.ms, liveHit.conflict, liveHit.conflict)
   }
   if (liveHit.hit) {
+    const dateKey = scheduleDateFromPayMs(create.ms)
     return {
-      canonicalAnchorId: resolveAnchorId(liveHit.hit.anchorName),
+      canonicalAnchorId: await resolveCanonicalAnchorIdForLiveHit(
+        liveHit.hit.anchorName,
+        dateKey,
+      ),
       canonicalAnchorName: liveHit.hit.anchorName,
       attributionType: 'live_session',
       attributionTime: formatAttributionTime(create.ms, create.text),

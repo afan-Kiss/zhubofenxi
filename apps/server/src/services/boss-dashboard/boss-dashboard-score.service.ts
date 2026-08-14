@@ -254,13 +254,17 @@ export async function syncBossShopScoreForShop(params: {
     officialOverallScore: parsed.officialOverallScore ?? duplicate?.officialOverallScore ?? null,
   }
 
+  const primaryProvidedAllSubs =
+    parsed.qualityScore != null &&
+    parsed.logisticsScore != null &&
+    parsed.serviceScore != null
   const allComplete =
     merged.qualityScore != null &&
     merged.logisticsScore != null &&
     merged.serviceScore != null &&
     merged.officialOverallScore != null
-  // 趋势失败但主接口四项齐全 → 仍算完整；仅缺字段才 partial
-  const partial = !allComplete
+  // 主接口未给出完整分项（即使 carry 后四项齐全）仍标 partial，供日报趋势仲裁
+  const partial = !allComplete || !primaryProvidedAllSubs
   if (warnings.length) {
     logInfo(
       '老板同步',

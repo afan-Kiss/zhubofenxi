@@ -222,6 +222,18 @@ console.log('\n=== 测试7b：partial 总分追上分项 → 持平（XY 误报�
   assert(realDown.status === 'down' && realDown.displayDelta === -0.2, '真实下降仍保留')
 }
 
+console.log('\n=== 测试7c：sync carry 后分项非空仍可仲裁（生产路径） ===')
+{
+  // 28b4ff4 carry 后 qualityRaw 非 null，但与昨完全一致 → 仍应按 overall-only 仲裁
+  const carried = resolveOfficialTrend({
+    current: 4.5,
+    previous: 4.6,
+    currentOverallOnly: true, // loadDailyReportShopScores 在 subsCarriedFromPrev / sourcePartial 时置 true
+    previousSubs: { qualityScore: 4.4, logisticsScore: 4.9, serviceScore: 4.5 },
+  })
+  assert(carried.status === 'flat' && carried.displayDelta === 0, 'carry 分项后仍抹平假下降')
+}
+
 console.log('\n=== 解析：仅 score 字符串 ===')
 {
   const parsed = parseBossShopScore({
@@ -273,6 +285,10 @@ console.log('\n=== 文案静态检查 ===')
   assert(!/parts\.reduce/.test(svc), '日报服务无分项均值')
   assert(svc.includes('byKey.set(shop.shopKey'), '按 shopKey 关联结果')
   assert(svc.includes('qualityRaw ?? prevQuality'), 'partial 总分时分项沿用上一快照')
+  assert(
+    svc.includes('subsCarriedFromPrev') || svc.includes('sourcePartial'),
+    'carry/partial 仍按仅总分仲裁趋势',
+  )
 
   const scoreSvcPath = path.resolve(
     __dirname,
@@ -280,6 +296,7 @@ console.log('\n=== 文案静态检查 ===')
   )
   const scoreSvc = fs.readFileSync(scoreSvcPath, 'utf-8')
   assert(scoreSvc.includes('prev?.qualityScore'), '同步侧分项可沿用上一快照')
+  assert(scoreSvc.includes('primaryProvidedAllSubs'), '主接口未给分项时仍标 partial')
   assert(scoreSvc.includes('pt.date <= primaryScoreDate'), '趋势滞后用最近历史点补分项')
 }
 

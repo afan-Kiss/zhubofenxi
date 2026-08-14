@@ -156,7 +156,8 @@ export function viewBelongsToAnchor(
   const viewId = v.anchorId?.trim() ?? ''
 
   if (isUnassignedQuery) {
-    return viewName === '未归属' || !viewId
+    // 仅真·未归属；有名字但缺 id（临时主播）不算未归属
+    return viewName === '未归属' || viewName === ''
   }
 
   const config = getAnchorConfigSync()

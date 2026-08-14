@@ -176,7 +176,11 @@ function SessionCard({ session }: { session: DailyReportImageSession }) {
           />
           <MetricCell
             label={isOffline ? '成交单数' : '总订单数'}
-            value={softMissing ? '—' : formatOrderCount(totalOrderCount)}
+            value={
+              onLeave
+                ? '—'
+                : formatOrderCount(totalOrderCount)
+            }
           />
         </div>
         <div className="grid grid-cols-4 gap-2 border-t border-slate-100 pt-3">

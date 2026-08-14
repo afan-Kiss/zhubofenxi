@@ -54,7 +54,7 @@ export interface DailyReportImageSession {
   color: string | null
   /** 排班请假：卡片展示「休假」水印 */
   isOnLeave?: boolean
-  /** 逸凡线下成交：无直播场次，卡片展示线下业绩 */
+  /** 线下成交：无直播场次，卡片展示线下业绩（按实际归属主播） */
   isOfflineDeal?: boolean
 }
 
@@ -327,7 +327,7 @@ export function buildDailyReportImageSessionsForAnchor(params: {
     .filter((row): row is DailyReportImageSession => row != null)
 }
 
-/** 逸凡线下成交：写入日报长图卡片（无直播时段，突出 GMV / 笔数） */
+/** 线下成交：写入日报长图卡片（无直播时段，突出 GMV / 笔数） */
 export function buildDailyReportOfflineImageSession(params: {
   anchorName: string
   color?: string | null

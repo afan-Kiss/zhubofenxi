@@ -166,6 +166,8 @@ export interface DailyReportAnchorRow extends AnchorAttendanceStatusPayload {
   temporaryAnchorKey?: string | null
   /** 与主播卡片「本期销售额」一致，供走势对账 */
   gmvYuan?: number
+  /** 线上 GMV（不含线下），供长图直播卡兜底，避免把线下混进直播卡 */
+  onlineGmvYuan?: number
   /** 与主播业绩页 anchorLeaderboard.trend 同源 */
   trend?: AnchorTrend
 }
@@ -768,6 +770,7 @@ export async function buildDailyReport(params: {
   for (const row of anchorRows) {
     const lb = trendByAnchor.get(row.anchorName)
     row.gmvYuan = Number(lb?.gmv ?? lb?.totalGmv ?? 0)
+    row.onlineGmvYuan = Number(lb?.onlineGmv ?? row.gmvYuan ?? 0)
 
     const mergedTrendRow: Record<string, unknown> = {
       ...(lb ?? {}),
@@ -1014,7 +1017,7 @@ export async function buildDailyReport(params: {
         sessions,
         shippedAmountYuan: row.shippedAmountYuan,
         soldOrderCount: row.soldOrderCount,
-        gmvYuan: Number(row.gmvYuan ?? 0),
+        gmvYuan: Number(row.onlineGmvYuan ?? row.gmvYuan ?? 0),
         returnOrderCount: metrics?.returnOrderCount ?? row.invalidOrderCount ?? 0,
         returnAmountYuan: metrics?.returnAmountYuan ?? 0,
         totalOrderCount:
@@ -1094,39 +1097,24 @@ export async function buildDailyReport(params: {
     }
   }
 
-  // 线下成交：仅给「线下专属 / 纯线下补行 / 未归属线下」补独立长图卡片；
-  // 已有直播场次的主播，线下 GMV 已计入其场次卡 gmvYuan，不再重复出卡。
+  // 线下成交：凡有线下归属的主播都出独立长图卡（含当日同时有直播的主播）；
+  // 直播场次卡只用场次 GMV，不再把线下混进直播卡，也不再漏卡。
   if (showOfflineOnReport) {
-    const hasUnassignedOffline = offlineIncludedViews.some((v) => {
+    const offlineByAnchorName = new Map<string, AnalyzedOrderView[]>()
+    for (const v of offlineIncludedViews) {
       const name = (v.anchorName ?? '').trim() || '未归属'
-      return name === '未归属'
-    })
-    const offlineOnlyRows = anchorRows.filter(
-      (row) =>
-        isOfflineOnlyAnchor({ systemKey: row.systemKey }) ||
-        row.shopName === '线下成交' ||
-        (row.anchorName === '未归属' && hasUnassignedOffline),
-    )
-    for (const offlineRow of offlineOnlyRows) {
-      const dealCount =
-        offlineRow.shopName === '线下成交' || isOfflineOnlyAnchor({ systemKey: offlineRow.systemKey })
-          ? Number(offlineRow.soldOrderCount ?? 0)
-          : offlineIncludedViews.filter((v) => {
-              const name = (v.anchorName ?? '').trim() || '未归属'
-              return name === '未归属'
-            }).length
-      const gmvYuan =
-        offlineRow.shopName === '线下成交' || isOfflineOnlyAnchor({ systemKey: offlineRow.systemKey })
-          ? roundMoneyYuan(Number(offlineRow.gmvYuan ?? 0))
-          : sumOfflinePayYuan(
-              offlineIncludedViews.filter((v) => {
-                const name = (v.anchorName ?? '').trim() || '未归属'
-                return name === '未归属'
-              }),
-            )
+      const list = offlineByAnchorName.get(name) ?? []
+      list.push(v)
+      offlineByAnchorName.set(name, list)
+    }
+    for (const [anchorName, views] of offlineByAnchorName) {
+      const dealCount = views.length
+      const gmvYuan = sumOfflinePayYuan(views)
+      const color =
+        anchorRows.find((row) => row.anchorName === anchorName)?.color ?? null
       const offlineCard = buildDailyReportOfflineImageSession({
-        anchorName: offlineRow.anchorName,
-        color: offlineRow.color ?? null,
+        anchorName,
+        color,
         gmvYuan,
         dealCount,
         reportDate: params.startDate,

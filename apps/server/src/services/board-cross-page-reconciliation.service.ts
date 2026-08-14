@@ -710,7 +710,7 @@ export async function runBoardCrossPageReconciliationForPresets(
 ): Promise<BoardReconciliationResult[]> {
   const out: BoardReconciliationResult[] = []
   const targets = [...new Set(presets)].filter((p) =>
-    ['today', 'yesterday', 'thisMonth', 'lastMonth'].includes(p),
+    ['today', 'yesterday', 'thisWeek', 'thisMonth', 'lastMonth'].includes(p),
   )
   for (const preset of targets) {
     const range = resolveBusinessRange(preset as BusinessRangePreset)

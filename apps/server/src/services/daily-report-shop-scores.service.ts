@@ -221,11 +221,21 @@ export async function loadDailyReportShopScores(
         const overallScore = resolveOfficialOverallScore(pickFinite(row.officialOverallScore))
         const prevOverall = resolveOfficialOverallScore(pickFinite(prev?.officialOverallScore))
         const officialCompare = readOfficialCompareStatus(row.rawJson)
+        const sourcePartial = String(row.sourceApi ?? '').includes('partial')
+        // sync carry 会把上一分项写入当日行；分项与昨完全一致时仍按「仅总分」仲裁，避免假下降
+        const subsCarriedFromPrev =
+          prev != null &&
+          qualityRaw != null &&
+          logisticsRaw != null &&
+          serviceRaw != null &&
+          qualityRaw === prevQuality &&
+          logisticsRaw === prevLogistics &&
+          serviceRaw === prevService
         const currentOverallOnly =
           overallScore != null &&
-          qualityRaw == null &&
-          logisticsRaw == null &&
-          serviceRaw == null
+          ((qualityRaw == null && logisticsRaw == null && serviceRaw == null) ||
+            sourcePartial ||
+            subsCarriedFromPrev)
         const previousSubs = prev
           ? {
               qualityScore: prevQuality,

@@ -40,7 +40,7 @@ export interface DailyReportImageSession {
   color: string | null
   /** 排班请假：卡片展示「休假」水印 */
   isOnLeave?: boolean
-  /** 逸凡线下成交：无直播场次，卡片展示线下业绩 */
+  /** 线下成交：无直播场次，卡片展示线下业绩（按实际归属主播） */
   isOfflineDeal?: boolean
 }
 
@@ -85,12 +85,12 @@ function clockToMinutes(clockOrIso: string): number | null {
     if (h === 24 && m === 0) return 24 * 60
     return scheduleTimeToMinutes(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`)
   }
-  // ISO datetime
-  const isoHm = /T(\d{2}):(\d{2})/.exec(text)
-  if (isoHm) {
-    return scheduleTimeToMinutes(`${isoHm[1]}:${isoHm[2]}`)
+  // ISO datetime 或上海空格日期：2026-08-13T15:02:04 / 2026-08-13 15:02:04
+  const embeddedHm = /[T ](\d{2}):(\d{2})/.exec(text)
+  if (embeddedHm) {
+    return scheduleTimeToMinutes(`${embeddedHm[1]}:${embeddedHm[2]}`)
   }
-  return scheduleTimeToMinutes(text.slice(0, 5))
+  return null
 }
 
 function barBounds(session: DailyReportImageSession): { startMin: number; endMin: number } | null {

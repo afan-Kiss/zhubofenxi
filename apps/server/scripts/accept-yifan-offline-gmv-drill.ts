@@ -285,6 +285,18 @@ async function main() {
     Number(otherRow!.gmvYuan ?? 0) >= otherDealAmount - 0.02,
     '直播主播日报 gmv 应含其名下线下成交',
   )
+  const otherOfflineCard = (dailyReport.imageSessions ?? []).find(
+    (s) => s.isOfflineDeal && s.anchorName === other!.name,
+  )
+  assert.ok(otherOfflineCard, '有直播的主播名下线下成交也应出独立长图卡')
+  assert.ok(
+    Number(otherOfflineCard!.gmvYuan ?? 0) >= otherDealAmount - 0.02,
+    '直播主播线下长图卡 GMV 应对齐其线下成交',
+  )
+  assert.ok(
+    Number(otherOfflineCard!.totalOrderCount ?? otherOfflineCard!.orderCount ?? 0) >= 1,
+    '线下长图卡成交单数应可见',
+  )
 
   console.log('OK accept-yifan-offline-gmv-drill', {
     offlineGmvCard: detail.summary.valueRaw,

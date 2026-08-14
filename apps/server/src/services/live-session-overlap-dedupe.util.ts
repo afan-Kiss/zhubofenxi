@@ -48,7 +48,16 @@ function resolveSessionShopDayKey(session: LiveSessionTimeSpan): string {
   return `${shop}::${session.startTime.slice(0, 10)}`
 }
 
+function hasRealEndTime(session: LiveSessionTimeSpan): boolean {
+  const end = session.endTime?.trim() ?? ''
+  return Boolean(end && end !== '—')
+}
+
 function pickPreferredOverlappingSession<T extends LiveSessionTimeSpan>(a: T, b: T): T {
+  const aRealEnd = hasRealEndTime(a)
+  const bRealEnd = hasRealEndTime(b)
+  // 有真实下播时间的完整场次优先于「时长推算 / 未结束」残段
+  if (aRealEnd !== bRealEnd) return aRealEnd ? a : b
   if (b.durationMinutes !== a.durationMinutes) {
     return b.durationMinutes > a.durationMinutes ? b : a
   }
@@ -84,7 +93,17 @@ export function dedupeOverlappingLiveSessionsByShopDay<T extends LiveSessionTime
       const exStart = parseLiveSessionTimeMs(existing.startTime)
       const exEnd = resolveSessionEndMs(existing)
       if (exStart == null || exEnd == null) continue
-      if (overlapMinutes(startMs, endMs, exStart, exEnd) < minOverlapMinutes) continue
+      const overlap = overlapMinutes(startMs, endMs, exStart, exEnd)
+      // 任一方缺少真实下播时：短重叠或残段开播落在完整场次内，也合并
+      const eitherOpen = !hasRealEndTime(session) || !hasRealEndTime(existing)
+      if (eitherOpen) {
+        const openStartsInside =
+          (!hasRealEndTime(session) && startMs >= exStart && startMs < exEnd) ||
+          (!hasRealEndTime(existing) && exStart >= startMs && exStart < endMs)
+        if (overlap < 1 && !openStartsInside) continue
+      } else if (overlap < minOverlapMinutes) {
+        continue
+      }
       kept[i] = pickPreferredOverlappingSession(existing, session)
       merged = true
       break

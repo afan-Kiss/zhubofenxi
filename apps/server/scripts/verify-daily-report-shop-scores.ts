@@ -201,6 +201,27 @@ console.log('\n=== 测试7：官方「无变化」优先 ===')
   assert(trend.displayDelta === 0, '不展示内部精细差')
 }
 
+console.log('\n=== 测试7b：partial 总分追上分项 → 持平（XY 误报下降） ===')
+{
+  // 上一天总分 4.6 但分项加权已是 4.5；当天 partial 只有总分 4.5
+  const trend = resolveOfficialTrend({
+    current: 4.5,
+    previous: 4.6,
+    currentOverallOnly: true,
+    previousSubs: { qualityScore: 4.4, logisticsScore: 4.9, serviceScore: 4.5 },
+  })
+  assert(trend.status === 'flat' && trend.label === '持平', '分项已隐含 4.5 → 持平')
+  assert(trend.displayDelta === 0, '不误报 -0.1')
+  // 真实下降：当天 4.4 低于分项隐含 4.5
+  const realDown = resolveOfficialTrend({
+    current: 4.4,
+    previous: 4.6,
+    currentOverallOnly: true,
+    previousSubs: { qualityScore: 4.4, logisticsScore: 4.9, serviceScore: 4.5 },
+  })
+  assert(realDown.status === 'down' && realDown.displayDelta === -0.2, '真实下降仍保留')
+}
+
 console.log('\n=== 解析：仅 score 字符串 ===')
 {
   const parsed = parseBossShopScore({

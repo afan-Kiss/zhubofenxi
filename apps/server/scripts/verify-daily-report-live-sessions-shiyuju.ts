@@ -294,6 +294,32 @@ assert.equal(overlapMerged.length, 1, 'overlap sessions same shop/day should mer
 assert.equal(overlapMerged[0]!.liveId, '570343544189288405', 'keep longer real session')
 console.log('PASS overlap dedupe merges 09:44~14:12 and 09:55~13:57')
 
+// 完整场次 + 无 end 残段短重叠：保留完整场次（祥钰试播 15:02~17:33 vs 17:30 无 end）
+const openEndedMerged = dedupeOverlappingLiveSessionsByShopDay([
+  {
+    liveId: '570406204645147835',
+    liveName: '祥钰试播',
+    startTime: '2026-08-13 15:02:04',
+    endTime: '2026-08-13 17:33:23',
+    durationMinutes: 151,
+    sourceShopCode: 'xiangyu',
+    sourceShopName: '祥钰珠宝',
+  },
+  {
+    liveId: '570406349678523574',
+    liveName: '残段',
+    startTime: '2026-08-13 17:30:58',
+    endTime: '—',
+    durationMinutes: 33,
+    sourceShopCode: 'xiangyu',
+    sourceShopName: '祥钰珠宝',
+  },
+])
+assert.equal(openEndedMerged.length, 1, 'open-ended stub should merge into complete session')
+assert.equal(openEndedMerged[0]!.liveId, '570406204645147835', 'keep complete trial session')
+assert.equal(openEndedMerged[0]!.endTime, '2026-08-13 17:33:23', 'keep real end time')
+console.log('PASS open-ended stub merges into complete xiangyu trial session')
+
 const assignment = assignDailyReportLiveSessionsToAnchors(dedupedReal, SCHEDULES, DATE)
 const zijieSessions = assignment.byAnchor.get('子杰') ?? []
 const feiyunSessions = assignment.byAnchor.get('飞云') ?? []

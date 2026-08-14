@@ -117,11 +117,21 @@ function trendFields(
   current: number | null,
   previous: number | null,
   officialCompareStatus?: string | null,
+  opts?: {
+    currentOverallOnly?: boolean
+    previousSubs?: {
+      qualityScore: number | null
+      logisticsScore: number | null
+      serviceScore: number | null
+    } | null
+  },
 ): { delta: number | null; trend: OfficialScoreTrendLabel } {
   const resolved = resolveOfficialTrend({
     current,
     previous,
     officialCompareStatus,
+    currentOverallOnly: opts?.currentOverallOnly,
+    previousSubs: opts?.previousSubs,
   })
   return { delta: resolved.displayDelta, trend: resolved.label }
 }
@@ -203,8 +213,23 @@ export async function loadDailyReportShopScores(
         const overallScore = resolveOfficialOverallScore(pickFinite(row.officialOverallScore))
         const prevOverall = resolveOfficialOverallScore(pickFinite(prev?.officialOverallScore))
         const officialCompare = readOfficialCompareStatus(row.rawJson)
+        const currentOverallOnly =
+          overallScore != null &&
+          qualityScore == null &&
+          logisticsScore == null &&
+          serviceScore == null
+        const previousSubs = prev
+          ? {
+              qualityScore: pickFinite(prev.qualityScore),
+              logisticsScore: pickFinite(prev.logisticsScore),
+              serviceScore: pickFinite(prev.serviceScore),
+            }
+          : null
 
-        const overallTrend = trendFields(overallScore, prevOverall, officialCompare)
+        const overallTrend = trendFields(overallScore, prevOverall, officialCompare, {
+          currentOverallOnly,
+          previousSubs,
+        })
         const qualityTrend = trendFields(
           normalizeOfficialDisplayScore(qualityScore),
           normalizeOfficialDisplayScore(pickFinite(prev?.qualityScore)),
@@ -258,4 +283,5 @@ export {
   resolveOfficialTrend,
   formatOfficialDisplayScore,
   formatOfficialScoreDelta,
+  impliedOfficialDisplayFromSubs,
 } from './boss-dashboard/boss-shop-score-official.util'

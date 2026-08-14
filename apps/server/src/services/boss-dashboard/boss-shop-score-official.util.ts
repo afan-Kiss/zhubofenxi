@@ -61,15 +61,42 @@ export function parseOfficialCompareStatus(
 }
 
 /**
+ * 千帆店铺分页权重：品质 50% / 物流 20% / 服务 30%。
+ * 仅用于趋势仲裁（上一快照总分滞后于分项时），禁止拿来冒充展示总分。
+ */
+export function impliedOfficialDisplayFromSubs(params: {
+  qualityScore: number | null | undefined
+  logisticsScore: number | null | undefined
+  serviceScore: number | null | undefined
+}): number | null {
+  const q = normalizeOfficialDisplayScore(params.qualityScore)
+  const l = normalizeOfficialDisplayScore(params.logisticsScore)
+  const s = normalizeOfficialDisplayScore(params.serviceScore)
+  if (q == null || l == null || s == null) return null
+  return normalizeOfficialDisplayScore(q * 0.5 + l * 0.2 + s * 0.3)
+}
+
+/**
  * 趋势与展示差值必须基于同一标准化口径。
  * 优先官方「较前日」状态；否则比较官方展示 1 位小数。
  * displayDelta===0 → 持平，禁止「上升 +0.0」
+ *
+ * 特例：当日快照只有总分（partial、无分项、无较前文案），而上一完整快照分项加权
+ * 已等于当日总分时，视为「总分滞后追上」、持平——避免日报误报下降 0.1，与千帆「较前日无变化」对齐。
  */
 export function resolveOfficialTrend(params: {
   current: number | null | undefined
   previous: number | null | undefined
   /** 官方接口较前日文案，如「无变化」 */
   officialCompareStatus?: string | null
+  /** 当前快照是否仅有总分（无品质/物流/服务） */
+  currentOverallOnly?: boolean
+  /** 上一快照分项（完整时可用于仲裁） */
+  previousSubs?: {
+    qualityScore: number | null | undefined
+    logisticsScore: number | null | undefined
+    serviceScore: number | null | undefined
+  } | null
 }): {
   status: OfficialScoreTrendStatus
   displayDelta: number | null
@@ -100,6 +127,14 @@ export function resolveOfficialTrend(params: {
   if (cur == null || prev == null) {
     return { status: 'flat', displayDelta: null, label: '持平' }
   }
+
+  if (params.currentOverallOnly && params.previousSubs) {
+    const impliedPrev = impliedOfficialDisplayFromSubs(params.previousSubs)
+    if (impliedPrev != null && impliedPrev === cur && prev !== cur) {
+      return { status: 'flat', displayDelta: 0, label: '持平' }
+    }
+  }
+
   const displayDelta = Math.round((cur - prev) * 10) / 10
   if (displayDelta > 0) {
     return { status: 'up', displayDelta, label: '上升' }

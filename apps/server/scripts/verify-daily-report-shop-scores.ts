@@ -272,6 +272,15 @@ console.log('\n=== 文案静态检查 ===')
   assert(svc.includes('resolveOfficialOverallScore'), '使用官方总分解析')
   assert(!/parts\.reduce/.test(svc), '日报服务无分项均值')
   assert(svc.includes('byKey.set(shop.shopKey'), '按 shopKey 关联结果')
+  assert(svc.includes('qualityRaw ?? prevQuality'), 'partial 总分时分项沿用上一快照')
+
+  const scoreSvcPath = path.resolve(
+    __dirname,
+    '../src/services/boss-dashboard/boss-dashboard-score.service.ts',
+  )
+  const scoreSvc = fs.readFileSync(scoreSvcPath, 'utf-8')
+  assert(scoreSvc.includes('prev?.qualityScore'), '同步侧分项可沿用上一快照')
+  assert(scoreSvc.includes('pt.date <= primaryScoreDate'), '趋势滞后用最近历史点补分项')
 }
 
 console.log('\n=== 结果 ===')

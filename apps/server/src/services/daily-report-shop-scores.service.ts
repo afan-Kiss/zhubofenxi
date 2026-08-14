@@ -3,6 +3,7 @@
  * 按 reportDate 取「当日或之前最近」快照，并与上一快照算 delta
  *
  * 综合分仅使用 officialOverallScore（千帆 shop_score_dto.score），禁止分项均值兜底。
+ * 当日 partial 仅有总分时，品质/物流/服务沿用上一快照分项展示（趋势记持平）。
  * 趋势基于官方展示 1 位小数（或官方较前日状态），禁止「上升 +0.0」。
  */
 import { prisma } from '../lib/prisma'
@@ -207,22 +208,29 @@ export async function loadDailyReportShopScores(
           return
         }
 
-        const qualityScore = pickFinite(row.qualityScore)
-        const logisticsScore = pickFinite(row.logisticsScore)
-        const serviceScore = pickFinite(row.serviceScore)
+        const qualityRaw = pickFinite(row.qualityScore)
+        const logisticsRaw = pickFinite(row.logisticsScore)
+        const serviceRaw = pickFinite(row.serviceScore)
+        const prevQuality = pickFinite(prev?.qualityScore)
+        const prevLogistics = pickFinite(prev?.logisticsScore)
+        const prevService = pickFinite(prev?.serviceScore)
+        // 当日 partial 只有总分时，展示沿用上一快照分项（与同步侧 carry-forward 一致）
+        const qualityScore = qualityRaw ?? prevQuality
+        const logisticsScore = logisticsRaw ?? prevLogistics
+        const serviceScore = serviceRaw ?? prevService
         const overallScore = resolveOfficialOverallScore(pickFinite(row.officialOverallScore))
         const prevOverall = resolveOfficialOverallScore(pickFinite(prev?.officialOverallScore))
         const officialCompare = readOfficialCompareStatus(row.rawJson)
         const currentOverallOnly =
           overallScore != null &&
-          qualityScore == null &&
-          logisticsScore == null &&
-          serviceScore == null
+          qualityRaw == null &&
+          logisticsRaw == null &&
+          serviceRaw == null
         const previousSubs = prev
           ? {
-              qualityScore: pickFinite(prev.qualityScore),
-              logisticsScore: pickFinite(prev.logisticsScore),
-              serviceScore: pickFinite(prev.serviceScore),
+              qualityScore: prevQuality,
+              logisticsScore: prevLogistics,
+              serviceScore: prevService,
             }
           : null
 
@@ -230,17 +238,18 @@ export async function loadDailyReportShopScores(
           currentOverallOnly,
           previousSubs,
         })
+        // 分项趋势：仅用本行真实分项对比；若本行缺失则视为与上一日持平（避免伪造涨跌）
         const qualityTrend = trendFields(
-          normalizeOfficialDisplayScore(qualityScore),
-          normalizeOfficialDisplayScore(pickFinite(prev?.qualityScore)),
+          normalizeOfficialDisplayScore(qualityRaw ?? prevQuality),
+          normalizeOfficialDisplayScore(prevQuality),
         )
         const logisticsTrend = trendFields(
-          normalizeOfficialDisplayScore(logisticsScore),
-          normalizeOfficialDisplayScore(pickFinite(prev?.logisticsScore)),
+          normalizeOfficialDisplayScore(logisticsRaw ?? prevLogistics),
+          normalizeOfficialDisplayScore(prevLogistics),
         )
         const serviceTrend = trendFields(
-          normalizeOfficialDisplayScore(serviceScore),
-          normalizeOfficialDisplayScore(pickFinite(prev?.serviceScore)),
+          normalizeOfficialDisplayScore(serviceRaw ?? prevService),
+          normalizeOfficialDisplayScore(prevService),
         )
 
         const item: DailyReportShopScoreItem = {

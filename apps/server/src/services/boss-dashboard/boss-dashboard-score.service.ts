@@ -196,11 +196,16 @@ export async function syncBossShopScoreForShop(params: {
         field,
         points: trend.points,
       })
-      // 仅允许用与主接口同一 scoreDate 的趋势点补缺失分项；禁止改写主日期
+      // 趋势曲线常滞后一天：优先同日点，否则用主日期及之前最近一点补当日分项（不改写主日期）
       if (parsed[field] == null) {
         const sameDay = trend.points.find((pt) => pt.date === primaryScoreDate)
-        if (sameDay) {
-          parsed = { ...parsed, [field]: sameDay.score }
+        const prior =
+          sameDay ??
+          [...trend.points]
+            .filter((pt) => pt.date <= primaryScoreDate)
+            .sort((a, b) => b.date.localeCompare(a.date))[0]
+        if (prior) {
+          parsed = { ...parsed, [field]: prior.score }
         }
       }
     } else if (trend.error) {
@@ -235,11 +240,17 @@ export async function syncBossShopScoreForShop(params: {
   const duplicate = await prisma.bossShopScoreSnapshot.findUnique({
     where: { shopKey_scoreDate: { shopKey: params.shop.shopKey, scoreDate: finalDate } },
   })
+  const prev = await prisma.bossShopScoreSnapshot.findFirst({
+    where: { shopKey: params.shop.shopKey, scoreDate: { lt: finalDate } },
+    orderBy: { scoreDate: 'desc' },
+  })
 
+  // 主接口常只有总分；趋势又滞后时，沿用上一完整快照分项，避免日报「—」
   const merged = {
-    qualityScore: parsed.qualityScore ?? duplicate?.qualityScore ?? null,
-    logisticsScore: parsed.logisticsScore ?? duplicate?.logisticsScore ?? null,
-    serviceScore: parsed.serviceScore ?? duplicate?.serviceScore ?? null,
+    qualityScore: parsed.qualityScore ?? duplicate?.qualityScore ?? prev?.qualityScore ?? null,
+    logisticsScore:
+      parsed.logisticsScore ?? duplicate?.logisticsScore ?? prev?.logisticsScore ?? null,
+    serviceScore: parsed.serviceScore ?? duplicate?.serviceScore ?? prev?.serviceScore ?? null,
     officialOverallScore: parsed.officialOverallScore ?? duplicate?.officialOverallScore ?? null,
   }
 
@@ -271,11 +282,6 @@ export async function syncBossShopScoreForShop(params: {
       return { skipped: true, saved: false, scoreDate: finalDate, reason: '评分未变化' }
     }
   }
-
-  const prev = await prisma.bossShopScoreSnapshot.findFirst({
-    where: { shopKey: params.shop.shopKey, scoreDate: { lt: finalDate } },
-    orderBy: { scoreDate: 'desc' },
-  })
 
   await prisma.bossShopScoreSnapshot.upsert({
     where: { shopKey_scoreDate: { shopKey: params.shop.shopKey, scoreDate: finalDate } },

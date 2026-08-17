@@ -620,11 +620,46 @@ export function ensureAnchorPerformanceLeaderboardSlots(
   })
 }
 
-/** 异步：在 ensure 基础上再补当日临时试播空卡、请假占位空卡 */
+/**
+ * 单日主播业绩卡片：当日实际排班名单（与排班页 listDailySchedulesForDate 一致）。
+ * 未排班 / 已删班次的主播不靠空卡强行出现；有真实业绩聚合的仍保留。
+ */
+export async function resolveScheduledAnchorNamesForSingleDayLeaderboard(
+  dateKey: string,
+): Promise<Set<string>> {
+  const { listDailySchedulesForDate } = await import('./anchor-daily-schedule.service')
+  const { schedules } = await listDailySchedulesForDate(dateKey)
+  return new Set(
+    schedules
+      .filter((r) => r.enabled)
+      .map((r) => String(r.anchorName ?? '').trim())
+      .filter(Boolean),
+  )
+}
+
+/** 按当日排班裁剪空卡：有聚合业绩或在排班名单内才保留 */
+export function filterLeaderboardRowsBySingleDaySchedule<T extends { anchorName?: string | null }>(
+  rows: T[],
+  originalAggregatedNames: Set<string>,
+  scheduledNames: Set<string>,
+): T[] {
+  return rows.filter((row) => {
+    const name = String(row.anchorName ?? '').trim()
+    if (!name || name === '未归属') return true
+    if (originalAggregatedNames.has(name)) return true
+    if (scheduledNames.has(name)) return true
+    return false
+  })
+}
+
+/** 异步：在 ensure 基础上再补当日临时试播空卡、请假占位空卡；并按当日排班裁掉多余空卡 */
 export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
   rows: BoardAnchorMetrics[],
   dateKey: string,
 ): Promise<BoardAnchorMetrics[]> {
+  const originalNames = new Set(
+    rows.map((r) => String(r.anchorName ?? '').trim()).filter(Boolean),
+  )
   const base = ensureAnchorPerformanceLeaderboardSlots(rows, dateKey)
   const { resolveAnchorCandidatesForDate } = await import('./anchor-date-candidates.service')
   const candidates = await resolveAnchorCandidatesForDate(dateKey)
@@ -646,28 +681,52 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
     byName.set(c.anchorName, empty)
   }
 
-  // 请假排班：无「非请假」班次且尚无卡片时补空卡，供前端打「休假」水印
+  let scheduledNames: Set<string>
+  let scheduleRows: Array<{
+    enabled: boolean
+    isOnLeave?: boolean
+    anchorName: string
+    anchorId?: string | null
+    shopName?: string
+    startTime?: string
+    endTime?: string
+    anchorColorSnapshot?: string | null
+  }> = []
   try {
-    const { getEffectiveScheduleTableForDate } = await import('./anchor-daily-schedule.service')
-    const table = await getEffectiveScheduleTableForDate(dateKey)
+    const { listDailySchedulesForDate } = await import('./anchor-daily-schedule.service')
+    const listed = await listDailySchedulesForDate(dateKey)
+    scheduleRows = listed.schedules
+    scheduledNames = new Set(
+      listed.schedules
+        .filter((r) => r.enabled)
+        .map((r) => String(r.anchorName ?? '').trim())
+        .filter(Boolean),
+    )
+  } catch {
+    return merged
+  }
+
+  // 请假排班：仅当日排班名单内、且无「非请假」班次时补空卡
+  try {
+    const leaveCandidates = scheduleRows.filter(
+      (r) => r.enabled && r.isOnLeave && scheduledNames.has(String(r.anchorName ?? '').trim()),
+    )
     const workingNames = new Set(
-      table.rows
+      scheduleRows
         .filter((r) => r.enabled && !r.isOnLeave)
-        .map((r) => r.anchorName.trim())
+        .map((r) => String(r.anchorName ?? '').trim())
         .filter(Boolean),
     )
     const cfg = getAnchorConfigSync()
-    for (const r of table.rows) {
-      if (!r.enabled || !r.isOnLeave) continue
-      const name = r.anchorName.trim()
+    for (const r of leaveCandidates) {
+      const name = String(r.anchorName ?? '').trim()
       if (!name || byName.has(name) || workingNames.has(name)) continue
       const found = findAnchorByName(cfg, name) ?? findAnchorForAttributionByName(name)
-      // 离职/删除主播不补休假空卡；禁止 extra-* 幽灵 id
       if (!shouldPadEmptyAnchorSlot(found, dateKey)) continue
-      if (!found && !r.anchorId?.trim()) continue
+      if (!found && !String(r.anchorId ?? '').trim()) continue
       const empty = {
         ...createEmptyAnchorLeaderboardRow(
-          found?.id ?? r.anchorId!,
+          found?.id ?? String(r.anchorId),
           name,
           found?.color ?? r.anchorColorSnapshot ?? '#94a3b8',
           {
@@ -676,7 +735,7 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
           },
         ),
         shopName: r.shopName,
-        sessionLabel: `${r.startTime}-${r.endTime}`,
+        sessionLabel: `${r.startTime ?? ''}-${r.endTime ?? ''}`,
         isOnLeave: true,
       } as BoardAnchorMetrics & {
         shopName?: string
@@ -687,8 +746,9 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
       byName.set(name, empty)
     }
   } catch {
-    /* ignore schedule load failures for slot padding */
+    /* ignore leave pad failures */
   }
 
-  return merged
+  // 裁掉：无真实聚合业绩、且不在当日排班（含请假）的空卡
+  return filterLeaderboardRowsBySingleDaySchedule(merged, originalNames, scheduledNames)
 }

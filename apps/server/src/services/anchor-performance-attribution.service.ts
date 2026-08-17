@@ -621,20 +621,134 @@ export function ensureAnchorPerformanceLeaderboardSlots(
 }
 
 /**
- * 单日主播业绩卡片：当日实际排班名单（与排班页 listDailySchedulesForDate 一致）。
- * 未排班 / 已删班次的主播不靠空卡强行出现；有真实业绩聚合的仍保留。
+ * 单日主播业绩空卡裁剪：是否按「纯人工排班日」只认 manual 行。
+ * - 正式保存的人工日（含删班次后的工作班）→ true，与排班页一致
+ * - 仅业绩页休假物化出的稀疏 manual 请假行 → false，改用生效表，避免裁掉其他主播空卡
+ */
+export function shouldUseManualOnlyScheduleForLeaderboardCards(params: {
+  manualRows: Array<{
+    enabled?: boolean | null
+    isOnLeave?: boolean | null
+    note?: string | null
+  }>
+  expectedTemplateCount: number
+}): boolean {
+  const manuals = params.manualRows.filter((r) => r.enabled !== false)
+  if (manuals.length === 0) return false
+
+  const placeholder = '业绩页标记休假'
+  if (manuals.every((r) => String(r.note ?? '').includes(placeholder))) {
+    return false
+  }
+
+  const working = manuals.filter((r) => !r.isOnLeave)
+  const templateCount = Math.max(0, Number(params.expectedTemplateCount) || 0)
+  // 全是请假、且人工行数未覆盖默认班次规模 → 视为休假物化，不切纯人工日
+  if (working.length === 0 && (templateCount === 0 || manuals.length < templateCount)) {
+    return false
+  }
+  return true
+}
+
+function namesFromScheduleRows(
+  rows: Array<{ enabled?: boolean | null; anchorName?: string | null }>,
+): Set<string> {
+  return new Set(
+    rows
+      .filter((r) => r.enabled !== false)
+      .map((r) => String(r.anchorName ?? '').trim())
+      .filter(Boolean),
+  )
+}
+
+/**
+ * 单日主播业绩卡片排班范围：
+ * - 完整人工排班日：只认人工行（删掉的主播不出现）
+ * - 否则：用生效表（模板+人工合并），休假物化不会误裁其他空卡
+ */
+export async function resolveSingleDayLeaderboardScheduleScope(dateKey: string): Promise<{
+  scheduledNames: Set<string>
+  leaveSourceRows: Array<{
+    enabled: boolean
+    isOnLeave?: boolean
+    anchorName: string
+    anchorId?: string | null
+    shopName?: string
+    startTime?: string
+    endTime?: string
+    anchorColorSnapshot?: string | null
+  }>
+  usedManualOnly: boolean
+}> {
+  const { listDailySchedulesForDate } = await import('./anchor-daily-schedule.service')
+  const { listActiveTemplatesForDate } = await import('./anchor-schedule-template.service')
+  const { prisma } = await import('../lib/prisma')
+
+  const listed = await listDailySchedulesForDate(dateKey)
+  const templates = await listActiveTemplatesForDate(dateKey)
+  const manualRows = await prisma.anchorDailySchedule.findMany({
+    where: { scheduleDate: dateKey, enabled: true, source: 'manual' },
+    select: { enabled: true, isOnLeave: true, note: true, anchorName: true },
+  })
+
+  const usedManualOnly = shouldUseManualOnlyScheduleForLeaderboardCards({
+    manualRows,
+    expectedTemplateCount: templates.length,
+  })
+
+  if (usedManualOnly) {
+    // 与排班页一致：有人工日时 list 已只返回 manual
+    const rows = listed.hasManualDay
+      ? listed.schedules
+      : manualRows.map((r) => ({
+          enabled: true,
+          isOnLeave: Boolean(r.isOnLeave),
+          anchorName: r.anchorName,
+        }))
+    return {
+      scheduledNames: namesFromScheduleRows(rows),
+      leaveSourceRows: rows.map((r) => ({
+        enabled: r.enabled !== false,
+        isOnLeave: Boolean(r.isOnLeave),
+        anchorName: String(r.anchorName ?? ''),
+        anchorId: 'anchorId' in r ? (r.anchorId as string | null | undefined) : null,
+        shopName: 'shopName' in r ? (r.shopName as string | undefined) : undefined,
+        startTime: 'startTime' in r ? (r.startTime as string | undefined) : undefined,
+        endTime: 'endTime' in r ? (r.endTime as string | undefined) : undefined,
+        anchorColorSnapshot:
+          'anchorColorSnapshot' in r
+            ? (r.anchorColorSnapshot as string | null | undefined)
+            : null,
+      })),
+      usedManualOnly: true,
+    }
+  }
+
+  const effectiveRows = listed.effectiveTable.rows
+  return {
+    scheduledNames: namesFromScheduleRows(effectiveRows),
+    leaveSourceRows: effectiveRows.map((r) => ({
+      enabled: Boolean(r.enabled),
+      isOnLeave: Boolean(r.isOnLeave),
+      anchorName: r.anchorName,
+      anchorId: r.anchorId,
+      shopName: r.shopName,
+      startTime: r.startTime,
+      endTime: r.endTime,
+      anchorColorSnapshot: r.anchorColorSnapshot,
+    })),
+    usedManualOnly: false,
+  }
+}
+
+/**
+ * 单日主播业绩卡片：当日排班名单（完整人工日认人工；休假稀疏日认生效表）。
  */
 export async function resolveScheduledAnchorNamesForSingleDayLeaderboard(
   dateKey: string,
 ): Promise<Set<string>> {
-  const { listDailySchedulesForDate } = await import('./anchor-daily-schedule.service')
-  const { schedules } = await listDailySchedulesForDate(dateKey)
-  return new Set(
-    schedules
-      .filter((r) => r.enabled)
-      .map((r) => String(r.anchorName ?? '').trim())
-      .filter(Boolean),
-  )
+  const scope = await resolveSingleDayLeaderboardScheduleScope(dateKey)
+  return scope.scheduledNames
 }
 
 /** 按当日排班裁剪空卡：有聚合业绩或在排班名单内才保留 */
@@ -681,7 +795,8 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
     byName.set(c.anchorName, empty)
   }
 
-  let scheduledNames: Set<string>
+  // 读不到排班时 fail-closed：不展示无业绩空卡（避免又退回「全员空卡」）
+  let scheduledNames = new Set<string>()
   let scheduleRows: Array<{
     enabled: boolean
     isOnLeave?: boolean
@@ -693,17 +808,12 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
     anchorColorSnapshot?: string | null
   }> = []
   try {
-    const { listDailySchedulesForDate } = await import('./anchor-daily-schedule.service')
-    const listed = await listDailySchedulesForDate(dateKey)
-    scheduleRows = listed.schedules
-    scheduledNames = new Set(
-      listed.schedules
-        .filter((r) => r.enabled)
-        .map((r) => String(r.anchorName ?? '').trim())
-        .filter(Boolean),
-    )
+    const scope = await resolveSingleDayLeaderboardScheduleScope(dateKey)
+    scheduledNames = scope.scheduledNames
+    scheduleRows = scope.leaveSourceRows
   } catch {
-    return merged
+    scheduledNames = new Set()
+    scheduleRows = []
   }
 
   // 请假排班：仅当日排班名单内、且无「非请假」班次时补空卡
@@ -749,6 +859,5 @@ export async function ensureAnchorPerformanceLeaderboardSlotsWithTemporary(
     /* ignore leave pad failures */
   }
 
-  // 裁掉：无真实聚合业绩、且不在当日排班（含请假）的空卡
   return filterLeaderboardRowsBySingleDaySchedule(merged, originalNames, scheduledNames)
 }

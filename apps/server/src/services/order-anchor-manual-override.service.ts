@@ -4,7 +4,6 @@ import { findAnchorByName } from './anchor-rules.service'
 import {
   findAnchorForAttributionByName,
   getAnchorConfigSync,
-  isOfflineOnlyAnchor,
   refreshAnchorConfigCache,
   type AttributionAnchorLookup,
 } from './anchor.service'
@@ -84,13 +83,15 @@ function resolveAnchorIdByName(anchorName: string): string {
   return found?.id ?? ''
 }
 
-/** 今日可手动指派：在职区间内、非线下专属、非「停用却无离职日」 */
+/**
+ * 今日可手动指派：在职区间内、非「停用却无离职日」。
+ * 含线下专属（YIFAN_MANUAL / 逸凡）：其本就只能靠手动指定接单，不得从下拉排除。
+ */
 export function isManualAssignableAnchorToday(
   anchor: AttributionAnchorLookup | null | undefined,
   today = shanghaiTodayDateKey(),
 ): boolean {
   if (!anchor?.name?.trim()) return false
-  if (isOfflineOnlyAnchor(anchor)) return false
   if (isOffboardDateMissing(anchor)) return false
   return isAnchorEffectiveOnDate(anchor, today)
 }

@@ -1,11 +1,13 @@
 /**
- * 指派选项不得再出现已离职小红/小艺，且禁止 extra-*
+ * 指派选项不得再出现已离职小红/小艺，且禁止 extra-*；
+ * 线下专属逸凡须出现在手动指派下拉中。
  * npx tsx apps/server/scripts/verify-order-anchor-assign-options-offboard.ts
  */
 import assert from 'node:assert/strict'
 import {
   setAnchorConfigCacheForTests,
   setAttributionLifecycleExtrasForTests,
+  YIFAN_SYSTEM_KEY,
 } from '../src/services/anchor.service'
 import type { AnchorConfig } from '../src/types/analysis'
 
@@ -37,6 +39,16 @@ async function main() {
         enabled: true,
         attributionMode: 'schedule',
         effectiveFrom: '2026-06-18',
+        effectiveTo: null,
+      },
+      {
+        id: 'a-yifan',
+        name: '逸凡',
+        color: '#6366f1',
+        enabled: true,
+        systemKey: YIFAN_SYSTEM_KEY,
+        attributionMode: 'manual',
+        effectiveFrom: '2026-01-01',
         effectiveTo: null,
       },
     ],
@@ -75,10 +87,11 @@ async function main() {
   const names = opts.map((o) => o.name)
   assert.ok(names.includes('橙橙'), '应含橙橙')
   assert.ok(names.includes('小白'), '应含小白')
+  assert.ok(names.includes('逸凡'), `应含逸凡（手动指派）: ${names.join(',')}`)
   assert.ok(!names.includes('小红'), `不应含小红: ${names.join(',')}`)
   assert.ok(!names.includes('小艺'), `不应含小艺: ${names.join(',')}`)
   assert.ok(!opts.some((o) => o.id.startsWith('extra-')), '禁止 extra-*')
-  console.log('  ✓ 指派选项无小红/小艺、无 extra-*')
+  console.log('  ✓ 指派选项含逸凡、无小红/小艺、无 extra-*')
 
   // 离职当天仍可选
   const lastDay = buildOrderAnchorAssignOptions('2026-07-16')
@@ -91,7 +104,8 @@ async function main() {
     /不在岗|不存在/,
   )
   assert.doesNotThrow(() => resolveManualAssignAnchorIdentity('橙橙'))
-  console.log('  ✓ 今日提交小红被拒绝，橙橙可通过')
+  assert.doesNotThrow(() => resolveManualAssignAnchorIdentity('逸凡'))
+  console.log('  ✓ 今日提交小红被拒绝，橙橙/逸凡可通过')
 
   console.log('\nALL PASS')
   setAnchorConfigCacheForTests(null)
